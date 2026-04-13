@@ -72,7 +72,7 @@ sudo apt install -y bridge-utils
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/littlezo/era-xvlan.git
+   git clone https://github.com/exvlan/exvlan.git
    cd EXVlan
    ```
 
@@ -212,8 +212,8 @@ cargo test --no-default-features --features=full --verbose
 
 ## Additional Resources
 
-- [Issue Tracker](https://github.com/littlezo/era-xvlan/issues)
-- [Project Documentation](https://github.com/littlezo/era-xvlan/wiki)
+- [Issue Tracker](https://github.com/exvlan/exvlan/issues)
+- [Project Documentation](https://github.com/exvlan/exvlan/wiki)
 
 ## Questions or Need Help?
 

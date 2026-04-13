@@ -96,7 +96,7 @@ pub fn setup_panic_handler() {
         };
 
         let msg = formatdoc! {"
-            panic occurred, if this is a bug, please report this issue on github (https://github.com/littlezo/era-xvlan/issues)
+            panic occurred, if this is a bug, please report this issue on github (https://github.com/exvlan/exvlan/issues)
                 exvlan version: {version}
                 os: {os}
                 arch: {arch}

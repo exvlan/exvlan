@@ -80,7 +80,7 @@ sudo apt install -y bridge-utils
 
 1. 克隆仓库：
    ```bash
-   git clone https://github.com/littlezo/era-xvlan.git
+   git clone https://github.com/exvlan/exvlan.git
    cd EXVlan
    ```
 
@@ -220,8 +220,8 @@ cargo test --no-default-features --features=full --verbose
 
 ## 其他资源
 
-- [问题追踪](https://github.com/littlezo/era-xvlan/issues)
-- [项目文档](https://github.com/littlezo/era-xvlan/wiki)
+- [问题追踪](https://github.com/exvlan/exvlan/issues)
+- [项目文档](https://github.com/exvlan/exvlan/wiki)
 
 ## 需要帮助？
 

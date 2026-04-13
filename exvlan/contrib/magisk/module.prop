@@ -3,5 +3,5 @@ name=EraXVlan_Magisk
 version=v2026.26.0
 versionCode=20262601
 author=EXVlan
-description=exvlan magisk module @EXVlan(https://github.com/littlezo/era-xvlan)
-updateJson=https://raw.githubusercontent.com/littlezo/era-xvlan/refs/heads/main/exvlan/contrib/magisk/magisk_update.json
+description=exvlan magisk module @EXVlan(https://github.com/exvlan/exvlan)
+updateJson=https://raw.githubusercontent.com/exvlan/exvlan/refs/heads/main/exvlan/contrib/magisk/magisk_update.json

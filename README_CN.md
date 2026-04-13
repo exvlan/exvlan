@@ -1,13 +1,13 @@
 # EXVlan
 
-[![Github release](https://img.shields.io/github/v/tag/littlezo/era-xvlan)](https://github.com/littlezo/era-xvlan/releases)
-[![GitHub](https://img.shields.io/github/license/littlezo/era-xvlan)](https://github.com/littlezo/era-xvlan/blob/main/LICENSE)
-[![GitHub last commit](https://img.shields.io/github/last-commit/littlezo/era-xvlan)](https://github.com/littlezo/era-xvlan/commits/main)
-[![GitHub issues](https://img.shields.io/github/issues/littlezo/era-xvlan)](https://github.com/littlezo/era-xvlan/issues)
-[![GitHub Core Actions](https://github.com/littlezo/era-xvlan/actions/workflows/core.yml/badge.svg)](https://github.com/littlezo/era-xvlan/actions/workflows/core.yml)
-[![GitHub GUI Actions](https://github.com/littlezo/era-xvlan/actions/workflows/gui.yml/badge.svg)](https://github.com/littlezo/era-xvlan/actions/workflows/gui.yml)
-[![GitHub Test Actions](https://github.com/littlezo/era-xvlan/actions/workflows/test.yml/badge.svg)](https://github.com/littlezo/era-xvlan/actions/workflows/test.yml)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/littlezo/era-xvlan)
+[![Github release](https://img.shields.io/github/v/tag/exvlan/exvlan)](https://github.com/exvlan/exvlan/releases)
+[![GitHub](https://img.shields.io/github/license/exvlan/exvlan)](https://github.com/exvlan/exvlan/blob/main/LICENSE)
+[![GitHub last commit](https://img.shields.io/github/last-commit/exvlan/exvlan)](https://github.com/exvlan/exvlan/commits/main)
+[![GitHub issues](https://img.shields.io/github/issues/exvlan/exvlan)](https://github.com/exvlan/exvlan/issues)
+[![GitHub Core Actions](https://github.com/exvlan/exvlan/actions/workflows/core.yml/badge.svg)](https://github.com/exvlan/exvlan/actions/workflows/core.yml)
+[![GitHub GUI Actions](https://github.com/exvlan/exvlan/actions/workflows/studio.yml/badge.svg)](https://github.com/exvlan/exvlan/actions/workflows/studio.yml)
+[![GitHub Test Actions](https://github.com/exvlan/exvlan/actions/workflows/test.yml/badge.svg)](https://github.com/exvlan/exvlan/actions/workflows/test.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/exvlan/exvlan)
 
 [简体中文](/README_CN.md) | [English](/README.md)
 
@@ -18,7 +18,7 @@
 <img src="assets/running-page.png" width="300" alt="运行页面">
 </p>
 
-📚 **[完整文档](https://xvlan.era-x.cn)** | 🖥️ **[Web 控制台](https://xvlan.era-x.cn/web)** | 📝 **[下载发布版本](https://github.com/littlezo/era-xvlan/releases)** | 🧩 **[第三方工具](https://xvlan.era-x.cn/guide/installation_gui.html#%E7%AC%AC%E4%B8%89%E6%96%B9%E5%9B%BE%E5%BD%A2%E7%95%8C%E9%9D%A2)** | ❤️ **[赞助](#赞助)**
+📚 **[完整文档](https://xvlan.era-x.cn)** | 🖥️ **[Web 控制台](https://xvlan.era-x.cn/web)** | 📝 **[下载发布版本](https://github.com/exvlan/exvlan/releases)** | 🧩 **[第三方工具](https://xvlan.era-x.cn/guide/installation_gui.html#%E7%AC%AC%E4%B8%89%E6%96%B9%E5%9B%BE%E5%BD%A2%E7%95%8C%E9%9D%A2)** | ❤️ **[赞助](#赞助)**
 
 ## 特性
 
@@ -50,7 +50,7 @@
 
 Linux（推荐）：
 ```bash
-curl -fsSL "https://github.com/littlezo/era-xvlan/blob/main/script/install.sh?raw=true" | sudo bash -s install
+curl -fsSL "https://github.com/exvlan/exvlan/blob/main/script/install.sh?raw=true" | sudo bash -s install
 ```
 
 Homebrew（MacOS/Linux）：
@@ -61,19 +61,19 @@ brew install --cask exvlan-studio
 
 Windows（推荐，请以管理员权限运行）：
 ```powershell
-irm "https://github.com/littlezo/era-xvlan/blob/main/script/install.ps1?raw=true" | iex
+irm "https://github.com/exvlan/exvlan/blob/main/script/install.ps1?raw=true" | iex
 ```
 
 通过 cargo 安装（最新开发版本）：
 ```bash
-cargo install --git https://github.com/littlezo/era-xvlan.git exvlan-studio
+cargo install --git https://github.com/exvlan/exvlan.git exvlan-studio
 ```
 
-[下载预编译文件](https://github.com/littlezo/era-xvlan/releases)（推荐，支持所有平台）
+[下载预编译文件](https://github.com/exvlan/exvlan/releases)（推荐，支持所有平台）
 
 [通过 Docker 安装](https://doc.xvlan.era-x.cn/guide/installation.html#%E5%AE%89%E8%A3%85%E6%96%B9%E5%BC%8F)
 
-[安装 OpenWrt ipk 软件包](https://github.com/littlezo/luci-app-exvlan)
+[安装 OpenWrt ipk 软件包](https://github.com/exvlan/luci-app-exvlan)
 
 附加步骤：
 
@@ -291,5 +291,5 @@ sudo exvlan --network-name mysharednode --network-secret mysharednode
 
 ## 许可证
 
-EXVlan 在 [LGPL-3.0](https://github.com/littlezo/era-xvlan/blob/main/LICENSE) 许可下发布。
+EXVlan 在 [LGPL-3.0](https://github.com/exvlan/exvlan/blob/main/LICENSE) 许可下发布。
 

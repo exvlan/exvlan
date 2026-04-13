@@ -22,7 +22,7 @@ thunk-rs = { git = "https://github.com/EasyTier/thunk.git", default-features = f
 thunk-rs = { git = "https://github.com/EasyTier/thunk.git", default-features = false, features = ["win7"] }
 
 [dependencies]
-# wry 0.47 may crash on android, see https://github.com/littlezo/era-xvlan/issues/527
+# wry 0.47 may crash on android, see https://github.com/exvlan/exvlan/issues/527
 tauri = { version = "2.10", features = [
     "tray-icon",
     "image-png",

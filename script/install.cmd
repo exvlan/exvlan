@@ -418,7 +418,7 @@ function Get-EXVlan {
 
     try {
         Write-Host "检查最新版本..." -ForegroundColor Green
-        $response = Invoke-RestMethodCompatible -Uri "https://api.github.com/repos/littlezo/era-xvlan/releases/latest"
+        $response = Invoke-RestMethodCompatible -Uri "https://api.github.com/repos/exvlan/exvlan/releases/latest"
         $latestVersion = Get-RemoteVersion($response)
     }
     catch {

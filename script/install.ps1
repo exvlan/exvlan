@@ -43,7 +43,7 @@ $ProgressPreference = 'SilentlyContinue'
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-$GITHUB_REPO        = 'littlezo/era-xvlan'
+$GITHUB_REPO        = 'exvlan/exvlan'
 $GITHUB_API         = "https://api.github.com/repos/$GITHUB_REPO"
 $GITHUB_RELEASE_URL = "https://github.com/$GITHUB_REPO/releases"
 

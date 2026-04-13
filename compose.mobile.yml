@@ -1,11 +1,11 @@
 name: builder
 services:
   mobile:
-    image: era-xvlan/builder:mobile
+    image: exvlan/builder:mobile
     build:
       context: .
       dockerfile: Dockerfile.mobile
-    container_name: era-xvlan-mobile-builder
+    container_name: exvlan-builder-mobile
     volumes:
       - .:/workspace:rw
       - cargo-cache:/usr/local/cargo/registry

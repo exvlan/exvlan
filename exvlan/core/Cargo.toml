@@ -1,8 +1,8 @@
 [package]
 name = "exvlan"
 description = "A full meshed p2p VPN, connecting all your devices in one network with one command."
-homepage = "https://github.com/littlezo/era-xvlan"
-repository = "https://github.com/littlezo/era-xvlan"
+homepage = "https://github.com/exvlan/exvlan"
+repository = "https://github.com/exvlan/exvlan"
 version = "2026.26.0"
 edition = "2021"
 authors = ["<@长久同学 cloud@era-x.cn>"]
