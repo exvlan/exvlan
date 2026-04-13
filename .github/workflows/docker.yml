@@ -23,7 +23,11 @@ on:
         type: boolean
         default: false
         required: true
-
+      is_alpha:
+        description: 'Mark this image as alpha'
+        type: boolean
+        default: false
+        required: true
 jobs:
   docker:
     if: contains(fromJSON('["era-cloud", "exvlan"]'), github.actor)
