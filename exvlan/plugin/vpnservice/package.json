@@ -1,0 +1,36 @@
+{
+  "name": "@exvlan/ipc",
+  "version": "2026.26.0",
+  "author": {
+    "name": "@长久同学 ",
+    "email": "cloud@era-x.cn",
+    "url": "https://github.com/littlezo"
+  },
+  "description": "",
+  "type": "module",
+  "types": "./dist-js/index.d.ts",
+  "main": "./dist-js/index.cjs",
+  "module": "./dist-js/index.js",
+  "exports": {
+    "types": "./dist-js/index.d.ts",
+    "import": "./dist-js/index.js",
+    "require": "./dist-js/index.cjs"
+  },
+  "files": [
+    "dist-js",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "build:rollup": "rollup -c",
+    "prepublishOnly": "pnpm build",
+    "pretest": "pnpm build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1"
+  },
+  "devDependencies": {
+    "tsdown": "^0.21.7",
+    "typescript": "^6.0.2"
+  }
+}

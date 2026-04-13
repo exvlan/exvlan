@@ -1,17 +1,26 @@
 [workspace]
-resolver= "2"
+resolver = "2"
 members = [
-    "easytier-core",
-    "easytier-cli"
+    "exvlan/core",
+    "packages/studio/src-tauri",
+    "exvlan/build",
+    "exvlan/api",
+    "exvlan/contrib/ffi",
+    "exvlan/contrib/uptime",
+    "exvlan/contrib/android-jni",
 ]
-
-default-members = [
-    "easytier-core",
-    "easytier-cli"
+default-members = ["exvlan/core", "exvlan/api"]
+exclude = [
+    "exvlan/contrib/ohrs", # it needs ohrs sdk
 ]
 
 [profile.dev]
-panic = "abort"
+panic = "unwind"
+debug = 2
 
 [profile.release]
 panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true

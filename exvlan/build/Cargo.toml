@@ -1,0 +1,21 @@
+[package]
+name = "exvlan-rpc-build"
+description = "Protobuf RPC Service Generator for EXVlan"
+version = "2026.1.0"
+edition = "2021"
+homepage = "https://github.com/littlezo/era-xvlan"
+repository = "https://github.com/littlezo/era-xvlan"
+authors = ["<@长久同学 cloud@era-x.cn>"]
+keywords = ["vpn", "p2p", "network", "exvlan"]
+categories = ["network-programming", "command-line-utilities"]
+rust-version = "1.93.0"
+license-file = "LICENSE"
+readme = "README.md"
+
+[dependencies]
+heck = "0.5"
+prost-build = "0.13"
+
+[features]
+default = []
+internal-namespace = []

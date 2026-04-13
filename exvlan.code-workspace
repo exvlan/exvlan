@@ -1,0 +1,57 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "core",
+			"path": "exvlan/core"
+		},
+		{
+			"name": "gui",
+			"path": "exvlan/gui"
+		},
+		{
+			"name": "api",
+			"path": "exvlan/api"
+		},
+		{
+			"name": "ffi",
+			"path": "exvlan/contrib/ffi"
+		},
+		{
+			"name": "magisk",
+			"path": "exvlan/contrib/magisk"
+		},
+		{
+			"name": "openharmony",
+			"path": "exvlan/contrib/ohrs"
+		},
+		{
+			"name": "uptime",
+			"path": "exvlan/contrib/uptime"
+		},
+		{
+			"name": "vpnservice",
+			"path": "exvlan/plugin/vpnservice"
+		},
+		{
+			"name": "rpc-build",
+			"path": "exvlan/build"
+		}
+	],
+	"settings": {
+		"i18n-ally.sourceLanguage": "cn",
+		"i18n-ally.keystyle": "nested",
+		"i18n-ally.sortKeys": true,
+		// Disable the default formatter
+		"prettier.enable": false,
+		"editor.formatOnSave": true,
+		"editor.formatOnSaveMode": "modifications",
+		"editor.formatOnPaste": false,
+		"editor.formatOnType": true,
+		"[nix]": {
+			"editor.formatOnSave": false,
+		},
+	}
+}

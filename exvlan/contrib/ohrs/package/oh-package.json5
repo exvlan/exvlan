@@ -1,0 +1,20 @@
+{
+  "license": "LGPL-3.0",
+  "author": "EXVlan",
+  "name": "exvlan-ohrs",
+  "description": "EXVlan for OpenHarmonyOS",
+  "main": "index.ets",
+  "version": "2026.0.1",
+  "types": "libs/index.d.ts",
+  "dependencies": {},
+  "compatibleSdkVersion": "17",
+  "compatibleSdkType": "OpenHarmony",
+  "obfuscated": false,
+  "nativeComponents": [
+    {
+      "name": "libexvlan_ohrs.so",
+      "compatibleSdkVersion": "17",
+      "compatibleSdkType": "OpenHarmony"
+    }
+  ]
+}

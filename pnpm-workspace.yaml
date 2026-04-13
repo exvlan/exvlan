@@ -1,0 +1,10 @@
+packages:
+  - packages/ui
+  - packages/kit
+  - packages/studio
+  - exvlan/plugin/vpnservice
+
+onlyBuiltDependencies:
+  - esbuild
+  - unrs-resolver
+  - vue-demi

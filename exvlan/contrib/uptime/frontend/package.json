@@ -1,0 +1,31 @@
+{
+  "name": "@exvlan/uptime",
+  "private": true,
+  "version": "2026.26.0",
+  "type": "module",
+  "author": {
+    "name": "@长久同学 ",
+    "email": "cloud@era-x.cn",
+    "url": "https://github.com/littlezo"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "@exvlan/uptime": "link:",
+    "axios": "^1.14.0",
+    "dayjs": "^1.11.20",
+    "element-plus": "^2.13.6",
+    "vue": "^3.5.32",
+    "vue-router": "^5.0.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.5",
+    "unplugin-auto-import": "^21.0.0",
+    "unplugin-vue-components": "^32.0.0",
+    "vite": "^8.0.6"
+  }
+}

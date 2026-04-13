@@ -1,0 +1,15 @@
+{
+  "name": "@exvlan/monorepo",
+  "private": true,
+  "scripts": {
+    "deps:latest": "bunx taze latest -r --peer -w",
+    "deps:major": "bunx taze major -r --peer -w",
+    "deps:prune": "bunx depcheck --json | jq -r '(.dependencies + .devDependencies)[]?' | xargs pnpm remove",
+    "postinstall": "pnpm --filter=@exvlan/ipc --filter=@exvlan/kit build"
+  },
+  "pnpm": {
+    "overrides": {
+      "minimatch": "10.2.4"
+    }
+  }
+}
