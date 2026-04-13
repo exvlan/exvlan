@@ -1,10 +1,10 @@
-name: EXVlan Docker
+name: Builder Docker
 
 on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: 'The run id of EXVlan-Core Action in EXVlan repo'
+        description: 'The run id of Core Action in exvlan repo'
         type: number
         default: 10228239965
         required: true
@@ -23,8 +23,12 @@ on:
         type: boolean
         default: false
         required: true
+      is_alpha:
+        description: 'Is this an alpha release from develop branch'
+        type: boolean
+        default: false
+        required: true
 
-env:
 jobs:
   docker:
     if: contains(fromJSON('["era-cloud", "littlezo"]'), github.actor)
@@ -35,17 +39,18 @@ jobs:
         name: Checkout
         uses: actions/checkout@v6
       -
-        name: Check if alpha build
+        name: Validate inputs
+        run: |
+          if [[ "${{ inputs.mark_latest }}" == "true" && "${{ inputs.mark_unstable }}" == "true" ]]; then
+            echo "Error: mark_latest and mark_unstable cannot both be true"
+            exit 1
+          fi
+      -
+        name: Set up QEMU
         uses: docker/setup-qemu-action@v4
       -
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-      -
-        name: Login to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: login github container registry
         uses: docker/login-action@v4
         with:
@@ -63,30 +68,26 @@ jobs:
       - name: List files
         run: |
           ls -l -R .
-      - name: Check if alpha build
-        id: check_alpha
-        run: |
-          # Check if this run_id comes from alpha-release workflow
-          WORKFLOW_NAME=$(gh run view ${{ inputs.run_id }} --json workflowName -q '.workflowName')
-          if [[ "$WORKFLOW_NAME" == "EXVlan Alpha Release" ]]; then
-            echo "is_alpha=true" >> $GITHUB_OUTPUT
-            echo "This is an alpha build"
-          else
-            echo "is_alpha=false" >> $GITHUB_OUTPUT
-            echo "This is a regular build"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Prepare Docker tags
         id: tags
         run: |
-          # Always use alpha tag for docker builds
-          DOCKERHUB_TAGS="exvlan/exvlan:alpha"
-          GHCR_TAGS="ghcr.io/${{ github.repository_owner }}/exvlan:alpha"
+          # Base tags with version
+          GHCR_TAGS="ghcr.io/${{ github.repository_owner }}/exvlan:${{ inputs.image_tag }}"
+          # Add alpha tag if this is an alpha release
+          if [[ "${{ inputs.is_alpha }}" == "true" ]]; then
+            GHCR_TAGS="${GHCR_TAGS},ghcr.io/${{ github.repository_owner }}/exvlan:alpha"
+          # Add latest tags if requested
+          elif [[ "${{ inputs.mark_latest }}" == "true" ]]; then
+            GHCR_TAGS="${GHCR_TAGS},ghcr.io/${{ github.repository_owner }}/exvlan:latest"
+          fi
+
+          # Add unstable tags if requested
+          if [[ "${{ inputs.mark_unstable }}" == "true" ]]; then
+            GHCR_TAGS="${GHCR_TAGS},ghcr.io/${{ github.repository_owner }}/exvlan:unstable"
+          fi
 
           # Combine all tags
-          ALL_TAGS="${DOCKERHUB_TAGS},${GHCR_TAGS}"
+          ALL_TAGS="${GHCR_TAGS}"
 
           echo "tags=${ALL_TAGS}" >> $GITHUB_OUTPUT
           echo "Generated tags: ${ALL_TAGS}"

@@ -106,7 +106,7 @@ async function doStartVpn(ipv4Addr: string, cidr: number, routes: string[], dns?
     ipv4Addr: `${ipv4Addr}/${cidr}`,
     routes,
     dns,
-    disallowedApplications: ['era.exvlan'],
+    disallowedApplications: ['era.exvlan.studio'],
     mtu: 1300,
   }
 

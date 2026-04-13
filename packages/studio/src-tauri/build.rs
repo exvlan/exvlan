@@ -8,5 +8,19 @@ fn main() {
         thunk::thunk();
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+
+        println!("cargo:warning=BuildRS Path: {}", manifest_dir);
+        println!("cargo:rustc-link-search=native={}", manifest_dir);
+
+        if let Some(parent) = std::path::Path::new(&manifest_dir).parent() {
+            println!("cargo:rustc-link-search=native={}", parent.display());
+        }
+
+        println!("cargo:rustc-link-lib=Packet");
+    }
+
     tauri_build::build();
 }

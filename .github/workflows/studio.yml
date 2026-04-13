@@ -1,4 +1,4 @@
-name: EXVlan Studio
+name: Builder Studio
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
           concurrent_skipping: 'same_content_newer'
           skip_after_successful_duplicate: 'true'
           cancel_others: 'true'
-          paths: '["Cargo.toml", "Cargo.lock", "exvlan/**", "packages/studio/**", ".github/workflows/studio.yml", ".github/workflows/install_rust.sh", ".github/workflows/install_gui_dep.sh", "packages/kit/**"]'
+          paths: '["Cargo.toml", "Cargo.lock", "exvlan/core/**", "packages/studio/**", ".github/workflows/studio.yml", ".github/workflows/install_rust.sh", ".github/workflows/install_gui_dep.sh", "packages/kit/**"]'
   build-gui:
     name: Build EXVlan Studio GUI
     strategy:
@@ -160,12 +160,16 @@ jobs:
               aarch64*) ARCH_DIR=arm64 ;;
           esac
           if [[ -n "$ARCH_DIR" ]]; then
-              find "./exvlan/core/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./packages/studio/src-tauri/ \;
+              find "./exvlan/core/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" -o -name "*.lib" \) -exec cp {} ./packages/studio/src-tauri/ \;
           fi
+          ls -al ./packages/studio/src-tauri/
 
       - name: Build GUI
         if: ${{ matrix.GUI_TARGET != '' }}
         uses: tauri-apps/tauri-action@v0
+        env:
+          RUSTFLAGS: "-L native=${{ github.workspace }}/packages/studio/src-tauri/"
+          CARGO_TERM_COLOR: always
         with:
           projectPath: ./packages/studio
           # https://tauri.app/v1/guides/building/linux/#cross-compiling-tauri-applications-for-arm-based-devices
@@ -182,6 +186,7 @@ jobs:
           fi
           # copy gui bundle, gui is built without specific target
           if [[ $OS =~ ^windows.*$ ]]; then
+              mv ./target/$GUI_TARGET/release/bundle/msi/*.msi ./artifacts/objects/
               mv ./target/$GUI_TARGET/release/bundle/nsis/*.exe ./artifacts/objects/
           elif [[ $OS =~ ^macos.*$ ]]; then
               mv ./target/$GUI_TARGET/release/bundle/dmg/*.dmg ./artifacts/objects/

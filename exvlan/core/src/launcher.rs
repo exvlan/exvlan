@@ -110,7 +110,7 @@ impl EraXVlanLauncher {
                 let Some(tun_fd) = tun_fd_receiver.recv().await.flatten() else {
                     return;
                 };
-                let res = Instance::setup_nic_ctx_for_mobile(
+                let _res = Instance::setup_nic_ctx_for_mobile(
                     nic_ctx.clone(),
                     global_ctx.clone(),
                     peer_mgr.clone(),

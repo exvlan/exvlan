@@ -1,4 +1,4 @@
-package era.exvlan
+package era.exvlan.studio
 
 import android.content.Intent
 import android.os.Build

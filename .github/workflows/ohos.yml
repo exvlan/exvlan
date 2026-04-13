@@ -1,4 +1,4 @@
-name: EXVlan OHOS
+name: Builder OHOS
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
       - 'v*'
       - '!*-pre'
   pull_request:
-    branches: ["develop", "main"]
+    branches: []
   workflow_dispatch:
 
 permissions:
