@@ -86,7 +86,9 @@ impl WindowsBuild {
         } else {
             Self::download_protoc()
         };
-        std::env::set_var("PROTOC", protoc_path);
+        unsafe {
+            std::env::set_var("PROTOC", protoc_path);
+        }
     }
 }
 
@@ -141,26 +143,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-
-        println!("cargo:warning=BuildRS Path: {}", manifest_dir);
-        println!("cargo:rustc-link-search=native={}", manifest_dir);
-
-        if let Some(parent) = std::path::Path::new(&manifest_dir).parent() {
-            println!("cargo:rustc-link-search=native={}", parent.display());
-        }
-
-        println!("cargo:rustc-link-lib=Packet");
-    }
-
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     // enable thunk-rs when target os is windows and arch is x86_64 or i686
-    #[cfg(target_os = "windows")]
-    if !std::env::var("TARGET")
-        .unwrap_or_default()
-        .contains("aarch64")
-    {
+    if target_os == "windows" && (target_arch == "x86" || target_arch == "x86_64") {
         thunk::thunk();
     }
 

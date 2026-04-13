@@ -64,7 +64,7 @@ jobs:
   build:
     name: Build EXVlan Core
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - TARGET: x86_64-unknown-linux-musl
