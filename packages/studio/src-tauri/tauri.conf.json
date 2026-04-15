@@ -19,6 +19,7 @@
   "productName": "EXVlan Studio",
   "version": "2026.26.0",
   "identifier": "era.exvlan.studio",
+  "mainBinaryName": "exvlan studio",
   "plugins": {
     "shell": {
       "open": "^.+"
