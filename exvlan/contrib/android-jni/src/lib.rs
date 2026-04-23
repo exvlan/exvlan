@@ -69,7 +69,7 @@ fn throw_exception(env: &mut JNIEnv, message: &str) {
 
 /// 设置 TUN 文件描述符
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_setTunFd(
+pub extern "system" fn Java_com_exvlan_jni_exvlanJNI_setTunFd(
     mut env: JNIEnv,
     _class: JClass,
     inst_name: JString,
@@ -98,7 +98,7 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_setTunFd(
 
 /// 解析配置
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_parseConfig(
+pub extern "system" fn Java_com_exvlan_jni_exvlanJNI_parseConfig(
     mut env: JNIEnv,
     _class: JClass,
     config: JString,
@@ -126,7 +126,7 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_parseConfig(
 
 /// 运行网络实例
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_runNetworkInstance(
+pub extern "system" fn Java_com_exvlan_jni_exvlanJNI_runNetworkInstance(
     mut env: JNIEnv,
     _class: JClass,
     config: JString,
@@ -154,7 +154,7 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_runNetworkInstance(
 
 /// 保持网络实例
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_retainNetworkInstance(
+pub extern "system" fn Java_com_exvlan_jni_exvlanJNI_retainNetworkInstance(
     mut env: JNIEnv,
     _class: JClass,
     instance_names: JObjectArray,
@@ -245,7 +245,7 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_retainNetworkInstance(
 
 /// 收集网络信息
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_collectNetworkInfos(
+pub extern "system" fn Java_com_exvlan_jni_exvlanJNI_collectNetworkInfos(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
@@ -305,7 +305,7 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_collectNetworkInfos(
 
 /// 获取最后的错误信息
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_getLastError(
+pub extern "system" fn Java_com_exvlan_jni_exvlanJNI_getLastError(
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {

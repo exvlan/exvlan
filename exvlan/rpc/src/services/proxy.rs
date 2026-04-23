@@ -3,8 +3,8 @@ use tokio::sync::Mutex;
 
 use exvlan::common::PeerId;
 use exvlan::proto::api::instance::TcpProxyRpcClientFactory;
-use exvlan::proto::rpc_types::controller::BaseController;
 use exvlan::proto::rpc_impl::client::Client;
+use exvlan::proto::rpc_types::controller::BaseController;
 
 pub struct TcpProxyClient {
     pub client: Arc<Mutex<Client>>,
@@ -15,7 +15,13 @@ pub struct TcpProxyClient {
 }
 
 impl TcpProxyClient {
-    pub fn new(client: Arc<Mutex<Client>>, from_peer_id: PeerId, to_peer_id: PeerId, domain_name: String, client_type: String) -> Self {
+    pub fn new(
+        client: Arc<Mutex<Client>>,
+        from_peer_id: PeerId,
+        to_peer_id: PeerId,
+        domain_name: String,
+        client_type: String,
+    ) -> Self {
         Self {
             client,
             from_peer_id,
@@ -41,10 +47,20 @@ impl TcpProxyClient {
         &self.domain_name
     }
 
-    pub async fn list_tcp_proxy_entry(&self, request: exvlan::proto::api::instance::ListTcpProxyEntryRequest) -> anyhow::Result<exvlan::proto::api::instance::ListTcpProxyEntryResponse> {
+    pub async fn list_tcp_proxy_entry(
+        &self,
+        request: exvlan::proto::api::instance::ListTcpProxyEntryRequest,
+    ) -> anyhow::Result<exvlan::proto::api::instance::ListTcpProxyEntryResponse> {
         let client = self.client.lock().await;
-        let client = client.scoped_client::<TcpProxyRpcClientFactory<BaseController>>(self.from_peer_id, self.to_peer_id, self.domain_name.clone());
-        client.list_tcp_proxy_entry(BaseController::default(), request).await.map_err(|e| anyhow::anyhow!(e))
+        let client = client.scoped_client::<TcpProxyRpcClientFactory<BaseController>>(
+            self.from_peer_id,
+            self.to_peer_id,
+            self.domain_name.clone(),
+        );
+        client
+            .list_tcp_proxy_entry(BaseController::default(), request)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 }
 
@@ -60,7 +76,13 @@ mod tests {
         let domain_name = "example.com".to_string();
         let client_type = "test".to_string();
 
-        let tcp_proxy_client = TcpProxyClient::new(client, from_peer_id, to_peer_id, domain_name.clone(), client_type.clone());
+        let tcp_proxy_client = TcpProxyClient::new(
+            client,
+            from_peer_id,
+            to_peer_id,
+            domain_name.clone(),
+            client_type.clone(),
+        );
 
         assert_eq!(tcp_proxy_client.from_peer_id, from_peer_id);
         assert_eq!(tcp_proxy_client.to_peer_id, to_peer_id);
@@ -76,7 +98,8 @@ mod tests {
         let domain_name = "example.com".to_string();
         let client_type = "test".to_string();
 
-        let tcp_proxy_client = TcpProxyClient::new(client, from_peer_id, to_peer_id, domain_name, client_type);
+        let tcp_proxy_client =
+            TcpProxyClient::new(client, from_peer_id, to_peer_id, domain_name, client_type);
         assert_eq!(tcp_proxy_client.client_type(), "test");
     }
 
@@ -133,13 +156,8 @@ mod tests {
         let client = Arc::new(Mutex::new(Client::new()));
         let client_type = "type-with-special-chars_123".to_string();
 
-        let tcp_proxy_client = TcpProxyClient::new(
-            client,
-            0,
-            0,
-            "test.com".to_string(),
-            client_type.clone(),
-        );
+        let tcp_proxy_client =
+            TcpProxyClient::new(client, 0, 0, "test.com".to_string(), client_type.clone());
 
         assert_eq!(tcp_proxy_client.client_type(), client_type);
     }
@@ -164,9 +182,27 @@ mod tests {
         let client = Arc::new(Mutex::new(Client::new()));
         let domain_name = "test.com".to_string();
 
-        let tcp_proxy1 = TcpProxyClient::new(client.clone(), 0, 0, domain_name.clone(), "type_a".to_string());
-        let tcp_proxy2 = TcpProxyClient::new(client.clone(), 0, 0, domain_name.clone(), "type_b".to_string());
-        let tcp_proxy3 = TcpProxyClient::new(client.clone(), 0, 0, domain_name.clone(), "type_c".to_string());
+        let tcp_proxy1 = TcpProxyClient::new(
+            client.clone(),
+            0,
+            0,
+            domain_name.clone(),
+            "type_a".to_string(),
+        );
+        let tcp_proxy2 = TcpProxyClient::new(
+            client.clone(),
+            0,
+            0,
+            domain_name.clone(),
+            "type_b".to_string(),
+        );
+        let tcp_proxy3 = TcpProxyClient::new(
+            client.clone(),
+            0,
+            0,
+            domain_name.clone(),
+            "type_c".to_string(),
+        );
 
         assert_eq!(tcp_proxy1.client_type(), "type_a");
         assert_eq!(tcp_proxy2.client_type(), "type_b");

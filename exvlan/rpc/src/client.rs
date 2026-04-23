@@ -34,7 +34,12 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
-    pub fn new(client: Arc<Mutex<Client>>, from_peer_id: PeerId, to_peer_id: PeerId, domain_name: String) -> Self {
+    pub fn new(
+        client: Arc<Mutex<Client>>,
+        from_peer_id: PeerId,
+        to_peer_id: PeerId,
+        domain_name: String,
+    ) -> Self {
         Self {
             client,
             from_peer_id,
@@ -305,7 +310,12 @@ mod tests {
         let to_peer_id = 100;
         let domain_name = "test.example.com".to_string();
 
-        let rpc_client = RpcClient::new(client.clone(), from_peer_id, to_peer_id, domain_name.clone());
+        let rpc_client = RpcClient::new(
+            client.clone(),
+            from_peer_id,
+            to_peer_id,
+            domain_name.clone(),
+        );
 
         assert_eq!(rpc_client.from_peer_id(), from_peer_id);
         assert_eq!(rpc_client.to_peer_id(), to_peer_id);
@@ -352,12 +362,7 @@ mod tests {
     #[tokio::test]
     async fn test_rpc_client_services_all() {
         let client = Arc::new(Mutex::new(Client::new()));
-        let rpc_client = RpcClient::new(
-            client,
-            10,
-            20,
-            "services.test".to_string(),
-        );
+        let rpc_client = RpcClient::new(client, 10, 20, "services.test".to_string());
 
         let peer_manage = rpc_client.peer_manage();
         assert_eq!(peer_manage.from_peer_id, 10);
@@ -451,9 +456,7 @@ impl RpcClientManager {
     /// # 返回值
     /// - `RpcClientManager` 实例
     pub fn new() -> Self {
-        Self {
-            rpc_client: None,
-        }
+        Self { rpc_client: None }
     }
 
     /// 获取或创建 RPC 客户端
@@ -464,7 +467,10 @@ impl RpcClientManager {
     /// # 返回值
     /// - 成功时返回 `Arc<Mutex<RpcClient>>` 实例
     /// - 失败时返回 `RpcError`
-    pub async fn get_or_create_rpc_client(&mut self, addr: &str) -> Result<Arc<Mutex<RpcClient>>, RpcError> {
+    pub async fn get_or_create_rpc_client(
+        &mut self,
+        addr: &str,
+    ) -> Result<Arc<Mutex<RpcClient>>, RpcError> {
         if let Some(rpc_client) = &self.rpc_client {
             return Ok(rpc_client.clone());
         }
@@ -561,9 +567,6 @@ mod manager_tests {
 
         assert!(manager1.get_rpc_client().is_none());
         assert!(manager2.get_rpc_client().is_none());
-        assert!(!std::ptr::eq(
-            &manager1 as *const _,
-            &manager2 as *const _
-        ));
+        assert!(!std::ptr::eq(&manager1 as *const _, &manager2 as *const _));
     }
 }

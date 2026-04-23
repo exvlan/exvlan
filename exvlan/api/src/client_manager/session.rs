@@ -386,7 +386,7 @@ impl WebServerService for SessionRpcService {
         _: exvlan::proto::web::GetFeatureRequest,
     ) -> rpc_types::error::Result<exvlan::proto::web::GetFeatureResponse> {
         Ok(exvlan::proto::web::GetFeatureResponse {
-            support_encryption: true,
+            support_encryption: exvlan::web_client::security::web_secure_tunnel_supported(),
         })
     }
 }

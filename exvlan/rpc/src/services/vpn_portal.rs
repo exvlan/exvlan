@@ -3,8 +3,8 @@ use tokio::sync::Mutex;
 
 use exvlan::common::PeerId;
 use exvlan::proto::api::instance::VpnPortalRpcClientFactory;
-use exvlan::proto::rpc_types::controller::BaseController;
 use exvlan::proto::rpc_impl::client::Client;
+use exvlan::proto::rpc_types::controller::BaseController;
 
 pub struct VpnPortalClient {
     pub client: Arc<Mutex<Client>>,
@@ -14,7 +14,12 @@ pub struct VpnPortalClient {
 }
 
 impl VpnPortalClient {
-    pub fn new(client: Arc<Mutex<Client>>, from_peer_id: PeerId, to_peer_id: PeerId, domain_name: String) -> Self {
+    pub fn new(
+        client: Arc<Mutex<Client>>,
+        from_peer_id: PeerId,
+        to_peer_id: PeerId,
+        domain_name: String,
+    ) -> Self {
         Self {
             client,
             from_peer_id,
@@ -23,10 +28,20 @@ impl VpnPortalClient {
         }
     }
 
-    pub async fn get_vpn_portal_info(&self, request: exvlan::proto::api::instance::GetVpnPortalInfoRequest) -> anyhow::Result<exvlan::proto::api::instance::GetVpnPortalInfoResponse> {
+    pub async fn get_vpn_portal_info(
+        &self,
+        request: exvlan::proto::api::instance::GetVpnPortalInfoRequest,
+    ) -> anyhow::Result<exvlan::proto::api::instance::GetVpnPortalInfoResponse> {
         let client = self.client.lock().await;
-        let client = client.scoped_client::<VpnPortalRpcClientFactory<BaseController>>(self.from_peer_id, self.to_peer_id, self.domain_name.clone());
-        client.get_vpn_portal_info(BaseController::default(), request).await.map_err(|e| anyhow::anyhow!(e))
+        let client = client.scoped_client::<VpnPortalRpcClientFactory<BaseController>>(
+            self.from_peer_id,
+            self.to_peer_id,
+            self.domain_name.clone(),
+        );
+        client
+            .get_vpn_portal_info(BaseController::default(), request)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 }
 

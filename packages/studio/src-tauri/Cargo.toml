@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-studio"
-version = "2026.26.0"
+version = "2026.26.1"
 description = "EXVlan Studio"
 authors = ["<@长久同学 cloud@era-x.cn>"]
 edition.workspace = true

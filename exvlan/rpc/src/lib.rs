@@ -78,7 +78,6 @@ pub mod test_utils;
 
 pub use client::{RpcClient, RpcClientManager};
 
-
 // Proto 类型 - manage
 pub use exvlan::proto::api::manage::{
     CollectNetworkInfoRequest, CollectNetworkInfoResponse, DeleteNetworkInstanceRequest,

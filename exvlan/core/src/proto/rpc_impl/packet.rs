@@ -12,7 +12,7 @@ use crate::{
 use super::RpcTransactId;
 
 // Budget the final UDP payload size on the wire for peer RPC over `udp://`.
-// This includes EasyTier's UDP tunnel header, peer header, and reserved tail
+// This includes exvlan's UDP tunnel header, peer header, and reserved tail
 // space for encryption/compression metadata, but excludes the outer IP header.
 const RPC_PACKET_UDP_PAYLOAD_BUDGET: usize = 1300;
 
@@ -153,11 +153,11 @@ pub struct BuildRpcPacketArgs<'a> {
     pub compression_info: RpcCompressionInfo,
 }
 
-// Fixed transport overhead for peer RPC carried by EasyTier's UDP tunnel:
+// Fixed transport overhead for peer RPC carried by exvlan's UDP tunnel:
 //
 //   UDP payload budget
 //   +-------------------------------------------------------------------------+
-//   | EasyTier UDP tunnel hdr | PeerManager hdr | RpcPacket bytes | tail room |
+//   | exvlan UDP tunnel hdr | PeerManager hdr | RpcPacket bytes | tail room |
 //   +-------------------------------------------------------------------------+
 //   |<------ ZCPacketType::UDP payload_offset ------>|<-- TAIL_RESERVED_SIZE -->|
 //
@@ -168,7 +168,7 @@ fn udp_rpc_tunnel_overhead() -> usize {
 
 // Maximum encoded RpcPacket size we can admit before adding it to a UDP tunnel.
 // This budget excludes the outer UDP/IP headers because the caller only controls
-// the EasyTier payload carried inside the UDP datagram.
+// the exvlan payload carried inside the UDP datagram.
 fn max_rpc_packet_encoded_len_for_udp() -> usize {
     RPC_PACKET_UDP_PAYLOAD_BUDGET.saturating_sub(udp_rpc_tunnel_overhead())
 }

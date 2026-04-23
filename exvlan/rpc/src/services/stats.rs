@@ -3,8 +3,8 @@ use tokio::sync::Mutex;
 
 use exvlan::common::PeerId;
 use exvlan::proto::api::instance::StatsRpcClientFactory;
-use exvlan::proto::rpc_types::controller::BaseController;
 use exvlan::proto::rpc_impl::client::Client;
+use exvlan::proto::rpc_types::controller::BaseController;
 
 pub struct StatsClient {
     pub client: Arc<Mutex<Client>>,
@@ -14,7 +14,12 @@ pub struct StatsClient {
 }
 
 impl StatsClient {
-    pub fn new(client: Arc<Mutex<Client>>, from_peer_id: PeerId, to_peer_id: PeerId, domain_name: String) -> Self {
+    pub fn new(
+        client: Arc<Mutex<Client>>,
+        from_peer_id: PeerId,
+        to_peer_id: PeerId,
+        domain_name: String,
+    ) -> Self {
         Self {
             client,
             from_peer_id,
@@ -23,10 +28,20 @@ impl StatsClient {
         }
     }
 
-    pub async fn get_stats(&self, request: exvlan::proto::api::instance::GetStatsRequest) -> anyhow::Result<exvlan::proto::api::instance::GetStatsResponse> {
+    pub async fn get_stats(
+        &self,
+        request: exvlan::proto::api::instance::GetStatsRequest,
+    ) -> anyhow::Result<exvlan::proto::api::instance::GetStatsResponse> {
         let client = self.client.lock().await;
-        let client = client.scoped_client::<StatsRpcClientFactory<BaseController>>(self.from_peer_id, self.to_peer_id, self.domain_name.clone());
-        client.get_stats(BaseController::default(), request).await.map_err(|e| anyhow::anyhow!(e))
+        let client = client.scoped_client::<StatsRpcClientFactory<BaseController>>(
+            self.from_peer_id,
+            self.to_peer_id,
+            self.domain_name.clone(),
+        );
+        client
+            .get_stats(BaseController::default(), request)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 }
 

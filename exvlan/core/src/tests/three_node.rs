@@ -997,7 +997,7 @@ pub async fn foreign_network_forward_nic_data() {
 use std::{net::SocketAddr, str::FromStr};
 
 use defguard_wireguard_rs::{
-    InterfaceConfiguration, WGApi, WireguardInterfaceApi, host::Peer, key::Key, net::IpAddrMask,
+    InterfaceConfiguration, WGApi, WireguardInterfaceApi, key::Key, net::IpAddrMask, peer::Peer,
 };
 
 fn run_wireguard_client(
@@ -3151,6 +3151,20 @@ pub async fn relay_peer_e2e_encryption(#[values("tcp", "udp")] proto: &str) {
             .as_ref()
             .map(|i| i.noise_static_pubkey.len())
     );
+
+    // Wait until relay route info includes inst3 static pubkey for IK handshake.
+    wait_for_condition(
+        || async {
+            insts[0]
+                .get_peer_manager()
+                .get_peer_map()
+                .get_route_peer_info(inst3_peer_id)
+                .await
+                .is_some_and(|info| !info.noise_static_pubkey.is_empty())
+        },
+        Duration::from_secs(10),
+    )
+    .await;
 
     // Test basic connectivity through relay
     println!("Starting ping test from net_a to 10.144.144.3...");

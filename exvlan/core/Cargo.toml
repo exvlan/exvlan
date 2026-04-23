@@ -3,7 +3,7 @@ name = "exvlan"
 description = "A full meshed p2p VPN, connecting all your devices in one network with one command."
 homepage = "https://github.com/exvlan/exvlan"
 repository = "https://github.com/exvlan/exvlan"
-version = "2026.26.0"
+version = "2026.26.1"
 edition.workspace = true
 rust-version.workspace = true
 authors = ["<@长久同学 cloud@era-x.cn>"]
@@ -50,7 +50,7 @@ time = "0.3"
 toml = "0.8.12"
 chrono = { version = "0.4.37", features = ["serde"] }
 
-cfg-if = "1.0"
+delegate = "0.13.5"
 
 itertools = "0.14.0"
 
@@ -165,7 +165,6 @@ network-interface = "2.0"
 
 # for ospf route
 petgraph = "0.8.1"
-hashbrown = "0.15.3"
 ordered_hash_map = "0.5.0"
 
 # for wireguard

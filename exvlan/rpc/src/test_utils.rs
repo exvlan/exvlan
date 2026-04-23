@@ -8,12 +8,15 @@ use std::time::Duration;
 
 use anyhow::Result;
 use exvlan::common::PeerId;
-use exvlan::proto::api::instance::{
-    DumpRouteRequest, ListConnectorRequest, ListPeerRequest, ListPortForwardRequest,
-    ListRouteRequest, ListTcpProxyEntryRequest, GetVpnPortalInfoRequest, ListMappedListenerRequest,
-    GetStatsRequest, GetAclStatsRequest, GetWhitelistRequest,
-};
 use exvlan::proto::api::config::{GetConfigRequest, PatchConfigRequest};
+use exvlan::proto::api::instance::{
+    DumpRouteRequest, GetAclStatsRequest, GetStatsRequest, GetVpnPortalInfoRequest,
+    GetWhitelistRequest, ListConnectorRequest, ListMappedListenerRequest, ListPeerRequest,
+    ListPortForwardRequest, ListRouteRequest, ListTcpProxyEntryRequest,
+};
+use exvlan::proto::api::instance::{
+    GenerateCredentialRequest, ListCredentialsRequest, RevokeCredentialRequest,
+};
 use exvlan::proto::api::logger::{GetLoggerConfigRequest, SetLoggerConfigRequest};
 use exvlan::proto::api::manage::{
     CollectNetworkInfoRequest, DeleteNetworkInstanceRequest, GetNetworkInstanceConfigRequest,
@@ -21,21 +24,15 @@ use exvlan::proto::api::manage::{
     RunNetworkInstanceRequest, ValidateConfigRequest,
 };
 use exvlan::proto::peer_rpc::{GetGlobalPeerMapRequest, ReportPeersRequest};
-use exvlan::proto::api::instance::{
-    GenerateCredentialRequest, ListCredentialsRequest, RevokeCredentialRequest,
-};
-use exvlan::proto::rpc_types::controller::BaseController;
 use exvlan::proto::rpc_impl::client::Client;
+use exvlan::proto::rpc_types::controller::BaseController;
 use tokio::sync::Mutex;
 
 pub fn default_controller() -> BaseController {
     BaseController::default()
 }
 
-pub async fn wait_for_condition<F, Fut>(
-    condition: F,
-    timeout: Duration,
-) -> Result<()>
+pub async fn wait_for_condition<F, Fut>(condition: F, timeout: Duration) -> Result<()>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = bool>,
@@ -185,12 +182,7 @@ pub fn create_mock_connector_manage_client() -> super::services::ConnectorManage
 }
 
 pub fn create_mock_stats_client() -> super::services::StatsClient {
-    super::services::StatsClient::new(
-        create_test_client(),
-        0,
-        0,
-        "test.example.com".to_string(),
-    )
+    super::services::StatsClient::new(create_test_client(), 0, 0, "test.example.com".to_string())
 }
 
 pub fn create_mock_acl_manage_client() -> super::services::AclManageClient {
@@ -221,21 +213,11 @@ pub fn create_mock_vpn_portal_client() -> super::services::VpnPortalClient {
 }
 
 pub fn create_mock_config_client() -> super::services::ConfigClient {
-    super::services::ConfigClient::new(
-        create_test_client(),
-        0,
-        0,
-        "test.example.com".to_string(),
-    )
+    super::services::ConfigClient::new(create_test_client(), 0, 0, "test.example.com".to_string())
 }
 
 pub fn create_mock_logger_client() -> super::services::LoggerClient {
-    super::services::LoggerClient::new(
-        create_test_client(),
-        0,
-        0,
-        "test.example.com".to_string(),
-    )
+    super::services::LoggerClient::new(create_test_client(), 0, 0, "test.example.com".to_string())
 }
 
 pub fn create_mock_mapped_listener_manage_client() -> super::services::MappedListenerManageClient {
@@ -284,7 +266,10 @@ pub fn create_mock_tcp_proxy_client() -> super::services::TcpProxyClient {
     )
 }
 
-pub fn create_rpc_client_with_peers(from_peer_id: PeerId, to_peer_id: PeerId) -> super::client::RpcClient {
+pub fn create_rpc_client_with_peers(
+    from_peer_id: PeerId,
+    to_peer_id: PeerId,
+) -> super::client::RpcClient {
     let client = create_test_client();
     super::client::RpcClient::new(
         client,
@@ -360,7 +345,10 @@ mod tests {
     #[test]
     fn test_create_test_instance_manage_requests() {
         assert!(create_test_validate_config_request().eq(&ValidateConfigRequest::default()));
-        assert!(create_test_run_network_instance_request().eq(&RunNetworkInstanceRequest::default()));
-        assert!(create_test_delete_network_instance_request().eq(&DeleteNetworkInstanceRequest::default()));
+        assert!(
+            create_test_run_network_instance_request().eq(&RunNetworkInstanceRequest::default())
+        );
+        assert!(create_test_delete_network_instance_request()
+            .eq(&DeleteNetworkInstanceRequest::default()));
     }
 }

@@ -3,8 +3,8 @@ use tokio::sync::Mutex;
 
 use exvlan::common::PeerId;
 use exvlan::proto::api::logger::LoggerRpcClientFactory;
-use exvlan::proto::rpc_types::controller::BaseController;
 use exvlan::proto::rpc_impl::client::Client;
+use exvlan::proto::rpc_types::controller::BaseController;
 
 pub struct LoggerClient {
     pub client: Arc<Mutex<Client>>,
@@ -14,7 +14,12 @@ pub struct LoggerClient {
 }
 
 impl LoggerClient {
-    pub fn new(client: Arc<Mutex<Client>>, from_peer_id: PeerId, to_peer_id: PeerId, domain_name: String) -> Self {
+    pub fn new(
+        client: Arc<Mutex<Client>>,
+        from_peer_id: PeerId,
+        to_peer_id: PeerId,
+        domain_name: String,
+    ) -> Self {
         Self {
             client,
             from_peer_id,
@@ -23,16 +28,36 @@ impl LoggerClient {
         }
     }
 
-    pub async fn set_logger_config(&self, request: exvlan::proto::api::logger::SetLoggerConfigRequest) -> anyhow::Result<exvlan::proto::api::logger::SetLoggerConfigResponse> {
+    pub async fn set_logger_config(
+        &self,
+        request: exvlan::proto::api::logger::SetLoggerConfigRequest,
+    ) -> anyhow::Result<exvlan::proto::api::logger::SetLoggerConfigResponse> {
         let client = self.client.lock().await;
-        let client = client.scoped_client::<LoggerRpcClientFactory<BaseController>>(self.from_peer_id, self.to_peer_id, self.domain_name.clone());
-        client.set_logger_config(BaseController::default(), request).await.map_err(|e| anyhow::anyhow!(e))
+        let client = client.scoped_client::<LoggerRpcClientFactory<BaseController>>(
+            self.from_peer_id,
+            self.to_peer_id,
+            self.domain_name.clone(),
+        );
+        client
+            .set_logger_config(BaseController::default(), request)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
-    pub async fn get_logger_config(&self, request: exvlan::proto::api::logger::GetLoggerConfigRequest) -> anyhow::Result<exvlan::proto::api::logger::GetLoggerConfigResponse> {
+    pub async fn get_logger_config(
+        &self,
+        request: exvlan::proto::api::logger::GetLoggerConfigRequest,
+    ) -> anyhow::Result<exvlan::proto::api::logger::GetLoggerConfigResponse> {
         let client = self.client.lock().await;
-        let client = client.scoped_client::<LoggerRpcClientFactory<BaseController>>(self.from_peer_id, self.to_peer_id, self.domain_name.clone());
-        client.get_logger_config(BaseController::default(), request).await.map_err(|e| anyhow::anyhow!(e))
+        let client = client.scoped_client::<LoggerRpcClientFactory<BaseController>>(
+            self.from_peer_id,
+            self.to_peer_id,
+            self.domain_name.clone(),
+        );
+        client
+            .get_logger_config(BaseController::default(), request)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 }
 

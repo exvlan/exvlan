@@ -3,7 +3,6 @@ use crate::common::get_logger_timer_rfc3339;
 use crate::common::tracing_rolling_appender::{FileAppenderWrapper, RollingFileAppenderBase};
 use crate::rpc_service::logger::{CURRENT_LOG_LEVEL, LOGGER_LEVEL_SENDER};
 use anyhow::Context;
-use cfg_if::cfg_if;
 use paste::paste;
 use std::io::IsTerminal;
 use tracing::level_filters::LevelFilter;
@@ -76,7 +75,6 @@ macro_rules! log_layer {
         $layer
             .with_file(false)
             .with_line_number(false)
-            .with_ansi(true)
             .with_filter(filter_fn(is_log))
             .boxed()
     };
@@ -122,14 +120,13 @@ fn console_layers(default_level: Option<LevelFilter>) -> anyhow::Result<Vec<BoxL
     let (console_filter, _) =
         tracing_subscriber::reload::Layer::new(parse_env_filter(default_level)?);
 
-    cfg_if! {
-        if #[cfg(test)] {
+    let (stdout, stderr) = cfg_select! {
+        test => {{
             let w = tracing_subscriber::fmt::TestWriter::new;
-            let (stdout, stderr) = (w, w);
-        } else {
-            let (stdout, stderr) = (std::io::stdout, std::io::stderr);
-        }
-    }
+            (w, w)
+        }}
+        _ => (std::io::stdout, std::io::stderr),
+    };
 
     let ansi = std::io::stderr().is_terminal() || cfg!(test);
 
@@ -274,7 +271,7 @@ mod tests {
     #[ctor::ctor]
     fn init() {
         let _ = Registry::default()
-            .with(console_layers(Some(LevelFilter::DEBUG)).unwrap())
+            .with(console_layers(Some(LevelFilter::WARN)).unwrap())
             .try_init();
     }
 

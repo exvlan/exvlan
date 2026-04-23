@@ -3,8 +3,8 @@ use tokio::sync::Mutex;
 
 use exvlan::common::PeerId;
 use exvlan::proto::api::instance::AclManageRpcClientFactory;
-use exvlan::proto::rpc_types::controller::BaseController;
 use exvlan::proto::rpc_impl::client::Client;
+use exvlan::proto::rpc_types::controller::BaseController;
 
 pub struct AclManageClient {
     pub client: Arc<Mutex<Client>>,
@@ -14,7 +14,12 @@ pub struct AclManageClient {
 }
 
 impl AclManageClient {
-    pub fn new(client: Arc<Mutex<Client>>, from_peer_id: PeerId, to_peer_id: PeerId, domain_name: String) -> Self {
+    pub fn new(
+        client: Arc<Mutex<Client>>,
+        from_peer_id: PeerId,
+        to_peer_id: PeerId,
+        domain_name: String,
+    ) -> Self {
         Self {
             client,
             from_peer_id,
@@ -23,16 +28,36 @@ impl AclManageClient {
         }
     }
 
-    pub async fn get_acl_stats(&self, request: exvlan::proto::api::instance::GetAclStatsRequest) -> anyhow::Result<exvlan::proto::api::instance::GetAclStatsResponse> {
+    pub async fn get_acl_stats(
+        &self,
+        request: exvlan::proto::api::instance::GetAclStatsRequest,
+    ) -> anyhow::Result<exvlan::proto::api::instance::GetAclStatsResponse> {
         let client = self.client.lock().await;
-        let client = client.scoped_client::<AclManageRpcClientFactory<BaseController>>(self.from_peer_id, self.to_peer_id, self.domain_name.clone());
-        client.get_acl_stats(BaseController::default(), request).await.map_err(|e| anyhow::anyhow!(e))
+        let client = client.scoped_client::<AclManageRpcClientFactory<BaseController>>(
+            self.from_peer_id,
+            self.to_peer_id,
+            self.domain_name.clone(),
+        );
+        client
+            .get_acl_stats(BaseController::default(), request)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
-    pub async fn get_whitelist(&self, request: exvlan::proto::api::instance::GetWhitelistRequest) -> anyhow::Result<exvlan::proto::api::instance::GetWhitelistResponse> {
+    pub async fn get_whitelist(
+        &self,
+        request: exvlan::proto::api::instance::GetWhitelistRequest,
+    ) -> anyhow::Result<exvlan::proto::api::instance::GetWhitelistResponse> {
         let client = self.client.lock().await;
-        let client = client.scoped_client::<AclManageRpcClientFactory<BaseController>>(self.from_peer_id, self.to_peer_id, self.domain_name.clone());
-        client.get_whitelist(BaseController::default(), request).await.map_err(|e| anyhow::anyhow!(e))
+        let client = client.scoped_client::<AclManageRpcClientFactory<BaseController>>(
+            self.from_peer_id,
+            self.to_peer_id,
+            self.domain_name.clone(),
+        );
+        client
+            .get_whitelist(BaseController::default(), request)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 }
 
