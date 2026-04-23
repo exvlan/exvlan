@@ -78,7 +78,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          cmdline-tools-version: 20.0
+          cmdline-tools-version: 14742923
           packages: 'build-tools;${{ env.BUILD_TOOLS_VERSION }} ndk;${{ env.NDK_VERSION }} platform-tools platforms;android-35 '
 
       - name: Setup Android Environment
@@ -89,6 +89,12 @@ jobs:
           echo "$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
           echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/" >> $GITHUB_ENV
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/" >> $GITHUB_ENV
+
+          KEYSTORE_PATH="${{ github.workspace }}/release.jks"
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64_CONTENT }}" | base64 -d > "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE=$KEYSTORE_PATH" >> $GITHUB_ENV
+          echo "KEYSTORE_ALIAS=${{ secrets.KEYSTORE_ALIAS }}" >> $GITHUB_ENV
+          echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build

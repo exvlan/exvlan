@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 配置变量
-KEYSTORE_FILE="./keys/keystore.jks"
+KEYSTORE_FILE="./keys/x.jks"
 ANDROID_KEYSTORE_BASE64=$(base64 -w 0 $KEYSTORE_FILE)
 
 echo "正在设置 GitHub Secrets..."

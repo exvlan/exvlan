@@ -27,16 +27,11 @@ android {
     }
     signingConfigs {
         create("release") {
-            val keystorePropertiesFile = rootProject.file("keystore.properties")
-            val keystoreProperties = Properties()
-            if (keystorePropertiesFile.exists()) {
-                keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-            }
-
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
+            // 优先从环境变量读取，如果没有则尝试从 keystore.properties 或项目属性读取
+            storeFile = file(System.getenv("ANDROID_KEYSTORE") ?: "./upload-keystore.jks")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "upload.exvlan.studio"
+            keyAlias = System.getenv("KEYSTORE_ALIAS") ?: "upload"
+            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: "upload.exvlan.studio"
         }
     }
     buildTypes {
@@ -59,7 +54,14 @@ android {
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
                     .toList().toTypedArray()
             )
-            // signingConfig = signingConfigs.getByName("release")
+            // 获取环境变量
+            val ksFile = System.getenv("ANDROID_KEYSTORE")
+            val ksPass = System.getenv("KEYSTORE_PASSWORD")
+            val keyPass = System.getenv("KEYSTORE_KEY_PASSWORD") ?: ksPass
+
+            if (!ksFile.isNullOrBlank() && !ksPass.isNullOrBlank()) {
+              signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

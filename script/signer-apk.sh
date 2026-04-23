@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 配置变量
-KEYSTORE_FILE="./keys/keystore.jks"
+KEYSTORE_FILE="keys/x.jks"
 CN="era.xvlan.studio" # 证书持有者名称
 
 if [ -f .env ]; then
@@ -20,26 +20,42 @@ UPLOADED_ALIAS="$UPLOADED_KEYSTORE_ALIAS"
 echo "RELEASE_ALIAS: $RELEASE_ALIAS"
 echo "UPLOADED_ALIAS: $UPLOADED_ALIAS"
 
-UNSIGNED_APK="./packages/studio/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
+UNSIGNED_APK="./packages/studio/src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk"
 SIGNED_APK="./release/exvlan-release-latest.apk"
 mkdir -p ./release ./artifacts
 echo "🚀 开始处理 APK 签名..."
 
 # 1. 检查并生成 Keystore (如果不存在)
 if [ ! -f "$KEYSTORE_FILE" ]; then
-    echo "🔑 未找到 Keystore，正在生成新密钥..."
+    # 首先必须关闭 NTP 自动同步，否则无法手动改时间
+    timedatectl set-ntp false
+    # 手动设置具体时间 (格式: YYYY-MM-DD HH:MM:SS)
+    timedatectl set-time "2026-01-01 00:00:00"
+    echo "$(date) 🔑 未找到 Keystore，正在生成新密钥... "
     keytool -genkey -v \
       -keystore "$KEYSTORE_FILE" \
       -alias "$RELEASE_ALIAS" \
-      -keyalg RSA \
-      -keysize 2048 \
-      -validity 10000 \
+      -keyalg EC \
+      -groupname secp521r1 \
+      -sigalg SHA512withECDSA \
+      -validity 20090 \
       -storepass "$PASSWORD" \
       -keypass "$PASSWORD" \
+      -storetype PKCS12 \
       -dname "CN=$CN, OU=Era X Development, O=Era X Team, L=Gui Yang, S=Gui Zhou, C=CN"
-    echo "✅ Keystore 已生成: $KEYSTORE_FILE"
-fi
 
+    # 改完后重新开启 NTP 自动同步
+    sudo timedatectl set-ntp true
+    echo "$(date) ✅ Keystore 已生成: $KEYSTORE_FILE"
+fi
+export KEYSTORE_ALIAS=$RELEASE_ALIAS
+export KEYSTORE_PASSWORD=$PASSWORD
+export ANDROID_KEYSTORE="$(pwd)/$KEYSTORE_FILE"
+
+echo export KEYSTORE_ALIAS=$RELEASE_ALIAS
+echo export KEYSTORE_PASSWORD=$PASSWORD
+echo export ANDROID_KEYSTORE="$KEYSTORE_FILE"
+echo $ANDROID_KEYSTORE $KEYSTORE_PASSWORD $KEYSTORE_ALIAS
 # 2. 检查源文件是否存在
 if [ ! -f "$UNSIGNED_APK" ]; then
     echo "❌ 错误: 找不到未签名文件 $UNSIGNED_APK"
