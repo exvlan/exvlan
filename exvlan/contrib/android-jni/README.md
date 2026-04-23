@@ -262,6 +262,6 @@ public class EraXVlanVpnService extends VpnService {
 
 ## 相关链接
 
-- [EXVlan 主项目](https://github.com/littlezo/era-xvlan)
+- [EXVlan 主项目](https://github.com/exvlan/exvlan)
 - [Android NDK 文档](https://developer.android.com/ndk)
 - [Rust JNI 文档](https://docs.rs/jni/)

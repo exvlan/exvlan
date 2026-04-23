@@ -1,0 +1,24 @@
+[package]
+name = "exvlan-rpc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.35.1", features = ["full"] }
+anyhow = "1.0.102"
+tracing = "0.1.40"
+thiserror = "1.0.56"
+exvlan = { path = "../core" }
+uuid = "1.5.0"
+
+[features]
+default = []
+integration-test = []
+
+[dev-dependencies]
+tokio = { version = "1.35.1", features = ["test-util"] }
+mockall = "0.12.0"
+assert_matches = "1.5.0"
+serial_test = "2.0"
+anyhow = "1.0.102"
+url = "2.5"

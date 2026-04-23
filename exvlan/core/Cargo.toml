@@ -1,14 +1,14 @@
 [package]
 name = "exvlan"
 description = "A full meshed p2p VPN, connecting all your devices in one network with one command."
-homepage = "https://github.com/littlezo/era-xvlan"
-repository = "https://github.com/littlezo/era-xvlan"
-version = "2026.26.0"
-edition = "2021"
+homepage = "https://github.com/exvlan/exvlan"
+repository = "https://github.com/exvlan/exvlan"
+version = "2026.26.1"
+edition.workspace = true
+rust-version.workspace = true
 authors = ["<@长久同学 cloud@era-x.cn>"]
 keywords = ["vpn", "p2p", "network", "exvlan"]
 categories = ["network-programming", "command-line-utilities"]
-rust-version = "1.93.0"
 license-file = "LICENSE"
 readme = "README.md"
 
@@ -50,7 +50,7 @@ time = "0.3"
 toml = "0.8.12"
 chrono = { version = "0.4.37", features = ["serde"] }
 
-cfg-if = "1.0"
+delegate = "0.13.5"
 
 itertools = "0.14.0"
 
@@ -165,7 +165,6 @@ network-interface = "2.0"
 
 # for ospf route
 petgraph = "0.8.1"
-hashbrown = "0.15.3"
 ordered_hash_map = "0.5.0"
 
 # for wireguard
@@ -242,6 +241,7 @@ hickory-server = { version = "0.25.2", features = [
     "resolver",
 ], optional = true }
 
+bon = "3.9.1"
 derive_builder = "0.20.2"
 humantime-serde = "1.1.1"
 multimap = "0.10.1"
@@ -324,21 +324,13 @@ exvlan-rpc-build = { path = "../build", features = [
     "internal-namespace",
 ] }
 prost-reflect-build = { version = "0.14.0" }
+thunk-rs = { git = "https://github.com/easytier/thunk.git", default-features = false, features = [
+    "win7",
+] }
 
 [target.'cfg(windows)'.build-dependencies]
 reqwest = { version = "0.12.12", features = ["blocking"] }
 zip = "4.0.0"
-
-# enable thunk-rs when compiling for x86_64 or i686 windows
-[target.x86_64-pc-windows-msvc.build-dependencies]
-thunk-rs = { git = "https://github.com/easytier/thunk.git", default-features = false, features = [
-    "win7",
-] }
-
-[target.i686-pc-windows-msvc.build-dependencies]
-thunk-rs = { git = "https://github.com/easytier/thunk.git", default-features = false, features = [
-    "win7",
-] }
 
 
 [dev-dependencies]
@@ -347,6 +339,7 @@ rstest = "0.25.0"
 futures-util = "0.3.31"
 maplit = "1.0.2"
 tempfile = "3.22.0"
+ctor = "0.8.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 defguard_wireguard_rs = "^0.9"
@@ -411,13 +404,3 @@ faketcp = ["dep:flume"]
 zstd = ["dep:zstd"]
 # For Network Extension on macOS
 macos-ne = []
-
-[profile.dev]
-incremental = true # 以较小的步骤编译您的二进制文件。
-
-[profile.release]
-codegen-units = 1 # 允许 LLVM 执行更好的优化。
-lto = true # 启用链接时优化。
-opt-level = "s" # 优先考虑小的二进制文件大小。如果您更喜欢速度，请使用 `3`。
-panic = "abort" # 通过禁用 panic 处理程序来提高性能。
-strip = true # 确保移除调试符号。

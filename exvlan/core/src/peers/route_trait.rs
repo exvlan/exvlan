@@ -1,12 +1,13 @@
+use cidr::{Ipv4Cidr, Ipv6Cidr};
+use dashmap::DashMap;
 use std::{
+    collections::BTreeSet,
     net::{Ipv4Addr, Ipv6Addr},
     sync::Arc,
 };
 
-use dashmap::DashMap;
-
 use crate::{
-    common::{global_ctx::NetworkIdentity, PeerId},
+    common::{PeerId, global_ctx::NetworkIdentity},
     proto::peer_rpc::{
         ForeignNetworkRouteInfoEntry, ForeignNetworkRouteInfoKey, PeerIdentityType,
         RouteForeignNetworkInfos, RouteForeignNetworkSummary, RoutePeerInfo,
@@ -86,6 +87,12 @@ pub trait Route {
 
     async fn list_routes(&self) -> Vec<crate::proto::api::instance::Route>;
 
+    // TODO: rewrite route management, remove this
+    async fn list_proxy_cidrs(&self) -> BTreeSet<Ipv4Cidr>;
+
+    // TODO: rewrite route management, remove this
+    async fn list_proxy_cidrs_v6(&self) -> BTreeSet<Ipv6Cidr>;
+
     async fn get_peer_id_by_ipv4(&self, _ipv4: &Ipv4Addr) -> Option<PeerId> {
         None
     }
@@ -134,6 +141,8 @@ pub trait Route {
 
     fn get_peer_groups(&self, peer_id: PeerId) -> Arc<Vec<String>>;
 
+    async fn refresh_acl_groups(&self) {}
+
     async fn get_peer_groups_by_ip(&self, ip: &std::net::IpAddr) -> Arc<Vec<String>> {
         match self.get_peer_id_by_ip(ip).await {
             Some(peer_id) => self.get_peer_groups(peer_id),
@@ -173,6 +182,16 @@ impl Route for MockRoute {
 
     async fn list_routes(&self) -> Vec<crate::proto::api::instance::Route> {
         panic!("mock route")
+    }
+
+    // TODO: rewrite route management, remove this
+    async fn list_proxy_cidrs(&self) -> BTreeSet<Ipv4Cidr> {
+        unimplemented!()
+    }
+
+    // TODO: rewrite route management, remove this
+    async fn list_proxy_cidrs_v6(&self) -> BTreeSet<Ipv6Cidr> {
+        unimplemented!()
     }
 
     async fn get_peer_info(&self, _peer_id: PeerId) -> Option<RoutePeerInfo> {

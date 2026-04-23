@@ -4,27 +4,27 @@ on:
   workflow_dispatch:
     inputs:
       core_run_id:
-        description: 'The run id of EXVlan-Core Action in EXVlan repo'
+        description: 'The run id of exvlan Core Action in exvlan repo'
         type: number
-        required: false
+        required: true
       gui_run_id:
-        description: 'The run id of EXVlan-GUI Action in EXVlan repo'
+        description: 'The run id of exvlan GUI Action in exvlan repo'
         type: number
-        required: false
+        required: true
       mobile_run_id:
-        description: 'The run id of EXVlan-Mobile Action in EXVlan repo'
+        description: 'The run id of exvlan Mobile Action in exvlan repo'
         type: number
-        required: false
+        required: true
       version:
         description: 'Version for this release'
         type: string
-        default: 'v2026.26.0'
-        required: false
+        default: 'v2026.26.1'
+        required: true
       make_latest:
         description: 'Mark this release as latest'
         type: boolean
         default: true
-        required: false
+        required: true
       is_alpha:
         description: 'Is this an alpha release from develop branch'
         type: boolean
@@ -35,7 +35,6 @@ permissions:
   contents: write
 env:
   CARGO_TERM_COLOR: always
-
 jobs:
   release:
     name: Release Publish
@@ -44,97 +43,8 @@ jobs:
       -
         name: Checkout
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Get version and build info
-        id: version
-        if: inputs.is_alpha == true
-        run: |
-          CARGO_VERSION=$(cargo metadata --format-version 1 --no-deps --manifest-path exvlan/core/Cargo.toml | jq -r '.packages[0].version')
-          COMMIT_SHORT=$(git rev-parse --short HEAD)
-          COMMIT_DATE=$(git log -1 --format=%cd --date=format:%Y%m%d)
-          ALPHA_VERSION="v${CARGO_VERSION}-alpha-${COMMIT_DATE}-${COMMIT_SHORT}"
-          TAG_NAME="alpha-${COMMIT_DATE}-${COMMIT_SHORT}"
-          
-          echo "alpha_version=${ALPHA_VERSION}" >> $GITHUB_OUTPUT
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-          echo "commit_short=${COMMIT_SHORT}" >> $GITHUB_OUTPUT
-
-      - name: Get latest successful core run
-        id: core_run
-        if: inputs.is_alpha == true
-        run: |
-          CORE_RUN=$(gh run list -w core.yml --json databaseId,conclusion | jq -r '.[] | select(.conclusion=="success") | .databaseId' | head -1)
-          if [ -z "$CORE_RUN" ]; then
-            echo "::warning::No successful core workflow run found, skipping core artifacts"
-            echo "core_run_id=0" >> $GITHUB_OUTPUT
-          else
-            echo "core_run_id=${CORE_RUN}" >> $GITHUB_OUTPUT
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get latest successful studio run
-        id: studio_run
-        if: inputs.is_alpha == true
-        run: |
-          STUDIO_RUN=$(gh run list -w studio.yml --json databaseId,conclusion | jq -r '.[] | select(.conclusion=="success") | .databaseId' | head -1)
-          if [ -z "$STUDIO_RUN" ]; then
-            echo "::warning::No successful studio workflow run found, skipping studio artifacts"
-            echo "studio_run_id=0" >> $GITHUB_OUTPUT
-          else
-            echo "studio_run_id=${STUDIO_RUN}" >> $GITHUB_OUTPUT
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get latest successful mobile run
-        id: mobile_run
-        if: inputs.is_alpha == true
-        run: |
-          MOBILE_RUN=$(gh run list -w mobile.yml --json databaseId,conclusion | jq -r '.[] | select(.conclusion=="success") | .databaseId' | head -1)
-          if [ -z "$MOBILE_RUN" ]; then
-            echo "::warning::No successful mobile workflow run found, skipping mobile artifacts"
-            echo "mobile_run_id=0" >> $GITHUB_OUTPUT
-          else
-            echo "mobile_run_id=${MOBILE_RUN}" >> $GITHUB_OUTPUT
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Core Artifact
-        if: inputs.is_alpha == true
-        uses: dawidd6/action-download-artifact@v20
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          run_id: ${{ steps.core_run.outputs.core_run_id }}
-          repo: ${{ github.repository }}
-          path: release_assets
-        continue-on-error: true
-
-      - name: Download GUI Artifact
-        if: inputs.is_alpha == true
-        uses: dawidd6/action-download-artifact@v20
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          run_id: ${{ steps.studio_run.outputs.studio_run_id }}
-          repo: ${{ github.repository }}
-          path: release_assets_nozip
-        continue-on-error: true
-
-      - name: Download Mobile Artifact
-        if: inputs.is_alpha == true
-        uses: dawidd6/action-download-artifact@v20
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          run_id: ${{ steps.mobile_run.outputs.mobile_run_id }}
-          repo: ${{ github.repository }}
-          path: release_assets_nozip
-        continue-on-error: true
-
-      - name: Download Core Artifact (Manual)
-        if: github.event_name == 'workflow_dispatch' && inputs.is_alpha == false
         uses: dawidd6/action-download-artifact@v20
         with:
           github_token: ${{secrets.GITHUB_TOKEN}}
@@ -142,8 +52,7 @@ jobs:
           repo: ${{ github.repository }}
           path: release_assets
 
-      - name: Download GUI Artifact (Manual)
-        if: github.event_name == 'workflow_dispatch' && inputs.is_alpha == false
+      - name: Download GUI Artifact
         uses: dawidd6/action-download-artifact@v20
         with:
           github_token: ${{secrets.GITHUB_TOKEN}}
@@ -151,8 +60,7 @@ jobs:
           repo: ${{ github.repository }}
           path: release_assets_nozip
 
-      - name: Download Mobile Artifact (Manual)
-        if: github.event_name == 'workflow_dispatch' && inputs.is_alpha == false
+      - name: Download Mobile Artifact
         uses: dawidd6/action-download-artifact@v20
         with:
           github_token: ${{secrets.GITHUB_TOKEN}}
@@ -162,7 +70,7 @@ jobs:
 
       - name: Zip release assets
         env:
-          VERSION: ${{ inputs.is_alpha == true && steps.version.outputs.alpha_version || inputs.version }}
+          VERSION: ${{ inputs.version }}
         run: |
           mkdir zipped_assets
 
@@ -173,8 +81,8 @@ jobs:
           ls -l -R ./
           chmod -R 755 .
           for x in `ls`; do
-            if [ "$x" = "EXVlan-Magisk" ]; then
-              # for EXVlan-Magisk, make sure files are in the root of the zip
+            if [ "$x" = "exvlan-magisk" ]; then
+              # for exvlan-magisk, make sure files are in the root of the zip
               cd $x;
               zip -r ../../zipped_assets/$x-${VERSION}.zip .;
               cd ..;
@@ -183,67 +91,7 @@ jobs:
             fi
           done
 
-      - name: Generate changelog
-        id: changelog
-        if: inputs.is_alpha == true
-        run: |
-          {
-            echo "# EXVlan Alpha Release"
-            echo ""
-            echo "**Version:** ${{ steps.version.outputs.alpha_version }}"
-            echo ""
-            echo "**Build Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-            echo ""
-            echo "**Commit:** [${{ steps.version.outputs.commit_short }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})"
-            echo ""
-            echo "**Branch:** develop"
-            echo ""
-            echo "## Recent Changes (Since last release)"
-            echo ""
-            echo "\`\`\`"
-            LAST_RELEASE_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
-            if [ -n "$LAST_RELEASE_TAG" ]; then
-              git log ${LAST_RELEASE_TAG}..HEAD --decorate --pretty=fuller
-            else
-              git log --decorate --pretty=fuller
-            fi
-            echo "\`\`\`"
-            echo ""
-            echo "## ⚠️ Warning"
-            echo ""
-            echo "This is an **alpha release** for development and testing purposes only."
-            echo "It may contain bugs and is not recommended for production use."
-          } > CHANGELOG.md
-
-      - name: Prepare alpha assets
-        if: inputs.is_alpha == true
-        run: |
-          mkdir -p alpha_release
-          
-          if [ -d zipped_assets ] && [ -n "$(find zipped_assets -type f 2>/dev/null)" ]; then
-            find zipped_assets -type f \( -name "*.tar.gz" -o -name "*.tar" -o -name "*.zip" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.apk" -o -name "*.har" \) -exec cp {} alpha_release/ \; 2>/dev/null || true
-          fi
-          
-          cp CHANGELOG.md alpha_release/
-          
-          echo "Alpha Release Assets:"
-          ls -lh alpha_release/ || echo "No files prepared"
-
-      - name: Release (Alpha)
-        if: inputs.is_alpha == true
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "Alpha ${{ steps.version.outputs.alpha_version }}"
-          tag_name: ${{ steps.version.outputs.tag_name }}
-          prerelease: true
-          draft: false
-          files: |
-            alpha_release/*
-          body_path: CHANGELOG.md
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Release (Stable)
-        if: github.event_name == 'workflow_dispatch' && inputs.is_alpha == false
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ inputs.version }}

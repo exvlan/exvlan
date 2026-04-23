@@ -126,7 +126,7 @@ impl WebClient {
                 }
             };
 
-            if support_encryption {
+            if support_encryption && security::web_secure_tunnel_supported() {
                 log::info!("Server supports encryption, reconnecting with secure tunnel");
                 drop(session);
 
@@ -159,10 +159,30 @@ impl WebClient {
                 continue;
             }
 
+            if support_encryption {
+                if secure_mode {
+                    connected.store(false, Ordering::Release);
+                    let wait = 1;
+                    log::warn!(
+                        "secure-mode enabled but local build lacks aes-gcm support for web secure tunnel, retrying in {} seconds...",
+                        wait
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                    continue;
+                }
+
+                log::warn!(
+                    "Server supports encryption but local build lacks aes-gcm support for web secure tunnel, falling back to legacy tunnel"
+                );
+            }
+
             if secure_mode {
                 connected.store(false, Ordering::Release);
                 let wait = 1;
-                log::warn!("secure-mode enabled but server does not support encryption, retrying in {} seconds...", wait);
+                log::warn!(
+                    "secure-mode enabled but server does not support encryption, retrying in {} seconds...",
+                    wait
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                 continue;
             }
@@ -235,7 +255,7 @@ pub async fn run_web_client(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicBool, Arc};
+    use std::sync::{Arc, atomic::AtomicBool};
 
     use crate::instance_manager::NetworkInstanceManager;
 

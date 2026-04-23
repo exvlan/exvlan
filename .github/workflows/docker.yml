@@ -24,14 +24,13 @@ on:
         default: false
         required: true
       is_alpha:
-        description: 'Is this an alpha release from develop branch'
+        description: 'Mark this image as alpha'
         type: boolean
         default: false
         required: true
-
 jobs:
   docker:
-    if: contains(fromJSON('["era-cloud", "littlezo"]'), github.actor)
+    if: contains(fromJSON('["era-cloud", "exvlan"]'), github.actor)
     name: Build Docker Image
     runs-on: ubuntu-latest
     steps:

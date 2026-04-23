@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use anyhow::Context;
 use hickory_proto::runtime::TokioRuntimeProvider;
@@ -73,7 +73,7 @@ pub async fn socket_addrs(
         .port()
         .or_else(default_port_number)
         .ok_or(Error::InvalidUrl(url.to_string()))?;
-    // See https://github.com/littlezo/era-xvlan/pull/947
+    // See https://github.com/exvlan/exvlan/pull/947
     // here is for compatibility with old version
     let port = match port {
         0 => match url.scheme() {

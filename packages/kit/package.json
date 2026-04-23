@@ -1,7 +1,7 @@
 {
   "name": "@exvlan/kit",
   "private": true,
-  "version": "2026.26.0",
+  "version": "2026.26.1",
   "type": "module",
   "main": "./dist/index.umd.js",
   "module": "./dist/index.js",
@@ -9,7 +9,7 @@
   "author": {
     "name": "@长久同学 ",
     "email": "cloud@era-x.cn",
-    "url": "https://github.com/littlezo"
+    "url": "https://github.com/exvlan"
   },
   "exports": {
     ".": {

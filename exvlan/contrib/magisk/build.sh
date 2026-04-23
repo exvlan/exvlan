@@ -16,7 +16,7 @@ echo $version
 if [ -f "./exvlan" ] && [ -f "./exvlan-cli" ] && [ -f "./exvlan-api" ]; then
     zip -r -o -X "$filename" ./ -x '.git/*' -x '.github/*' -x 'folder/*' -x 'build.sh' -x 'magisk_update.json'
 else
-    wget -O "exvlan_last.zip" https://github.com/littlezo/era-xvlan/releases/download/"$version"/exvlan-linux-aarch64-"$version".zip
+    wget -O "exvlan_last.zip" https://github.com/exvlan/exvlan/releases/download/"$version"/exvlan-linux-aarch64-"$version".zip
     unzip -o exvlan_last.zip -d ./
     mv ./exvlan-linux-aarch64/* ./
     rm -rf ./exvlan_last.zip
