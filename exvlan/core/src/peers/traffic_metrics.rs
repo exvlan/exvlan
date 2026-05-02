@@ -4,9 +4,8 @@ use dashmap::DashMap;
 use futures::future::BoxFuture;
 
 use crate::common::{
-    shrink_dashmap,
+    PeerId, shrink_dashmap,
     stats_manager::{CounterHandle, LabelSet, LabelType, MetricName, StatsManager},
-    PeerId,
 };
 use crate::proto::peer_rpc::RoutePeerInfo;
 use crate::tunnel::packet_def::PacketType;
@@ -147,11 +146,11 @@ impl LogicalTrafficMetrics {
     {
         self.total.add_sample(bytes);
 
-        if let Some(entry) = self.per_peer.get(&peer_id) {
-            if entry.value().is_resolved() {
-                entry.value().counters().add_sample(bytes);
-                return;
-            }
+        if let Some(entry) = self.per_peer.get(&peer_id)
+            && entry.value().is_resolved()
+        {
+            entry.value().counters().add_sample(bytes);
+            return;
         }
 
         let resolved_instance_id = resolver().await;
@@ -221,10 +220,32 @@ impl LogicalTrafficMetrics {
     }
 }
 
-#[derive(Clone, Copy)]
-enum TrafficKind {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrafficKind {
     Data,
     Control,
+}
+
+pub(crate) fn traffic_kind(packet_type: u8) -> TrafficKind {
+    if packet_type == PacketType::Data as u8
+        || packet_type == PacketType::KcpSrc as u8
+        || packet_type == PacketType::KcpDst as u8
+        || packet_type == PacketType::QuicSrc as u8
+        || packet_type == PacketType::QuicDst as u8
+        || packet_type == PacketType::DataWithKcpSrcModified as u8
+        || packet_type == PacketType::DataWithQuicSrcModified as u8
+    {
+        TrafficKind::Data
+    } else {
+        TrafficKind::Control
+    }
+}
+
+pub(crate) fn is_relay_data_packet_type(packet_type: u8) -> bool {
+    // Relay handshakes are control-plane setup; payload data is blocked by its
+    // original packet type after the session exists.
+    traffic_kind(packet_type) == TrafficKind::Data
+        || packet_type == PacketType::ForeignNetworkPacket as u8
 }
 
 #[derive(Clone)]
@@ -283,7 +304,7 @@ impl TrafficMetricRecorder {
             return;
         }
         self.tx_metrics
-            .select(Self::traffic_kind(packet_type))
+            .select(traffic_kind(packet_type))
             .record_with_resolver(peer_id, bytes, || self.resolve_instance_id(peer_id))
             .await;
     }
@@ -293,7 +314,7 @@ impl TrafficMetricRecorder {
             return;
         }
         self.rx_metrics
-            .select(Self::traffic_kind(packet_type))
+            .select(traffic_kind(packet_type))
             .record_with_resolver(peer_id, bytes, || self.resolve_instance_id(peer_id))
             .await;
     }
@@ -314,21 +335,6 @@ impl TrafficMetricRecorder {
 
     fn resolve_instance_id(&self, peer_id: PeerId) -> BoxFuture<'static, Option<String>> {
         (self.resolve_instance_id)(peer_id)
-    }
-
-    fn traffic_kind(packet_type: u8) -> TrafficKind {
-        if packet_type == PacketType::Data as u8
-            || packet_type == PacketType::KcpSrc as u8
-            || packet_type == PacketType::KcpDst as u8
-            || packet_type == PacketType::QuicSrc as u8
-            || packet_type == PacketType::QuicDst as u8
-            || packet_type == PacketType::DataWithKcpSrcModified as u8
-            || packet_type == PacketType::DataWithQuicSrcModified as u8
-        {
-            TrafficKind::Data
-        } else {
-            TrafficKind::Control
-        }
     }
 }
 
@@ -388,18 +394,22 @@ mod tests {
                 .value,
             300
         );
-        assert!(stats_mgr
-            .get_metric(
-                MetricName::TrafficBytesTx,
-                &to_instance_labels("default", UNKNOWN_INSTANCE_ID),
-            )
-            .is_none());
-        assert!(stats_mgr
-            .get_metric(
-                MetricName::TrafficBytesTx,
-                &to_instance_labels("default", resolved_instance_id),
-            )
-            .is_none());
+        assert!(
+            stats_mgr
+                .get_metric(
+                    MetricName::TrafficBytesTx,
+                    &to_instance_labels("default", UNKNOWN_INSTANCE_ID),
+                )
+                .is_none()
+        );
+        assert!(
+            stats_mgr
+                .get_metric(
+                    MetricName::TrafficBytesTx,
+                    &to_instance_labels("default", resolved_instance_id),
+                )
+                .is_none()
+        );
         assert_eq!(
             stats_mgr
                 .get_metric(

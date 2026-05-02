@@ -4,10 +4,10 @@ use std::{
 };
 
 use anyhow::Context;
-use base64::{prelude::BASE64_STANDARD, Engine as _};
+use base64::{Engine as _, prelude::BASE64_STANDARD};
 use strum::VariantArray;
 
-use crate::tunnel::{packet_def::CompressorAlgo, IpScheme};
+use crate::tunnel::{IpScheme, packet_def::CompressorAlgo};
 
 include!(concat!(env!("OUT_DIR"), "/common.rs"));
 
@@ -257,15 +257,21 @@ impl FromStr for IpInet {
 
 impl From<url::Url> for Url {
     fn from(value: url::Url) -> Self {
-        Url {
-            url: value.to_string(),
-        }
+        Url { url: value.into() }
+    }
+}
+
+impl TryFrom<&Url> for url::Url {
+    type Error = url::ParseError;
+
+    fn try_from(value: &Url) -> Result<Self, Self::Error> {
+        value.url.parse()
     }
 }
 
 impl From<Url> for url::Url {
     fn from(value: Url) -> Self {
-        url::Url::parse(&value.url).unwrap()
+        (&value).try_into().expect("failed to parse url")
     }
 }
 
@@ -273,9 +279,7 @@ impl FromStr for Url {
     type Err = url::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Url {
-            url: s.parse::<url::Url>()?.to_string(),
-        })
+        url::Url::try_from(s).map(Into::into)
     }
 }
 
@@ -288,18 +292,17 @@ impl fmt::Display for Url {
 fn split_tunnel_scheme(raw_scheme: &str) -> Option<(&str, &'static str, bool)> {
     for scheme in IpScheme::VARIANTS {
         let scheme: &'static str = scheme.into();
-        if let Some(base) = raw_scheme.strip_suffix('6') {
-            if let Some(prefix) = base.strip_suffix(scheme) {
-                if prefix.is_empty() || prefix.ends_with('-') {
-                    return Some((prefix, scheme, true));
-                }
-            }
+        if let Some(base) = raw_scheme.strip_suffix('6')
+            && let Some(prefix) = base.strip_suffix(scheme)
+            && (prefix.is_empty() || prefix.ends_with('-'))
+        {
+            return Some((prefix, scheme, true));
         }
 
-        if let Some(prefix) = raw_scheme.strip_suffix(scheme) {
-            if prefix.is_empty() || prefix.ends_with('-') {
-                return Some((prefix, scheme, false));
-            }
+        if let Some(prefix) = raw_scheme.strip_suffix(scheme)
+            && (prefix.is_empty() || prefix.ends_with('-'))
+        {
+            return Some((prefix, scheme, false));
         }
     }
 
@@ -532,7 +535,7 @@ impl SecureModeConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_tunnel_url, TunnelInfo, Url};
+    use super::{TunnelInfo, Url, normalize_tunnel_url};
 
     fn assert_ipv6_tunnel_normalization(scheme: &str, port: u16) {
         let expected = format!("{scheme}6://[2001:db8::1]:{port}");

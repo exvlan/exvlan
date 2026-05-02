@@ -11,7 +11,7 @@ on:
       image_tag:
         description: 'Tag for this image build'
         type: string
-        default: 'v2.6.0'
+        default: 'v2026.26.3'
         required: true
       mark_latest:
         description: 'Mark this image as latest'
@@ -24,14 +24,13 @@ on:
         default: false
         required: true
       is_alpha:
-        description: 'Is this an alpha release from develop branch'
+        description: 'Mark this image as alpha'
         type: boolean
         default: false
         required: true
-
 jobs:
   docker:
-    if: contains(fromJSON('["era-cloud", "littlezo"]'), github.actor)
+    if: contains(fromJSON('["era-cloud", "exvlan"]'), github.actor)
     name: Build Docker Image
     runs-on: ubuntu-latest
     steps:

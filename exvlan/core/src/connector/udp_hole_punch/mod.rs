@@ -1,5 +1,5 @@
 use std::{
-    sync::{atomic::AtomicBool, Arc},
+    sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
 
@@ -13,7 +13,7 @@ use sym_to_cone::{PunchSymToConeHoleClient, PunchSymToConeHoleServer};
 use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
-    common::{stun::StunInfoCollectorTrait, PeerId},
+    common::{PeerId, stun::StunInfoCollectorTrait},
     peers::{
         peer_manager::PeerManager,
         peer_task::{PeerTaskLauncher, PeerTaskManager},
@@ -88,7 +88,7 @@ impl UdpHolePunchRpc for UdpHolePunchServer {
     ) -> rpc_types::error::Result<SelectPunchListenerResponse> {
         let (_, addr) = self
             .common
-            .select_listener(input.force_new)
+            .select_listener(input.force_new, input.prefer_port_mapping)
             .await
             .ok_or(anyhow::anyhow!("no listener available"))?;
 
@@ -584,6 +584,11 @@ impl UdpHolePunchConnector {
 
         Ok(())
     }
+
+    #[cfg(test)]
+    pub async fn run_immediately_for_test(&self) {
+        self.client.run_immediately().await;
+    }
 }
 
 #[cfg(test)]
@@ -601,7 +606,7 @@ pub mod tests {
     use crate::proto::common::NatType;
     use crate::tunnel::common::tests::wait_for_condition;
 
-    use super::{UdpHolePunchConnector, UdpHolePunchPeerTaskLauncher, RUN_TESTING};
+    use super::{RUN_TESTING, UdpHolePunchConnector, UdpHolePunchPeerTaskLauncher};
 
     pub fn replace_stun_info_collector(peer_mgr: Arc<PeerManager>, udp_nat_type: NatType) {
         let collector = Box::new(MockStunInfoCollector { udp_nat_type });
@@ -614,6 +619,9 @@ pub mod tests {
         udp_nat_type: NatType,
     ) -> Arc<PeerManager> {
         let p_a = create_mock_peer_manager().await;
+        let mut flags = p_a.get_global_ctx().get_flags();
+        flags.disable_upnp = true;
+        p_a.get_global_ctx().set_flags(flags);
         replace_stun_info_collector(p_a.clone(), udp_nat_type);
         p_a
     }
@@ -676,14 +684,18 @@ pub mod tests {
         connect_peer_manager(p_b.clone(), p_c.clone()).await;
         wait_route_appear(p_a.clone(), p_c.clone()).await.unwrap();
 
-        assert!(!collect_lazy_punch_peers(p_a.clone())
-            .await
-            .contains(&p_c.my_peer_id()));
+        assert!(
+            !collect_lazy_punch_peers(p_a.clone())
+                .await
+                .contains(&p_c.my_peer_id())
+        );
 
         p_a.mark_recent_traffic(p_c.my_peer_id());
 
-        assert!(collect_lazy_punch_peers(p_a.clone())
-            .await
-            .contains(&p_c.my_peer_id()));
+        assert!(
+            collect_lazy_punch_peers(p_a.clone())
+                .await
+                .contains(&p_c.my_peer_id())
+        );
     }
 }

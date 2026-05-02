@@ -1,13 +1,13 @@
 {
   "name": "@exvlan/studio",
   "type": "module",
-  "version": "2026.26.0",
+  "version": "2026.26.3",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "author": {
     "name": "@长久同学 ",
     "email": "cloud@era-x.cn",
-    "url": "https://github.com/littlezo"
+    "url": "https://github.com/exvlan"
   },
   "scripts": {
     "dev": "vite",

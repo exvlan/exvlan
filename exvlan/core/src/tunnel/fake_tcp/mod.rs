@@ -14,18 +14,16 @@ use std::{
 };
 use tokio::{io::AsyncReadExt, net::TcpStream, sync::Mutex};
 
-use crate::{
-    common::scoped_task::ScopedTask,
-    tunnel::{
-        common::TunnelWrapper,
-        fake_tcp::netfilter::create_tun,
-        packet_def::{ZCPacket, ZCPacketType, PEER_MANAGER_HEADER_SIZE, TCP_TUNNEL_HEADER_SIZE},
-        FromUrl, IpVersion, SinkError, SinkItem, StreamItem, Tunnel, TunnelConnector, TunnelError,
-        TunnelInfo, TunnelListener,
-    },
+use crate::tunnel::{
+    FromUrl, IpVersion, SinkError, SinkItem, StreamItem, Tunnel, TunnelConnector, TunnelError,
+    TunnelInfo, TunnelListener,
+    common::TunnelWrapper,
+    fake_tcp::netfilter::create_tun,
+    packet_def::{PEER_MANAGER_HEADER_SIZE, TCP_TUNNEL_HEADER_SIZE, ZCPacket, ZCPacketType},
 };
 
 use futures::Future;
+use tokio_util::task::AbortOnDropHandle;
 
 use dashmap::DashMap;
 
@@ -186,8 +184,8 @@ impl FakeTcpTunnelListener {
     }
 }
 
-fn build_os_socket_reader_task(mut socket: TcpStream) -> ScopedTask<()> {
-    let os_socket_reader_task: ScopedTask<()> = tokio::spawn(async move {
+fn build_os_socket_reader_task(mut socket: TcpStream) -> AbortOnDropHandle<()> {
+    AbortOnDropHandle::new(tokio::spawn(async move {
         // read the os socket until it's closed
         let mut buf = [0u8; 1024];
         while let Ok(size) = socket.read(&mut buf).await {
@@ -197,9 +195,7 @@ fn build_os_socket_reader_task(mut socket: TcpStream) -> ScopedTask<()> {
             }
         }
         tracing::info!("FakeTcpTunnelListener os socket closed");
-    })
-    .into();
-    os_socket_reader_task
+    }))
 }
 
 #[derive(Debug)]
@@ -285,6 +281,7 @@ impl TunnelListener for FakeTcpTunnelListener {
 pub struct FakeTcpTunnelConnector {
     addr: url::Url,
     ip_to_if_name: IpToIfNameCache,
+    resolved_addr: Option<SocketAddr>,
 }
 
 impl FakeTcpTunnelConnector {
@@ -292,6 +289,7 @@ impl FakeTcpTunnelConnector {
         FakeTcpTunnelConnector {
             addr,
             ip_to_if_name: IpToIfNameCache::new(),
+            resolved_addr: None,
         }
     }
 }
@@ -318,7 +316,10 @@ fn get_local_ip_for_destination(destination: IpAddr) -> Option<IpAddr> {
 #[async_trait::async_trait]
 impl TunnelConnector for FakeTcpTunnelConnector {
     async fn connect(&mut self) -> Result<Box<dyn Tunnel>, TunnelError> {
-        let remote_addr = SocketAddr::from_url(self.addr.clone(), IpVersion::Both).await?;
+        let remote_addr = match self.resolved_addr {
+            Some(addr) => addr,
+            None => SocketAddr::from_url(self.addr.clone(), IpVersion::Both).await?,
+        };
         let local_ip = get_local_ip_for_destination(remote_addr.ip())
             .ok_or(TunnelError::InternalError("Failed to get local ip".into()))?;
 
@@ -393,6 +394,10 @@ impl TunnelConnector for FakeTcpTunnelConnector {
 
     fn remote_url(&self) -> url::Url {
         self.addr.clone()
+    }
+
+    fn set_resolved_addr(&mut self, addr: SocketAddr) {
+        self.resolved_addr = Some(addr);
     }
 }
 

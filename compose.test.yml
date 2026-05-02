@@ -1,0 +1,30 @@
+name: tests
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    image: exvlan-test:latest
+    container_name: exvlan-test
+    privileged: true
+    network_mode: bridge
+    volumes:
+      - .:/workspace
+      - cargo-cache:/root/.cargo
+      - target-cache:/workspace/target
+      - archive-cache:/workspace/archive
+    environment:
+      - CARGO_TERM_COLOR=always
+      - RUST_LOG=info
+      - PROTOC_INCLUDE=/usr/local/include
+      - PROTOBUF_INCLUDE=/usr/local/include
+    tty: true
+    command: ["/workspace/script/tests.sh"]
+
+volumes:
+  cargo-cache:
+    name: exvlan-cargo-cache
+  target-cache:
+    name: exvlan-target-cache
+  archive-cache:
+    name: exvlan-archive-cache

@@ -1,25 +1,26 @@
+use anyhow::Context;
+use async_trait::async_trait;
+use cidr::{Ipv4Cidr, Ipv6Cidr};
+use dashmap::DashMap;
+use std::collections::BTreeSet;
 use std::{
     fmt::Debug,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::{atomic::AtomicBool, Arc, Weak},
+    sync::{Arc, Weak, atomic::AtomicBool},
     time::{Duration, Instant, SystemTime},
 };
 
-use anyhow::Context;
-use async_trait::async_trait;
-
-use dashmap::DashMap;
-
 use tokio::{
     sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
         Mutex, RwLock,
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
     },
     task::JoinSet,
 };
 
 use crate::{
     common::{
+        PeerId,
         compressor::{Compressor as _, DefaultCompressor},
         constants::EXVLAN_VERSION,
         error::Error,
@@ -27,24 +28,23 @@ use crate::{
         shrink_dashmap,
         stats_manager::{CounterHandle, LabelSet, LabelType, MetricName},
         stun::StunInfoCollectorTrait,
-        PeerId,
     },
     peers::{
+        PeerPacketFilter,
         peer_conn::PeerConn,
         peer_rpc::PeerRpcManagerTransport,
         peer_session::PeerSessionStore,
         recv_packet_from_chan,
         route_trait::{ForeignNetworkRouteInfoMap, MockRoute, NextHopPolicy, RouteInterface},
         traffic_metrics::{
-            route_peer_info_instance_id, InstanceLabelKind, LogicalTrafficMetrics,
-            TrafficMetricRecorder,
+            InstanceLabelKind, LogicalTrafficMetrics, TrafficKind, TrafficMetricRecorder,
+            is_relay_data_packet_type, route_peer_info_instance_id, traffic_kind,
         },
-        PeerPacketFilter,
     },
     proto::{
         api::instance::{
-            self, list_global_foreign_network_response::OneForeignNetwork,
-            ListGlobalForeignNetworkResponse,
+            self, ListGlobalForeignNetworkResponse,
+            list_global_foreign_network_response::OneForeignNetwork,
         },
         peer_rpc::{
             ForeignNetworkRouteInfoEntry, ForeignNetworkRouteInfoKey, PeerIdentityType,
@@ -52,13 +52,13 @@ use crate::{
         },
     },
     tunnel::{
-        self,
+        self, Tunnel, TunnelConnector,
         packet_def::{CompressorAlgo, PacketType, ZCPacket},
-        Tunnel, TunnelConnector,
     },
 };
 
 use super::{
+    BoxNicPacketFilter, BoxPeerPacketFilter, PacketRecvChan, PacketRecvChanReceiver,
     create_packet_recv_chan,
     encrypt::{Encryptor, NullCipher},
     foreign_network_client::ForeignNetworkClient,
@@ -70,7 +70,6 @@ use super::{
     peer_task::ExternalTaskSignal,
     relay_peer_map::RelayPeerMap,
     route_trait::{ArcRoute, Route},
-    BoxNicPacketFilter, BoxPeerPacketFilter, PacketRecvChan, PacketRecvChanReceiver,
 };
 
 struct RpcTransport {
@@ -264,9 +263,7 @@ impl PeerManager {
             .is_err()
         {
             // if local network is not in whitelist, avoid relay data when exist any other route path
-            let mut f = global_ctx.get_feature_flags();
-            f.avoid_relay_data = true;
-            global_ctx.set_feature_flags(f);
+            global_ctx.set_avoid_relay_data_preference(true);
         }
 
         let is_secure_mode_enabled = global_ctx
@@ -537,6 +534,21 @@ impl PeerManager {
     async fn add_new_peer_conn(&self, peer_conn: PeerConn) -> Result<(), Error> {
         let my_identity = self.global_ctx.get_network_identity();
         let peer_identity = peer_conn.get_network_identity();
+        let conn_info = peer_conn.get_conn_info();
+        let local_secure_mode = self
+            .global_ctx
+            .config
+            .get_secure_mode()
+            .as_ref()
+            .map(|cfg| cfg.enabled)
+            .unwrap_or(false);
+        let peer_secure_mode = !conn_info.noise_remote_static_pubkey.is_empty();
+
+        if local_secure_mode != peer_secure_mode {
+            return Err(Error::SecretKeyError(
+                "same-network peers must use the same secure mode".to_string(),
+            ));
+        }
 
         // For credential nodes, network_secret_digest is either None or all-zeros
         // (all-zeros when received over the wire via handshake).
@@ -760,6 +772,7 @@ impl PeerManager {
         my_peer_id: PeerId,
         peer_map: &PeerMap,
         foreign_network_mgr: &ForeignNetworkManager,
+        disable_relay_data: bool,
     ) -> Result<(), ZCPacket> {
         let pm_header = packet.peer_manager_header().unwrap();
         if pm_header.packet_type != PacketType::ForeignNetworkPacket as u8 {
@@ -768,6 +781,16 @@ impl PeerManager {
 
         let from_peer_id = pm_header.from_peer_id.get();
         let to_peer_id = pm_header.to_peer_id.get();
+
+        if disable_relay_data && Self::is_relay_data_zc_packet(&packet) {
+            tracing::debug!(
+                ?from_peer_id,
+                ?to_peer_id,
+                inner_packet_type = ?packet.foreign_network_inner_packet_type(),
+                "drop foreign network relay data while relay data is disabled"
+            );
+            return Ok(());
+        }
 
         let foreign_hdr = packet.foreign_network_hdr().unwrap();
         let foreign_network_name = foreign_hdr.get_network_name(packet.payload());
@@ -858,6 +881,29 @@ impl PeerManager {
         }
     }
 
+    fn is_relay_data_packet(packet_type: u8) -> bool {
+        is_relay_data_packet_type(packet_type)
+    }
+
+    fn is_relay_data_zc_packet(packet: &ZCPacket) -> bool {
+        let Some(hdr) = packet.peer_manager_header() else {
+            return false;
+        };
+
+        if hdr.packet_type == PacketType::ForeignNetworkPacket as u8 {
+            let inner_packet_type = packet.foreign_network_inner_packet_type();
+            if inner_packet_type.is_none() {
+                tracing::warn!(
+                    ?hdr,
+                    "foreign network packet has unparseable inner peer manager header"
+                );
+            }
+            return inner_packet_type.is_none_or(Self::is_relay_data_packet);
+        }
+
+        Self::is_relay_data_packet(hdr.packet_type)
+    }
+
     async fn start_peer_recv(&self) {
         let mut recv = self.packet_recv.lock().await.take().unwrap();
         let my_peer_id = self.my_peer_id;
@@ -889,10 +935,16 @@ impl PeerManager {
             stats_mgr.get_counter(MetricName::TrafficBytesSelfRx, label_set.clone());
         let self_rx_packets =
             stats_mgr.get_counter(MetricName::TrafficPacketsSelfRx, label_set.clone());
-        let forward_tx_bytes =
+        let forward_data_tx_bytes =
             stats_mgr.get_counter(MetricName::TrafficBytesForwarded, label_set.clone());
-        let forward_tx_packets =
+        let forward_data_tx_packets =
             stats_mgr.get_counter(MetricName::TrafficPacketsForwarded, label_set.clone());
+        let forward_control_tx_bytes =
+            stats_mgr.get_counter(MetricName::TrafficControlBytesForwarded, label_set.clone());
+        let forward_control_tx_packets = stats_mgr.get_counter(
+            MetricName::TrafficControlPacketsForwarded,
+            label_set.clone(),
+        );
 
         let compress_tx_bytes_before = self.self_tx_counters.compress_tx_bytes_before.clone();
         let compress_tx_bytes_after = self.self_tx_counters.compress_tx_bytes_after.clone();
@@ -905,14 +957,21 @@ impl PeerManager {
         self.tasks.lock().await.spawn(async move {
             tracing::trace!("start_peer_recv");
             while let Ok(ret) = recv_packet_from_chan(&mut recv).await {
-                let Err(mut ret) =
-                    Self::try_handle_foreign_network_packet(ret, my_peer_id, &peers, &foreign_mgr)
-                        .await
+                let disable_relay_data = global_ctx.flags_arc().disable_relay_data;
+                let Err(mut ret) = Self::try_handle_foreign_network_packet(
+                    ret,
+                    my_peer_id,
+                    &peers,
+                    &foreign_mgr,
+                    disable_relay_data,
+                )
+                .await
                 else {
                     continue;
                 };
 
                 let buf_len = ret.buf_len();
+                let is_relay_data_packet = Self::is_relay_data_zc_packet(&ret);
                 let Some(hdr) = ret.mut_peer_manager_header() else {
                     tracing::warn!(?ret, "invalid packet, skip");
                     continue;
@@ -924,6 +983,16 @@ impl PeerManager {
                 let packet_type = hdr.packet_type;
                 let is_encrypted = hdr.is_encrypted();
                 if to_peer_id != my_peer_id {
+                    if disable_relay_data && is_relay_data_packet {
+                        tracing::debug!(
+                            ?from_peer_id,
+                            ?to_peer_id,
+                            packet_type,
+                            "drop forwarded relay data while relay data is disabled"
+                        );
+                        continue;
+                    }
+
                     if hdr.forward_counter > 7 {
                         tracing::warn!(?hdr, "forward counter exceed, drop packet");
                         continue;
@@ -967,8 +1036,16 @@ impl PeerManager {
                         self_tx_bytes.add(ret.buf_len() as u64);
                         self_tx_packets.inc();
                     } else {
-                        forward_tx_bytes.add(buf_len as u64);
-                        forward_tx_packets.inc();
+                        match traffic_kind(packet_type) {
+                            TrafficKind::Data => {
+                                forward_data_tx_bytes.add(buf_len as u64);
+                                forward_data_tx_packets.inc();
+                            }
+                            TrafficKind::Control => {
+                                forward_control_tx_bytes.add(buf_len as u64);
+                                forward_control_tx_packets.inc();
+                            }
+                        }
                     }
 
                     tracing::trace!(?to_peer_id, ?my_peer_id, "need forward");
@@ -1034,7 +1111,7 @@ impl PeerManager {
                         &ret,
                         true,
                         global_ctx.get_ipv4().map(|x| x.address()),
-                        global_ctx.get_ipv6().map(|x| x.address()),
+                        |dst| global_ctx.is_ip_local_ipv6(&dst),
                         &route,
                     ) {
                         continue;
@@ -1255,6 +1332,26 @@ impl PeerManager {
         self.get_route().get_peer_info_last_update_time().await
     }
 
+    pub async fn list_proxy_cidrs(&self) -> BTreeSet<Ipv4Cidr> {
+        self.get_route().list_proxy_cidrs().await
+    }
+
+    pub async fn list_proxy_cidrs_v6(&self) -> BTreeSet<Ipv6Cidr> {
+        self.get_route().list_proxy_cidrs_v6().await
+    }
+
+    pub async fn list_public_ipv6_routes(&self) -> BTreeSet<cidr::Ipv6Inet> {
+        self.get_route().list_public_ipv6_routes().await
+    }
+
+    pub async fn get_my_public_ipv6_addr(&self) -> Option<cidr::Ipv6Inet> {
+        self.get_route().get_my_public_ipv6_addr().await
+    }
+
+    pub async fn get_local_public_ipv6_info(&self) -> instance::ListPublicIpv6InfoResponse {
+        self.get_route().get_local_public_ipv6_info().await
+    }
+
     pub async fn dump_route(&self) -> String {
         self.get_route().dump().await
     }
@@ -1294,7 +1391,7 @@ impl PeerManager {
             data,
             false,
             None,
-            None,
+            |_| false,
             &self.get_route(),
         ) {
             return false;
@@ -1408,10 +1505,10 @@ impl PeerManager {
             Err(Error::RouteError(None))
         };
 
-        if send_result.is_ok() {
-            if let Some(metrics) = direct_tx_metrics {
-                metrics.record_tx(dst_peer_id, packet_type, msg_len).await;
-            }
+        if send_result.is_ok()
+            && let Some(metrics) = direct_tx_metrics
+        {
+            metrics.record_tx(dst_peer_id, packet_type, msg_len).await;
         }
 
         send_result
@@ -1495,6 +1592,10 @@ impl PeerManager {
         if self.is_all_peers_broadcast_ipv6(ipv6_addr) {
             dst_peers.extend(self.peers.list_routes().await.iter().map(|x| *x.key()));
         } else if let Some(peer_id) = self.peers.get_peer_id_by_ipv6(ipv6_addr).await {
+            dst_peers.push(peer_id);
+        } else if !ipv6_addr.is_unicast_link_local()
+            && let Some(peer_id) = self.get_route().get_public_ipv6_gateway_peer_id().await
+        {
             dst_peers.push(peer_id);
         } else if !ipv6_addr.is_unicast_link_local() {
             // NOTE: never route link local address to exit node.
@@ -1621,8 +1722,12 @@ impl PeerManager {
 
             #[cfg(not(target_env = "ohos"))]
             {
-                if not_send_to_self && *peer_id == self.my_peer_id {
-                    // the packet may be sent to vpn portal, so we just set flags instead of drop it
+                if not_send_to_self
+                    && *peer_id == self.my_peer_id
+                    && !self.global_ctx.is_ip_local_virtual_ip(&ip_addr)
+                {
+                    // Keep the loop-prevention flags for proxy-induced self-delivery where
+                    // the destination is not this node's own exvlan-managed IP.
                     hdr.set_not_send_to_tun(true);
                     hdr.set_no_proxy(true);
                 }
@@ -1839,6 +1944,15 @@ impl PeerManager {
             version: EXVLAN_VERSION.to_string(),
             feature_flag: Some(self.global_ctx.get_feature_flags()),
             ip_list: Some(self.global_ctx.get_ip_collector().collect_ip_addrs().await),
+            public_ipv6_addr: self.get_my_public_ipv6_addr().await.map(Into::into),
+            ipv6_public_addr_prefix: self
+                .global_ctx
+                .get_advertised_ipv6_public_addr_prefix()
+                .map(|prefix| {
+                    cidr::Ipv6Inet::new(prefix.first_address(), prefix.network_length())
+                        .unwrap()
+                        .into()
+                }),
         }
     }
 
@@ -1986,7 +2100,6 @@ impl PeerManager {
 
 #[cfg(test)]
 mod tests {
-
     use std::{
         fmt::Debug,
         sync::Arc,
@@ -1996,7 +2109,7 @@ mod tests {
     use crate::{
         common::{
             config::Flags,
-            global_ctx::{tests::get_mock_global_ctx, NetworkIdentity},
+            global_ctx::{NetworkIdentity, tests::get_mock_global_ctx},
             stats_manager::{LabelSet, LabelType, MetricName},
         },
         connector::{
@@ -2016,15 +2129,15 @@ mod tests {
             },
         },
         proto::{
-            common::{CompressionAlgoPb, NatType, PeerFeatureFlag},
+            common::{CompressionAlgoPb, NatType},
             peer_rpc::SecureAuthLevel,
         },
         tunnel::{
+            TunnelConnector, TunnelListener,
             common::tests::wait_for_condition,
-            filter::{tests::DropSendTunnelFilter, TunnelWithFilter},
+            filter::{TunnelWithFilter, tests::DropSendTunnelFilter},
             packet_def::{PacketType, ZCPacket},
             ring::create_ring_tunnel_pair,
-            TunnelConnector, TunnelListener,
         },
     };
 
@@ -2045,6 +2158,12 @@ mod tests {
             .get_metric(metric, labels)
             .map(|metric| metric.value)
             .unwrap_or(0)
+    }
+
+    fn network_labels(peer_mgr: &PeerManager) -> LabelSet {
+        LabelSet::new().with_label_type(LabelType::NetworkName(
+            peer_mgr.get_global_ctx().get_network_name(),
+        ))
     }
 
     #[test]
@@ -2154,6 +2273,84 @@ mod tests {
         assert_eq!(signal.version(), initial_version + 2);
     }
 
+    #[test]
+    fn disable_relay_data_classifies_data_plane_packets_only() {
+        for packet_type in [
+            PacketType::Data,
+            PacketType::KcpSrc,
+            PacketType::KcpDst,
+            PacketType::QuicSrc,
+            PacketType::QuicDst,
+            PacketType::DataWithKcpSrcModified,
+            PacketType::DataWithQuicSrcModified,
+            PacketType::ForeignNetworkPacket,
+        ] {
+            assert!(PeerManager::is_relay_data_packet(packet_type as u8));
+        }
+
+        for packet_type in [
+            PacketType::RpcReq,
+            PacketType::RpcResp,
+            PacketType::Ping,
+            PacketType::Pong,
+            PacketType::HandShake,
+            PacketType::NoiseHandshakeMsg1,
+            PacketType::NoiseHandshakeMsg2,
+            PacketType::NoiseHandshakeMsg3,
+            PacketType::RelayHandshake,
+            PacketType::RelayHandshakeAck,
+        ] {
+            assert!(!PeerManager::is_relay_data_packet(packet_type as u8));
+        }
+    }
+
+    #[test]
+    fn disable_relay_data_inspects_foreign_network_inner_packet_type() {
+        let network_name = "net1".to_string();
+
+        let mut rpc_packet = ZCPacket::new_with_payload(b"rpc");
+        rpc_packet.fill_peer_manager_hdr(1, 2, PacketType::RpcReq as u8);
+        let mut foreign_rpc_packet =
+            ZCPacket::new_for_foreign_network(&network_name, 2, &rpc_packet);
+        foreign_rpc_packet.fill_peer_manager_hdr(10, 20, PacketType::ForeignNetworkPacket as u8);
+
+        assert_eq!(
+            foreign_rpc_packet.foreign_network_inner_packet_type(),
+            Some(PacketType::RpcReq as u8)
+        );
+        assert!(!PeerManager::is_relay_data_zc_packet(&foreign_rpc_packet));
+
+        let mut data_packet = ZCPacket::new_with_payload(b"data");
+        data_packet.fill_peer_manager_hdr(1, 2, PacketType::Data as u8);
+        let mut foreign_data_packet =
+            ZCPacket::new_for_foreign_network(&network_name, 2, &data_packet);
+        foreign_data_packet.fill_peer_manager_hdr(10, 20, PacketType::ForeignNetworkPacket as u8);
+
+        assert_eq!(
+            foreign_data_packet.foreign_network_inner_packet_type(),
+            Some(PacketType::Data as u8)
+        );
+        assert!(PeerManager::is_relay_data_zc_packet(&foreign_data_packet));
+    }
+
+    #[tokio::test]
+    async fn non_whitelisted_network_avoid_relay_survives_disable_relay_data_toggle() {
+        let global_ctx = get_mock_global_ctx();
+        let mut flags = global_ctx.get_flags();
+        flags.disable_relay_data = true;
+        flags.relay_network_whitelist = "other-network".to_string();
+        global_ctx.set_flags(flags);
+
+        let (packet_send, _packet_recv) = create_packet_recv_chan();
+        let _peer_mgr = PeerManager::new(RouteAlgoType::Ospf, global_ctx.clone(), packet_send);
+
+        let mut flags = global_ctx.get_flags();
+        flags.disable_relay_data = false;
+        global_ctx.set_flags(flags);
+
+        assert!(global_ctx.get_feature_flags().avoid_relay_data);
+    }
+
     #[tokio::test]
     async fn send_msg_internal_does_not_record_tx_metrics_on_failed_delivery() {
         let peer_mgr = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
@@ -2194,24 +2391,28 @@ mod tests {
                 .value,
             0
         );
-        assert!(peer_mgr
-            .get_global_ctx()
-            .stats_manager()
-            .get_metric(
-                MetricName::TrafficBytesTxByInstance,
-                &network_labels
-                    .clone()
-                    .with_label_type(LabelType::ToInstanceId("unknown".to_string())),
-            )
-            .is_none());
-        assert!(peer_mgr
-            .get_global_ctx()
-            .stats_manager()
-            .get_metric(
-                MetricName::TrafficPacketsTxByInstance,
-                &network_labels.with_label_type(LabelType::ToInstanceId("unknown".to_string())),
-            )
-            .is_none());
+        assert!(
+            peer_mgr
+                .get_global_ctx()
+                .stats_manager()
+                .get_metric(
+                    MetricName::TrafficBytesTxByInstance,
+                    &network_labels
+                        .clone()
+                        .with_label_type(LabelType::ToInstanceId("unknown".to_string())),
+                )
+                .is_none()
+        );
+        assert!(
+            peer_mgr
+                .get_global_ctx()
+                .stats_manager()
+                .get_metric(
+                    MetricName::TrafficPacketsTxByInstance,
+                    &network_labels.with_label_type(LabelType::ToInstanceId("unknown".to_string())),
+                )
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -2265,24 +2466,28 @@ mod tests {
             ),
             0
         );
-        assert!(peer_mgr
-            .get_global_ctx()
-            .stats_manager()
-            .get_metric(
-                MetricName::TrafficBytesTxByInstance,
-                &network_labels
-                    .clone()
-                    .with_label_type(LabelType::ToInstanceId("unknown".to_string())),
-            )
-            .is_none());
-        assert!(peer_mgr
-            .get_global_ctx()
-            .stats_manager()
-            .get_metric(
-                MetricName::TrafficControlBytesTxByInstance,
-                &network_labels.with_label_type(LabelType::ToInstanceId("unknown".to_string())),
-            )
-            .is_none());
+        assert!(
+            peer_mgr
+                .get_global_ctx()
+                .stats_manager()
+                .get_metric(
+                    MetricName::TrafficBytesTxByInstance,
+                    &network_labels
+                        .clone()
+                        .with_label_type(LabelType::ToInstanceId("unknown".to_string())),
+                )
+                .is_none()
+        );
+        assert!(
+            peer_mgr
+                .get_global_ctx()
+                .stats_manager()
+                .get_metric(
+                    MetricName::TrafficControlBytesTxByInstance,
+                    &network_labels.with_label_type(LabelType::ToInstanceId("unknown".to_string())),
+                )
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -2426,6 +2631,136 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_msg_internal_records_data_forwarded_metrics_for_transit_peer() {
+        let peer_mgr_a = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
+        let peer_mgr_b = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
+        let peer_mgr_c = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
+
+        connect_peer_manager(peer_mgr_a.clone(), peer_mgr_b.clone()).await;
+        connect_peer_manager(peer_mgr_b.clone(), peer_mgr_c.clone()).await;
+        wait_route_appear(peer_mgr_a.clone(), peer_mgr_c.clone())
+            .await
+            .unwrap();
+
+        let b_network_labels = network_labels(&peer_mgr_b);
+        let forwarded_bytes_before = metric_value(
+            &peer_mgr_b,
+            MetricName::TrafficBytesForwarded,
+            &b_network_labels,
+        );
+        let forwarded_packets_before = metric_value(
+            &peer_mgr_b,
+            MetricName::TrafficPacketsForwarded,
+            &b_network_labels,
+        );
+
+        let mut pkt = ZCPacket::new_with_payload(b"forward-data");
+        pkt.fill_peer_manager_hdr(
+            peer_mgr_a.my_peer_id(),
+            peer_mgr_c.my_peer_id(),
+            PacketType::Data as u8,
+        );
+        let pkt_len = pkt.buf_len() as u64;
+
+        PeerManager::send_msg_internal(
+            &peer_mgr_a.peers,
+            &peer_mgr_a.foreign_network_client,
+            &peer_mgr_a.relay_peer_map,
+            Some(&peer_mgr_a.traffic_metrics),
+            pkt,
+            peer_mgr_c.my_peer_id(),
+        )
+        .await
+        .unwrap();
+
+        wait_for_condition(
+            || {
+                let peer_mgr_b = peer_mgr_b.clone();
+                let b_network_labels = b_network_labels.clone();
+                async move {
+                    metric_value(
+                        &peer_mgr_b,
+                        MetricName::TrafficBytesForwarded,
+                        &b_network_labels,
+                    ) >= forwarded_bytes_before + pkt_len
+                        && metric_value(
+                            &peer_mgr_b,
+                            MetricName::TrafficPacketsForwarded,
+                            &b_network_labels,
+                        ) > forwarded_packets_before
+                }
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn send_msg_internal_records_control_forwarded_metrics_for_transit_peer() {
+        let peer_mgr_a = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
+        let peer_mgr_b = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
+        let peer_mgr_c = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
+
+        connect_peer_manager(peer_mgr_a.clone(), peer_mgr_b.clone()).await;
+        connect_peer_manager(peer_mgr_b.clone(), peer_mgr_c.clone()).await;
+        wait_route_appear(peer_mgr_a.clone(), peer_mgr_c.clone())
+            .await
+            .unwrap();
+
+        let b_network_labels = network_labels(&peer_mgr_b);
+        let forwarded_bytes_before = metric_value(
+            &peer_mgr_b,
+            MetricName::TrafficControlBytesForwarded,
+            &b_network_labels,
+        );
+        let forwarded_packets_before = metric_value(
+            &peer_mgr_b,
+            MetricName::TrafficControlPacketsForwarded,
+            &b_network_labels,
+        );
+
+        let mut pkt = ZCPacket::new_with_payload(b"forward-control");
+        pkt.fill_peer_manager_hdr(
+            peer_mgr_a.my_peer_id(),
+            peer_mgr_c.my_peer_id(),
+            PacketType::RpcReq as u8,
+        );
+        let pkt_len = pkt.buf_len() as u64;
+
+        PeerManager::send_msg_internal(
+            &peer_mgr_a.peers,
+            &peer_mgr_a.foreign_network_client,
+            &peer_mgr_a.relay_peer_map,
+            Some(&peer_mgr_a.traffic_metrics),
+            pkt,
+            peer_mgr_c.my_peer_id(),
+        )
+        .await
+        .unwrap();
+
+        wait_for_condition(
+            || {
+                let peer_mgr_b = peer_mgr_b.clone();
+                let b_network_labels = b_network_labels.clone();
+                async move {
+                    metric_value(
+                        &peer_mgr_b,
+                        MetricName::TrafficControlBytesForwarded,
+                        &b_network_labels,
+                    ) >= forwarded_bytes_before + pkt_len
+                        && metric_value(
+                            &peer_mgr_b,
+                            MetricName::TrafficControlPacketsForwarded,
+                            &b_network_labels,
+                        ) > forwarded_packets_before
+                }
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn recent_traffic_tolerates_future_timestamps() {
         let peer_mgr_a = create_lazy_peer_manager().await;
         let peer_mgr_b = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
@@ -2553,7 +2888,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn peer_manager_safe_server_accept_legacy_client() {
+    async fn peer_manager_same_network_secure_mode_mismatch_rejected() {
         let peer_mgr_client = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
         let peer_mgr_server = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
 
@@ -2573,64 +2908,65 @@ mod tests {
             peer_mgr_client.add_client_tunnel(c_ring, false),
             peer_mgr_server.add_tunnel_as_server(s_ring, true)
         );
-        let (server_id, _) = c_ret.unwrap();
-        s_ret.unwrap();
+        let _ = c_ret;
+        assert!(
+            s_ret.is_err(),
+            "same-network peer with mismatched secure mode should be rejected"
+        );
 
-        wait_for_condition(
-            || {
-                let peer_mgr_client = peer_mgr_client.clone();
-                async move {
-                    if !peer_mgr_client
-                        .get_peer_map()
-                        .list_peers_with_conn()
-                        .await
-                        .contains(&server_id)
-                    {
-                        return false;
-                    }
-                    let Some(conns) = peer_mgr_client
-                        .get_peer_map()
-                        .list_peer_conns(server_id)
-                        .await
-                    else {
-                        return false;
-                    };
-                    conns.iter().any(|c| {
-                        c.noise_local_static_pubkey.is_empty()
-                            && c.noise_remote_static_pubkey.is_empty()
-                            && c.secure_auth_level == SecureAuthLevel::None as i32
-                    })
-                }
-            },
-            Duration::from_secs(10),
-        )
-        .await;
-
-        let client_id = peer_mgr_client.my_peer_id();
         wait_for_condition(
             || {
                 let peer_mgr_server = peer_mgr_server.clone();
                 async move {
-                    if !peer_mgr_server
+                    peer_mgr_server
                         .get_peer_map()
                         .list_peers_with_conn()
                         .await
-                        .contains(&client_id)
-                    {
-                        return false;
-                    }
-                    let Some(conns) = peer_mgr_server
+                        .is_empty()
+                }
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn credential_node_rejects_legacy_client() {
+        let peer_mgr_client = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
+        let peer_mgr_server = create_mock_peer_manager_with_mock_stun(NatType::Unknown).await;
+
+        peer_mgr_client
+            .get_global_ctx()
+            .config
+            .set_network_identity(NetworkIdentity::new("net1".to_string(), "sec1".to_string()));
+        peer_mgr_server
+            .get_global_ctx()
+            .config
+            .set_network_identity(NetworkIdentity::new_credential("net1".to_string()));
+
+        set_secure_mode_cfg(&peer_mgr_server.get_global_ctx(), true);
+
+        let (c_ring, s_ring) = create_ring_tunnel_pair();
+        let (c_ret, s_ret) = tokio::join!(
+            peer_mgr_client.add_client_tunnel(c_ring, false),
+            peer_mgr_server.add_tunnel_as_server(s_ring, true)
+        );
+
+        let _ = c_ret;
+        assert!(
+            s_ret.is_err(),
+            "credential server should reject legacy client"
+        );
+
+        wait_for_condition(
+            || {
+                let peer_mgr_server = peer_mgr_server.clone();
+                async move {
+                    peer_mgr_server
                         .get_peer_map()
-                        .list_peer_conns(client_id)
+                        .list_peers_with_conn()
                         .await
-                    else {
-                        return false;
-                    };
-                    conns.iter().any(|c| {
-                        c.noise_local_static_pubkey.is_empty()
-                            && c.noise_remote_static_pubkey.is_empty()
-                            && c.secure_auth_level == SecureAuthLevel::None as i32
-                    })
+                        .is_empty()
                 }
             },
             Duration::from_secs(5),
@@ -2912,10 +3248,7 @@ mod tests {
         // when b's avoid_relay_data is true, a->c should route through d and e, cost is 3
         peer_mgr_b
             .get_global_ctx()
-            .set_feature_flags(PeerFeatureFlag {
-                avoid_relay_data: true,
-                ..Default::default()
-            });
+            .set_avoid_relay_data_preference(true);
         tokio::time::sleep(Duration::from_secs(2)).await;
         if wait_route_appear_with_cost(peer_mgr_a.clone(), peer_mgr_c.my_peer_id, Some(3))
             .await

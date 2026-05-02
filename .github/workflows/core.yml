@@ -2,16 +2,18 @@ name: Builder Core
 
 on:
   push:
-    branches: ["main", "develop", "releases/**"]
-    tags:
-      - 'v*'
-      - '!*-pre'
+    branches: [ "develop", "feature", "main", "releases/**" ]
   pull_request:
-    branches: ["main", "develop"]
+    branches: [ "develop", "main" ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
 
 permissions:
   contents: read
   actions: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,6 +28,7 @@ jobs:
     name: Run Pre check
     # continue-on-error: true # Uncomment once integration is finished
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     # Map a step output to a job output
     outputs:
       # do not skip push on branch starts with releases/
@@ -38,7 +41,7 @@ jobs:
           concurrent_skipping: 'same_content_newer'
           skip_after_successful_duplicate: 'true'
           cancel_others: 'true'
-          paths: '["Cargo.toml", "Cargo.lock", "exvlan/core/**", ".github/workflows/core.yml", ".github/workflows/install_rust.sh", "exvlan/api/**", "packages/**"]'
+          paths: '["Cargo.toml", "Cargo.lock", "exvlan/core/**", ".github/workflows/core.yml", ".github/actions/**", "exvlan/api/**", "packages/ui/**", "packages/kit/**"]'
   build_api:
     name: Build API
     runs-on: ubuntu-latest
@@ -61,40 +64,47 @@ jobs:
   build:
     name: Build EXVlan Core
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
-          - TARGET: aarch64-unknown-linux-musl
-            OS: ubuntu-22.04
-            ARTIFACT_NAME: linux-aarch64
           - TARGET: x86_64-unknown-linux-musl
-            OS: ubuntu-22.04
+            OS: ubuntu-24.04
             ARTIFACT_NAME: linux-x86_64
-          - TARGET: riscv64gc-unknown-linux-musl
-            OS: ubuntu-22.04
-            ARTIFACT_NAME: linux-riscv64
-          # - TARGET: mips-unknown-linux-musl
-          #   OS: ubuntu-22.04
-          #   ARTIFACT_NAME: linux-mips
-          # - TARGET: mipsel-unknown-linux-musl
-          #   OS: ubuntu-22.04
-          #   ARTIFACT_NAME: linux-mipsel
-          - TARGET: armv7-unknown-linux-musleabihf # raspberry pi 2-3-4, not tested
-            OS: ubuntu-22.04
-            ARTIFACT_NAME: linux-armv7hf
-          - TARGET: armv7-unknown-linux-musleabi # raspberry pi 2-3-4, not tested
-            OS: ubuntu-22.04
-            ARTIFACT_NAME: linux-armv7
-          - TARGET: arm-unknown-linux-musleabihf # raspberry pi 0-1, not tested
-            OS: ubuntu-22.04
-            ARTIFACT_NAME: linux-armhf
-          - TARGET: arm-unknown-linux-musleabi # raspberry pi 0-1, not tested
-            OS: ubuntu-22.04
-            ARTIFACT_NAME: linux-arm
+          - TARGET: aarch64-unknown-linux-musl
+            OS: ubuntu-24.04-arm
+            ARTIFACT_NAME: linux-aarch64
 
+          - TARGET: riscv64gc-unknown-linux-musl
+            OS: ubuntu-24.04
+            ARTIFACT_NAME: linux-riscv64
           - TARGET: loongarch64-unknown-linux-musl
             OS: ubuntu-24.04
             ARTIFACT_NAME: linux-loongarch64
+
+          - TARGET: armv7-unknown-linux-musleabihf # raspberry pi 2-3-4, not tested
+            OS: ubuntu-24.04
+            ARTIFACT_NAME: linux-armv7hf
+          - TARGET: armv7-unknown-linux-musleabi # raspberry pi 2-3-4, not tested
+            OS: ubuntu-24.04
+            ARTIFACT_NAME: linux-armv7
+          - TARGET: arm-unknown-linux-musleabihf # raspberry pi 0-1, not tested
+            OS: ubuntu-24.04
+            ARTIFACT_NAME: linux-armhf
+          - TARGET: arm-unknown-linux-musleabi # raspberry pi 0-1, not tested
+            OS: ubuntu-24.04
+            ARTIFACT_NAME: linux-arm
+
+          - TARGET: mips-unknown-linux-musl
+            OS: ubuntu-24.04
+            ARTIFACT_NAME: linux-mips
+          - TARGET: mipsel-unknown-linux-musl
+            OS: ubuntu-24.04
+            ARTIFACT_NAME: linux-mipsel
+
+          - TARGET: x86_64-unknown-freebsd
+            OS: ubuntu-24.04
+            ARTIFACT_NAME: freebsd-13.2-x86_64
+            BSD_VERSION: 13.2
 
           - TARGET: x86_64-apple-darwin
             OS: macos-latest
@@ -106,14 +116,12 @@ jobs:
           - TARGET: x86_64-pc-windows-msvc
             OS: windows-latest
             ARTIFACT_NAME: windows-x86_64
-          - TARGET: aarch64-pc-windows-msvc
+          - TARGET: i686-pc-windows-msvc
             OS: windows-latest
+            ARTIFACT_NAME: windows-i686
+          - TARGET: aarch64-pc-windows-msvc
+            OS: windows-11-arm
             ARTIFACT_NAME: windows-arm64
-
-          - TARGET: x86_64-unknown-freebsd
-            OS: ubuntu-22.04
-            ARTIFACT_NAME: freebsd-13.2-x86_64
-            BSD_VERSION: 13.2
 
     runs-on: ${{ matrix.OS }}
     env:
@@ -138,8 +146,15 @@ jobs:
           name: exvlan-dashboard
           path: packages/ui/dist/
 
+      - name: Prepare build environment
+        uses: ./.github/actions/prepare-build
+        with:
+          target: ${{ matrix.TARGET }}
+          gui: true
+          pnpm: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: Swatinem/rust-cache@v2
-        if: ${{ ! endsWith(matrix.TARGET, 'freebsd') }}
         with:
           # The prefix cache key, this can be changed to start a new cache manually.
           # default: "v0-rust"
@@ -147,104 +162,51 @@ jobs:
           shared-key: "core-registry"
           cache-targets: "false"
 
-      - name: Setup protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          # GitHub repo token to use to avoid rate limiter
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: mlugg/setup-zig@v2
+        if: ${{ contains(matrix.OS, 'ubuntu') }}
 
-      - name: Build Core & Cli
-        if: ${{ ! endsWith(matrix.TARGET, 'freebsd') }}
-        env:
-          CARGO_TERM_COLOR: always
+      - uses: taiki-e/install-action@v2
+        if: ${{ contains(matrix.OS, 'ubuntu') }}
+        with:
+          tool: cargo-zigbuild
+
+      - name: Build
+        if: ${{ !contains(matrix.TARGET, 'mips') }}
         run: |
-          bash ./.github/workflows/install_rust.sh
-
-          # loongarch need llvm-18
-          if [[ $TARGET =~ ^loongarch.*$ ]]; then
-            sudo apt-get install -qq llvm-18 clang-18
-            export LLVM_CONFIG_PATH=/usr/lib/llvm-18/bin/llvm-config
-          fi
-          # we set the sysroot when sysroot is a dir
-          # this dir is a soft link generated by install_rust.sh
-          # kcp-sys need this to gen ffi bindings. without this clang may fail to find some libc headers such as bits/libc-header-start.h
-          if [[ -d "./musl_gcc/sysroot" ]]; then
-            export BINDGEN_EXTRA_CLANG_ARGS=--sysroot=$(readlink -f ./musl_gcc/sysroot)
-          fi
-
-          if [[ $OS =~ ^ubuntu.*$ && $TARGET =~ ^mips.*$ ]]; then
-            cargo +nightly-2026-02-02 build -r --target $TARGET -Z build-std=std,panic_abort --package=exvlan --features=jemalloc
+          if [[ "$TARGET" == *windows* ]]; then
+            SUFFIX=.exe
           else
-            if [[ $OS =~ ^windows.*$ ]]; then
-              SUFFIX=.exe
-              case $TARGET in
-                  x86_64*)  ARCH_DIR=x86_64 ;;
-                  i686*)    ARCH_DIR=i686 ;;
-                  aarch64*) ARCH_DIR=arm64 ;;
-              esac
-              export RUSTFLAGS="-L native=${{ github.workspace }}/exvlan/core/third_party/${ARCH_DIR}"
-              CORE_FEATURES="--features=mimalloc"
-            elif [[ $TARGET =~ ^riscv64.*$ || $TARGET =~ ^loongarch64.*$ || $TARGET =~ ^aarch64.*$ ]]; then
-              CORE_FEATURES="--features=mimalloc"
-            else
-              CORE_FEATURES="--features=jemalloc"
-            fi
-            cargo build --release --target $TARGET --package=exvlan-api --features=embed
-            mv ./target/$TARGET/release/exvlan-api"$SUFFIX" ./target/$TARGET/release/exvlan-api-embed"$SUFFIX"
-            cargo build --release --target $TARGET $CORE_FEATURES
+            SUFFIX=""
           fi
 
-      # Copied and slightly modified from @lmq8267 (https://github.com/lmq8267)
-      - name: Build Core & Cli (X86_64 FreeBSD)
-        uses: vmactions/freebsd-vm@v1
-        if: ${{ endsWith(matrix.TARGET, 'freebsd') }}
+          if [[ "$TARGET" =~ (x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|windows|darwin) ]]; then
+            BUILD=build
+          else
+            BUILD=zigbuild
+          fi
+
+          if [[ "$TARGET" =~ ^(riscv64|loongarch64|aarch64).*$ || "$TARGET" =~ (freebsd|windows) ]]; then
+            FEATURES="mimalloc"
+          else
+            FEATURES="jemalloc"
+          fi
+          
+          cargo $BUILD --release --target $TARGET --package=exvlan-api --features=embed
+          mv ./target/$TARGET/release/exvlan-api"$SUFFIX" ./target/$TARGET/release/exvlan-api-embed"$SUFFIX"
+          
+          cargo $BUILD --release --target $TARGET --features=$FEATURES
+
+      - name: Build (MIPS)
+        if: ${{ contains(matrix.TARGET, 'mips') }}
         env:
-          TARGET: ${{ matrix.TARGET }}
-        with:
-          envs: TARGET
-          release: ${{ matrix.BSD_VERSION }}
-          arch: x86_64
-          usesh: true
-          mem: 6144
-          cpu: 4
-          run: |
-            uname -a
-            echo $SHELL
-            pwd
-            ls -lah
-            whoami
-            env | sort
-
-            pkg install -y git protobuf llvm-devel sudo curl
-            curl --proto 'https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            . $HOME/.cargo/env
-
-            rustup set auto-self-update disable
-
-            rustup install 1.93
-            rustup default 1.93
-
-            export CC=clang
-            export CXX=clang++
-            export CARGO_TERM_COLOR=always
-
-            cargo build --release --verbose --target $TARGET --package=exvlan-api --features=embed
-            mv ./target/$TARGET/release/exvlan-api ./target/$TARGET/release/exvlan-api-embed
-            cargo build --release --verbose --target $TARGET --features=mimalloc
-
-            mkdir -p built-bins/$TARGET/release/
-            mv ./target/$TARGET/release/exvlan-api-embed ./built-bins/$TARGET/release/exvlan-api-embed
-            mv ./target/$TARGET/release/exvlan-api ./built-bins/$TARGET/release/exvlan-api
-            mv ./target/$TARGET/release/exvlan ./built-bins/$TARGET/release/exvlan
-            mv ./target/$TARGET/release/exvlan-cli ./built-bins/$TARGET/release/exvlan-cli
-
-            # remove dirs to avoid copy many files back
-            rm -rf ./target ~/.cargo
-            mv ./built-bins ./target
+          RUSTC_BOOTSTRAP: 1
+        run: |
+          cargo build -r --target $TARGET -Z build-std=std,panic_abort --package=exvlan --features=jemalloc
 
       - name: Compress
         run: |
           mkdir -p ./artifacts/objects/
+
           # windows is the only OS using a different convention for executable file name
           if [[ $OS =~ ^windows.*$ ]]; then
               SUFFIX=.exe
@@ -257,26 +219,37 @@ jobs:
                   find "exvlan/core/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./artifacts/objects/ \;
               fi
           fi
+
           if [[ $GITHUB_REF_TYPE =~ ^tag$ ]]; then
             TAG=$GITHUB_REF_NAME
           else
             TAG=$GITHUB_SHA
           fi
+          
+          if [[ $OS =~ ^ubuntu.*$ && ! $TARGET =~ (loongarch|freebsd) ]]; then
+            HOST_ARCH=$(uname -m)
+            case $HOST_ARCH in
+              x86_64)  UPX_ARCH="amd64" ;;
+              aarch64) UPX_ARCH="arm64" ;;
+              *)       UPX_ARCH="amd64" ;;
+            esac
 
-          if [[ $OS =~ ^ubuntu.*$ && ! $TARGET =~ ^.*freebsd$ && ! $TARGET =~ ^loongarch.*$ && ! $TARGET =~ ^riscv64.*$ ]]; then
-            UPX_VERSION=4.2.4
-            curl -L https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-amd64_linux.tar.xz -s | tar xJvf -
-            cp upx-${UPX_VERSION}-amd64_linux/upx .
-            ./upx --lzma --best ./target/$TARGET/release/exvlan"$SUFFIX"
-            ./upx --lzma --best ./target/$TARGET/release/exvlan-cli"$SUFFIX"
-          fi
+            UPX_VERSION=5.1.1
+            UPX_PKG="upx-${UPX_VERSION}-${UPX_ARCH}_linux"
+            curl -L "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_PKG}.tar.xz" -s | tar xJvf -
+            cp "${UPX_PKG}/upx" .
+            UPX_BIN=./upx
+           fi
 
-          mv ./target/$TARGET/release/exvlan"$SUFFIX" ./artifacts/objects/
-          mv ./target/$TARGET/release/exvlan-cli"$SUFFIX" ./artifacts/objects/
-          if [[ ! $TARGET =~ ^mips.*$ ]]; then
-            mv ./target/$TARGET/release/exvlan-api"$SUFFIX" ./artifacts/objects/
-            mv ./target/$TARGET/release/exvlan-api-embed"$SUFFIX" ./artifacts/objects/
-          fi
+          for BIN in ./target/$TARGET/release/{exvlan,exvlan-cli,exvlan-api,exvlan-api-embed}"$SUFFIX"; do
+            if [[ -f "$BIN" ]]; then
+              if [[ -n "$UPX_BIN" ]]; then
+                $UPX_BIN --lzma --best "$BIN" || true
+              fi
+
+              mv "$BIN" ./artifacts/objects/
+            fi
+          done
 
           mv ./artifacts/objects/* ./artifacts/
           rm -rf ./artifacts/objects/
@@ -288,54 +261,47 @@ jobs:
           path: |
             ./artifacts/*
 
+  build_magisk:
+    name: Build Magisk Module
+    runs-on: ubuntu-latest
+    needs: [ pre_job, build_api, build ]
+    if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5  # 必须先检出代码才能获取模块配置
+
+      # 下载二进制文件到独立目录
+      - name: Download Linux aarch64 binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: exvlan-linux-aarch64
+          path: ./downloaded-binaries/  # 独立目录避免冲突
+
+      # 将二进制文件复制到 Magisk 模块目录
+      - name: Prepare binaries
+        run: |
+          mkdir -p ./exvlan-contrib/magisk/
+          cp ./downloaded-binaries/exvlan ./exvlan-contrib/magisk/
+          cp ./downloaded-binaries/exvlan-cli ./exvlan-contrib/magisk/
+          cp ./downloaded-binaries/exvlan-api ./exvlan-contrib/magisk/
+
+      # 上传生成的模块
+      - name: Upload Magisk Module
+        uses: actions/upload-artifact@v5
+        with:
+          name: exvlan-magisk
+          path: |
+            ./exvlan-contrib/magisk
+            !./exvlan-contrib/magisk/build.sh
+            !./exvlan-contrib/magisk/magisk_update.json
+          if-no-files-found: error
+
   core-result:
     name: Core Result Check
-    if: needs.pre_job.outputs.should_skip != 'true' && always()
     runs-on: ubuntu-latest
-    needs:
-      - pre_job
-      - build_api
-      - build
+    needs: [ pre_job, build_api, build, build_magisk ]
+    if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
       - name: Mark result as failed
-        if: needs.build.result != 'success'
+        if: contains(needs.*.result, 'failure')
         run: exit 1
-
-  # magisk_build:
-  #   name: Build Magisk Module
-  #   needs: 
-  #     - pre_job
-  #     - build_api
-  #     - build
-  #   if: needs.pre_job.outputs.should_skip != 'true' && always()
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout Code
-  #       uses: actions/checkout@v6  # 必须先检出代码才能获取模块配置
-
-  #     # 下载二进制文件到独立目录
-  #     - name: Download Linux aarch64 binaries
-  #       uses: actions/download-artifact@v8
-  #       with:
-  #         name: exvlan-linux-aarch64
-  #         path: ./downloaded-binaries/  # 独立目录避免冲突
-
-  #     # 将二进制文件复制到 Magisk 模块目录
-  #     - name: Prepare binaries
-  #       run: |
-  #         mkdir -p ./exvlan/contrib/magisk/
-  #         cp ./downloaded-binaries/exvlan ./exvlan/contrib/magisk/
-  #         cp ./downloaded-binaries/exvlan-cli ./exvlan/contrib/magisk/
-  #         cp ./downloaded-binaries/exvlan-api ./exvlan/contrib/magisk/
-
-
-  #     # 上传生成的模块
-  #     - name: Upload Magisk Module
-  #       uses: actions/upload-artifact@v7
-  #       with:
-  #         name: EXVlan-Magisk
-  #         path: |
-  #           ./exvlan/contrib/magisk
-  #           !./exvlan/contrib/magisk/build.sh
-  #           !./exvlan/contrib/magisk/magisk_update.json
-  #         if-no-files-found: error

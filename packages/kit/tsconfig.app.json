@@ -23,6 +23,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
+    "noImplicitAny": false,
     "types": [
       "@modyfi/vite-plugin-yaml/modules",
       "vite/client", 

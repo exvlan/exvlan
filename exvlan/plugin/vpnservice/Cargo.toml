@@ -3,8 +3,7 @@ name = "tauri-plugin-vpnservice"
 version = "2026.1.0"
 authors = ["<@长久同学 cloud@era-x.cn>"]
 description = ""
-edition = "2021"
-rust-version = "1.70"
+edition.workspace = true
 exclude = ["/examples", "/webview-dist", "/webview-src", "/node_modules"]
 links = "tauri-plugin-vpnservice"
 
@@ -15,13 +14,3 @@ thiserror = "1.0"
 
 [build-dependencies]
 tauri-plugin = { version = "2.0.0-rc", features = ["build"] }
-
-[profile.dev]
-incremental = true # 以较小的步骤编译您的二进制文件。
-
-[profile.release]
-codegen-units = 1 # 允许 LLVM 执行更好的优化。
-lto = true # 启用链接时优化。
-opt-level = "s" # 优先考虑小的二进制文件大小。如果您更喜欢速度，请使用 `3`。
-panic = "abort" # 通过禁用 panic 处理程序来提高性能。
-strip = true # 确保移除调试符号。

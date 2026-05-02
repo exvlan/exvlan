@@ -132,7 +132,7 @@ onMounted(() => {
           </el-button>
 
           <!-- GitHub链接 -->
-          <el-button type="primary" link @click="() => openExternalLink('https://github.com/littlezo/era-xvlan')">
+          <el-button type="primary" link @click="() => openExternalLink('https://github.com/exvlan/exvlan')">
             <el-icon>
               <Link />
             </el-icon>
@@ -157,12 +157,12 @@ onMounted(() => {
         <p>
           © 2024 EXVlan Community |
           <el-button type="primary" link size="small"
-            @click="() => openExternalLink('https://github.com/littlezo/era-xvlan')">
+            @click="() => openExternalLink('https://github.com/exvlan/exvlan')">
             开源项目
           </el-button>
           |
           <el-button type="primary" link size="small"
-            @click="() => openExternalLink('https://github.com/littlezo/era-xvlan/blob/main/README.md')">
+            @click="() => openExternalLink('https://github.com/exvlan/exvlan/blob/main/README.md')">
             使用文档
           </el-button>
         </p>
