@@ -1,7 +1,16 @@
 [package]
 name = "exvlan-rpc"
+description = "Protobuf RPC Client for exvlaln"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+homepage = "https://github.com/exvlan/exvlan"
+repository = "https://github.com/exvlan/exvlan"
+rust-version.workspace = true
+authors = ["<@长久同学 cloud@era-x.cn>"]
+keywords = ["vpn", "p2p", "network", "exvlan"]
+categories = ["network-programming", "command-line-utilities"]
+license-file = "LICENSE"
+readme = "README.md"
 
 [dependencies]
 tokio = { version = "1.35.1", features = ["full"] }
@@ -13,6 +22,7 @@ uuid = "1.5.0"
 
 [features]
 default = []
+internal-namespace = []
 integration-test = []
 
 [dev-dependencies]

@@ -24,15 +24,14 @@ main() {
         echo "::1 txt.stun-v6.xvlan.era-x.cn" >> /etc/hosts
     fi
 
-    rustup component add rustfmt
-    rustup component add clippy
+    cargo +stable fmt --all
+    cargo +stable fmt --all -- --check
 
-    cargo fmt --all
-    cargo fmt --all -- --check
+    cargo +stable fix --lib -p exvlan --allow-dirty
+    
+    cargo +stable clippy --all-targets --features full --all -- -D warnings
 
-    cargo clippy --all-targets --features full --all -- -D warnings
-
-    cargo hack check --package exvlan --each-feature --exclude-features macos-ne --verbose
+    cargo +stable hack check --package exvlan --each-feature --exclude-features macos-ne --verbose
 
     if ! cargo metadata --format-version 1 --locked > /dev/null; then
         echo "::error::Cargo.lock is out of date. Run cargo generate-lockfile or cargo build locally, then commit Cargo.lock."
@@ -66,15 +65,15 @@ main() {
     prlimit --pid $$ --nofile=1048576:1048576 2>/dev/null || true
 
     echo "=== Running exvlan tests (excluding three_node) ==="
-    cargo nextest run --archive-file "$ARCHIVE_FILE" -E 'not test(tests::three_node)' --test-threads 1 --no-fail-fast 2>&1 | grep -E '(FAIL|error|Summary|---|test\()' || true
+    cargo nextest run --archive-file "$ARCHIVE_FILE" -E 'not test(tests::three_node)' --test-threads 1 --no-fail-fast #2>&1 | grep -E '(FAIL|error|Summary|---|test\()' || true
 
     echo ""
     echo "=== Running three_node tests ==="
-    cargo nextest run --archive-file "$ARCHIVE_FILE" -E 'test(tests::three_node) and not test(subnet_proxy_three_node_test)' --test-threads 1 --no-fail-fast 2>&1 | grep -E '(FAIL|error|Summary|---|test\()' || true
+    cargo nextest run --archive-file "$ARCHIVE_FILE" -E 'test(tests::three_node) and not test(subnet_proxy_three_node_test)' --test-threads 1 --no-fail-fast #2>&1 | grep -E '(FAIL|error|Summary|---|test\()' || true
 
     echo ""
     echo "=== Running subnet_proxy_three_node_test ==="
-    cargo nextest run --archive-file "$ARCHIVE_FILE" -E 'test(subnet_proxy_three_node_test)' --test-threads 1 --no-fail-fast 2>&1 | grep -E '(FAIL|error|Summary|---|test\()' || true
+    cargo nextest run --archive-file "$ARCHIVE_FILE" -E 'test(subnet_proxy_three_node_test)' --test-threads 1 --no-fail-fast #2>&1 | grep -E '(FAIL|error|Summary|---|test\()' || true
 }
 
 main "$@"

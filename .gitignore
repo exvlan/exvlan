@@ -57,3 +57,4 @@ release/
 .envrc
 keys
 archive/
+pnpm-lock.yaml

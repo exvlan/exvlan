@@ -101,6 +101,7 @@ pub use exvlan::proto::rpc_impl::bidirect::BidirectRpcManager;
 pub use exvlan::proto::rpc_types::controller::BaseController;
 
 // Core 类型
+pub use exvlan::VERSION;
 pub use exvlan::common::config::{
     ConfigLoader, FileLoggerConfig, LoggingConfigBuilder, TomlConfigLoader,
 };
@@ -114,7 +115,6 @@ pub use exvlan::tunnel::ring::RingTunnelConnector;
 pub use exvlan::tunnel::{IpVersion, TunnelConnector};
 pub use exvlan::web_client::WebClientHooks;
 pub use exvlan::web_client::{self, WebClient};
-pub use exvlan::VERSION;
 
 // RPC Service 类型
 pub use exvlan::rpc_service::logger::LoggerRpcService;

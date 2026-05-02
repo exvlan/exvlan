@@ -8,6 +8,11 @@ interface StoredGuiConfig {
     source?: 'user' | 'webhook' | 'legacy'
 }
 
+interface StoredGuiConfig {
+    config: NetworkTypes.NetworkConfig
+    source?: 'user' | 'webhook' | 'legacy'
+}
+
 const EVENTS = Object.freeze({
     SAVE_CONFIGS: 'save_configs',
     PRE_RUN_NETWORK_INSTANCE: 'pre_run_network_instance',
