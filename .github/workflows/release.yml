@@ -33,7 +33,7 @@ on:
       version:
         description: 'Version for this release'
         type: string
-        default: 'v26.2.0603'
+        default: 'v26.2.10604'
         required: true
       mark_latest:
         description: 'Mark this release as latest'

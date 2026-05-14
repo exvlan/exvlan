@@ -1,7 +1,7 @@
 id=exvlan_magisk
-name=EraXVlan_Magisk
-version=v26.2.0604
-versionCode=2620604
+name=ExVLAN_Magisk
+version=v26.2.10604
+versionCode=26210604
 author=exvlan
 description=exvlan magisk module @exvlan(https://github.com/exvlan/exvlan)
 updateJson=https://raw.githubusercontent.com/exvlan/exvlan/refs/heads/main/exvlan/contrib/magisk/magisk_update.json

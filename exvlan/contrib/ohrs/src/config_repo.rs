@@ -8,7 +8,7 @@ use exvlan::common::config::ConfigLoader;
 use exvlan::proto::api::manage::NetworkConfig;
 use ohos_hilog_binding::{hilog_debug, hilog_error};
 use rusqlite::params;
-use serde_json::Value;s
+use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
