@@ -1,19 +1,21 @@
 name: Nix Check
 
 on:
+  workflow_call:
   push:
     branches: ["main", "develop"]
-    paths:
+    paths: &nix_paths
       - "**/*.nix"
       - "flake.lock"
       - "rust-toolchain.toml"
   pull_request:
     branches: ["main", "develop"]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "**/*.nix"
-      - "flake.lock"
-      - "rust-toolchain.toml"
+    paths: *nix_paths
+
+permissions:
+  contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -21,8 +23,7 @@ concurrency:
 
 jobs:
   check-full-shell:
-    name: Check full shell
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: Check Full Shell
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -31,6 +32,10 @@ jobs:
         uses: cachix/install-nix-action@v31
         with:
           nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+
 
       - name: Magic Nix Cache
         uses: DeterminateSystems/magic-nix-cache-action@v13

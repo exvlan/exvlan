@@ -1,7 +1,6 @@
+import type { Api } from '@exvlan/kit'
+import { NetworkTypes } from '@exvlan/kit'
 import { invoke } from '@tauri-apps/api/core'
-import { Api, NetworkTypes } from '@exvlan/kit'
-import { GetNetworkMetasResponse } from 'node_modules/@exvlan/kit/dist/modules/api'
-
 
 type NetworkConfig = NetworkTypes.NetworkConfig
 type ValidateConfigResponse = Api.ValidateConfigResponse
@@ -15,7 +14,7 @@ interface ServiceOptions {
   config_server?: string
 }
 
-export type ServiceStatus = "Running" | "Stopped" | "NotInstalled"
+export type ServiceStatus = 'Running' | 'Stopped' | 'NotInstalled'
 
 interface StoredGuiConfig {
   config: NetworkConfig
@@ -111,12 +110,12 @@ export async function sendConfigs(enabledNetworks: string[]) {
       config: NetworkTypes.toBackendNetworkConfig(config),
       source,
     })),
-    enabledNetworks
+    enabledNetworks,
   })
 }
 
 export async function getNetworkMetas(instanceIds: string[]) {
-  return await invoke<GetNetworkMetasResponse>('get_network_metas', { instanceIds })
+  return await invoke<Api.GetNetworkMetasResponse>('get_network_metas', { instanceIds })
 }
 
 export async function initService(opts?: ServiceOptions) {

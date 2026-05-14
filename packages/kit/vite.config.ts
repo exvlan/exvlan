@@ -16,6 +16,7 @@ export default defineConfig({
     staticImport: true,
     insertTypesEntry: true,
     copyDtsFiles: true,
+    entryRoot: './src',
     beforeWriteFile: (filePath: string, content: string) => {
       return {
         filePath: filePath.replace('dist/src', 'dist'),

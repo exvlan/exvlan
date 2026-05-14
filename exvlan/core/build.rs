@@ -73,11 +73,11 @@ impl WindowsBuild {
         let target = std::env::var("TARGET").unwrap_or_default();
 
         if target.contains("x86_64") {
-            println!("cargo:rustc-link-search=native=exvlan/third_party/x86_64/");
+            println!("cargo:rustc-link-search=native=exvlan/core/third_party/x86_64/");
         } else if target.contains("i686") {
-            println!("cargo:rustc-link-search=native=exvlan/third_party/i686/");
+            println!("cargo:rustc-link-search=native=exvlan/core/third_party/i686/");
         } else if target.contains("aarch64") {
-            println!("cargo:rustc-link-search=native=exvlan/third_party/arm64/");
+            println!("cargo:rustc-link-search=native=exvlan/core/third_party/arm64/");
         }
 
         let protoc_path = if let Some(o) = Self::check_protoc_exist() {
@@ -88,6 +88,19 @@ impl WindowsBuild {
         };
         unsafe {
             std::env::set_var("PROTOC", protoc_path);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+
+            println!("cargo:warning=BuildRS Path: {}", manifest_dir);
+            println!("cargo:rustc-link-search=native={}", manifest_dir);
+
+            if let Some(parent) = std::path::Path::new(&manifest_dir).parent() {
+                println!("cargo:rustc-link-search=native={}", parent.display());
+            }
+
+            println!("cargo:rustc-link-lib=Packet");
         }
     }
 }
@@ -191,6 +204,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .type_attribute("peer_rpc.RouteForeignNetworkSummary", "#[derive(Hash, Eq)]")
         .type_attribute("common.RpcDescriptor", "#[derive(Hash, Eq)]")
+        .type_attribute("acl.Acl", "#[serde(default)]")
+        .type_attribute("acl.AclV1", "#[serde(default)]")
+        .type_attribute("acl.Chain", "#[serde(default)]")
+        .type_attribute("acl.Rule", "#[serde(default)]")
+        .type_attribute("acl.GroupInfo", "#[serde(default)]")
         .field_attribute(".api.manage.NetworkConfig", "#[serde(default)]")
         .service_generator(Box::new(exvlan_rpc_build::ServiceGenerator::default()))
         .btree_map(["."])

@@ -1,6 +1,7 @@
 import java.util.Properties
 import java.io.FileInputStream
 import groovy.json.JsonSlurper
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -45,28 +46,40 @@ val tauriVersionCode = if (tauriProperties.getProperty("tauri.android.versionNam
 }
 
 android {
-    compileSdk = 34
+    compileSdk = 36
     namespace = "era.exvlan.studio"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "era.exvlan.studio"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 36
         versionCode = tauriVersionCode
         versionName = tauriVersionName
     }
     signingConfigs {
         create("release") {
+            // 1. 尝试从环境变量读取
+            val envKeyAlias = System.getenv("KEYSTORE_ALIAS")
+            val envKeyPassword = System.getenv("KEYSTORE_PASSWORD")
+            val envStoreFile = System.getenv("KEYSTORE_PATH")
+            val envStorePassword = System.getenv("KEYSTORE_PASSWORD") // 通常 store 和 key 密码相同
+
+            // 2. 读取配置文件作为备选
             val keystorePropertiesFile = rootProject.file("keystore.properties")
             val keystoreProperties = Properties()
             if (keystorePropertiesFile.exists()) {
                 keystoreProperties.load(FileInputStream(keystorePropertiesFile))
             }
 
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
+            // 3. 优先级逻辑：环境变量 > 属性文件 > 默认值/空
+            keyAlias = envKeyAlias ?: (keystoreProperties["keyAlias"] as? String) ?: ""
+            keyPassword = envKeyPassword ?: (keystoreProperties["keyPassword"] as? String) ?: ""
+            storePassword = envStorePassword ?: (keystoreProperties["storePassword"] as? String) ?: ""
+            
+            val filePath = envStoreFile ?: (keystoreProperties["storeFile"] as? String)
+            if (!filePath.isNullOrEmpty()) {
+                storeFile = file(filePath)
+            }
         }
     }
     buildTypes {
@@ -89,15 +102,12 @@ android {
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
                     .toList().toTypedArray()
             )
-            // signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
-    }
-    kotlinOptions {
-        jvmTarget = "21" 
     }
     buildFeatures {
         buildConfig = true
@@ -110,11 +120,19 @@ rust {
 
 dependencies {
     implementation("androidx.webkit:webkit:1.6.1")
-    implementation("androidx.appcompat:appcompat:1.6.1")
-    implementation("com.google.android.material:material:1.8.0")
+    implementation("androidx.core:core:1.18.0")
+    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("com.google.android.material:material:1.13.0")
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.4")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_21
+    }
 }
 
 apply(from = "tauri.build.gradle.kts")

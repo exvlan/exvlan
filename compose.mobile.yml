@@ -16,9 +16,9 @@ services:
     environment:
       - CARGO_TERM_COLOR=always
       - ANDROID_HOME=/opt/android-sdk
-      - NDK_HOME=/opt/android-sdk/ndk/27.3.13750724/
+      - NDK_HOME=/opt/android-sdk/ndk/28.2.13676358/
       - ANDROID_SDK_ROOT=/opt/android-sdk
-      - PATH=$PATH:/root/.cargo/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - PATH=$PATH:/root/.cargo/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       - JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
       - GRADLE_OPTS=-Dorg.gradle.daemon=true -Dorg.gradle.parallel=true -Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+UseG1GC
       - RUST_BACKTRACE=1

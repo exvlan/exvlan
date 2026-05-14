@@ -3,19 +3,17 @@ import path from 'node:path'
 import process from 'node:process'
 import VueI18n from '@intlify/unplugin-vue-i18n/vite'
 import { PrimeVueResolver } from '@primevue/auto-import-resolver'
+import tailwindcss from '@tailwindcss/vite'
 import Vue from '@vitejs/plugin-vue'
 import { containsCidr, parseCidr } from 'cidr-tools'
 import { gateway4sync } from 'default-gateway'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
-import VueMacros from 'unplugin-vue-macros/vite'
-// import { VueRouterAutoImports } from 'unplugin-vue-router'
-import VueRouter from 'vue-router/vite'
-// import VueRouter from 'unplugin-vue-router/vite'
 import { defineConfig } from 'vite'
 import VueDevTools from 'vite-plugin-vue-devtools'
 import Layouts from 'vite-plugin-vue-layouts'
-import tailwindcss from '@tailwindcss/vite'
+import VueMacros from 'vue-macros/vite'
+import VueRouter from 'vue-router/vite'
 
 function findIp(gateway: string) {
   // Look for the matching interface in all local interfaces
@@ -33,10 +31,12 @@ function findIp(gateway: string) {
 
 const host = process.env.TAURI_DEV_HOST
 
-const getHost = ()=>{
+function getHost() {
   try {
     return findIp(gateway4sync().gateway)
-  } catch (_) {
+  }
+  // eslint-disable-next-line unused-imports/no-unused-vars
+  catch (_e: any) {
     return host
   }
 }
@@ -107,9 +107,11 @@ export default defineConfig(async () => ({
 
     // https://github.com/webfansplz/vite-plugin-vue-devtools
     VueDevTools(),
-    tailwindcss()
+    tailwindcss(),
   ],
-
+  build:{
+    chunkSizeWarningLimit: 20480
+  },
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent vite from obscuring rust errors
@@ -125,10 +127,10 @@ export default defineConfig(async () => ({
     },
     hmr: host
       ? {
-        protocol: 'ws',
-        host: getHost(),
-        port: 1430,
-      }
+          protocol: 'ws',
+          host: getHost(),
+          port: 1430,
+        }
       : void 0,
   },
 }))

@@ -1,26 +1,48 @@
 name: Builder Core
 
 on:
-  push:
-    branches: [ "develop", "feature", "main", "releases/**" ]
-  pull_request:
-    branches: [ "develop", "main" ]
-    types: [ opened, synchronize, reopened, ready_for_review ]
+  workflow_call:
+    # paths: &core_paths
+    #   - "Cargo.toml"
+    #   - "Cargo.lock"
+    #   - "exvlan/core/**"
+    #   - ".github/workflows/core.yml"
+    #   - ".github/actions/**"
+    #   - "exvlan/api/**"
+    #   - "packages/ui/**"
+    #   - "packages/kit/**"
+  # push:
+  #   branches: [ "develop", "feature", "main", "releases/**" ]
+  #   # 替代 fkirc 的原生路径过滤，提升 CI 启动速度且无 Node 警告
+  #   paths: &core_paths
+  #     - "Cargo.toml"
+  #     - "Cargo.lock"
+  #     - "exvlan/core/**"
+  #     - ".github/workflows/core.yml"
+  #     - ".github/actions/**"
+  #     - "exvlan/api/**"
+  #     - "packages/ui/**"
+  #     - "packages/kit/**"
+  # pull_request:
+  #   branches: [ "develop", "main" ]
+  #   types: [ opened, synchronize, reopened, ready_for_review ]
+  #   paths: *core_paths
 
 permissions:
   contents: read
   actions: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: core-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 defaults:
   run:
-    # necessary for windows
     shell: bash
 
 jobs:
@@ -42,8 +64,8 @@ jobs:
           skip_after_successful_duplicate: 'true'
           cancel_others: 'true'
           paths: '["Cargo.toml", "Cargo.lock", "exvlan/core/**", ".github/workflows/core.yml", ".github/actions/**", "exvlan/api/**", "packages/ui/**", "packages/kit/**"]'
-  build_api:
-    name: Build API
+  dashboard:
+    name: Build Kit & Dashboard
     runs-on: ubuntu-latest
     needs: pre_job
     if: needs.pre_job.outputs.should_skip != 'true'
@@ -61,10 +83,19 @@ jobs:
           name: exvlan-dashboard
           path: |
             packages/ui/dist/*
+
+      - name: Setup tmate session
+        if: failure()
+        uses: mxschmitt/action-tmate@v3
+        with:
+          detached: true
+          limit-access-to-actor: true
+          timeout-minutes: 3
+
   build:
-    name: Build EXVlan Core
+    name: Build Core ${{ matrix.ARTIFACT_NAME }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - TARGET: x86_64-unknown-linux-musl
@@ -74,12 +105,12 @@ jobs:
             OS: ubuntu-24.04-arm
             ARTIFACT_NAME: linux-aarch64
 
-          - TARGET: riscv64gc-unknown-linux-musl
-            OS: ubuntu-24.04
-            ARTIFACT_NAME: linux-riscv64
-          - TARGET: loongarch64-unknown-linux-musl
-            OS: ubuntu-24.04
-            ARTIFACT_NAME: linux-loongarch64
+          # - TARGET: riscv64gc-unknown-linux-musl # !26 not tested
+          #   OS: ubuntu-24.04
+          #   ARTIFACT_NAME: linux-riscv64
+          # - TARGET: loongarch64-unknown-linux-musl # !26 not tested
+          #   OS: ubuntu-24.04
+          #   ARTIFACT_NAME: linux-loongarch64 # !26 not tested
 
           - TARGET: armv7-unknown-linux-musleabihf # raspberry pi 2-3-4, not tested
             OS: ubuntu-24.04
@@ -94,12 +125,12 @@ jobs:
             OS: ubuntu-24.04
             ARTIFACT_NAME: linux-arm
 
-          - TARGET: mips-unknown-linux-musl
-            OS: ubuntu-24.04
-            ARTIFACT_NAME: linux-mips
-          - TARGET: mipsel-unknown-linux-musl
-            OS: ubuntu-24.04
-            ARTIFACT_NAME: linux-mipsel
+          # - TARGET: mips-unknown-linux-musl # !26 not tested
+          #   OS: ubuntu-24.04
+          #   ARTIFACT_NAME: linux-mips
+          # - TARGET: mipsel-unknown-linux-musl # !26 not tested
+          #   OS: ubuntu-24.04
+          #   ARTIFACT_NAME: linux-mipsel # !26 not tested
 
           - TARGET: x86_64-unknown-freebsd
             OS: ubuntu-24.04
@@ -116,22 +147,19 @@ jobs:
           - TARGET: x86_64-pc-windows-msvc
             OS: windows-latest
             ARTIFACT_NAME: windows-x86_64
-          - TARGET: i686-pc-windows-msvc
-            OS: windows-latest
-            ARTIFACT_NAME: windows-i686
-          - TARGET: aarch64-pc-windows-msvc
-            OS: windows-11-arm
-            ARTIFACT_NAME: windows-arm64
+          # - TARGET: i686-pc-windows-msvc
+          #   OS: windows-latest
+          #   ARTIFACT_NAME: windows-i686
+          # - TARGET: aarch64-pc-windows-msvc
+          #   OS: windows-11-arm
+          #   ARTIFACT_NAME: windows-arm64
 
     runs-on: ${{ matrix.OS }}
     env:
       NAME: exvlan
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
-      OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
-    needs:
-      - pre_job
-      - build_api
+    needs: [ pre_job, dashboard ]
     if: needs.pre_job.outputs.should_skip != 'true'
     steps:
       - uses: actions/checkout@v6
@@ -156,50 +184,37 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # The prefix cache key, this can be changed to start a new cache manually.
-          # default: "v0-rust"
           prefix-key: ""
-          shared-key: "core-registry"
-          cache-targets: "false"
+          shared-key: "exvlan-shared"
+          cache-targets: true
 
       - uses: mlugg/setup-zig@v2
         if: ${{ contains(matrix.OS, 'ubuntu') }}
+        with:
+          version: 0.16.0
+          use-cache: true
 
       - uses: taiki-e/install-action@v2
         if: ${{ contains(matrix.OS, 'ubuntu') }}
         with:
           tool: cargo-zigbuild
 
-      - name: Build
+      - name: Build (${{ matrix.ARTIFACT_NAME }})
         if: ${{ !contains(matrix.TARGET, 'mips') }}
         run: |
-          if [[ "$TARGET" == *windows* ]]; then
-            SUFFIX=.exe
-          else
-            SUFFIX=""
-          fi
-
-          if [[ "$TARGET" =~ (x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|windows|darwin) ]]; then
-            BUILD=build
-          else
-            BUILD=zigbuild
-          fi
-
-          if [[ "$TARGET" =~ ^(riscv64|loongarch64|aarch64).*$ || "$TARGET" =~ (freebsd|windows) ]]; then
-            FEATURES="mimalloc"
-          else
-            FEATURES="jemalloc"
-          fi
+          SUFFIX=$([[ "$TARGET" == *windows* ]] && echo ".exe" || echo "")
+          BUILD=$([[ "$TARGET" =~ (x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|windows|darwin) ]] && echo "build" || echo "zigbuild")
+          FEATURES=$([[ "$TARGET" =~ ^(riscv64|loongarch64|aarch64).*$ || "$TARGET" =~ (freebsd|windows) ]] && echo "mimalloc" || echo "jemalloc")
           
           cargo $BUILD --release --target $TARGET --package=exvlan-api --features=embed
           mv ./target/$TARGET/release/exvlan-api"$SUFFIX" ./target/$TARGET/release/exvlan-api-embed"$SUFFIX"
-          
           cargo $BUILD --release --target $TARGET --features=$FEATURES
 
-      - name: Build (MIPS)
+      - name: Build (MIPS) (${{ matrix.ARTIFACT_NAME }})
         if: ${{ contains(matrix.TARGET, 'mips') }}
         env:
           RUSTC_BOOTSTRAP: 1
+          RUSTFLAGS: "--cfg portable_atomic_unsafe_assume_single_core"
         run: |
           cargo build -r --target $TARGET -Z build-std=std,panic_abort --package=exvlan --features=jemalloc
 
@@ -231,15 +246,26 @@ jobs:
             case $HOST_ARCH in
               x86_64)  UPX_ARCH="amd64" ;;
               aarch64) UPX_ARCH="arm64" ;;
+              armv7*)  UPX_ARCH="arm" ;;
               *)       UPX_ARCH="amd64" ;;
             esac
 
-            UPX_VERSION=5.1.1
+            UPX_VERSION=4.2.4
             UPX_PKG="upx-${UPX_VERSION}-${UPX_ARCH}_linux"
-            curl -L "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_PKG}.tar.xz" -s | tar xJvf -
-            cp "${UPX_PKG}/upx" .
-            UPX_BIN=./upx
-           fi
+            UPX_URL="https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_PKG}.tar.xz"
+            
+            echo "⬇️ Downloading UPX from: $UPX_URL"
+            
+            if curl  -f -s -L "$UPX_URL" -o upx.tar.xz; then
+              # 解压并移动二进制文件到当前目录
+              tar -xJvf upx.tar.xz
+              cp "${UPX_PKG}/upx" .
+              UPX_BIN=./upx
+              echo "✅ UPX installed successfully."
+            else
+              echo "❌ Failed to download UPX, skipping compression."
+            fi
+          fi
 
           for BIN in ./target/$TARGET/release/{exvlan,exvlan-cli,exvlan-api,exvlan-api-embed}"$SUFFIX"; do
             if [[ -f "$BIN" ]]; then
@@ -261,11 +287,20 @@ jobs:
           path: |
             ./artifacts/*
 
-  build_magisk:
+      - name: Setup tmate session
+        if: failure()
+        uses: mxschmitt/action-tmate@v3
+        with:
+          detached: true
+          limit-access-to-actor: true
+          timeout-minutes: 3
+
+  magisk:
     name: Build Magisk Module
     runs-on: ubuntu-latest
-    needs: [ pre_job, build_api, build ]
-    if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
+    needs: [ pre_job, dashboard, build ]
+    # if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
+    if: false
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5  # 必须先检出代码才能获取模块配置
@@ -287,7 +322,7 @@ jobs:
 
       # 上传生成的模块
       - name: Upload Magisk Module
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: exvlan-magisk
           path: |
@@ -296,10 +331,10 @@ jobs:
             !./exvlan-contrib/magisk/magisk_update.json
           if-no-files-found: error
 
-  core-result:
+  result:
     name: Core Result Check
     runs-on: ubuntu-latest
-    needs: [ pre_job, build_api, build, build_magisk ]
+    needs: [ pre_job, dashboard, build ]
     if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
       - name: Mark result as failed

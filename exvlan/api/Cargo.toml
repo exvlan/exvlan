@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-api"
-version = "2026.26.3"
+version = "26.2.10604"
 edition.workspace = true
 authors = ["<@长久同学 cloud@era-x.cn>"]
 description = "Config server for exvlan. exvlan gets config from this and web frontend use it as restful api server."

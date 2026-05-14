@@ -9,7 +9,8 @@
   },
   "pnpm": {
     "overrides": {
-      "minimatch": "10.2.4"
+      "@vue/language-core": "^3.2.8",
+      "minimatch": "^10.2.5"
     }
   }
 }

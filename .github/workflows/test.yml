@@ -1,51 +1,38 @@
 name: EXVlan Test
 
 on:
-  push:
-    branches: [ "develop", "feature", "main", "feature/*" ]
-  pull_request:
-    branches: [ "develop", "main" ]
+  workflow_call:
+  # push:
+  #   branches: [ "develop", "feature", "main", "feature/*", "releases/**" ]
+  #   paths: &path_filter
+  #     - "Cargo.toml"
+  #     - "Cargo.lock"
+  #     - "exvlan/core/**"
+  #     - ".github/workflows/test.yml"
+  #     - ".github/actions/**"
+  # pull_request:
+  #   branches: [ "develop", "main" ]
+  #   paths: *path_filter
 
 permissions:
   contents: read
   actions: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: test-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-#  RUSTC_WRAPPER: "sccache"
-#  SCCACHE_GHA_ENABLED: "true"
 
 defaults:
   run:
-    # necessary for windows
     shell: bash
 
 jobs:
-  pre_job:
-    name: Run Pre check
-    # continue-on-error: true # Uncomment once integration is finished
-    runs-on: ubuntu-latest
-    # Map a step output to a job output
-    outputs:
-      should_skip: ${{ steps.skip_check.outputs.should_skip }}
-    steps:
-      - id: skip_check
-        uses: fkirc/skip-duplicate-actions@v5
-        with:
-          # All of these options are optional, so you can remove them if you are happy with the defaults
-          concurrent_skipping: 'never'
-          skip_after_successful_duplicate: 'true'
-          paths: '["Cargo.toml", "Cargo.lock", "exvlan/**", ".github/workflows/test.yml", ".github/actions/**"]'
-
   check:
     name: Run linters & check
     runs-on: ubuntu-latest
-    needs: pre_job
-    if: needs.pre_job.outputs.should_skip != 'true'
     steps:
       - uses: actions/checkout@v6
 
@@ -56,38 +43,47 @@ jobs:
           pnpm: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install GLib system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -qq libglib2.0-dev
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt,clippy
           rustflags: ''
 
-      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ''
+          shared-key: 'exvlan-shared'
+          cache-targets: true
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack
 
       - name: Check formatting
-        if: ${{ !cancelled() }}
         run: cargo fmt --all -- --check
 
       - name: Check Clippy
-        if: ${{ !cancelled() }}
         run: cargo clippy --all-targets --features full --all -- -D warnings
 
       - name: Check features
-        if: ${{ !cancelled() }}
         run: cargo hack check --package exvlan --each-feature --exclude-features macos-ne --verbose
 
       - name: Check Cargo.lock is up to date
-        if: ${{ !cancelled() }}
         run: |
           if ! cargo metadata --format-version 1 --locked > /dev/null; then
             echo "::error::Cargo.lock is out of date. Run cargo generate-lockfile or cargo build locally, then commit Cargo.lock."
             exit 1
           fi
-
+          
   pre-test:
     name: Build test
     runs-on: ubuntu-latest
-    needs: pre_job
-    if: needs.pre_job.outputs.should_skip != 'true'
     steps:
       - uses: actions/checkout@v6
 
@@ -99,13 +95,18 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: 'exvlan-shared'
 
       - uses: taiki-e/install-action@nextest
+        with:
+          tool: nextest
 
       - name: Archive test
         run: cargo nextest archive --archive-file tests.tar.zst --package exvlan --features full
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
         with:
           name: tests
           path: tests.tar.zst
@@ -114,18 +115,15 @@ jobs:
   test_matrix:
     name: Test (${{ matrix.name }})
     runs-on: ubuntu-latest
-    needs: [ pre_job, pre-test ]
-    if: needs.pre_job.outputs.should_skip != 'true'
+    needs: pre-test
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: "exvlan"
             opts: "-E 'not test(tests::three_node)' --test-threads 1 --no-fail-fast"
-
           - name: "three_node"
             opts: "-E 'test(tests::three_node) and not test(subnet_proxy_three_node_test)' --test-threads 1 --no-fail-fast"
-
           - name: "three_node::subnet_proxy_three_node_test"
             opts: "-E 'test(subnet_proxy_three_node_test)' --test-threads 1 --no-fail-fast"
     steps:
@@ -161,8 +159,9 @@ jobs:
           sudo sysctl net.ipv6.conf.lo.disable_ipv6=0
           sudo ip addr add 2001:db8::2/64 dev lo
 
-      - uses: taiki-e/install-action@nextest
-
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       - name: Download tests
         uses: actions/download-artifact@v8
         with:
@@ -176,8 +175,8 @@ jobs:
   test:
     name: Test Result Check
     runs-on: ubuntu-latest
-    needs: [ pre_job, check, test_matrix ]
-    if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
+    needs: [ check, test_matrix ]
+    if: always()
     steps:
       - name: Mark result as failed
         if: contains(needs.*.result, 'failure')

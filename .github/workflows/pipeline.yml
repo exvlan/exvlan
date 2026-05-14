@@ -1,0 +1,90 @@
+name: Builder & Publish Pipeline
+
+on:
+  push:
+    branches: ["develop", "feature", "main", "releases/**"]
+    paths: &filter_paths
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "exvlan/**"
+      - ".github/workflows/*.yml"
+      - "packages/**"
+
+  pull_request:
+    branches: [ "develop", "main" ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
+    paths: *filter_paths
+
+permissions:
+  contents: write
+  actions: write
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    shell: bash
+ 
+jobs:
+  tests:
+    name: Core Tests
+    uses: ./.github/workflows/test.yml
+    secrets: inherit
+
+  core:
+    name: Build Core
+    needs: tests
+    if: needs.tests.result == 'success' || needs.tests.result == 'skipped'
+    uses: ./.github/workflows/core.yml
+    secrets: inherit
+
+  studio:
+    name: Build Studio GUI
+    if: needs.core.result == 'success' || needs.core.result == 'skipped'
+    needs: core
+    uses: ./.github/workflows/studio.yml
+    secrets: inherit
+
+  mobile:
+    name: Build Studio Mobile
+    if: needs.core.result == 'success' || needs.core.result == 'skipped'
+    needs: core
+    uses: ./.github/workflows/mobile.yml
+    secrets: inherit
+
+  docker:
+    name: Builder & Publish Docker Image
+    if: needs.core.result == 'success'
+    needs: core
+    uses: ./.github/workflows/docker.yml
+    with:
+      mark_unstable: false
+      mark_latest: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/') }}
+      is_alpha: ${{ !(github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) }}
+    secrets: inherit
+
+  release:
+    name: Release Publish
+    if: |
+      always() &&
+      startsWith(github.ref, 'refs/heads/releases/') &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      (
+        needs.core.result == 'success' || 
+        needs.studio.result == 'success' || 
+        needs.mobile.result == 'success'
+      )
+    needs: [core, studio, mobile]
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ github.ref_name }} # 自动提取分支名末尾作为版本号，如 releases/v1.0 -> v1.0
+      mark_latest: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/') }}
+      is_alpha: ${{ !(github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) }}
+    secrets: inherit

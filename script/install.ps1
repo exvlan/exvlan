@@ -7,7 +7,7 @@
     Copies binaries to the install directory and updates the system PATH.
 
 .PARAMETER Version
-    Target version: "latest", "stable", or a specific tag like "v2026.26.3".
+    Target version: "latest", "stable", or a specific tag like "v26.2.0603".
     Default: "latest"
 
 .PARAMETER InstallDir
@@ -16,7 +16,7 @@
 
 .EXAMPLE
     .\install.ps1
-    .\install.ps1 -Version v2026.26.3
+    .\install.ps1 -Version v26.2.0603
     .\install.ps1 -InstallDir "C:\EXVlan"
 
 .NOTES

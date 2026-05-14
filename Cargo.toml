@@ -21,8 +21,11 @@ rust-version = "1.95"
 
 [profile.dev]
 panic = "unwind"
-debug = 2
-
+# debug = 2
+# 增加并行代码生成单元
+codegen-units = 256
+# 减少调试信息（降低内存压力）
+debug = 1
 [profile.release]
 panic = "abort"
 lto = true

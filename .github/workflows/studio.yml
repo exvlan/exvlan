@@ -1,18 +1,29 @@
 name: Builder Studio
 
 on:
-  push:
-    branches: ["develop", "feature", "main", "releases/**"]
-  pull_request:
-    branches: ["develop", "main"]
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_call:
+  # push:
+  #   branches: ["develop", "feature", "main", "releases/**"]
+  #   # 替代 fkirc 的原生路径过滤，触发即运行，不触发不扣费
+  #   paths: &path_filter
+  #     - "Cargo.toml"
+  #     - "Cargo.lock"
+  #     - "exvlan/core/**"
+  #     - "packages/studio/**"
+  #     - ".github/workflows/studio.yml"
+  #     - ".github/actions/**"
+  #     - "packages/kit/**"
+  # pull_request:
+  #   branches: ["develop", "main"]
+  #   types: [opened, synchronize, reopened, ready_for_review]
+  #   paths: *path_filter
 
 permissions:
   contents: read
   actions: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: studio-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -20,7 +31,6 @@ env:
 
 defaults:
   run:
-    # necessary for windows
     shell: bash
 
 jobs:
@@ -41,41 +51,42 @@ jobs:
           skip_after_successful_duplicate: 'true'
           cancel_others: 'true'
           paths: '["Cargo.toml", "Cargo.lock", "exvlan/core/**", "packages/studio/**", ".github/workflows/studio.yml", ".github/actions/**", "packages/kit/**"]'
-  build-gui:
+
+  build:
     strategy:
       fail-fast: true
       matrix:
         include:
-          - TARGET: x86_64-unknown-linux-musl
-            OS: ubuntu-24.04
-            GUI_TARGET: x86_64-unknown-linux-gnu
-            ARTIFACT_NAME: linux-x86_64
-          - TARGET: aarch64-unknown-linux-musl
-            OS: ubuntu-24.04-arm
-            GUI_TARGET: aarch64-unknown-linux-gnu
-            ARTIFACT_NAME: linux-aarch64
+          # - TARGET: x86_64-unknown-linux-musl
+          #   OS: ubuntu-24.04
+          #   GUI_TARGET: x86_64-unknown-linux-gnu
+          #   ARTIFACT_NAME: linux-x86_64
+          # - TARGET: aarch64-unknown-linux-musl
+          #   OS: ubuntu-24.04-arm
+          #   GUI_TARGET: aarch64-unknown-linux-gnu
+          #   ARTIFACT_NAME: linux-aarch64
 
           - TARGET: x86_64-apple-darwin
             OS: macos-latest
             GUI_TARGET: x86_64-apple-darwin
             ARTIFACT_NAME: macos-x86_64
-          - TARGET: aarch64-apple-darwin
-            OS: macos-latest
-            GUI_TARGET: aarch64-apple-darwin
-            ARTIFACT_NAME: macos-aarch64
+          # - TARGET: aarch64-apple-darwin
+          #   OS: macos-latest
+          #   GUI_TARGET: aarch64-apple-darwin
+          #   ARTIFACT_NAME: macos-aarch64
 
           - TARGET: x86_64-pc-windows-msvc
             OS: windows-latest
             GUI_TARGET: x86_64-pc-windows-msvc
             ARTIFACT_NAME: windows-x86_64
-          - TARGET: i686-pc-windows-msvc
-            OS: windows-latest
-            GUI_TARGET: i686-pc-windows-msvc
-            ARTIFACT_NAME: windows-i686
-          - TARGET: aarch64-pc-windows-msvc
-            OS: windows-11-arm
-            GUI_TARGET: aarch64-pc-windows-msvc
-            ARTIFACT_NAME: windows-arm64
+          # - TARGET: i686-pc-windows-msvc
+          #   OS: windows-latest
+          #   GUI_TARGET: i686-pc-windows-msvc
+          #   ARTIFACT_NAME: windows-i686
+          # - TARGET: aarch64-pc-windows-msvc
+          #   OS: windows-11-arm
+          #   GUI_TARGET: aarch64-pc-windows-msvc
+          #   ARTIFACT_NAME: windows-arm64
 
     runs-on: ${{ matrix.OS }}
     env:
@@ -83,7 +94,6 @@ jobs:
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
       GUI_TARGET: ${{ matrix.GUI_TARGET }}
-      OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
     needs: pre_job
     if: needs.pre_job.outputs.should_skip != 'true'    
     steps:
@@ -104,13 +114,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # The prefix cache key, this can be changed to start a new cache manually.
-          # default: "v0-rust"
           prefix-key: ""
-          shared-key: "gui-registry"
-          cache-targets: "false"
+          shared-key: "exvlan-shared"
+          cache-targets: true
 
-      - name: copy correct DLLs
+      - name: copy correct DLLs (Windows)
         if: ${{ contains(matrix.GUI_TARGET, 'windows') }}
         run: |
           case $TARGET in
@@ -121,9 +129,8 @@ jobs:
           if [[ -n "$ARCH_DIR" ]]; then
               find "./exvlan/core/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" -o -name "*.lib" \) -exec cp {} ./packages/studio/src-tauri/ \;
           fi
-          ls -al ./packages/studio/src-tauri/
 
-      - name: Build GUI
+      - name: Build GUI (Tauri)
         if: ${{ matrix.GUI_TARGET != '' }}
         uses: tauri-apps/tauri-action@v0
         env:
@@ -135,28 +142,19 @@ jobs:
 
       - name: Collect artifact
         run: |
-          mkdir -p ./artifacts/objects/
-          
-          if [[ $GITHUB_REF_TYPE =~ ^tag$ ]]; then
-            TAG=$GITHUB_REF_NAME
-          else
-            TAG=$GITHUB_SHA
-          fi
-
-          # copy gui bundle, gui is built without specific target
+          mkdir -p ./artifacts/
           if [[ $GUI_TARGET =~ windows ]]; then
-              mv ./target/$GUI_TARGET/release/bundle/msi/*.msi ./artifacts/objects/
-              mv ./target/$GUI_TARGET/release/bundle/nsis/*.exe ./artifacts/objects/
+              find ./target/$GUI_TARGET/release/bundle/ -type f \( -name "*.msi" -o -name "*.exe" \) -exec cp {} ./artifacts/ \; 2>/dev/null || true
           elif [[ $GUI_TARGET =~ darwin ]]; then
-              mv ./target/$GUI_TARGET/release/bundle/dmg/*.dmg ./artifacts/objects/
+              find ./target/$GUI_TARGET/release/bundle/ -type f -name "*.dmg" -exec cp {} ./artifacts/ \; 2>/dev/null || true
           elif [[ $GUI_TARGET =~ linux ]]; then
-              mv ./target/$GUI_TARGET/release/bundle/deb/*.deb ./artifacts/objects/
-              mv ./target/$GUI_TARGET/release/bundle/rpm/*.rpm ./artifacts/objects/
-              mv ./target/$GUI_TARGET/release/bundle/appimage/*.AppImage ./artifacts/objects/
+              # 扩展匹配：包含 .deb, .rpm 和 .AppImage
+              find ./target/$GUI_TARGET/release/bundle/ -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \) -exec cp {} ./artifacts/ \; 2>/dev/null || true
           fi
-
-          mv ./artifacts/objects/* ./artifacts/
-          rm -rf ./artifacts/objects/
+          
+          # 打印列表，确保你在日志中能看到到底抓取了哪些文件
+          echo "Collected artifacts:"
+          ls -F ./artifacts/
 
       - name: Archive artifact
         uses: actions/upload-artifact@v7
@@ -164,11 +162,12 @@ jobs:
           name: exvlan-studio-${{ matrix.ARTIFACT_NAME }}
           path: |
             ./artifacts/*
+          if-no-files-found: error
 
-  gui-result:
+  result:
     name: GUI Result Check
     runs-on: ubuntu-latest
-    needs: [ pre_job, build-gui ]
+    needs: [ pre_job, build ]
     if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
       - name: Mark result as failed

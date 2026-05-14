@@ -4,6 +4,9 @@ packages:
   - packages/studio
   - exvlan/plugin/vpnservice
 
+allowBuilds:
+  esbuild: false
+
 onlyBuiltDependencies:
   - esbuild
   - unrs-resolver

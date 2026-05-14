@@ -1,7 +1,7 @@
 import type { NetworkTypes } from '@exvlan/kit'
-import { addPluginListener } from '@tauri-apps/api/core'
-import { Utils } from '@exvlan/kit'
 import { get_vpn_status, prepare_vpn, start_vpn, stop_vpn } from '@exvlan/ipc'
+import { Utils } from '@exvlan/kit'
+import { addPluginListener } from '@tauri-apps/api/core'
 
 type Route = NetworkTypes.Route
 
