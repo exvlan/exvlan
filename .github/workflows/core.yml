@@ -202,6 +202,7 @@ jobs:
       - name: Build (${{ matrix.ARTIFACT_NAME }})
         if: ${{ !contains(matrix.TARGET, 'mips') }}
         run: |
+          export PATH="$PATH:$HOME/.cargo/bin"
           SUFFIX=$([[ "$TARGET" == *windows* ]] && echo ".exe" || echo "")
           BUILD=$([[ "$TARGET" =~ (x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|windows|darwin) ]] && echo "build" || echo "zigbuild")
           FEATURES=$([[ "$TARGET" =~ ^(riscv64|loongarch64|aarch64).*$ || "$TARGET" =~ (freebsd|windows) ]] && echo "mimalloc" || echo "jemalloc")
