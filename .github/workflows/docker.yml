@@ -29,7 +29,7 @@ on:
       image_tag:
         description: 'Tag for this image build'
         type: string
-        default: 'v26.2.0604'
+        default: 'v26.206.1010000'
         required: true
       mark_latest:
         description: 'Mark this image as latest'

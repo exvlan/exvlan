@@ -7,10 +7,8 @@
     "deps:prune": "bunx depcheck --json | jq -r '(.dependencies + .devDependencies)[]?' | xargs pnpm remove",
     "postinstall": "pnpm --filter=@exvlan/ipc --filter=@exvlan/kit build"
   },
-  "pnpm": {
-    "overrides": {
-      "@vue/language-core": "^3.2.8",
-      "minimatch": "^10.2.5"
-    }
+  "devDependencies": {
+    "@vue/language-core": "^3.3.5",
+    "minimatch": "^10.2.5"
   }
 }

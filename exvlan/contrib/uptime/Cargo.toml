@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-uptime"
-version = "26.1.0"
+version = "26.206.1010000"
 edition.workspace = true
 
 [dependencies]

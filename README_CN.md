@@ -20,6 +20,21 @@
 
 📚 **[完整文档](https://xvlan.era-x.cn)** | 🖥️ **[Web 控制台](https://xvlan.era-x.cn/web)** | 📝 **[下载发布版本](https://github.com/exvlan/exvlan/releases)** | 🧩 **[第三方工具](https://xvlan.era-x.cn/guide/installation_gui.html#%E7%AC%AC%E4%B8%89%E6%96%B9%E5%9B%BE%E5%BD%A2%E7%95%8C%E9%9D%A2)** | ❤️ **[赞助](#赞助)**
 
+## 年份版本规范
+
+版本格式 `YY.QQM.DDMMmmpp`：
+
+| 段 | 含义 | 示例 |
+|----|------|------|
+| YY | 年份末两位 | `26` = 2026 |
+| QQM | 季度 + 月份 (zero-padded) | `206` = Q2 6月 |
+| DD | 日 (zero-padded) | `05` = 5日 |
+| MM | major 版本 | `01` = v1 |
+| mm | minor 版本 | `08` = v1.8 |
+| pp | patch | `00` |
+
+示例：`26.206.05010800` = 2026年 Q2 6月 05日 v1.8.0
+
 ## 特性
 
 ### 核心特性
@@ -108,9 +123,9 @@ sudo exvlan -d --network-name abc --network-secret abc -p tcp://<共享节点IP>
 ```text
 | ipv4         | hostname       | cost  | lat_ms | loss_rate | rx_bytes | tx_bytes | tunnel_proto | nat_type | id         | version         |
 | ------------ | -------------- | ----- | ------ | --------- | -------- | -------- | ------------ | -------- | ---------- | --------------- |
-| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.2.10604-70e69a38~ |
-| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.2.10604-70e69a38~ |
-|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.2.10604-70e69a38~ |
+| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.206.17020604-70e69a38~ |
+| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.206.17020604-70e69a38~ |
+|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.206.17020604-70e69a38~ |
 ```
 
 您可以测试节点之间的连通性：

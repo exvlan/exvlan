@@ -17,7 +17,7 @@
     "createUpdaterArtifacts": false
   },
   "productName": "EXVlan Studio",
-  "version": "26.2.10604",
+  "version": "26.206.17020604",
   "identifier": "era.exvlan.studio",
   "mainBinaryName": "exvlan studio",
   "plugins": {

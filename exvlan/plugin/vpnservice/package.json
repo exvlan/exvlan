@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/ipc",
-  "version": "26.2.10604",
+  "version": "26.206.17020604",
   "author": {
     "name": "@长久同学 ",
     "email": "cloud@era-x.cn",
@@ -30,7 +30,7 @@
     "@tauri-apps/api": "^2.11.0"
   },
   "devDependencies": {
-    "tsdown": "^0.21.10",
+    "tsdown": "^0.22.3",
     "typescript": "^6.0.3"
   }
 }

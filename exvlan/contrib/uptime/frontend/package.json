@@ -1,7 +1,7 @@
 {
   "name": "@exvlan/uptime",
   "private": true,
-  "version": "26.2.10604",
+  "version": "26.206.17020604",
   "type": "module",
   "author": {
     "name": "@长久同学 ",
@@ -16,16 +16,16 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@exvlan/uptime": "link:",
-    "axios": "^1.16.0",
-    "dayjs": "^1.11.20",
-    "element-plus": "^2.13.7",
-    "vue": "^3.5.34",
-    "vue-router": "^5.0.6"
+    "axios": "^1.18.0",
+    "dayjs": "^1.11.21",
+    "element-plus": "^2.14.2",
+    "vue": "^3.5.38",
+    "vue-router": "^5.1.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.6",
+    "@vitejs/plugin-vue": "^6.0.7",
     "unplugin-auto-import": "^21.0.0",
-    "unplugin-vue-components": "^32.0.0",
-    "vite": "^8.0.10"
+    "unplugin-vue-components": "^32.1.0",
+    "vite": "^8.0.16"
   }
 }
