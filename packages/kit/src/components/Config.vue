@@ -21,8 +21,7 @@ const props = defineProps<{
 
 defineEmits(['runNetwork'])
 
-const curNetwork = defineModel('curNetwork', {
-  type: Object as () => NetworkConfig,
+const curNetwork = defineModel<NetworkConfig>('curNetwork', {
   default: DEFAULT_NETWORK_CONFIG,
 })
 
