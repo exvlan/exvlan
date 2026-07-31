@@ -83,7 +83,8 @@ jobs:
 
   build:
     strategy:
-      fail-fast: true
+      # ABI 构建彼此独立：一个 ABI 失败/上传失败不应取消其余已完成的构建
+      fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.prepare_matrix.outputs.include) }}
 

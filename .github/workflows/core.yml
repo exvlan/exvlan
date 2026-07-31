@@ -74,7 +74,6 @@ jobs:
         with:
           detached: true
           limit-access-to-actor: true
-          timeout-minutes: 3
 
   prepare_matrix:
     name: Prepare build matrix
@@ -263,7 +262,6 @@ jobs:
         with:
           detached: true
           limit-access-to-actor: true
-          timeout-minutes: 3
 
   magisk:
     name: Build Magisk Module

@@ -79,7 +79,9 @@ jobs:
 
   build:
     strategy:
-      fail-fast: true
+      # One matrix leg failing at the final upload step (e.g. artifact quota)
+      # must not cancel the other legs' already-running builds.
+      fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.prepare_matrix.outputs.include) }}
 
