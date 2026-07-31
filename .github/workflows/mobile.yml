@@ -61,7 +61,7 @@ jobs:
       - name: Generate matrix include
         id: gen
         run: |
-          python3 - "${{ inputs.targets }}" <<'PY'
+          python3 - '${{ inputs.targets }}' <<'PY'
           import json, os, sys
 
           ALL = [
@@ -175,6 +175,10 @@ jobs:
           name: exvlan-studio-${{ matrix.ARCH }}
           path: ./artifacts/*.apk
           if-no-files-found: error
+          # 防止 artifact 跨 run 无限累积耗尽存储配额：
+          # 同名覆盖（每 ABI 只保留最新一份）+ 短期保留
+          overwrite: true
+          retention-days: 3
 
   result:
     name: Mobile Result Check

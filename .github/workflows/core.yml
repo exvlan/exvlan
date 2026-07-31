@@ -66,6 +66,7 @@ jobs:
           name: exvlan-dashboard
           path: |
             packages/ui/dist/*
+          retention-days: 7
 
       - name: Setup tmate session
         if: failure()
@@ -86,7 +87,7 @@ jobs:
       - name: Generate matrix include
         id: gen
         run: |
-          python3 - "${{ inputs.targets }}" <<'PY'
+          python3 - '${{ inputs.targets }}' <<'PY'
           import json, os, sys
 
           ALL = [
@@ -254,6 +255,7 @@ jobs:
           name: exvlan-${{ matrix.ARTIFACT_NAME }}
           path: |
             ./artifacts/*
+          retention-days: 7
 
       - name: Setup tmate session
         if: failure()
