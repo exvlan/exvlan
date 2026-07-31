@@ -87,7 +87,7 @@ jobs:
         id: gen
         run: |
           python3 - "${{ inputs.targets }}" <<'PY'
-          import json, sys
+          import json, os, sys
 
           ALL = [
             {"TARGET": "x86_64-unknown-linux-musl", "OS": "ubuntu-24.04", "ARTIFACT_NAME": "linux-x86_64"},
@@ -109,7 +109,9 @@ jobs:
           else:
               wanted = set(json.loads(selected))
               result = [e for e in ALL if e["TARGET"] in wanted]
-          print("include=" + json.dumps(result))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write("include=" + json.dumps(result) + "\n")
+          print(json.dumps(result))
           PY
 
   build:
