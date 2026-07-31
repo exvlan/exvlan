@@ -1,7 +1,7 @@
 {
   "name": "@exvlan/kit",
   "private": true,
-  "version": "26.20617.020604",
+  "version": "26.20617.20604",
   "type": "module",
   "main": "./dist/index.umd.js",
   "module": "./dist/index.js",
