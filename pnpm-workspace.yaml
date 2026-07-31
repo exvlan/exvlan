@@ -6,6 +6,7 @@ packages:
 
 allowBuilds:
   esbuild: false
+  ip-num: false
   unrs-resolver: true
   vue-demi: true
 minimumReleaseAgeExclude:
