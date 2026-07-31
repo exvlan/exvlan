@@ -47,41 +47,39 @@ jobs:
           cancel_others: 'true'
           paths: '["Cargo.toml", "Cargo.lock", "exvlan/core/**", "packages/studio/**", ".github/workflows/studio.yml", ".github/actions/**", "packages/kit/**"]'
 
+  prepare_matrix:
+    name: Prepare build matrix
+    runs-on: ubuntu-latest
+    needs: pre_job
+    if: needs.pre_job.outputs.should_skip != 'true'
+    outputs:
+      include: ${{ steps.gen.outputs.include }}
+    steps:
+      - name: Generate matrix include
+        id: gen
+        run: |
+          python3 - "${{ inputs.targets }}" <<'PY'
+          import json, sys
+
+          ALL = [
+            {"TARGET": "x86_64-apple-darwin", "OS": "macos-latest", "GUI_TARGET": "x86_64-apple-darwin", "ARTIFACT_NAME": "macos-x86_64"},
+            {"TARGET": "x86_64-pc-windows-msvc", "OS": "windows-latest", "GUI_TARGET": "x86_64-pc-windows-msvc", "ARTIFACT_NAME": "windows-x86_64"},
+          ]
+
+          selected = sys.argv[1]
+          if selected == "all":
+              result = ALL
+          else:
+              wanted = set(json.loads(selected))
+              result = [e for e in ALL if e["TARGET"] in wanted]
+          print("include=" + json.dumps(result))
+          PY
+
   build:
     strategy:
       fail-fast: true
       matrix:
-        include:
-          # - TARGET: x86_64-unknown-linux-musl
-          #   OS: ubuntu-24.04
-          #   GUI_TARGET: x86_64-unknown-linux-gnu
-          #   ARTIFACT_NAME: linux-x86_64
-          # - TARGET: aarch64-unknown-linux-musl
-          #   OS: ubuntu-24.04-arm
-          #   GUI_TARGET: aarch64-unknown-linux-gnu
-          #   ARTIFACT_NAME: linux-aarch64
-
-          - TARGET: x86_64-apple-darwin
-            OS: macos-latest
-            GUI_TARGET: x86_64-apple-darwin
-            ARTIFACT_NAME: macos-x86_64
-          # - TARGET: aarch64-apple-darwin
-          #   OS: macos-latest
-          #   GUI_TARGET: aarch64-apple-darwin
-          #   ARTIFACT_NAME: macos-aarch64
-
-          - TARGET: x86_64-pc-windows-msvc
-            OS: windows-latest
-            GUI_TARGET: x86_64-pc-windows-msvc
-            ARTIFACT_NAME: windows-x86_64
-          # - TARGET: i686-pc-windows-msvc
-          #   OS: windows-latest
-          #   GUI_TARGET: i686-pc-windows-msvc
-          #   ARTIFACT_NAME: windows-i686
-          # - TARGET: aarch64-pc-windows-msvc
-          #   OS: windows-11-arm
-          #   GUI_TARGET: aarch64-pc-windows-msvc
-          #   ARTIFACT_NAME: windows-arm64
+        include: ${{ fromJSON(needs.prepare_matrix.outputs.include) }}
 
     runs-on: ${{ matrix.OS }}
     env:
@@ -89,8 +87,8 @@ jobs:
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
       GUI_TARGET: ${{ matrix.GUI_TARGET }}
-    needs: pre_job
-    if: ${{ needs.pre_job.outputs.should_skip != 'true' && (inputs.targets == 'all' || contains(fromJSON(inputs.targets), matrix.TARGET)) }}    
+    needs: [ pre_job, prepare_matrix ]
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     steps:
       - uses: actions/checkout@v7
 
