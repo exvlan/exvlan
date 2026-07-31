@@ -68,13 +68,6 @@ jobs:
             packages/ui/dist/*
           retention-days: 7
 
-      - name: Setup tmate session
-        if: failure()
-        uses: mxschmitt/action-tmate@v3
-        with:
-          detached: true
-          limit-access-to-actor: true
-
   prepare_matrix:
     name: Prepare build matrix
     runs-on: ubuntu-latest
@@ -255,13 +248,6 @@ jobs:
           path: |
             ./artifacts/*
           retention-days: 7
-
-      - name: Setup tmate session
-        if: failure()
-        uses: mxschmitt/action-tmate@v3
-        with:
-          detached: true
-          limit-access-to-actor: true
 
   magisk:
     name: Build Magisk Module
