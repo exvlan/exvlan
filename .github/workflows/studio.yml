@@ -161,13 +161,3 @@ jobs:
             ./artifacts/*
           if-no-files-found: error
           retention-days: 7
-
-  result:
-    name: GUI Result Check
-    runs-on: ubuntu-latest
-    needs: [ pre_job, build ]
-    if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
-    steps:
-      - name: Mark result as failed
-        if: contains(needs.*.result, 'failure')
-        run: exit 1

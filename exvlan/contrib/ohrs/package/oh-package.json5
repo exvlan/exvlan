@@ -4,7 +4,7 @@
   "name": "exvlan-ohrs",
   "description": "EXVlan for OpenHarmonyOS",
   "main": "index.ets",
-  "version": "26.206.1010000",
+  "version": "26.20617.020604",
   "types": "libs/index.d.ts",
   "dependencies": {},
   "compatibleSdkVersion": "17",
