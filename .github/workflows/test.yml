@@ -2,6 +2,7 @@ name: EXVlan Test
 
 on:
   workflow_call:
+  workflow_dispatch:
   # push:
   #   branches: [ "develop", "feature", "main", "feature/*", "releases/**" ]
   #   paths: &path_filter
@@ -34,7 +35,7 @@ jobs:
     name: Run linters & check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
@@ -85,7 +86,7 @@ jobs:
     name: Build test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
@@ -127,7 +128,7 @@ jobs:
           - name: "three_node::subnet_proxy_three_node_test"
             opts: "-E 'test(subnet_proxy_three_node_test)' --test-threads 1 --no-fail-fast"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup DNS for test domains
         run: |

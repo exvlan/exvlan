@@ -2,21 +2,16 @@ name: Builder Studio
 
 on:
   workflow_call:
-  # push:
-  #   branches: ["develop", "feature", "main", "releases/**"]
-  #   # 替代 fkirc 的原生路径过滤，触发即运行，不触发不扣费
-  #   paths: &path_filter
-  #     - "Cargo.toml"
-  #     - "Cargo.lock"
-  #     - "exvlan/core/**"
-  #     - "packages/studio/**"
-  #     - ".github/workflows/studio.yml"
-  #     - ".github/actions/**"
-  #     - "packages/kit/**"
-  # pull_request:
-  #   branches: ["develop", "main"]
-  #   types: [opened, synchronize, reopened, ready_for_review]
-  #   paths: *path_filter
+    inputs:
+      targets:
+        description: 'Build targets: JSON array of target triples, or "all"'
+        type: string
+        default: 'all'
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Build targets: JSON array of target triples, or "all"'
+        default: 'all'
 
 permissions:
   contents: read
@@ -95,9 +90,9 @@ jobs:
       OS: ${{ matrix.OS }}
       GUI_TARGET: ${{ matrix.GUI_TARGET }}
     needs: pre_job
-    if: needs.pre_job.outputs.should_skip != 'true'    
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' && (inputs.targets == 'all' || contains(fromJSON(inputs.targets), matrix.TARGET)) }}    
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set current ref as env variable
         run: |
@@ -132,7 +127,7 @@ jobs:
 
       - name: Build GUI (Tauri)
         if: ${{ matrix.GUI_TARGET != '' }}
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           RUSTFLAGS: "-L native=${{ github.workspace }}/packages/studio/src-tauri/"
           CARGO_TERM_COLOR: always

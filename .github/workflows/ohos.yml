@@ -41,7 +41,7 @@ jobs:
     name: Cargo fmt check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
         with:
@@ -64,7 +64,7 @@ jobs:
     env:
       OHPM_PUBLISH_CODE: ${{ secrets.OHPM_PUBLISH_CODE }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # 必须拉取全部记录以进行版本计算
 
@@ -95,7 +95,7 @@ jobs:
           jq --arg v "$EXVLAN_VERSION" '.version = $v' oh-package.json5 > oh-package.tmp.json5 && mv oh-package.tmp.json5 oh-package.json5
 
       - name: Setup HarmonyOS CLI tools
-        uses: ErBWs/setup-ohos@v1
+        uses: ErBWs/setup-ohos@v2
 
       - name: Download and Extract Custom SDK
         run: |

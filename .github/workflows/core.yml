@@ -2,31 +2,16 @@ name: Builder Core
 
 on:
   workflow_call:
-    # paths: &core_paths
-    #   - "Cargo.toml"
-    #   - "Cargo.lock"
-    #   - "exvlan/core/**"
-    #   - ".github/workflows/core.yml"
-    #   - ".github/actions/**"
-    #   - "exvlan/api/**"
-    #   - "packages/ui/**"
-    #   - "packages/kit/**"
-  # push:
-  #   branches: [ "develop", "feature", "main", "releases/**" ]
-  #   # 替代 fkirc 的原生路径过滤，提升 CI 启动速度且无 Node 警告
-  #   paths: &core_paths
-  #     - "Cargo.toml"
-  #     - "Cargo.lock"
-  #     - "exvlan/core/**"
-  #     - ".github/workflows/core.yml"
-  #     - ".github/actions/**"
-  #     - "exvlan/api/**"
-  #     - "packages/ui/**"
-  #     - "packages/kit/**"
-  # pull_request:
-  #   branches: [ "develop", "main" ]
-  #   types: [ opened, synchronize, reopened, ready_for_review ]
-  #   paths: *core_paths
+    inputs:
+      targets:
+        description: 'Build targets: JSON array of target triples, or "all"'
+        type: string
+        default: 'all'
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Build targets: JSON array of target triples, or "all"'
+        default: 'all'
 
 permissions:
   contents: read
@@ -38,8 +23,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 defaults:
   run:
@@ -70,7 +53,7 @@ jobs:
     needs: pre_job
     if: needs.pre_job.outputs.should_skip != 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Frontend Environment
         uses: ./.github/actions/prepare-pnpm
@@ -150,9 +133,9 @@ jobs:
           # - TARGET: i686-pc-windows-msvc
           #   OS: windows-latest
           #   ARTIFACT_NAME: windows-i686
-          # - TARGET: aarch64-pc-windows-msvc
-          #   OS: windows-11-arm
-          #   ARTIFACT_NAME: windows-arm64
+          - TARGET: aarch64-pc-windows-msvc
+            OS: windows-11-arm
+            ARTIFACT_NAME: windows-arm64
 
     runs-on: ${{ matrix.OS }}
     env:
@@ -160,9 +143,9 @@ jobs:
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
     needs: [ pre_job, dashboard ]
-    if: needs.pre_job.outputs.should_skip != 'true'
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' && (inputs.targets == 'all' || contains(fromJSON(inputs.targets), matrix.TARGET)) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set current ref as env variable
         run: |
@@ -188,11 +171,11 @@ jobs:
           shared-key: "exvlan-shared"
           cache-targets: true
 
-      - uses: mlugg/setup-zig@v2
+      - uses: jdx/mise-action@v4
         if: ${{ contains(matrix.OS, 'ubuntu') }}
         with:
-          version: 0.16.0
-          use-cache: true
+          install_args: 'zig@0.16.0'
+          cache_key_prefix: 'mise-zig'
 
       - uses: taiki-e/install-action@v2
         if: ${{ contains(matrix.OS, 'ubuntu') }}
@@ -304,11 +287,11 @@ jobs:
     if: false
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v5  # 必须先检出代码才能获取模块配置
+        uses: actions/checkout@v7  # 必须先检出代码才能获取模块配置
 
       # 下载二进制文件到独立目录
       - name: Download Linux aarch64 binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: exvlan-linux-aarch64
           path: ./downloaded-binaries/  # 独立目录避免冲突
