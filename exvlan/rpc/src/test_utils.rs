@@ -348,9 +348,7 @@ mod tests {
         assert!(
             create_test_run_network_instance_request().eq(&RunNetworkInstanceRequest::default())
         );
-        assert!(
-            create_test_delete_network_instance_request()
-                .eq(&DeleteNetworkInstanceRequest::default())
-        );
+        assert!(create_test_delete_network_instance_request()
+            .eq(&DeleteNetworkInstanceRequest::default()));
     }
 }

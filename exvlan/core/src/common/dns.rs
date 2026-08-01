@@ -73,6 +73,16 @@ pub async fn socket_addrs(
         .port()
         .or_else(default_port_number)
         .ok_or(Error::InvalidUrl(url.to_string()))?;
+    // See https://github.com/exvlan/exvlan/pull/947
+    // here is for compatibility with old version
+    let port = match port {
+        0 => match url.scheme() {
+            "ws" => 80,
+            "wss" => 443,
+            _ => port,
+        },
+        _ => port,
+    };
 
     // if host is an ip address, return it directly
     match host {

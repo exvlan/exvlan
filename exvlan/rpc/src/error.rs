@@ -77,11 +77,9 @@ mod tests {
     #[test]
     fn test_rpc_error_connection_error() {
         let error = RpcError::ConnectionError("Connection failed".to_string());
-        assert!(
-            error
-                .to_string()
-                .contains("Connection error: Connection failed")
-        );
+        assert!(error
+            .to_string()
+            .contains("Connection error: Connection failed"));
         assert!(error.is_connection_error());
         assert!(!error.is_timeout_error());
     }
@@ -129,11 +127,9 @@ mod tests {
     #[test]
     fn test_rpc_error_serialization_error() {
         let error = RpcError::SerializationError("JSON parse error".to_string());
-        assert!(
-            error
-                .to_string()
-                .contains("Serialization error: JSON parse error")
-        );
+        assert!(error
+            .to_string()
+            .contains("Serialization error: JSON parse error"));
         assert!(!error.is_connection_error());
         assert!(!error.is_timeout_error());
     }
