@@ -115,7 +115,13 @@ jobs:
           REPO_NAME="exvlan"
           BASE_IMAGE="ghcr.io/${OWNER}/${REPO_NAME}"
 
-          TAGS="${BASE_IMAGE}:${{ inputs.image_tag }}"
+          IMAGE_TAG="${{ inputs.image_tag }}"
+          if [ -z "$IMAGE_TAG" ]; then
+            # 从 pipeline (workflow_call) 调用时未传 image_tag，使用 commit SHA 兜底
+            IMAGE_TAG="${GITHUB_SHA:0:8}"
+          fi
+
+          TAGS="${BASE_IMAGE}:${IMAGE_TAG}"
 
           if [[ "${{ inputs.is_alpha }}" == "true" ]]; then
             TAGS="${TAGS},${BASE_IMAGE}:alpha"
