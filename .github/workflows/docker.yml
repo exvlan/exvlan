@@ -46,6 +46,12 @@ on:
         type: boolean
         default: false
         required: true
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
 jobs:
   docker:
     if: contains(fromJSON('["era-cloud", "exvlan", "littlezo"]'), github.actor)
