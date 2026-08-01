@@ -151,7 +151,9 @@ jobs:
       - uses: jdx/mise-action@v4
         if: ${{ contains(matrix.OS, 'ubuntu') }}
         with:
-          install_args: 'zig@0.16.0'
+          mise_toml: |
+            [tools]
+            zig = "0.16.0"
           cache_key_prefix: 'mise-zig'
 
       - uses: taiki-e/install-action@v2
