@@ -136,7 +136,7 @@ jobs:
           context: ./docker_context
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64,linux/riscv64
+          platforms: linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64
           push: true
           file: .github/workflows/Dockerfile
           tags: ${{ steps.tags.outputs.tags }}
