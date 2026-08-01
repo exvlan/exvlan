@@ -82,7 +82,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download all artifacts from workflow run
-        if: github.event_name == 'workflow_call'
+        if: inputs.run_id == ''
         uses: actions/download-artifact@v8
         with:
           path: docker_context
@@ -96,7 +96,7 @@ jobs:
           find ./docker_context -type d | head -20
 
       - name: Download artifact from run_id
-        if: github.event_name != 'workflow_call'
+        if: inputs.run_id != ''
         id: download-artifact
         uses: dawidd6/action-download-artifact@v21
         with:
