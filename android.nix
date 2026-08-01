@@ -12,7 +12,7 @@ let
   };
 
   includeAuto = pkgs.stdenv.hostPlatform.isx86_64 || pkgs.stdenv.hostPlatform.isDarwin;
-  ndkVersion = "26.206.17010000";
+  ndkVersion = "28.2.13676358";
   ndkVersions = [ ndkVersion ];
 
   sdkArgs = {
