@@ -1,10 +1,10 @@
 {
   "name": "@exvlan/ipc",
-  "version": "2026.26.0",
+  "version": "26.20617.20604",
   "author": {
     "name": "@长久同学 ",
     "email": "cloud@era-x.cn",
-    "url": "https://github.com/littlezo"
+    "url": "https://github.com/exvlan"
   },
   "description": "",
   "type": "module",
@@ -27,10 +27,10 @@
     "pretest": "pnpm build"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.10.1"
+    "@tauri-apps/api": "^2.11.0"
   },
   "devDependencies": {
-    "tsdown": "^0.21.7",
-    "typescript": "^6.0.2"
+    "tsdown": "^0.22.3",
+    "typescript": "^6.0.3"
   }
 }

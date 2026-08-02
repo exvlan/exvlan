@@ -1,0 +1,52 @@
+name: builder
+services:
+  mobile:
+    image: exvlan/builder:mobile
+    build:
+      context: .
+      dockerfile: Dockerfile.mobile
+    container_name: exvlan-builder-mobile
+    volumes:
+      - .:/workspace:rw
+      - cargo-cache:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target-cache:/workspace/target
+      - node-cache:/workspace/node_modules
+      - studio-node-cache:/workspace/packages/studio/node_modules
+    environment:
+      - CARGO_TERM_COLOR=always
+      - ANDROID_HOME=/opt/android-sdk
+      - NDK_HOME=/opt/android-sdk/ndk/28.2.13676358/
+      - ANDROID_SDK_ROOT=/opt/android-sdk
+      - PATH=$PATH:/root/.cargo/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+      - GRADLE_OPTS=-Dorg.gradle.daemon=true -Dorg.gradle.parallel=true -Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+UseG1GC
+      - RUST_BACKTRACE=1
+      - TAURI_DEV=false
+    shm_size: 4g
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+        reservations:
+          memory: 8G
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    network_mode: host
+    command: ["/bin/bash"]
+    # command:
+    #   - bash
+    #   - -c
+    #   - |
+    #    ls -al
+    #    cargo install
+    #    cd packages/studio
+    #    pnpm -r install
+    #    pnpm tauri android build
+volumes:
+  cargo-cache:
+  cargo-git:
+  target-cache:
+  node-cache:
+  studio-node-cache:

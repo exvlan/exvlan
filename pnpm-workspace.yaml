@@ -4,7 +4,20 @@ packages:
   - packages/studio
   - exvlan/plugin/vpnservice
 
-onlyBuiltDependencies:
-  - esbuild
-  - unrs-resolver
-  - vue-demi
+allowBuilds:
+  esbuild: false
+  ip-num: false
+  unrs-resolver: true
+  vue-demi: true
+minimumReleaseAgeExclude:
+  - '@babel/generator@8.0.0'
+  - '@babel/helper-string-parser@8.0.0'
+  - '@babel/helper-validator-identifier@8.0.0'
+  - '@babel/parser@8.0.0'
+  - '@babel/types@8.0.0'
+  - ast-kit@3.0.0
+  - rolldown-plugin-dts@0.26.0
+  - tsdown@0.22.3
+overrides:
+  '@vue/language-core': ^3.3.5
+  minimatch: ^10.2.5

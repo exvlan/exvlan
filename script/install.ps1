@@ -7,7 +7,7 @@
     Copies binaries to the install directory and updates the system PATH.
 
 .PARAMETER Version
-    Target version: "latest", "stable", or a specific tag like "v0.6.0".
+    Target version: "latest", "stable", or a specific tag like "v26.20617.20604".
     Default: "latest"
 
 .PARAMETER InstallDir
@@ -16,7 +16,7 @@
 
 .EXAMPLE
     .\install.ps1
-    .\install.ps1 -Version v0.6.0
+    .\install.ps1 -Version v26.20617.20604
     .\install.ps1 -InstallDir "C:\EXVlan"
 
 .NOTES
@@ -43,7 +43,7 @@ $ProgressPreference = 'SilentlyContinue'
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-$GITHUB_REPO        = 'littlezo/era-xvlan'
+$GITHUB_REPO        = 'exvlan/exvlan'
 $GITHUB_API         = "https://api.github.com/repos/$GITHUB_REPO"
 $GITHUB_RELEASE_URL = "https://github.com/$GITHUB_REPO/releases"
 

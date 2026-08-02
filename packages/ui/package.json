@@ -1,12 +1,12 @@
 {
   "name": "@exvlan/ui",
   "private": true,
-  "version": "2026.26.0",
+  "version": "26.20617.20604",
   "type": "module",
   "author": {
     "name": "@长久同学 ",
     "email": "cloud@era-x.cn",
-    "url": "https://github.com/littlezo"
+    "url": "https://github.com/exvlan"
   },
   "scripts": {
     "dev": "vite",
@@ -17,24 +17,24 @@
     "@exvlan/kit": "workspace:*",
     "@modyfi/vite-plugin-yaml": "^1.1.1",
     "@primeuix/themes": "^2.0.3",
-    "axios": "^1.14.0",
-    "primevue": "^4.5.4",
+    "axios": "^1.18.0",
+    "primevue": "^4.5.5",
     "tailwindcss-primeui": "^0.6.1",
     "ts-md5": "^2.0.1",
-    "vue": "^3.5.32",
-    "vue-i18n": "^11.3.1",
-    "vue-router": "^5.0.4"
+    "vue": "^3.5.38",
+    "vue-i18n": "^11.4.5",
+    "vue-router": "^5.1.0"
   },
   "devDependencies": {
-    "@primevue/auto-import-resolver": "^4.5.4",
-    "@tailwindcss/postcss": "^4.2.2",
-    "@tailwindcss/vite": "^4.2.2",
-    "@types/node": "^25.5.2",
-    "@vitejs/plugin-vue": "^6.0.5",
-    "postcss": "^8.5.8",
-    "tailwindcss": "^4.2.2",
-    "typescript": "^6.0.2",
-    "vite": "^8.0.6",
-    "vite-plugin-singlefile": "^2.3.2"
+    "@primevue/auto-import-resolver": "^4.5.5",
+    "@tailwindcss/postcss": "^4.3.1",
+    "@tailwindcss/vite": "^4.3.1",
+    "@types/node": "^25.9.3",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vite-plugin-singlefile": "^2.3.3"
   }
 }

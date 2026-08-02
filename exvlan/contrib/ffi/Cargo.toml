@@ -1,7 +1,7 @@
 [package]
 name = "exvlan-ffi"
-version = "2026.1.0"
-edition = "2021"
+version = "26.20617.20604"
+edition.workspace = true
 
 [lib]
 crate-type = ["cdylib"]

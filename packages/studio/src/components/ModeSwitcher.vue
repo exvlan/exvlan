@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed, watch, onMounted, ref } from 'vue';
-import type { Mode, ServiceMode, RemoteMode, NormalMode } from '~/composables/mode';
-import { appConfigDir, appLogDir } from '@tauri-apps/api/path';
-import { join } from '@tauri-apps/api/path';
-import { getServiceStatus, type ServiceStatus } from '~/composables/backend';
+import type { ServiceStatus } from '~/composables/backend'
+import type { Mode, NormalMode, RemoteMode, ServiceMode } from '~/composables/mode'
+import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
+import { computed, onMounted, ref, watch } from 'vue'
+import { getServiceStatus } from '~/composables/backend'
+
+const emit = defineEmits(['uninstall-service', 'stop-service'])
 
 const { t } = useI18n()
 
 const model = defineModel<Mode>({ required: true })
-const emit = defineEmits(['uninstall-service', 'stop-service'])
-
 const defaultConfigDir = ref('')
 const defaultLogDir = ref('')
 const serviceStatus = ref<ServiceStatus>('NotInstalled')
@@ -32,7 +32,7 @@ const modeOptions = computed(() => [
   { label: t('mode.normal'), value: 'normal' },
   { label: t('mode.service'), value: 'service' },
   { label: t('mode.remote'), value: 'remote' },
-]);
+])
 
 const normalMode = computed({
   get: () => model.value.mode === 'normal' ? model.value as NormalMode : undefined,
@@ -40,7 +40,7 @@ const normalMode = computed({
     if (value) {
       model.value = value
     }
-  }
+  },
 })
 
 const rpcListenOptions = computed(() => [
@@ -77,7 +77,7 @@ const serviceMode = computed({
     if (value) {
       model.value = value
     }
-  }
+  },
 })
 
 const remoteMode = computed({
@@ -86,7 +86,7 @@ const remoteMode = computed({
     if (value) {
       model.value = value
     }
-  }
+  },
 })
 
 const statusColorClass = computed(() => {
@@ -159,14 +159,15 @@ watch(() => model.value.mode, async (newMode, oldMode) => {
     }
   }
 }, { immediate: true })
-
 </script>
 
 <template>
   <div class="flex flex-col gap-4">
     <div>
-      <SelectButton id="mode-select" v-model="model.mode" :options="modeOptions" option-label="label"
-        option-value="value" fluid />
+      <SelectButton
+        id="mode-select" v-model="model.mode" :options="modeOptions" option-label="label"
+        option-value="value" fluid
+      />
     </div>
 
     <!-- Mode descriptions -->
@@ -183,8 +184,10 @@ watch(() => model.value.mode, async (newMode, oldMode) => {
     <div v-if="normalMode" class="flex flex-col gap-2">
       <div class="flex items-center gap-2">
         <label for="rpc-listen-toggle">{{ t('mode.enable_rpc_tcp_listen') }}</label>
-        <SelectButton id="rpc-listen-toggle" v-model="rpcListenEnabled" :options="rpcListenOptions" option-label="label"
-          option-value="value" />
+        <SelectButton
+          id="rpc-listen-toggle" v-model="rpcListenEnabled" :options="rpcListenOptions" option-label="label"
+          option-value="value"
+        />
       </div>
       <div v-if="rpcListenEnabled" class="flex flex-col gap-2">
         <div class="flex items-center gap-2">
@@ -205,8 +208,10 @@ watch(() => model.value.mode, async (newMode, oldMode) => {
       </div>
       <div class="flex items-center gap-2">
         <label for="log-level">{{ t('mode.log_level') }}</label>
-        <Select id="log-level" v-model="serviceMode.file_log_level"
-          :options="['off', 'warn', 'info', 'debug', 'trace']" />
+        <Select
+          id="log-level" v-model="serviceMode.file_log_level"
+          :options="['off', 'warn', 'info', 'debug', 'trace']"
+        />
       </div>
       <div class="flex items-center gap-2">
         <label for="log-dir">{{ t('mode.log_dir') }}</label>
@@ -218,10 +223,14 @@ watch(() => model.value.mode, async (newMode, oldMode) => {
           <span :class="statusColorClass">{{ t(`mode.service_status_${serviceStatus.toLowerCase()}`) }}</span>
         </div>
         <div class="flex items-center gap-2">
-          <Button :label="t('mode.stop_service')" icon="pi pi-stop-circle" v-if="serviceStatus === 'Running'"
-            @click="emit('stop-service')" severity="warn" text />
-          <Button :label="t('mode.uninstall_service')" icon="pi pi-trash" v-if="serviceStatus !== 'NotInstalled'"
-            @click="emit('uninstall-service')" severity="danger" text />
+          <Button
+            v-if="serviceStatus === 'Running'" :label="t('mode.stop_service')" icon="pi pi-stop-circle"
+            severity="warn" text @click="emit('stop-service')"
+          />
+          <Button
+            v-if="serviceStatus !== 'NotInstalled'" :label="t('mode.uninstall_service')" icon="pi pi-trash"
+            severity="danger" text @click="emit('uninstall-service')"
+          />
         </div>
       </div>
     </div>

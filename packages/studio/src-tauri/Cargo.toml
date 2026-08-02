@@ -1,9 +1,9 @@
 [package]
 name = "exvlan-studio"
-version = "2026.26.0"
+version = "26.20617.20604"
 description = "EXVlan Studio"
 authors = ["<@长久同学 cloud@era-x.cn>"]
-edition = "2021"
+edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,18 +11,9 @@ edition = "2021"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[build-dependencies]
-tauri-build = { version = "2.0.0-rc", features = [] }
-
-# enable thunk-rs when compiling for x86_64 or i686 windows
-[target.x86_64-pc-windows-msvc.build-dependencies]
-thunk-rs = { git = "https://github.com/EasyTier/thunk.git", default-features = false, features = ["win7"] }
-
-[target.i686-pc-windows-msvc.build-dependencies]
-thunk-rs = { git = "https://github.com/EasyTier/thunk.git", default-features = false, features = ["win7"] }
 
 [dependencies]
-# wry 0.47 may crash on android, see https://github.com/littlezo/era-xvlan/issues/527
+# wry 0.47 may crash on android, see https://github.com/exvlan/exvlan/issues/527
 tauri = { version = "2.10", features = [
     "tray-icon",
     "image-png",
@@ -65,6 +56,14 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework-sys = "2.9.0"
+
+
+[build-dependencies]
+tauri-build = { version = "2.0.0-rc", features = [] }
+thunk-rs = { git = "https://github.com/easytier/thunk.git", default-features = false, features = [
+    "win7",
+] }
+
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

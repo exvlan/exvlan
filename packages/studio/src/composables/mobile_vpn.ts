@@ -1,7 +1,7 @@
 import type { NetworkTypes } from '@exvlan/kit'
-import { addPluginListener } from '@tauri-apps/api/core'
-import { Utils } from '@exvlan/kit'
 import { get_vpn_status, prepare_vpn, start_vpn, stop_vpn } from '@exvlan/ipc'
+import { Utils } from '@exvlan/kit'
+import { addPluginListener } from '@tauri-apps/api/core'
 
 type Route = NetworkTypes.Route
 
@@ -106,7 +106,7 @@ async function doStartVpn(ipv4Addr: string, cidr: number, routes: string[], dns?
     ipv4Addr: `${ipv4Addr}/${cidr}`,
     routes,
     dns,
-    disallowedApplications: ['era.exvlan'],
+    disallowedApplications: ['era.exvlan.studio'],
     mtu: 1300,
   }
 

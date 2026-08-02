@@ -1,0 +1,74 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libwebkit2gtk-4.0-dev \
+    libappindicator3-dev \
+    librsvg2-dev \
+    patchelf \
+    protobuf-compiler \
+    openjdk-21-jdk \
+    unzip \
+    zip \
+    file \
+    libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN rustup set auto-self-update disable && \
+    rustup install 1.93 && \
+    rustup default 1.93 && \
+    rustup target add aarch64-linux-android && \
+    rustup target add armv7-linux-androideabi && \
+    rustup target add i686-linux-android && \
+    rustup target add x86_64-linux-android
+
+ENV PATH="/root/.volta/bin:${PATH}"
+RUN curl https://get.volta.sh | bash && \
+    volta install node@25 && \
+    volta install pnpm@10 && \
+    pnpm --version && node --version
+
+ENV ANDROID_HOME=/opt/android-sdk
+ENV ANDROID_SDK_ROOT=/opt/android-sdk
+
+RUN mkdir -p ${ANDROID_HOME}/cmdline-tools /workspace/.cache && \
+    cd ${ANDROID_HOME}/cmdline-tools && \
+    if [ -f /workspace/.cache/commandlinetools-linux-14742923_latest.zip ]; then \
+        echo "Using cached Android cmdline-tools"; \
+        cp /workspace/.cache/commandlinetools-linux-14742923_latest.zip .; \
+    else \
+        echo "Downloading Android cmdline-tools"; \
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip && \
+        cp commandlinetools-linux-14742923_latest.zip /workspace/.cache/; \
+    fi && \
+    unzip commandlinetools-linux-14742923_latest.zip && \
+    mv cmdline-tools latest && \
+    rm commandlinetools-linux-14742923_latest.zip
+
+ENV PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${PATH}"
+
+RUN yes | sdkmanager --licenses && \
+    sdkmanager "build-tools;36.1.0" \
+    "ndk;28.2.13676358" \
+    "platform-tools" \
+    "platforms;android-36"
+
+ENV NDK_HOME=${ANDROID_HOME}/ndk/28.2.13676358/
+ENV PATH="${ANDROID_HOME}/platform-tools:${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin:${PATH}"
+
+WORKDIR /workspace
+
+CMD ["/bin/bash"]

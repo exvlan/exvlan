@@ -5,6 +5,7 @@ members = [
     "packages/studio/src-tauri",
     "exvlan/build",
     "exvlan/api",
+    "exvlan/rpc",
     "exvlan/contrib/ffi",
     "exvlan/contrib/uptime",
     "exvlan/contrib/android-jni",
@@ -14,13 +15,20 @@ exclude = [
     "exvlan/contrib/ohrs", # it needs ohrs sdk
 ]
 
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+
 [profile.dev]
 panic = "unwind"
-debug = 2
-
+# debug = 2
+# 增加并行代码生成单元
+codegen-units = 256
+# 减少调试信息（降低内存压力）
+debug = 1
 [profile.release]
 panic = "abort"
 lto = true
 codegen-units = 1
-opt-level = 3
+opt-level = "z"
 strip = true

@@ -1,12 +1,11 @@
+import type { Api } from '@exvlan/kit'
+import { NetworkTypes } from '@exvlan/kit'
 import { invoke } from '@tauri-apps/api/core'
-import { Api, NetworkTypes } from '@exvlan/kit'
-import { GetNetworkMetasResponse } from 'node_modules/@exvlan/kit/dist/modules/api'
-
 
 type NetworkConfig = NetworkTypes.NetworkConfig
 type ValidateConfigResponse = Api.ValidateConfigResponse
 type ListNetworkInstanceIdResponse = Api.ListNetworkInstanceIdResponse
-type GetNetworkMetasResponse = Api.GetNetworkMetasResponse
+type ConfigSource = 'user' | 'webhook' | 'legacy'
 interface ServiceOptions {
   config_dir: string
   rpc_portal: string
@@ -15,7 +14,40 @@ interface ServiceOptions {
   config_server?: string
 }
 
-export type ServiceStatus = "Running" | "Stopped" | "NotInstalled"
+export type ServiceStatus = 'Running' | 'Stopped' | 'NotInstalled'
+
+interface StoredGuiConfig {
+  config: NetworkConfig
+  source: ConfigSource
+}
+
+function parseStoredConfigs(raw: string | null): StoredGuiConfig[] {
+  const parsed: unknown = JSON.parse(raw || '[]')
+  if (!Array.isArray(parsed)) {
+    return []
+  }
+
+  return parsed.flatMap((entry): StoredGuiConfig[] => {
+    if (entry && typeof entry === 'object' && 'config' in entry) {
+      const { config, source } = entry as {
+        config?: NetworkConfig
+        source?: ConfigSource
+      }
+      if (!config) {
+        return []
+      }
+      return [{
+        config: NetworkTypes.normalizeNetworkConfig(config),
+        source: source === 'user' || source === 'webhook' ? source : 'legacy',
+      }]
+    }
+
+    return [{
+      config: NetworkTypes.normalizeNetworkConfig(entry as NetworkConfig),
+      source: 'legacy',
+    }]
+  })
+}
 
 export async function parseNetworkConfig(cfg: NetworkConfig) {
   return invoke<string>('parse_network_config', { cfg: NetworkTypes.toBackendNetworkConfig(cfg) })
@@ -72,15 +104,18 @@ export async function getConfig(instanceId: string) {
 }
 
 export async function sendConfigs(enabledNetworks: string[]) {
-  const networkList: NetworkConfig[] = JSON.parse(localStorage.getItem('networkList') || '[]');
+  const networkList = parseStoredConfigs(localStorage.getItem('networkList'))
   return await invoke('load_configs', {
-    configs: networkList.map((config) => NetworkTypes.toBackendNetworkConfig(NetworkTypes.normalizeNetworkConfig(config))),
-    enabledNetworks
+    configs: networkList.map(({ config, source }) => ({
+      config: NetworkTypes.toBackendNetworkConfig(config),
+      source,
+    })),
+    enabledNetworks,
   })
 }
 
 export async function getNetworkMetas(instanceIds: string[]) {
-  return await invoke<GetNetworkMetasResponse>('get_network_metas', { instanceIds })
+  return await invoke<Api.GetNetworkMetasResponse>('get_network_metas', { instanceIds })
 }
 
 export async function initService(opts?: ServiceOptions) {

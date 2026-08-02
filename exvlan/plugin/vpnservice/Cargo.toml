@@ -1,10 +1,9 @@
 [package]
 name = "tauri-plugin-vpnservice"
-version = "2026.1.0"
+version = "26.20617.20604"
 authors = ["<@长久同学 cloud@era-x.cn>"]
 description = ""
-edition = "2021"
-rust-version = "1.70"
+edition.workspace = true
 exclude = ["/examples", "/webview-dist", "/webview-src", "/node_modules"]
 links = "tauri-plugin-vpnservice"
 

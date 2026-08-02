@@ -50,4 +50,14 @@ et.*
 history.list
 **/gen/**/generated/
 tests.tar.zst
+.pnpm-store
+**/.kotlin/
+release/
+.env
 .envrc
+keys
+archive/
+pnpm-lock.yaml
+.trae/
+target
+.secrets

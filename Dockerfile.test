@@ -1,0 +1,63 @@
+FROM rust:slim-trixie
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    wget \
+    git \
+    bridge-utils \
+    miniupnpd \
+    miniupnpd-iptables \
+    iptables \
+    iproute2 \
+    binutils \
+    mold \
+    pkg-config \
+    libgtk-3-dev \
+    libpango1.0-dev \
+    libcairo2-dev \
+    libgdk-pixbuf-2.0-dev \
+    libglib2.0-dev \
+    libatk1.0-dev \
+    libharfbuzz-dev \
+    libfontconfig1-dev \
+    libwebkit2gtk-4.1-dev \
+    clang \
+    llvm-dev \
+    libclang-dev \
+    libssl-dev \
+    libappindicator3-dev \
+    librsvg2-dev \
+    patchelf \
+    protobuf-compiler \
+    libprotobuf-dev \
+    unzip \
+    zip \
+    file \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /usr/local/include/google/protobuf && \
+    if [ -d /usr/include/google/protobuf ]; then \
+        cp -r /usr/include/google/protobuf/* /usr/local/include/google/protobuf/; \
+        echo "Copied from /usr/include/google/protobuf"; \
+    elif [ -d /usr/share/protobuf/include/google/protobuf ]; then \
+        cp -r /usr/share/protobuf/include/google/protobuf/* /usr/local/include/google/protobuf/; \
+        echo "Copied from /usr/share/protobuf/include/google/protobuf"; \
+    else \
+        echo "WARNING: google/protobuf directory not found"; \
+    fi
+
+RUN ls -la /usr/local/include/google/protobuf/ || echo "Files not found"
+
+ENV PROTOBUF_INCLUDE=/usr/local/include
+ENV PROTOC_INCLUDE=/usr/local/include
+ENV PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+
+RUN rustup component add rustfmt clippy --toolchain stable
+
+RUN curl -LsSf https://github.com/taiki-e/cargo-hack/releases/latest/download/cargo-hack-x86_64-unknown-linux-gnu.tar.gz \
+    | tar zxf - -C /usr/local/cargo/bin
+
+WORKDIR /workspace
+
+CMD ["/workspace/script/tests.sh"]

@@ -6,23 +6,15 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 
-const props = defineProps({
-    readonly: {
-        type: Boolean,
-        default: false,
-    },
-    generateConfig: {
-        type: Object as () => (config: NetworkConfig) => Promise<string>,
-        required: true,
-    },
-    saveConfig: {
-        type: Object as () => (config: string) => Promise<void>,
-        required: true,
-    },
+const props = withDefaults(defineProps<{
+    generateConfig: (config: NetworkConfig) => Promise<string>
+    saveConfig: (config: string) => Promise<void>
+    readonly?: boolean
+}>(), {
+    readonly: false,
 })
 
-const curNetwork = defineModel('curNetwork', {
-    type: Object as () => NetworkConfig | undefined,
+const curNetwork = defineModel<NetworkConfig>('curNetwork', {
     required: true,
 })
 

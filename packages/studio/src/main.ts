@@ -1,15 +1,14 @@
-import Aura from '@primeuix/themes/aura';
-import PrimeVue from 'primevue/config';
+import Kit, { I18nUtils } from '@exvlan/kit'
+import Aura from '@primeuix/themes/aura'
 
-import Kit, { I18nUtils } from '@exvlan/kit';
-import { createRouter, createWebHistory } from 'vue-router';
-import { routes } from 'vue-router/auto-routes';
-import App from '~/App.vue';
+import { ConfirmationService, DialogService, ToastService } from 'primevue'
+import PrimeVue from 'primevue/config'
+import { createRouter, createWebHistory } from 'vue-router'
+import { routes } from 'vue-router/auto-routes'
 
-import '@exvlan/kit/style.css';
-import { ConfirmationService, DialogService, ToastService } from 'primevue';
-import '~/styles.css';
-
+import App from '~/App.vue'
+import '@exvlan/kit/style.css'
+import '~/styles.css'
 
 if (import.meta.env.PROD) {
   document.addEventListener('keydown', (event) => {

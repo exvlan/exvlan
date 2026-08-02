@@ -6,21 +6,21 @@
       "DOM",
       "ESNext"
     ],
-    "baseUrl": ".",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "paths": {
       "~/*": [
-        "src/*"
+        "./src/*"
       ]
     },
     "resolveJsonModule": true,
     "types": [
       "vite/client",
       "vite-plugin-vue-layouts/client",
-      "unplugin-vue-macros/macros-global",
-      // "unplugin-vue-router/client"
-       "./src/typed-router.d.ts"
+      "vue-macros/macros",
+      "vue-router/volar/sfc-typed-router",
+      "vue-router/volar/sfc-route-blocks",
+      "./src/typed-router.d.ts"
     ],
     "allowImportingTsExtensions": true,
     "allowJs": true,
@@ -40,7 +40,7 @@
     ]
   },
   "exclude": [
-    "dist",
+    "./dist",
     "node_modules"
   ]
 }

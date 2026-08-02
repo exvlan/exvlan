@@ -26,7 +26,7 @@ Thank you for your interest in contributing to EXVlan! This document provides gu
 #### Required Tools
 - Node.js v21 or higher
 - pnpm v9 or higher
-- Rust toolchain (version 1.93)
+- Rust toolchain (version 1.95)
 - LLVM and Clang
 - Protoc (Protocol Buffers compiler)
 
@@ -72,15 +72,15 @@ sudo apt install -y bridge-utils
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/littlezo/era-xvlan.git
+   git clone https://github.com/exvlan/exvlan.git
    cd EXVlan
    ```
 
 2. Install dependencies:
    ```bash
    # Install Rust toolchain
-   rustup install 1.93
-   rustup default 1.93
+   rustup install 1.95
+   rustup default 1.95
 
    # Install project dependencies
    pnpm -r install
@@ -212,8 +212,8 @@ cargo test --no-default-features --features=full --verbose
 
 ## Additional Resources
 
-- [Issue Tracker](https://github.com/littlezo/era-xvlan/issues)
-- [Project Documentation](https://github.com/littlezo/era-xvlan/wiki)
+- [Issue Tracker](https://github.com/exvlan/exvlan/issues)
+- [Project Documentation](https://github.com/exvlan/exvlan/wiki)
 
 ## Questions or Need Help?
 

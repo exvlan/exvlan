@@ -61,7 +61,7 @@ class EraXVlanVpnService : VpnService() {
                     .addAddress(ip, networkLength)
                     .addDnsServer("223.5.5.5")
                     .addDnsServer("114.114.114.114")
-                    .addDisallowedApplication("era.exvlan")
+                    .addDisallowedApplication("era.exvlan.studio")
 
             // 2. 添加路由表 - 为每个 proxy CIDR 添加路由
             proxyCidrs.forEach { cidr ->
