@@ -1,7 +1,7 @@
 {
   "name": "@exvlan/studio",
   "type": "module",
-  "version": "26.20617.20604",
+  "version": "26.308.20604",
   "private": true,
   "packageManager": "pnpm@11.7.0",
   "author": {

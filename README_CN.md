@@ -22,22 +22,22 @@
 
 ## 年份版本规范
 
-版本格式 `YY.QQMDD.Mmpp`：
+版本格式 `YY.QMM.Mmpp`：
 
 | 段 | 含义 | 示例 |
 |----|------|------|
 | YY | 年份末两位 | `26` = 2026 |
-| QQMDD | 季度 + 月份 + 日 (zero-padded) | `20617` = Q2 6月 17日 |
+| QMM | 季度 + 月份 (zero-padded) | `308` = Q3 8月 |
 | Mmpp | major(不补零) + minor(2位) + patch(2位) | `20604` = v2.6.4 |
 
-示例：`26.20617.20604` = 2026年 Q2 6月 17日 v2.6.4
+示例：`26.308.20604` = 2026年 Q3 8月 v2.6.4
 
 注意：第三段整体必须是**无前导零**的数值（否则违反 semver，pnpm/npm 等会拒绝；Windows MSI 也要求每段 ≤65535，`20604` 满足）。
 
 > **MSI 专用版本**：Windows MSI 打包要求版本三段每段 ≤ 255/255/65535，标准版本
-> `YY.QQMDD.Mmpp` 的中段（QQMDD）超过 255 限制，故 Windows 构建单独使用 MSI 专用版本
-> `YY.NN.QDDMM-mmpp`（如 `26.6.21702-604`）：
-> YY=年、NN=月、QDDMM=季度(1位)+日(2位)+主版本(2位)、mmpp=次版本×100+修订版本（整体为无前导零整数）。
+> `YY.QMM.Mmpp` 的中段（QMM）超过 255 限制，故 Windows 构建单独使用 MSI 专用版本
+> `YY.MMQ.mmmm-pp`（如 `26.83.206-4`）：
+> YY=年、MMQ=月份(2位)+季度(1位)（整体为无前导零整数）、mmmm=主版本+次版本(2位)、pp=修订版本(2位)。
 > 该版本通过 `packages/studio/src-tauri/tauri.windows.conf.json` 仅对 Windows 生效，其他平台保持标准版本。
 
 ## 特性
@@ -128,9 +128,9 @@ sudo exvlan -d --network-name abc --network-secret abc -p tcp://<共享节点IP>
 ```text
 | ipv4         | hostname       | cost  | lat_ms | loss_rate | rx_bytes | tx_bytes | tunnel_proto | nat_type | id         | version         |
 | ------------ | -------------- | ----- | ------ | --------- | -------- | -------- | ------------ | -------- | ---------- | --------------- |
-| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.20617.20604-70e69a38~ |
-| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.20617.20604-70e69a38~ |
-|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.20617.20604-70e69a38~ |
+| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.308.20604-70e69a38~ |
+| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.308.20604-70e69a38~ |
+|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.308.20604-70e69a38~ |
 ```
 
 您可以测试节点之间的连通性：
