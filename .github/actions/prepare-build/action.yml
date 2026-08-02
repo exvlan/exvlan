@@ -84,4 +84,15 @@ runs:
       with:
         tool: protoc
       env:
-        GITHUB_TOKEN: ${{ inputs.token }} 
+        GITHUB_TOKEN: ${{ inputs.token }}
+
+    - name: Setup sccache
+      uses: mozilla/sccache-action@v0.0.11
+      with:
+        cache-name: exvlan-sccache
+
+    - name: Enable sccache for cargo
+      run: |
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "SCCACHE_GHA_CACHE=true" >> "$GITHUB_ENV"
+      shell: bash
