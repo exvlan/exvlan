@@ -23,6 +23,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
 
 defaults:
   run:
