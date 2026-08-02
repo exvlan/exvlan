@@ -86,7 +86,6 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: docker_context
-          merge-multiple: true
 
       - name: List downloaded files (Debug)
         run: |
