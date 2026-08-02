@@ -65,6 +65,8 @@ jobs:
         uses: dawidd6/action-download-artifact@v21
         with:
           github_token: ${{secrets.GITHUB_TOKEN}}
+          name: 'exvlan-(linux|macos|windows|freebsd)-.*'
+          name_is_regexp: true
           run_id: ${{ inputs.core_run_id }}
           repo: ${{ github.repository }}
           path: release_assets
@@ -80,6 +82,8 @@ jobs:
         uses: dawidd6/action-download-artifact@v21
         with:
           github_token: ${{secrets.GITHUB_TOKEN}}
+          name: 'exvlan-studio-.*'
+          name_is_regexp: true
           run_id: ${{ inputs.gui_run_id }}
           repo: ${{ github.repository }}
           path: release_assets_nozip
@@ -96,6 +100,8 @@ jobs:
         uses: dawidd6/action-download-artifact@v21
         with:
           github_token: ${{secrets.GITHUB_TOKEN}}
+          name: 'exvlan-studio-.*'
+          name_is_regexp: true
           run_id: ${{ inputs.mobile_run_id }}
           repo: ${{ github.repository }}
           path: release_assets_nozip
