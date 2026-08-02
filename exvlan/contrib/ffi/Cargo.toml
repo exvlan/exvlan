@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-ffi"
-version = "26.20617.20604"
+version = "26.308.20604"
 edition.workspace = true
 
 [lib]
