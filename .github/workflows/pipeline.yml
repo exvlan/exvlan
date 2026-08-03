@@ -2,19 +2,18 @@ name: Builder & Publish Pipeline
 
 on:
   push:
-    - branches: ["develop", "feature", "main"]
-      paths: &filter_paths
-        - "Cargo.toml"
-        - "Cargo.lock"
-        - "exvlan/**"
-        - ".github/workflows/*.yml"
-        - "packages/**"
-    - tags: ["v*"]
+    branches: ["develop", "feature", "main"]
+    tags: ["v*"]
 
   pull_request:
     branches: [ "develop", "main" ]
     types: [ opened, synchronize, reopened, ready_for_review ]
-    paths: *filter_paths
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "exvlan/**"
+      - ".github/workflows/*.yml"
+      - "packages/**"
 
   workflow_dispatch:
 
