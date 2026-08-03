@@ -130,8 +130,9 @@ jobs:
 
           # 处理不需要二次 ZIP 的文件（如 APK, DMG, MSI）
           # 使用 find 将所有层级的产物移动到 zipped_assets 根目录
+          # 注意：{} 必须加引号，否则含空格的文件名（如 "EXVlan Studio_x64.dmg"）会被拆词
           if [ -d "release_assets_nozip" ]; then
-            find release_assets_nozip -type f -exec cp {} zipped_assets/ 2>/dev/null || true
+            find release_assets_nozip -type f -exec cp "{}" zipped_assets/ \; 2>/dev/null || true
           fi
 
           # 处理需要二次 ZIP 的 Core 二进制文件
