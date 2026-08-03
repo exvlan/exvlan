@@ -65,7 +65,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v21
         with:
           github_token: ${{secrets.GITHUB_TOKEN}}
-          name: 'exvlan-(linux|macos|windows|freebsd)-.*'
+          name: 'exvlan-(linux|macos|windows|freebsd)-.*|exvlan-dashboard|exvlan-magisk'
           name_is_regexp: true
           run_id: ${{ inputs.core_run_id }}
           repo: ${{ github.repository }}
@@ -75,6 +75,13 @@ jobs:
         if: inputs.core_run_id == ''
         uses: actions/download-artifact@v8
         with:
+          pattern: |
+            exvlan-linux-*
+            exvlan-macos-*
+            exvlan-windows-*
+            exvlan-freebsd-*
+            exvlan-dashboard
+            exvlan-magisk
           path: release_assets
 
       - name: Download GUI Artifact
@@ -92,6 +99,7 @@ jobs:
         if: inputs.core_run_id == ''
         uses: actions/download-artifact@v8
         with:
+          pattern: 'exvlan-studio-*'
           path: release_assets_nozip
           merge-multiple: true
 
@@ -110,6 +118,7 @@ jobs:
         if: inputs.core_run_id == ''
         uses: actions/download-artifact@v8
         with:
+          pattern: 'exvlan-studio-*'
           path: release_assets_nozip
           merge-multiple: true
 
