@@ -2,13 +2,14 @@ name: Builder & Publish Pipeline
 
 on:
   push:
-    branches: ["develop", "feature", "main", "releases/**"]
-    paths: &filter_paths
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "exvlan/**"
-      - ".github/workflows/*.yml"
-      - "packages/**"
+    - branches: ["develop", "feature", "main"]
+      paths: &filter_paths
+        - "Cargo.toml"
+        - "Cargo.lock"
+        - "exvlan/**"
+        - ".github/workflows/*.yml"
+        - "packages/**"
+    - tags: ["v*"]
 
   pull_request:
     branches: [ "develop", "main" ]
@@ -67,15 +68,15 @@ jobs:
     uses: ./.github/workflows/docker.yml
     with:
       mark_unstable: false
-      mark_latest: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/') }}
-      is_alpha: ${{ !(github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) }}
+      mark_latest: ${{ github.ref == 'refs/heads/main' || github.ref_type == 'tag' }}
+      is_alpha: ${{ !(github.ref == 'refs/heads/main' || github.ref_type == 'tag') }}
     secrets: inherit
 
   release:
     name: Release Publish
     if: |
       always() &&
-      startsWith(github.ref, 'refs/heads/releases/') &&
+      github.ref_type == 'tag' &&
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled') &&
       (
@@ -86,7 +87,7 @@ jobs:
     needs: [core, studio, mobile]
     uses: ./.github/workflows/release.yml
     with:
-      version: ${{ github.ref_name }} # 自动提取分支名末尾作为版本号，如 releases/v1.0 -> v1.0
-      mark_latest: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/') }}
-      is_alpha: ${{ !(github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) }}
+      version: ${{ github.ref_name }} # tag 名即为版本号，如 v26.308.20604
+      mark_latest: true
+      is_alpha: false
     secrets: inherit
