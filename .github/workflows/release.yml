@@ -75,13 +75,9 @@ jobs:
         if: inputs.core_run_id == ''
         uses: actions/download-artifact@v8
         with:
-          pattern: |
-            exvlan-linux-*
-            exvlan-macos-*
-            exvlan-windows-*
-            exvlan-freebsd-*
-            exvlan-dashboard
-            exvlan-magisk
+          # pattern 为单个 Minimatch glob（不支持换行分隔）。
+          # exvlan-[!s]* 匹配全部 core 产物（linux/macos/windows/freebsd/dashboard/magisk），排除 exvlan-studio-*
+          pattern: 'exvlan-[!s]*'
           path: release_assets
 
       - name: Download GUI Artifact
