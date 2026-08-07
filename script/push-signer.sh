@@ -14,9 +14,6 @@ gh secret --repo std-v/exvlan set ANDROID_KEYSTORE_BASE64 --body "$ANDROID_KEYST
 gh secret --repo exvlan/exvlan set --env-file .env
 gh secret --repo exvlan/exvlan set ANDROID_KEYSTORE_BASE64 --body "$ANDROID_KEYSTORE_BASE64"
 
-gh secret --repo std-ui/exvlan set --env-file .env
-gh secret --repo std-ui/exvlan set ANDROID_KEYSTORE_BASE64 --body "$ANDROID_KEYSTORE_BASE64"
-
 cat .env > .secrets
 tee -a .secrets <<EOF
 ANDROID_KEYSTORE_BASE64=$ANDROID_KEYSTORE_BASE64
