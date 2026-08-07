@@ -6,15 +6,18 @@ ANDROID_KEYSTORE_BASE64=$(base64 -w 0 $KEYSTORE_FILE)
 
 echo "正在设置 GitHub Secrets..."
 gh secret --repo era-cloud/exvlan set --env-file .env
+gh secret --repo era-cloud/exvlan set --env-file .env.secret
 gh secret --repo era-cloud/exvlan set ANDROID_KEYSTORE_BASE64 --body "$ANDROID_KEYSTORE_BASE64"
 
 gh secret --repo std-v/exvlan set --env-file .env
+gh secret --repo std-v/exvlan set --env-file .env.secret
 gh secret --repo std-v/exvlan set ANDROID_KEYSTORE_BASE64 --body "$ANDROID_KEYSTORE_BASE64"
 
 gh secret --repo exvlan/exvlan set --env-file .env
+gh secret --repo exvlan/exvlan set --env-file .env.secret
 gh secret --repo exvlan/exvlan set ANDROID_KEYSTORE_BASE64 --body "$ANDROID_KEYSTORE_BASE64"
 
-cat .env > .secrets
+cat .env .env.secret > .secrets
 tee -a .secrets <<EOF
 ANDROID_KEYSTORE_BASE64=$ANDROID_KEYSTORE_BASE64
 EOF
