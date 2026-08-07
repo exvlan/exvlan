@@ -54,6 +54,7 @@ tests.tar.zst
 **/.kotlin/
 release/
 .env
+.env.secret
 .envrc
 keys
 archive/
