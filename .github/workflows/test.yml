@@ -53,12 +53,12 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt,clippy
-          rustflags: ''
+          rustflags: ""
 
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: ''
-          shared-key: 'exvlan-shared'
+          prefix-key: ""
+          shared-key: "exvlan-shared"
           cache-targets: true
 
       - name: Install cargo-hack
@@ -98,7 +98,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: 'exvlan-shared'
+          shared-key: "exvlan-shared"
 
       - uses: taiki-e/install-action@nextest
         with:
