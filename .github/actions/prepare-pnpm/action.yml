@@ -35,6 +35,20 @@ runs:
         restore-keys: |
           ${{ runner.os }}-pnpm-store-
 
+    - name: Load PrimeUI license from secret
+      if: ${{ secrets.PRIMEUI_LICENSE != '' }}
+      shell: bash
+      run: echo "VITE_PRIMEUI_LICENSE=${{ secrets.PRIMEUI_LICENSE }}" >> .env.secret
+
+    - name: Source env
+      shell: bash
+      run: |
+        if [ -f .env.secret ]; then
+          set -a
+          source .env.secret
+          set +a
+        fi
+
     - name: Install and build
       shell: bash
       run: |
