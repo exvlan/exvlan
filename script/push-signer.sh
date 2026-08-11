@@ -31,3 +31,4 @@ ANDROID_KEYSTORE_BASE64=$ANDROID_KEYSTORE_BASE64
 EOF
 
 # gh auth refresh --scopes admin:ssh_signing_key,repo,delete_repo,gist,read:gpg_key,write:org,write:packages,read:packages
+# gh auth refresh --scopes admin:ssh_signing_key,admin:org,delete:packages,delete_repo,gist,read:gpg_key,repo,write:org,write:packages
