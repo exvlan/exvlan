@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Card, InputText, Password, Button, AutoComplete } from 'primevue';
+import { Card, InputText, InputPassword, Button, AutoComplete } from 'primevue';
 import { useRouter } from 'vue-router';
 import { useToast } from 'primevue/usetoast';
-import { I18nUtils } from '@exvlan/kit';
+import { I18nUtils } from '@exvlan/std';
 import { getInitialApiHost, cleanAndLoadApiHosts, saveApiHost } from "../modules/api-host"
 import { useI18n } from 'vue-i18n'
 import ApiClient, { Credential, RegisterData } from '../modules/api';
@@ -130,18 +130,16 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="p-field">
                         <label for="password" class="block text-sm font-medium">{{ t('web.login.password') }}</label>
-                        <Password id="password" v-model="password" required toggleMask :feedback="false" />
+                        <InputPassword id="password" v-model="password" required toggleMask :feedback="false" />
                     </div>
                     <div class="flex items-center justify-between">
-                        <Button :label="t('web.login.login')" type="submit" class="w-full" />
+                        <Button type="submit" class="w-full"><span>{{ t('web.login.login') }}</span></Button>
                     </div>
                     <div class="flex items-center justify-between">
-                        <Button :label="t('web.login.register')" type="button" class="w-full"
-                            @click="saveApiHost(apiHost); $router.replace({ name: 'register' })" severity="secondary" />
+                        <Button type="button" class="w-full" @click="saveApiHost(apiHost); $router.replace({ name: 'register' })" severity="secondary"><span>{{ t('web.login.register') }}</span></Button>
                     </div>
                     <div v-if="oidcEnabled" class="flex items-center justify-between">
-                        <Button :label="t('web.login.sso_login')" type="button" class="w-full" severity="info"
-                            @click="onSsoLogin" />
+                        <Button type="button" class="w-full" severity="info" @click="onSsoLogin"><span>{{ t('web.login.sso_login') }}</span></Button>
                     </div>
                 </form>
 
@@ -154,7 +152,7 @@ onBeforeUnmount(() => {
                     <div class="p-field">
                         <label for="register-password" class="block text-sm font-medium">{{ t('web.login.password')
                             }}</label>
-                        <Password id="register-password" v-model="registerPassword" required toggleMask
+                        <InputPassword id="register-password" v-model="registerPassword" required toggleMask
                             :feedback="false" class="w-full" />
                     </div>
                     <div class="p-field">
@@ -163,18 +161,14 @@ onBeforeUnmount(() => {
                         <img :src="captchaSrc" alt="Captcha" class="mt-2 mb-2" />
                     </div>
                     <div class="flex items-center justify-between">
-                        <Button :label="t('web.login.register')" type="submit" class="w-full" />
+                        <Button type="submit" class="w-full"><span>{{ t('web.login.register') }}</span></Button>
                     </div>
                     <div class="flex items-center justify-between">
-                        <Button :label="t('web.login.back_to_login')" type="button" class="w-full"
-                            @click="saveApiHost(apiHost); $router.replace({ name: 'login' })" severity="secondary" />
+                        <Button type="button" class="w-full" @click="saveApiHost(apiHost); $router.replace({ name: 'login' })" severity="secondary"><span>{{ t('web.login.back_to_login') }}</span></Button>
                     </div>
                 </form>
 
-                <Button icon="pi pi-language" type="button" class="rounded-full absolute! top-4 right-4 z-10"
-                    style="box-shadow: 0 2px 8px rgba(0,0,0,0.08);" severity="contrast"
-                    @click="I18nUtils.toggleLanguage" :aria-label="t('web.main.language')"
-                    :v-tooltip="t('web.main.language')" />
+                <Button type="button" class="rounded-full absolute! top-4 right-4 z-10" style="box-shadow: 0 2px 8px rgba(0,0,0,0.08);" severity="contrast" @click="I18nUtils.toggleLanguage" :aria-label="t('web.main.language')" :v-tooltip="t('web.main.language')"><i class="pi pi-language"></i></Button>
 
             </template>
 

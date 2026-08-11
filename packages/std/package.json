@@ -1,5 +1,5 @@
 {
-  "name": "@exvlan/kit",
+  "name": "@exvlan/std",
   "private": true,
   "version": "26.308.20604",
   "type": "module",
@@ -20,40 +20,41 @@
     "./*.css": "./dist/*.css"
   },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview"
   },
   "dependencies": {
-    "@primeuix/themes": "^2.0.3",
-    "@vueuse/core": "^14.3.0",
-    "axios": "^1.18.0",
+    "@primeuix/themes": "^3.0.0",
+    "@vueuse/core": "^14.4.0",
+    "axios": "^1.19.0",
     "chart.js": "^4.5.1",
     "floating-vue": "^5.2.2",
-    "ip-num": "^1.5.2",
-    "primeicons": "^7.0.0",
+    "ip-num": "^1.6.2",
+    "primeicons": "^8.0.0",
     "tailwindcss-primeui": "^0.6.1",
     "ts-md5": "^2.0.1",
-    "uuid": "^14.0.0",
-    "vue-chartjs": "^5.3.3",
-    "vue-i18n": "^11.4.5"
+    "uuid": "^14.0.1",
+    "vue-chartjs": "^5.3.4",
+    "vue-i18n": "^11.4.8"
   },
   "devDependencies": {
     "@modyfi/vite-plugin-yaml": "^1.1.1",
-    "@tailwindcss/postcss": "^4.3.1",
-    "@tailwindcss/vite": "^4.3.1",
-    "@types/node": "^25.9.3",
-    "@vitejs/plugin-vue": "^6.0.7",
-    "postcss": "^8.5.15",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.2.0",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "postcss": "^8.5.26",
     "postcss-import": "^16.1.1",
-    "postcss-nested": "^7.0.2",
-    "tailwindcss": "^4.3.1",
-    "typescript": "~6.0.3",
-    "unplugin-dts": "^1.0.2",
-    "vite": "^8.0.16"
+    "postcss-nested": "^8.0.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "6.0.3",
+    "unplugin-dts": "^1.0.3",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   },
   "peerDependencies": {
-    "primevue": "^4.5.5",
-    "vue": "^3.5.38"
+    "primevue": "^5.0.0",
+    "vue": "^3.5.41"
   }
 }

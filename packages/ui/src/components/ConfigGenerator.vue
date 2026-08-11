@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NetworkTypes } from '@exvlan/kit';
+import { NetworkTypes } from '@exvlan/std';
 import { computed, ref } from 'vue';
 import { AutoComplete, Divider, Button, Textarea } from "primevue";
 import { getInitialApiHost, cleanAndLoadApiHosts, saveApiHost } from "../modules/api-host"
@@ -80,7 +80,7 @@ const parseConfig = async () => {
           class="w-full grow p-2 whitespace-pre-wrap font-mono resize-none"
           placeholder="Press 'Run Network' to generate TOML configuration, or paste your TOML configuration here to parse it"></Textarea>
         <div class="mt-3 flex justify-center">
-          <Button label="Parse Config" icon="pi pi-arrow-left" icon-pos="left" @click="parseConfig" />
+          <Button @click="parseConfig"><i class="pi pi-arrow-left"></i>Parse Config</Button>
         </div>
       </div>
     </div>

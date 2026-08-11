@@ -1,5 +1,5 @@
 import { resolve } from 'path'
-import { defineConfig } from 'vite'
+import { defineConfig, lazyPlugins } from 'vite-plus'
 import vue from '@vitejs/plugin-vue'
 import dts from 'unplugin-dts/vite';
 import ViteYaml from '@modyfi/vite-plugin-yaml';
@@ -10,7 +10,12 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true
   },
-  plugins: [vue(), dts({
+  // Vite 不会自动把 process.env 暴露给 import.meta.env（构建时），
+  // 此处桥接：license token 经 .env.secret source 后注入（CI 由 PRIMEUI_LICENSE secret 写入 .env.secret）
+  define: {
+    'import.meta.env.VITE_PRIMEUI_LICENSE': JSON.stringify(process.env.VITE_PRIMEUI_LICENSE ?? ''),
+  },
+  plugins: lazyPlugins(() => [vue(), dts({
     processor: 'vue',
     outDirs: 'dist',
     staticImport: true,
@@ -24,7 +29,7 @@ export default defineConfig({
       };
     },
     tsconfigPath: './tsconfig.app.json',
-  }), ViteYaml(), tailwindcss()],
+  }), ViteYaml(), tailwindcss()]),
   build: {
     lib: {
       // Could also be a dictionary or array of multiple entry points

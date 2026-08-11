@@ -512,27 +512,13 @@ onUnmounted(() => {
                 <!-- 简化的按钮区域 - 无论屏幕大小都显示 -->
                 <div class="flex gap-2 shrink-0 button-container items-center">
                     <!-- Create/Cancel button based on state -->
-                    <Button v-if="!isEditingNetwork" @click="newNetwork" icon="pi pi-plus"
-                        :label="screenWidth > 640 ? t('web.device_management.create_new') : undefined"
-                        :class="['create-button', screenWidth <= 640 ? 'p-button-icon-only' : '']"
-                        :style="screenWidth <= 640 ? 'width: 3rem !important; height: 3rem !important; font-size: 1.2rem' : ''"
-                        :tooltip="screenWidth <= 640 ? t('web.device_management.create_network') : undefined"
-                        tooltipOptions="{ position: 'bottom' }" severity="primary" />
+                    <Button v-if="!isEditingNetwork" @click="newNetwork" :class="['create-button', screenWidth <= 640 ? 'p-button-icon-only' : '']" :style="screenWidth <= 640 ? 'width: 3rem !important; height: 3rem !important; font-size: 1.2rem' : ''" :tooltip="screenWidth <= 640 ? t('web.device_management.create_network') : undefined" tooltipOptions="{ position: 'bottom' }" severity="primary"><i class="pi pi-plus"></i><span>{{ screenWidth > 640 ? t('web.device_management.create_new') : undefined }}</span></Button>
 
-                    <Button v-else @click="cancelEditNetwork" icon="pi pi-times"
-                        :label="screenWidth > 640 ? t('web.device_management.cancel_edit') : undefined"
-                        :class="['cancel-button', screenWidth <= 640 ? 'p-button-icon-only' : '']"
-                        :style="screenWidth <= 640 ? 'width: 3rem !important; height: 3rem !important; font-size: 1.2rem' : ''"
-                        :tooltip="screenWidth <= 640 ? t('web.device_management.cancel_edit') : undefined"
-                        tooltipOptions="{ position: 'bottom' }" severity="secondary" />
+                    <Button v-else @click="cancelEditNetwork" :class="['cancel-button', screenWidth <= 640 ? 'p-button-icon-only' : '']" :style="screenWidth <= 640 ? 'width: 3rem !important; height: 3rem !important; font-size: 1.2rem' : ''" :tooltip="screenWidth <= 640 ? t('web.device_management.cancel_edit') : undefined" tooltipOptions="{ position: 'bottom' }" severity="secondary"><i class="pi pi-times"></i><span>{{ screenWidth > 640 ? t('web.device_management.cancel_edit') : undefined }}</span></Button>
 
                     <!-- More actions menu -->
                     <Menu ref="menuRef" :model="actionMenu" :popup="true" />
-                    <Button v-if="!isEditingNetwork && selectedInstanceId" icon="pi pi-ellipsis-v"
-                        class="p-button-rounded flex items-center justify-center" severity="help"
-                        style="width: 3rem !important; height: 3rem !important; font-size: 1.2rem"
-                        @click="menuRef.toggle($event)" :aria-label="t('web.device_management.more_actions')"
-                        :tooltip="t('web.device_management.more_actions')" tooltipOptions="{ position: 'bottom' }" />
+                    <Button v-if="!isEditingNetwork && selectedInstanceId" class="p-button-rounded flex items-center justify-center" severity="help" style="width: 3rem !important; height: 3rem !important; font-size: 1.2rem" @click="menuRef.toggle($event)" :aria-label="t('web.device_management.more_actions')" :tooltip="t('web.device_management.more_actions')" tooltipOptions="{ position: 'bottom' }"><i class="pi pi-ellipsis-v"></i></Button>
                 </div>
             </div>
         </div>
@@ -547,13 +533,9 @@ onUnmounted(() => {
                 </div>
 
                 <div class="w-full flex gap-2 flex-wrap justify-start mb-3">
-                    <Button @click="showConfigEditDialog = true" icon="pi pi-file-edit"
-                        :label="t('web.device_management.edit_as_file')" iconPos="left" severity="secondary" />
-                    <Button @click="importConfig" icon="pi pi-upload" :label="t('web.device_management.import_config')"
-                        iconPos="left" severity="help" />
-                    <Button v-if="networkIsDisabled" @click="saveNetworkConfig" :disabled="!currentNetworkConfig"
-                        icon="pi pi-save" :label="t('web.device_management.save_config')" iconPos="left"
-                        severity="success" />
+                    <Button @click="showConfigEditDialog = true" severity="secondary"><i class="pi pi-file-edit"></i><span>{{ t('web.device_management.edit_as_file') }}</span></Button>
+                    <Button @click="importConfig" severity="help"><i class="pi pi-upload"></i><span>{{ t('web.device_management.import_config') }}</span></Button>
+                    <Button v-if="networkIsDisabled" @click="saveNetworkConfig" :disabled="!currentNetworkConfig" severity="success"><i class="pi pi-save"></i><span>{{ t('web.device_management.save_config') }}</span></Button>
                 </div>
 
                 <Divider />
@@ -575,9 +557,7 @@ onUnmounted(() => {
                 <Message v-else severity="error" class="mb-4">{{ curNetworkInfo?.error_msg }}</Message>
 
                 <div class="text-center mt-4">
-                    <Button @click="stopNetwork" :disabled="!currentNetworkControl.deletable.value"
-                        :label="t('web.device_management.disable_network')" severity="danger" icon="pi pi-power-off"
-                        iconPos="left" />
+                    <Button @click="stopNetwork" :disabled="!currentNetworkControl.deletable.value" severity="danger"><i class="pi pi-power-off"></i><span>{{ t('web.device_management.disable_network') }}</span></Button>
                 </div>
             </div>
 
@@ -589,8 +569,7 @@ onUnmounted(() => {
                 <p class="text-secondary text-center mb-6 max-w-md">
                     {{ t('web.device_management.select_existing_network_or_create_new') }}
                 </p>
-                <Button @click="newNetwork" :label="t('web.device_management.create_network')" icon="pi pi-plus"
-                    iconPos="left" />
+                <Button @click="newNetwork"><i class="pi pi-plus"></i><span>{{ t('web.device_management.create_network') }}</span></Button>
             </div>
         </div>
 

@@ -174,8 +174,7 @@ const onProtoChange = (newProto: string) => {
             class="url-input-compact flex justify-between items-center p-2 border rounded w-full min-w-0 overflow-hidden">
             <span class="truncate mr-2 min-w-0 flex-1 overflow-hidden">{{ url }}</span>
             <div class="flex items-center shrink-0">
-                <Button icon="pi pi-pencil" class="p-button-sm p-button-text" :aria-label="t('web.common.edit')"
-                    @click="editing = true" />
+                <Button class="p-button-sm p-button-text" :aria-label="t('web.common.edit')" @click="editing = true"><i class="pi pi-pencil"></i></Button>
                 <slot name="actions"></slot>
             </div>
         </div>
@@ -199,8 +198,7 @@ const onProtoChange = (newProto: string) => {
                 </div>
             </div>
             <template #footer>
-                <Button :label="t('web.common.confirm') || 'Done'" icon="pi pi-check" @click="onDialogConfirm"
-                    autofocus />
+                <Button @click="onDialogConfirm" autofocus><i class="pi pi-check"></i><span>{{ t('web.common.confirm') || 'Done' }}</span></Button>
             </template>
         </Dialog>
     </div>

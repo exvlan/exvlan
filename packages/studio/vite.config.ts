@@ -9,7 +9,7 @@ import { containsCidr, parseCidr } from 'cidr-tools'
 import { gateway4sync } from 'default-gateway'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
-import { defineConfig } from 'vite'
+import { defineConfig, lazyPlugins } from 'vite-plus'
 import VueDevTools from 'vite-plugin-vue-devtools'
 import Layouts from 'vite-plugin-vue-layouts'
 import VueMacros from 'vue-macros/vite'
@@ -47,7 +47,7 @@ export default defineConfig(async () => ({
       '~/': `${path.resolve(__dirname, 'src')}/`,
     },
   },
-  plugins: [
+  plugins: lazyPlugins(() => [
     VueMacros({
       plugins: {
         vue: Vue({
@@ -108,7 +108,7 @@ export default defineConfig(async () => ({
     // https://github.com/webfansplz/vite-plugin-vue-devtools
     VueDevTools(),
     tailwindcss(),
-  ],
+  ]),
   build:{
     chunkSizeWarningLimit: 20480
   },

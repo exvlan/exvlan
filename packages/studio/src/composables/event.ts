@@ -1,5 +1,5 @@
 import type { Event } from '@tauri-apps/api/event'
-import { NetworkTypes, Utils } from '@exvlan/kit'
+import { NetworkTypes, Utils } from '@exvlan/std'
 import { listen } from '@tauri-apps/api/event'
 import { type } from '@tauri-apps/plugin-os'
 

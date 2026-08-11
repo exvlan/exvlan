@@ -35,6 +35,15 @@ runs:
         restore-keys: |
           ${{ runner.os }}-pnpm-store-
 
+    - name: Source env
+      shell: bash
+      run: |
+        if [ -f .env.secret ]; then
+          set -a
+          source .env.secret
+          set +a
+        fi
+
     - name: Install and build
       shell: bash
       run: |

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Column, DataTable, Dialog, InputText, MultiSelect, Password } from 'primevue';
+import { Button, Column, DataTable, Dialog, InputText, Select, InputPassword } from 'primevue';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { GroupIdentity, GroupInfo } from '../../types/network';
@@ -67,21 +67,21 @@ function saveGroup() {
           <label class="font-bold text-lg">{{ t('acl.group.declares') }}</label>
           <small class="text-gray-500">{{ t('acl.group.help') }}</small>
         </div>
-        <Button icon="pi pi-plus" :label="t('web.common.add')" severity="success" @click="addGroup" />
+        <Button severity="success" @click="addGroup"><i class="pi pi-plus"></i><span>{{ t('web.common.add') }}</span></Button>
       </div>
 
       <DataTable :value="group.declares" responsiveLayout="scroll">
         <Column field="group_name" :header="t('acl.group.name')" />
         <Column field="group_secret" :header="t('acl.group.secret')">
           <template #body="{ data }">
-            <Password v-model="data.group_secret" :feedback="false" toggleMask readonly plain class="w-full" />
+            <InputPassword v-model="data.group_secret" :feedback="false" toggleMask readonly class="w-full" />
           </template>
         </Column>
         <Column :header="t('web.common.edit')" headerStyle="width: 8rem">
           <template #body="{ index }">
             <div class="flex gap-2">
-              <Button icon="pi pi-pencil" text rounded @click="editGroup(index)" />
-              <Button icon="pi pi-trash" severity="danger" text rounded @click="deleteGroup(index)" />
+              <Button text rounded @click="editGroup(index)"><i class="pi pi-pencil"></i></Button>
+              <Button severity="danger" text rounded @click="deleteGroup(index)"><i class="pi pi-trash"></i></Button>
             </div>
           </template>
         </Column>
@@ -90,7 +90,7 @@ function saveGroup() {
 
     <div class="flex flex-col gap-2">
       <label class="font-bold text-lg">{{ t('acl.group.members') }}</label>
-      <MultiSelect v-model="group.members" :options="props.groupNames" multiple fluid filter
+      <Select v-model="group.members" :options="props.groupNames" multiple fluid filter
         :placeholder="t('acl.group.members')" />
     </div>
 
@@ -103,12 +103,12 @@ function saveGroup() {
         </div>
         <div class="flex flex-col gap-2">
           <label class="font-bold">{{ t('acl.group.secret') }}</label>
-          <Password v-model="editingGroup.group_secret" :feedback="false" toggleMask fluid />
+          <InputPassword v-model="editingGroup.group_secret" :feedback="false" toggleMask fluid />
         </div>
       </div>
       <template #footer>
-        <Button :label="t('web.common.cancel')" icon="pi pi-times" @click="showGroupDialog = false" text />
-        <Button :label="t('web.common.save')" icon="pi pi-save" @click="saveGroup" />
+        <Button @click="showGroupDialog = false" text><i class="pi pi-times"></i><span>{{ t('web.common.cancel') }}</span></Button>
+        <Button @click="saveGroup"><i class="pi pi-save"></i><span>{{ t('web.common.save') }}</span></Button>
       </template>
     </Dialog>
   </div>

@@ -2,7 +2,7 @@
 import type { MenuItem } from 'primevue/menuitem'
 
 import type { Mode, WebClientConfig } from '~/composables/mode'
-import { I18nUtils, RemoteManagement, Utils } from '@exvlan/kit'
+import { I18nUtils, RemoteManagement, Utils } from '@exvlan/std'
 import { invoke } from '@tauri-apps/api/core'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { type } from '@tauri-apps/plugin-os'
@@ -449,8 +449,8 @@ const configServerConnectionStatus = computed(() => {
     <Dialog v-model:visible="modeDialogVisible" modal :header="t('mode.switch_mode')" :style="{ width: '50vw' }">
       <ModeSwitcher v-model="editingMode" @uninstall-service="onUninstallService" @stop-service="onStopService" />
       <template #footer>
-        <Button :label="t('web.common.cancel')" icon="pi pi-times" text @click="modeDialogVisible = false" />
-        <Button :label="t('web.common.save')" icon="pi pi-save" autofocus :loading="isModeSaving" @click="onModeSave" />
+        <Button text @click="modeDialogVisible = false"><i class="pi pi-times"></i><span>{{ t('web.common.cancel') }}</span></Button>
+        <Button :disabled="isModeSaving" autofocus @click="onModeSave"><i v-if="isModeSaving" class="pi pi-spin pi-spinner"></i><i class="pi pi-save"></i><span>{{ t('web.common.save') }}</span></Button>
       </template>
     </Dialog>
 
@@ -467,11 +467,8 @@ const configServerConnectionStatus = computed(() => {
         <small class="p-text-secondary whitespace-pre-wrap">{{ t('config-server.description') }}</small>
       </div>
       <template #footer>
-        <Button :label="t('web.common.cancel')" icon="pi pi-times" text @click="configServerDialogVisible = false" />
-        <Button
-          :label="t('web.common.save')" icon="pi pi-save" autofocus :loading="isModeSaving"
-          @click="onConfigServerSave"
-        />
+        <Button text @click="configServerDialogVisible = false"><i class="pi pi-times"></i><span>{{ t('web.common.cancel') }}</span></Button>
+        <Button :disabled="isModeSaving" autofocus @click="onConfigServerSave"><i v-if="isModeSaving" class="pi pi-spin pi-spinner"></i><i class="pi pi-save"></i><span>{{ t('web.common.save') }}</span></Button>
       </template>
     </Dialog>
 
@@ -486,10 +483,7 @@ const configServerConnectionStatus = computed(() => {
       <div class="text-xl text-center font-medium mb-3">
         {{ t('client.not_running') }}
       </div>
-      <Button
-        :loading="isModeSaving" :label="t('client.retry')" icon="pi pi-replay" icon-pos="left"
-        @click="reconnectClient"
-      />
+      <Button :disabled="isModeSaving" @click="reconnectClient"><i v-if="isModeSaving" class="pi pi-spin pi-spinner"></i><i class="pi pi-replay"></i><span>{{ t('client.retry') }}</span></Button>
     </div>
 
     <Menubar :model="setting_menu_items" breakpoint="795px">

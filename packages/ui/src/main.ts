@@ -1,12 +1,9 @@
 import { createApp } from 'vue'
-import '@exvlan/kit/style.css'
+import '@exvlan/std/style.css'
 import './style.css'
 import App from './App.vue'
-import ExvlanFrontendLib from '@exvlan/kit'
-import PrimeVue from 'primevue/config'
-import Aura from '@primeuix/themes/aura';
+import ExvlanFrontendLib from '@exvlan/std'
 import ConfirmationService from 'primevue/confirmationservice';
-import { I18nUtils } from '@exvlan/kit'
 
 import { createRouter, createWebHashHistory } from 'vue-router'
 import MainPage from './components/MainPage.vue'
@@ -81,21 +78,4 @@ const router = createRouter({
 
 const app = createApp(App)
 
-// Use i18n
-app.use(I18nUtils.i18n)
-
-app.use(PrimeVue,
-    {
-        theme: {
-            preset: Aura,
-            options: {
-                prefix: 'p',
-                darkModeSelector: 'system',
-                cssLayer: {
-                    name: 'primevue',
-                    order: 'tailwind-base, primevue, tailwind-utilities'
-                }
-            }
-        }
-    }
-).use(ToastService as any).use(DialogService as any).use(router).use(ConfirmationService as any).use(ExvlanFrontendLib).mount('#app')
+app.use(ToastService as any).use(DialogService as any).use(router).use(ConfirmationService as any).use(ExvlanFrontendLib).mount('#app')

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { I18nUtils } from '@exvlan/kit'
+import { I18nUtils } from '@exvlan/std'
 import { computed, onMounted, ref, onUnmounted, nextTick } from 'vue';
 import { Button, TieredMenu } from 'primevue';
 import { useRoute, useRouter } from 'vue-router';
@@ -108,8 +108,7 @@ onUnmounted(() => {
             <div class="flex items-center justify-between">
                 <div class="flex items-center justify-start rtl:justify-end">
                     <div class="sm:hidden">
-                        <Button ref="toggleButtonRef" type="button" aria-haspopup="true" icon="pi pi-list"
-                            variant="text" size="large" severity="contrast" @click="toggleSidebar" />
+                        <Button ref="toggleButtonRef" type="button" aria-haspopup="true" variant="text" size="large" severity="contrast" @click="toggleSidebar"><i class="pi pi-list"></i></Button>
                     </div>
                     <a href="https://xvlan.era-x.cn" class="flex ms-2 md:me-24">
                         <img :src="Icon" class="h-9 me-3" alt="FlowBite Logo" />
@@ -119,13 +118,12 @@ onUnmounted(() => {
                 </div>
                 <div class="flex items-center">
                     <div class="language-switch">
-                        <Button icon="pi pi-language" @click="I18nUtils.toggleLanguage" rounded severity="contrast" />
+                        <Button @click="I18nUtils.toggleLanguage" rounded severity="contrast"><i class="pi pi-language"></i></Button>
                     </div>
 
                     <div class="flex items-center ms-3">
                         <div>
-                            <Button type="button" @click="userMenu.toggle($event)" aria-haspopup="true"
-                                aria-controls="user-menu" icon="pi pi-user" raised rounded />
+                            <Button type="button" @click="userMenu.toggle($event)" aria-haspopup="true" aria-controls="user-menu" raised rounded><i class="pi pi-user"></i></Button>
                             <TieredMenu ref="userMenu" id="user-menu" :model="userMenuItems" popup />
                         </div>
                     </div>

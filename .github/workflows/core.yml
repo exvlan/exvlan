@@ -6,24 +6,26 @@ on:
       targets:
         description: 'Build targets: JSON array of target triples, or "all"'
         type: string
-        default: 'all'
+        default: "all"
   workflow_dispatch:
     inputs:
       targets:
         description: 'Build targets: JSON array of target triples, or "all"'
-        default: 'all'
+        default: "all"
 
 permissions:
   contents: read
   actions: write
 
 concurrency:
-  group: core-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: core-${{ github.workflow }}-${{ github.event.pull_request.number ||
+    github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
+  VITE_PRIMEUI_LICENSE: ${{ secrets.PRIMEUI_LICENSE }}
 
 defaults:
   run:
@@ -36,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     outputs:
-      should_skip: 'false'
+      should_skip: "false"
     steps:
       - run: echo "Skip disabled (pipeline chaining requires artifacts)"
   dashboard:
@@ -50,7 +52,7 @@ jobs:
       - name: Setup Frontend Environment
         uses: ./.github/actions/prepare-pnpm
         with:
-          build-filter: './packages/*'
+          build-filter: "./packages/*"
 
       - name: Archive artifact
         uses: actions/upload-artifact@v7
@@ -111,7 +113,7 @@ jobs:
       NAME: exvlan
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
-    needs: [ pre_job, dashboard, prepare_matrix ]
+    needs: [pre_job, dashboard, prepare_matrix]
     if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     steps:
       - uses: actions/checkout@v7
@@ -146,9 +148,9 @@ jobs:
           mise_toml: |
             [tools]
             zig = "0.16.0"
-          cache_key_prefix: 'mise-zig'
+          cache_key_prefix: "mise-zig"
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.11
         if: ${{ contains(matrix.OS, 'ubuntu') }}
         with:
           tool: cargo-zigbuild
@@ -160,7 +162,7 @@ jobs:
           SUFFIX=$([[ "$TARGET" == *windows* ]] && echo ".exe" || echo "")
           BUILD=$([[ "$TARGET" =~ (x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|windows|darwin) ]] && echo "build" || echo "zigbuild")
           FEATURES=$([[ "$TARGET" =~ ^(riscv64|loongarch64|aarch64).*$ || "$TARGET" =~ (freebsd|windows) ]] && echo "mimalloc" || echo "jemalloc")
-          
+
           cargo $BUILD --release --target $TARGET --package=exvlan-api --features=embed
           mv ./target/$TARGET/release/exvlan-api"$SUFFIX" ./target/$TARGET/release/exvlan-api-embed"$SUFFIX"
           cargo $BUILD --release --target $TARGET --features=$FEATURES
@@ -195,7 +197,7 @@ jobs:
           else
             TAG=$GITHUB_SHA
           fi
-          
+
           if [[ $OS =~ ^ubuntu.*$ && ! $TARGET =~ (loongarch|freebsd) ]]; then
             HOST_ARCH=$(uname -m)
             case $HOST_ARCH in
@@ -246,19 +248,19 @@ jobs:
   magisk:
     name: Build Magisk Module
     runs-on: ubuntu-latest
-    needs: [ pre_job, dashboard, build ]
+    needs: [pre_job, dashboard, build]
     # if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     if: false
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7  # 必须先检出代码才能获取模块配置
+        uses: actions/checkout@v7 # 必须先检出代码才能获取模块配置
 
       # 下载二进制文件到独立目录
       - name: Download Linux aarch64 binaries
         uses: actions/download-artifact@v8
         with:
           name: exvlan-linux-aarch64
-          path: ./downloaded-binaries/  # 独立目录避免冲突
+          path: ./downloaded-binaries/ # 独立目录避免冲突
 
       # 将二进制文件复制到 Magisk 模块目录
       - name: Prepare binaries

@@ -1,8 +1,8 @@
 name: Builder OHOS
 
 on:
-  workflow_call:
-  # push:
+  workflow_call: # push:
+
   #   branches: ["develop", "main", "releases/**"]
   #   tags:
   #     - 'v*'
@@ -79,17 +79,17 @@ jobs:
           CARGO_VERSION=$(cargo metadata --format-version 1 --no-deps --manifest-path exvlan/core/Cargo.toml | jq -r '.packages[0].version')
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           LAST_TAG_VERSION="${LAST_TAG#v}"
-          
+
           # 使用 sort -V 进行版本比较
           if [ "$(printf '%s\n%s' "$CARGO_VERSION" "$LAST_TAG_VERSION" | sort -V | tail -n1)" = "$CARGO_VERSION" ]; then
             BASE_VERSION="$CARGO_VERSION"
           else
             BASE_VERSION="$LAST_TAG_VERSION"
           fi
-          
+
           COMMIT_HASH=$(git rev-parse --short HEAD)
           EXVLAN_VERSION="${BASE_VERSION}-${COMMIT_HASH}"
-          
+
           echo "EXVLAN_VERSION=$EXVLAN_VERSION" >> $GITHUB_ENV
           cd ./exvlan/contrib/ohrs/package
           jq --arg v "$EXVLAN_VERSION" '.version = $v' oh-package.json5 > oh-package.tmp.json5 && mv oh-package.tmp.json5 oh-package.json5
@@ -111,7 +111,7 @@ jobs:
           rustup target add aarch64-unknown-linux-ohos
 
       - name: Install ohrs
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.11
         with:
           tool: ohrs
 
@@ -125,7 +125,7 @@ jobs:
           echo "#!/bin/sh" > $OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh
           echo "exec $OHOS_NDK_HOME/native/llvm/bin/clang -target aarch64-linux-ohos --sysroot=$OHOS_NDK_HOME/native/sysroot -D__MUSL__ \"\$@\"" >> $OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh
           chmod +x $OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh
-          
+
           ohrs build --release --arch aarch
           ohrs artifact
           mv package.har exvlan-ohrs.har
@@ -175,7 +175,7 @@ jobs:
           PASSPHRASE="$(printf '%s' "$OHPM_KEY_PASSPHRASE" | tr -d '\r\n')"
           ohpm config set key_passphrase "$PASSPHRASE"
           ohpm publish exvlan-ohrs.har
-          
+
       - name: Publish To Private Ohpm
         working-directory: ./exvlan/contrib/ohrs
         if: ${{ env.OHPM_PUBLISH_CODE != '' && github.event_name == 'push' }}
@@ -188,4 +188,3 @@ jobs:
              ohpm publish exvlan-release.har
           fi
           curl --header "Content-Type: application/json" --request POST --data "{}" ${{ secrets.CODEARTS_WEBHOOKS }}
-

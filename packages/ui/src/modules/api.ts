@@ -1,5 +1,5 @@
 import axios, { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
-import { type Api, NetworkTypes, Utils } from '@exvlan/kit';
+import { type Api, NetworkTypes, Utils } from '@exvlan/std';
 import { Md5 } from 'ts-md5';
 
 export interface ValidateConfigResponse {

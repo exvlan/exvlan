@@ -5,7 +5,7 @@ import { NetworkInstance, type TunnelInfo, type NodeInfo, type PeerRoutePair } f
 import { useI18n } from 'vue-i18n';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { ipv4InetToString, ipv4ToString, ipv6ToString } from '../modules/utils';
-import { Badge, DataTable, Column, Tag, Chip, Button, Dialog, ScrollPanel, Timeline, Divider, Card, } from 'primevue';
+import { Badge, DataTable, Column, Tag, Chip, Button, Dialog, ScrollArea, Timeline, Divider, Card, } from 'primevue';
 import NetworkChart from './NetworkChart.vue';
 
 const props = defineProps<{
@@ -352,9 +352,9 @@ function showEventLogs() {
   <div class="frontend-lib">
     <Dialog v-model:visible="dialogVisible" modal :header="t(dialogHeader)" class="w-full h-auto max-h-full"
       :baseZIndex="2000">
-      <ScrollPanel v-if="dialogHeader === 'vpn_portal_config'">
+      <ScrollArea v-if="dialogHeader === 'vpn_portal_config'">
         <pre>{{ dialogContent }}</pre>
-      </ScrollPanel>
+      </ScrollArea>
       <Timeline v-else :value="dialogContent">
         <template #opposite="slotProps">
           <small class="text-surface-500 dark:text-surface-400">{{ useTimeAgo(Date.parse(slotProps.item.time))
@@ -395,10 +395,7 @@ function showEventLogs() {
 
             <!-- 展开/收起节点详细信息的divider按钮 -->
             <div class="w-full">
-              <Button @click="showNodeDetails = !showNodeDetails"
-                :icon="showNodeDetails ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
-                :label="showNodeDetails ? t('hide_node_details') : t('show_node_details')" severity="secondary" outlined
-                class="w-full justify-center" size="small" />
+              <Button @click="showNodeDetails = !showNodeDetails" severity="secondary" outlined class="w-full justify-center" size="small"><i :class="showNodeDetails ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"></i><span>{{ showNodeDetails ? t('hide_node_details') : t('show_node_details') }}</span></Button>
             </div>
 
             <!-- 节点详细信息chips，根据showNodeDetails状态显示/隐藏 -->
@@ -408,8 +405,8 @@ function showEventLogs() {
             </div>
 
             <div v-if="myNodeInfo" class="m-0 flex flex-row justify-center gap-x-5 text-sm">
-              <Button severity="info" :label="t('show_vpn_portal_config')" @click="showVpnPortalConfig" />
-              <Button severity="info" :label="t('show_event_log')" @click="showEventLogs" />
+              <Button severity="info" @click="showVpnPortalConfig"><span>{{ t('show_vpn_portal_config') }}</span></Button>
+              <Button severity="info" @click="showEventLogs"><span>{{ t('show_event_log') }}</span></Button>
             </div>
           </div>
         </template>

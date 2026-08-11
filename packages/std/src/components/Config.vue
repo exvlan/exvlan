@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, InputText, Panel, Password, SelectButton, ToggleButton } from 'primevue'
+import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, InputText, Panel, InputPassword, SelectButton, ToggleButton } from 'primevue'
 import InputGroup from 'primevue/inputgroup'
 import InputGroupAddon from 'primevue/inputgroupaddon'
 import {
@@ -199,7 +199,7 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                 </div>
                 <div class="flex flex-col gap-2 basis-5/12 grow">
                   <label for="network_secret">{{ t('network_secret') }}</label>
-                  <Password id="network_secret" v-model="curNetwork.network_secret"
+                  <InputPassword id="network_secret" v-model="curNetwork.network_secret"
                     aria-describedby="network_secret-help" toggleMask :feedback="false" />
                 </div>
               </div>
@@ -436,8 +436,7 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                         </InputGroup>
                       </div>
                       <div style="grow: 1;">
-                        <Button v-if="curNetwork.port_forwards.length > 0" icon="pi pi-trash" severity="danger" text
-                          rounded @click="removeRow(index, curNetwork.port_forwards)" />
+                        <Button v-if="curNetwork.port_forwards.length > 0" severity="danger" text rounded @click="removeRow(index, curNetwork.port_forwards)"><i class="pi pi-trash"></i></Button>
                       </div>
                     </div>
                     <!-- Small screen view -->
@@ -445,16 +444,14 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                       <span>{{ row.proto }}://{{ row.bind_ip }}:{{ row.bind_port }}/{{ row.dst_ip }}:{{
                         row.dst_port }}</span>
                       <div class="flex gap-2">
-                        <Button icon="pi pi-pencil" class="p-button-sm" @click="openPortForwardEditor(index)" />
-                        <Button icon="pi pi-trash" class="p-button-sm p-button-danger"
-                          @click="removeRow(index, curNetwork.port_forwards)" />
+                        <Button class="p-button-sm" @click="openPortForwardEditor(index)"><i class="pi pi-pencil"></i></Button>
+                        <Button class="p-button-sm p-button-danger" @click="removeRow(index, curNetwork.port_forwards)"><i class="pi pi-trash"></i></Button>
                       </div>
                     </div>
                   </div>
 
                   <div class="flex justify-content-end mt-4">
-                    <Button icon="pi pi-plus" :label="t('port_forwards_add_btn')" severity="success"
-                      @click="addPortForward" />
+                    <Button severity="success" @click="addPortForward"><i class="pi pi-plus"></i><span>{{ t('port_forwards_add_btn') }}</span></Button>
                   </div>
 
                   <Dialog v-model:visible="editingPortForward" modal :header="t('edit_port_forward')"
@@ -481,9 +478,8 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                       </InputGroup>
                     </div>
                     <template #footer>
-                      <Button :label="t('web.common.cancel')" icon="pi pi-times" @click="editingPortForward = false"
-                        text />
-                      <Button :label="t('web.common.save')" icon="pi pi-save" @click="savePortForward" />
+                      <Button @click="editingPortForward = false" text><i class="pi pi-times"></i><span>{{ t('web.common.cancel') }}</span></Button>
+                      <Button @click="savePortForward"><i class="pi pi-save"></i><span>{{ t('web.common.save') }}</span></Button>
                     </template>
                   </Dialog>
                 </div>
@@ -498,14 +494,12 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
               <AclManager v-model="curNetwork.acl" />
             </div>
             <div v-else class="flex justify-center p-4">
-              <Button :label="t('acl.enabled')"
-                @click="curNetwork.acl = { acl_v1: { chains: [], group: { declares: [], members: [] } } }" />
+              <Button @click="curNetwork.acl = { acl_v1: { chains: [], group: { declares: [], members: [] } } }"><span>{{ t('acl.enabled') }}</span></Button>
             </div>
           </Panel>
 
           <div class="flex pt-6 justify-center">
-            <Button :label="t('run_network')" icon="pi pi-arrow-right" icon-pos="right" :disabled="configInvalid"
-              @click="$emit('runNetwork', curNetwork)" />
+            <Button :disabled="configInvalid" @click="$emit('runNetwork', curNetwork)"><span>{{ t('run_network') }}</span><i class="pi pi-arrow-right"></i></Button>
           </div>
         </div>
       </div>

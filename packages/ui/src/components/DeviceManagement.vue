@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NetworkTypes, Utils, Api, RemoteManagement } from '@exvlan/kit';
+import { NetworkTypes, Utils, Api, RemoteManagement } from '@exvlan/std';
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ApiClient from '../modules/api';

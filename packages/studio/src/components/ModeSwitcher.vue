@@ -223,14 +223,8 @@ watch(() => model.value.mode, async (newMode, oldMode) => {
           <span :class="statusColorClass">{{ t(`mode.service_status_${serviceStatus.toLowerCase()}`) }}</span>
         </div>
         <div class="flex items-center gap-2">
-          <Button
-            v-if="serviceStatus === 'Running'" :label="t('mode.stop_service')" icon="pi pi-stop-circle"
-            severity="warn" text @click="emit('stop-service')"
-          />
-          <Button
-            v-if="serviceStatus !== 'NotInstalled'" :label="t('mode.uninstall_service')" icon="pi pi-trash"
-            severity="danger" text @click="emit('uninstall-service')"
-          />
+          <Button v-if="serviceStatus === 'Running'" severity="warn" text @click="emit('stop-service')"><i class="pi pi-stop-circle"></i><span>{{ t('mode.stop_service') }}</span></Button>
+          <Button v-if="serviceStatus !== 'NotInstalled'" severity="danger" text @click="emit('uninstall-service')"><i class="pi pi-trash"></i><span>{{ t('mode.uninstall_service') }}</span></Button>
         </div>
       </div>
     </div>

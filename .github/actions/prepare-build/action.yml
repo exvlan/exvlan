@@ -3,25 +3,25 @@ author: Luna
 description: Prepare build environment
 inputs:
   target:
-    description: 'The target to build for'
+    description: "The target to build for"
     required: false
   pnpm:
-    description: 'Whether to run pnpm build'
+    description: "Whether to run pnpm build"
     required: true
-    default: 'true'
+    default: "true"
   pnpm-build-filter:
-    description: 'The filter argument for pnpm build (e.g. ./packages/*)'
+    description: "The filter argument for pnpm build (e.g. ./packages/*)"
     required: false
-    default: './packages/*'
+    default: "./packages/*"
   gui:
-    description: 'Whether to prepare the GUI build environment'
+    description: "Whether to prepare the GUI build environment"
     required: true
-    default: 'true'
+    default: "true"
   token:
-    description: 'GitHub token, used by setup-protoc action'
+    description: "GitHub token, used by setup-protoc action"
     required: false
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - run: mkdir -p exvlan-studio/dist
       shell: bash
@@ -55,9 +55,10 @@ runs:
       with:
         toolchain: 1.95
         target: ${{ !contains(inputs.target, 'mips') && inputs.target || '' }}
-        components: ${{ contains(inputs.target, 'mips') && 'rust-src' || 'rustfmt, clippy' }}
+        components: ${{ contains(inputs.target, 'mips') && 'rust-src' || 'rustfmt,
+          clippy' }}
         cache: false
-        rustflags: ''
+        rustflags: ""
 
     - name: Install Rust (MIPS)
       if: ${{ contains(inputs.target, 'mips') }}
@@ -80,7 +81,7 @@ runs:
       shell: bash
 
     - name: Setup protoc
-      uses: taiki-e/install-action@v2
+      uses: taiki-e/install-action@v2.85.11
       with:
         tool: protoc
       env:

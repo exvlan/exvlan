@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { I18nUtils } from '@exvlan/kit'
+import { I18nUtils } from '@exvlan/std'
 import { onMounted } from 'vue';
 import { Toast, DynamicDialog } from 'primevue';
 

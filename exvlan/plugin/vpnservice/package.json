@@ -1,36 +1,37 @@
 {
   "name": "@exvlan/ipc",
   "version": "26.308.20604",
+  "description": "",
   "author": {
     "name": "@长久同学 ",
     "email": "cloud@era-x.cn",
     "url": "https://github.com/exvlan"
   },
-  "description": "",
+  "files": [
+    "dist-js",
+    "README.md"
+  ],
   "type": "module",
-  "types": "./dist-js/index.d.ts",
   "main": "./dist-js/index.cjs",
   "module": "./dist-js/index.js",
+  "types": "./dist-js/index.d.ts",
   "exports": {
     "types": "./dist-js/index.d.ts",
     "import": "./dist-js/index.js",
     "require": "./dist-js/index.cjs"
   },
-  "files": [
-    "dist-js",
-    "README.md"
-  ],
   "scripts": {
-    "build": "tsdown",
+    "build": "vp pack",
     "build:rollup": "rollup -c",
     "prepublishOnly": "pnpm build",
     "pretest": "pnpm build"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.0"
+    "@tauri-apps/api": "^2.11.1"
   },
   "devDependencies": {
-    "tsdown": "^0.22.3",
-    "typescript": "^6.0.3"
+    "typescript": "6.0.3",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   }
 }
