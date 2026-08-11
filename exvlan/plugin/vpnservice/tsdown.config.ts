@@ -1,4 +1,4 @@
-import { defineConfig } from 'tsdown';
+import { defineConfig } from 'vite-plus/pack';
 import pkg from './package.json' with { type: 'json' };
 
 export default defineConfig({

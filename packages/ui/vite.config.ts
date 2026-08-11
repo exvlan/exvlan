@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, lazyPlugins } from 'vite-plus'
 import vue from '@vitejs/plugin-vue'
 import ViteYaml from '@modyfi/vite-plugin-yaml'
 // import { viteSingleFile } from "vite-plugin-singlefile"
@@ -9,7 +9,7 @@ const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:11211';
 // https://vite.dev/config/
 export default defineConfig({
   base: WEB_BASE_URL,
-  plugins: [vue(), ViteYaml(),/* viteSingleFile() */, tailwindcss()],
+  plugins: lazyPlugins(() => [vue(), ViteYaml(),/* viteSingleFile() */, tailwindcss()]),
   server: {
     proxy: {
       "/api": {
