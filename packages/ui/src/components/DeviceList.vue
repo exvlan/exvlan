@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button, Drawer, ProgressSpinner, useToast, InputSwitch, Popover, Dropdown, Toolbar } from 'primevue';
+import { Button, Drawer, ProgressSpinner, useToast, ToggleSwitch, Popover, Select, Toolbar } from 'primevue';
 import Tooltip from 'primevue/tooltip';
 import { useRoute, useRouter } from 'vue-router';
-import { Utils } from '@exvlan/kit';
+import { Utils } from '@exvlan/std';
 import DeviceDetails from './DeviceDetails.vue';
 import { useI18n } from 'vue-i18n'
 import ApiClient from '../modules/api';
@@ -703,8 +703,8 @@ const handleResize = () => {
             <template #start>
                 <div class="flex items-center gap-2">
                     <label for="sort-by" class="text-sm text-500 hidden sm:block">{{ t('web.device.sort_by') }}：</label>
-                    <Dropdown id="sort-by" v-model="selectedSortOption" :options="sortOptions" optionLabel="name"
-                        class="sort-dropdown text-sm min-w-[120px]! sm:min-w-[140px]!" panelClass="text-sm">
+                    <Select id="sort-by" v-model="selectedSortOption" :options="sortOptions" optionLabel="name"
+                        class="sort-dropdown text-sm min-w-[120px]! sm:min-w-[140px]!" overlayClass="text-sm">
                         <template #value="slotProps">
                             <div class="flex items-center gap-2">
                                 <i :class="[slotProps.value.icon, 'text-600']"></i>
@@ -717,11 +717,8 @@ const handleResize = () => {
                                 <span>{{ slotProps.option.name() }}</span>
                             </div>
                         </template>
-                    </Dropdown>
-                    <Button :icon="ascending ? 'pi pi-sort-amount-up' : 'pi pi-sort-amount-down'" severity="secondary"
-                        text rounded class="sort-direction-btn min-w-10 h-10"
-                        v-tooltip.top="ascending ? t('web.device.sort_direction_asc') : t('web.device.sort_direction_desc')"
-                        @click="toggleSortDirection" />
+                    </Select>
+                    <Button severity="secondary" text rounded class="sort-direction-btn min-w-10 h-10" v-tooltip.top="ascending ? t('web.device.sort_direction_asc') : t('web.device.sort_direction_desc')" @click="toggleSortDirection"><i :class="ascending ? 'pi pi-sort-amount-up' : 'pi pi-sort-amount-down'"></i></Button>
                 </div>
             </template>
             <template #end>
@@ -730,7 +727,7 @@ const handleResize = () => {
                     <div class="flex items-center gap-2">
                         <label for="detailed-view" class="text-sm text-500 hidden sm:block">{{
                             t('web.device.show_detailed_view') }}</label>
-                        <InputSwitch id="detailed-view" v-model="showDetailedView" />
+                        <ToggleSwitch id="detailed-view" v-model="showDetailedView" />
                     </div>
                 </div>
             </template>
@@ -786,19 +783,16 @@ const handleResize = () => {
                             <!-- 操作按钮组 -->
                             <div class="flex items-center space-x-2">
                                 <!-- 网络数量徽章 -->
-                                <span v-tooltip="t('web.device.network_count')"
+                                <span v-tooltip="t('web.device.networks')"
                                     class="inline-flex items-center justify-center w-6 h-6 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">
                                     {{ device.running_network_count }}
                                 </span>
 
                                 <!-- 详情按钮 -->
-                                <Button v-tooltip="t('web.device.show_detailed_view')" icon="pi pi-info-circle"
-                                    severity="info" text rounded class="w-9 h-9" v-if="!showDetailedView"
-                                    @click="showDeviceDetails(device, $event)" />
+                                <Button v-tooltip="t('web.device.show_detailed_view')" severity="info" text rounded class="w-9 h-9" v-if="!showDetailedView" @click="showDeviceDetails(device, $event)"><i class="pi pi-info-circle"></i></Button>
 
                                 <!-- 设置按钮 -->
-                                <Button icon="pi pi-cog" @click="handleDeviceManagement(device)" severity="secondary"
-                                    rounded class="w-9 h-9" :title="`Manage ${device.hostname}`" />
+                                <Button @click="handleDeviceManagement(device)" severity="secondary" rounded class="w-9 h-9" :title="`Manage ${device.hostname}`"><i class="pi pi-cog"></i></Button>
                             </div>
                         </div>
                     </div>
@@ -833,9 +827,7 @@ const handleResize = () => {
                     <RouterView v-slot="{ Component }">
                         <component :is="Component" :api="api" :deviceList="deviceList" @update="loadDevices" />
                     </RouterView>
-                    <Button icon="pi pi-times" rounded severity="danger"
-                        class="fixed z-50 right-6 bottom-6 shadow-lg drawer-fab-close-btn"
-                        style="width: 3.2rem; height: 3.2rem; font-size: 1.5rem;" @click="closeCallback" />
+                    <Button rounded severity="danger" class="fixed z-50 right-6 bottom-6 shadow-lg drawer-fab-close-btn" style="width: 3.2rem; height: 3.2rem; font-size: 1.5rem;" @click="closeCallback"><i class="pi pi-times"></i></Button>
                 </div>
             </template>
         </Drawer>
