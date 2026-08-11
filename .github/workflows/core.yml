@@ -18,7 +18,8 @@ permissions:
   actions: write
 
 concurrency:
-  group: core-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: core-${{ github.workflow }}-${{ github.event.pull_request.number ||
+    github.ref }}
   cancel-in-progress: true
 
 env:
@@ -148,7 +149,7 @@ jobs:
             zig = "0.16.0"
           cache_key_prefix: 'mise-zig'
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.11
         if: ${{ contains(matrix.OS, 'ubuntu') }}
         with:
           tool: cargo-zigbuild
@@ -160,7 +161,7 @@ jobs:
           SUFFIX=$([[ "$TARGET" == *windows* ]] && echo ".exe" || echo "")
           BUILD=$([[ "$TARGET" =~ (x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|windows|darwin) ]] && echo "build" || echo "zigbuild")
           FEATURES=$([[ "$TARGET" =~ ^(riscv64|loongarch64|aarch64).*$ || "$TARGET" =~ (freebsd|windows) ]] && echo "mimalloc" || echo "jemalloc")
-          
+
           cargo $BUILD --release --target $TARGET --package=exvlan-api --features=embed
           mv ./target/$TARGET/release/exvlan-api"$SUFFIX" ./target/$TARGET/release/exvlan-api-embed"$SUFFIX"
           cargo $BUILD --release --target $TARGET --features=$FEATURES
@@ -195,7 +196,7 @@ jobs:
           else
             TAG=$GITHUB_SHA
           fi
-          
+
           if [[ $OS =~ ^ubuntu.*$ && ! $TARGET =~ (loongarch|freebsd) ]]; then
             HOST_ARCH=$(uname -m)
             case $HOST_ARCH in
@@ -251,14 +252,14 @@ jobs:
     if: false
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7  # 必须先检出代码才能获取模块配置
+        uses: actions/checkout@v7 # 必须先检出代码才能获取模块配置
 
       # 下载二进制文件到独立目录
       - name: Download Linux aarch64 binaries
         uses: actions/download-artifact@v8
         with:
           name: exvlan-linux-aarch64
-          path: ./downloaded-binaries/  # 独立目录避免冲突
+          path: ./downloaded-binaries/ # 独立目录避免冲突
 
       # 将二进制文件复制到 Magisk 模块目录
       - name: Prepare binaries

@@ -3,17 +3,17 @@ name: EXVlan Test
 on:
   workflow_call:
   workflow_dispatch:
-  # push:
-  #   branches: [ "develop", "feature", "main", "feature/*", "releases/**" ]
-  #   paths: &path_filter
-  #     - "Cargo.toml"
-  #     - "Cargo.lock"
-  #     - "exvlan/core/**"
-  #     - ".github/workflows/test.yml"
-  #     - ".github/actions/**"
-  # pull_request:
-  #   branches: [ "develop", "main" ]
-  #   paths: *path_filter
+    # push:
+    #   branches: [ "develop", "feature", "main", "feature/*", "releases/**" ]
+    #   paths: &path_filter
+    #     - "Cargo.toml"
+    #     - "Cargo.lock"
+    #     - "exvlan/core/**"
+    #     - ".github/workflows/test.yml"
+    #     - ".github/actions/**"
+    # pull_request:
+    #   branches: [ "develop", "main" ]
+    #   paths: *path_filter
 
 permissions:
   contents: read
@@ -62,7 +62,7 @@ jobs:
           cache-targets: true
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.11
         with:
           tool: cargo-hack
 
@@ -73,7 +73,8 @@ jobs:
         run: cargo clippy --all-targets --features full --all -- -D warnings
 
       - name: Check features
-        run: cargo hack check --package exvlan --each-feature --exclude-features macos-ne --verbose
+        run: cargo hack check --package exvlan --each-feature --exclude-features
+          macos-ne --verbose
 
       - name: Check Cargo.lock is up to date
         run: |
@@ -81,7 +82,7 @@ jobs:
             echo "::error::Cargo.lock is out of date. Run cargo generate-lockfile or cargo build locally, then commit Cargo.lock."
             exit 1
           fi
-          
+
   pre-test:
     name: Build test
     runs-on: ubuntu-latest
@@ -104,7 +105,8 @@ jobs:
           tool: nextest
 
       - name: Archive test
-        run: cargo nextest archive --archive-file tests.tar.zst --package exvlan --features full
+        run: cargo nextest archive --archive-file tests.tar.zst --package exvlan
+          --features full
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
@@ -124,7 +126,8 @@ jobs:
           - name: "exvlan"
             opts: "-E 'not test(tests::three_node)' --test-threads 1 --no-fail-fast"
           - name: "three_node"
-            opts: "-E 'test(tests::three_node) and not test(subnet_proxy_three_node_test)' --test-threads 1 --no-fail-fast"
+            opts: "-E 'test(tests::three_node) and not test(subnet_proxy_three_node_test)'
+              --test-threads 1 --no-fail-fast"
           - name: "three_node::subnet_proxy_three_node_test"
             opts: "-E 'test(subnet_proxy_three_node_test)' --test-threads 1 --no-fail-fast"
     steps:
@@ -160,7 +163,7 @@ jobs:
           sudo sysctl net.ipv6.conf.lo.disable_ipv6=0
           sudo ip addr add 2001:db8::2/64 dev lo
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.11
         with:
           tool: nextest
       - name: Download tests

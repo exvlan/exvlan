@@ -55,7 +55,8 @@ runs:
       with:
         toolchain: 1.95
         target: ${{ !contains(inputs.target, 'mips') && inputs.target || '' }}
-        components: ${{ contains(inputs.target, 'mips') && 'rust-src' || 'rustfmt, clippy' }}
+        components: ${{ contains(inputs.target, 'mips') && 'rust-src' || 'rustfmt,
+          clippy' }}
         cache: false
         rustflags: ''
 
@@ -80,7 +81,7 @@ runs:
       shell: bash
 
     - name: Setup protoc
-      uses: taiki-e/install-action@v2
+      uses: taiki-e/install-action@v2.85.11
       with:
         tool: protoc
       env:
