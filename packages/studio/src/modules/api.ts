@@ -1,4 +1,4 @@
-import type { Api, NetworkTypes } from '@exvlan/kit'
+import type { Api, NetworkTypes } from '@exvlan/std'
 import * as backend from '~/composables/backend'
 
 export class GUIRemoteClient implements Api.RemoteClient {

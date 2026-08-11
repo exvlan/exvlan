@@ -25,7 +25,7 @@ const removeUrl = (index: number) => {
         <div v-for="(_, index) in list" :key="index" class="flex gap-2 items-center w-full">
             <UrlInput v-model="list[index]" :protos="protos" :placeholder="placeholder">
                 <template #actions>
-                    <Button icon="pi pi-trash" severity="danger" text rounded @click="removeUrl(index)" />
+                    <Button severity="danger" text rounded @click="removeUrl(index)"><i class="pi pi-trash"></i></Button>
                 </template>
             </UrlInput>
         </div>

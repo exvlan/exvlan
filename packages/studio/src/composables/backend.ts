@@ -1,5 +1,5 @@
-import type { Api } from '@exvlan/kit'
-import { NetworkTypes } from '@exvlan/kit'
+import type { Api } from '@exvlan/std'
+import { NetworkTypes } from '@exvlan/std'
 import { invoke } from '@tauri-apps/api/core'
 
 type NetworkConfig = NetworkTypes.NetworkConfig

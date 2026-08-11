@@ -96,15 +96,13 @@ const tabs = computed(() => {
           <Tab v-for="tab in tabs" :key="tab.type + tab.index" :value="tab.index">
             <div class="flex items-center gap-2 whitespace-nowrap">
               {{ tab.label }}
-              <Button v-if="tab.type === 'chain'" icon="pi pi-times" severity="danger" text rounded size="small"
-                class="w-6 h-6 p-0" @click.stop="removeChain(tab.index)" />
+              <Button v-if="tab.type === 'chain'" severity="danger" text rounded size="small" class="w-6 h-6 p-0" @click.stop="removeChain(tab.index)"><i class="pi pi-times"></i></Button>
             </div>
           </Tab>
         </TabList>
         <div
           class="flex-shrink-0 flex items-center px-2 bg-white dark:bg-gray-900 border-l border-surface-100 dark:border-surface-800">
-          <Button icon="pi pi-plus" text rounded size="small" class="w-8 h-8 p-0"
-            @click="(event) => menu.toggle(event)" />
+          <Button text rounded size="small" class="w-8 h-8 p-0" @click="(event) => menu.toggle(event)"><i class="pi pi-plus"></i></Button>
           <Menu ref="menu" :model="addMenuModel" :popup="true" />
         </div>
       </div>
@@ -117,9 +115,9 @@ const tabs = computed(() => {
             <div class="text-xl font-bold mb-2">{{ t('acl.chains') }}</div>
             <p class="text-surface-500 mb-8 text-center max-w-sm px-4">{{ t('acl.help') }}</p>
             <div class="flex flex-wrap gap-3 justify-center">
-              <Button :label="t('acl.inbound')" icon="pi pi-arrow-down-left" @click="addChain(AclChainType.Inbound)" />
-              <Button :label="t('acl.outbound')" icon="pi pi-arrow-up-right" @click="addChain(AclChainType.Outbound)" />
-              <Button :label="t('acl.forward')" icon="pi pi-directions" @click="addChain(AclChainType.Forward)" />
+              <Button @click="addChain(AclChainType.Inbound)"><i class="pi pi-arrow-down-left"></i><span>{{ t('acl.inbound') }}</span></Button>
+              <Button @click="addChain(AclChainType.Outbound)"><i class="pi pi-arrow-up-right"></i><span>{{ t('acl.outbound') }}</span></Button>
+              <Button @click="addChain(AclChainType.Forward)"><i class="pi pi-directions"></i><span>{{ t('acl.forward') }}</span></Button>
             </div>
           </div>
 
@@ -134,13 +132,11 @@ const tabs = computed(() => {
               <AclGroupEditor v-if="acl.acl_v1.group" v-model="acl.acl_v1.group" :group-names="groupNames"
                 @rename-group="handleRenameGroup" />
               <div v-else class="flex justify-center p-4">
-                <Button :label="t('web.common.add') + ' ' + t('acl.groups')"
-                  @click="acl.acl_v1.group = { declares: [], members: [] }" />
+                <Button @click="acl.acl_v1.group = { declares: [], members: [] }"><span>{{ t('web.common.add') + ' ' + t('acl.groups') }}</span></Button>
               </div>
             </template>
             <div v-else class="flex justify-center p-4">
-              <Button :label="t('acl.enabled')"
-                @click="acl.acl_v1 = { chains: [], group: { declares: [], members: [] } }" />
+              <Button @click="acl.acl_v1 = { chains: [], group: { declares: [], members: [] } }"><span>{{ t('acl.enabled') }}</span></Button>
             </div>
           </div>
         </TabPanel>

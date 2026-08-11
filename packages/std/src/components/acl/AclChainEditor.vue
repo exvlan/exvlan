@@ -140,7 +140,7 @@ function onRowReorder(event: any) {
 
     <div class="flex flex-row items-center gap-4 justify-between">
       <h4 class="text-md font-bold">{{ t('acl.rules') }}</h4>
-      <Button icon="pi pi-plus" :label="t('acl.add_rule')" severity="success" size="small" @click="addRule" />
+      <Button severity="success" size="small" @click="addRule"><i class="pi pi-plus"></i><span>{{ t('acl.add_rule') }}</span></Button>
     </div>
 
     <DataTable :value="chain.rules" @row-reorder="onRowReorder" responsiveLayout="scroll">
@@ -205,8 +205,8 @@ function onRowReorder(event: any) {
       <Column :header="t('web.common.edit')">
         <template #body="{ index }">
           <div class="flex gap-2">
-            <Button icon="pi pi-pencil" text rounded @click="editRule(index)" />
-            <Button icon="pi pi-trash" severity="danger" text rounded @click="deleteRule(index)" />
+            <Button text rounded @click="editRule(index)"><i class="pi pi-pencil"></i></Button>
+            <Button severity="danger" text rounded @click="deleteRule(index)"><i class="pi pi-trash"></i></Button>
           </div>
         </template>
       </Column>

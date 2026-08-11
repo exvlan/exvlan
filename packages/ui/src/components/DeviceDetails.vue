@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Utils } from '@exvlan/kit';
+import { Utils } from '@exvlan/std';
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()

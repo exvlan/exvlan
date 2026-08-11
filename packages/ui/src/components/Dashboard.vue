@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Card, useToast } from 'primevue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { Utils } from '@exvlan/kit';
+import { Utils } from '@exvlan/std';
 import ApiClient, { Summary } from '../modules/api';
 
 const props = defineProps({
