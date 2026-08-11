@@ -124,7 +124,8 @@ jobs:
 
           if [[ "${{ inputs.is_alpha }}" == "true" ]]; then
             TAGS="${TAGS},${BASE_IMAGE}:alpha"
-          elif [[ "${{ inputs.mark_latest }}" == "true" ]]; then
+          elif [[ "${{ inputs.mark_latest }}" == "true" && "${{ github.ref_type }}" == "tag" ]]; then
+            # latest 仅 tag release 发版时打
             TAGS="${TAGS},${BASE_IMAGE}:latest"
           fi
 
@@ -132,10 +133,17 @@ jobs:
             TAGS="${TAGS},${BASE_IMAGE}:unstable"
           fi
 
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            # tag 推送追加版本标签（如 v26.308.20604）
+            TAGS="${TAGS},${BASE_IMAGE}:${{ github.ref_name }}"
+          fi
+
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "Generated tags: ${TAGS}"
+          # registry 镜像（exvlan-api-embed）固定标签
+          echo "registry_tag=${BASE_IMAGE}:registry" >> $GITHUB_OUTPUT
 
-      - name: Build and push
+      - name: Build and push (exvlan)
         uses: docker/build-push-action@v7
         with:
           context: ./docker_context
@@ -144,6 +152,21 @@ jobs:
           platforms: linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64
           push: true
           file: .github/workflows/Dockerfile
+          target: exvlan
           tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build and push (registry)
+        uses: docker/build-push-action@v7
+        with:
+          context: ./docker_context
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64
+          push: true
+          file: .github/workflows/Dockerfile
+          target: registry
+          tags: ${{ steps.tags.outputs.registry_tag }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
