@@ -54,7 +54,8 @@ permissions:
 
 jobs:
   docker:
-    if: contains(fromJSON('["era-cloud", "exvlan", "littlezo"]'), github.actor)
+    # TODO: 临时跳过 exvlan/exvlan（私有 ghcr 包访问 403，镜像保持 private）；授权后移除
+    if: github.repository != 'exvlan/exvlan' && contains(fromJSON('["era-cloud", "exvlan", "littlezo"]'), github.actor)
     name: Build Docker Image
     runs-on: ubuntu-latest
     steps:
