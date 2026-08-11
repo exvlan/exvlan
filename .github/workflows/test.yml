@@ -25,6 +25,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  VITE_PRIMEUI_LICENSE: ${{ secrets.PRIMEUI_LICENSE }}
 
 defaults:
   run:
