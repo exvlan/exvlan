@@ -1,0 +1,70 @@
+diff --git a/basecomponent/index.mjs b/basecomponent/index.mjs
+index 2199c452dc611287bb8f0f2ff02699d15b07de7e..6decbc3c79414b1c1e807e247478237c1aa7f832 100644
+--- a/basecomponent/index.mjs
++++ b/basecomponent/index.mjs
+@@ -2,7 +2,6 @@ import { ThemeService, Theme } from '@primeuix/styled';
+ import { resolve, isString, isArray, isNotEmpty, toFlatCase, getKeyValue, isFunction } from '@primeuix/utils/object';
+ import Base from '@primevue/core/base';
+ import BaseStyle from '@primevue/core/base/style';
+-import { showInvalidLicenseBanner } from '@primevue/core/license/licenseBanner';
+ import { useAttrSelector } from '@primevue/core/useattrselector';
+ import { mergeProps } from 'vue';
+ 
+@@ -101,11 +100,7 @@ var script = {
+     this._hook('onBeforeMount');
+   },
+   mounted: function mounted() {
+-    var _this$$primevue$verif;
+     this._hook('onMounted');
+-    if (!this.$primevue || ((_this$$primevue$verif = this.$primevue.verified) === null || _this$$primevue$verif === void 0 ? void 0 : _this$$primevue$verif.value) === false) {
+-      showInvalidLicenseBanner();
+-    }
+   },
+   beforeUpdate: function beforeUpdate() {
+     this._hook('onBeforeUpdate');
+diff --git a/config/index.mjs b/config/index.mjs
+index 675aa5bb1e1b91a261bbcd3aca3a3d4334c21df4..554b950409e0ba3d2235fc4732070b39f0389349 100644
+--- a/config/index.mjs
++++ b/config/index.mjs
+@@ -3,7 +3,6 @@ import { ThemeService, Theme } from '@primeuix/styled';
+ import { mergeKeys } from '@primeuix/utils';
+ import { FilterMatchMode } from '@primevue/core/api';
+ import BaseStyle from '@primevue/core/base/style';
+-import { showInvalidLicenseBanner } from '@primevue/core/license/licenseBanner';
+ import PrimeVueService from '@primevue/core/service';
+ import { inject, ref, readonly, reactive, watch } from 'vue';
+ 
+@@ -180,11 +179,6 @@ function setup(app, options) {
+     releaseDate: RELEASE_DATE
+   }).then(function (result) {
+     _verified.value = result.valid;
+-    if (!result.valid) {
+-      // eslint-disable-next-line no-console
+-      console.warn("[PrimeUI] ".concat(result.message));
+-      showInvalidLicenseBanner();
+-    }
+   });
+   var PrimeVue = {
+     config: reactive(options),
+diff --git a/license/licenseBanner/index.mjs b/license/licenseBanner/index.mjs
+index 74d93599ba7c5581dfaa969caad312a720fca389..4e17a9ec1a7c64bca51efceaa7a174d20efda3cd 100644
+--- a/license/licenseBanner/index.mjs
++++ b/license/licenseBanner/index.mjs
+@@ -19,16 +19,7 @@
+  * to a legitimate customer whose key needs attention.
+  */
+ function showInvalidLicenseBanner() {
+-  if (typeof document === 'undefined') return;
+-  if (document.getElementById('p-license-host')) return;
+-  var host = document.createElement('div');
+-  host.id = 'p-license-host';
+-  host.style.cssText = 'all:initial;position:fixed;bottom:16px;right:16px;z-index:2147483647;pointer-events:none;';
+-  var shadow = host.attachShadow({
+-    mode: 'closed'
+-  });
+-  shadow.innerHTML = '<div role="alert" style="padding:10px 14px;background:#991b1b;color:#fff;font:600 13px/1.2 system-ui,-apple-system,sans-serif;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.2);">' + 'Invalid PrimeUI License' + '</div>';
+-  document.body.appendChild(host);
++  // EXVlan: no-op — the license banner is suppressed by design (see patches/).
+ }
+ 
+ export { showInvalidLicenseBanner };
