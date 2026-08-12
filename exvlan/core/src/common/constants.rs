@@ -35,7 +35,6 @@ pub const UDP_HOLE_PUNCH_CONNECTOR_SERVICE_ID: u32 = 2;
 pub const WIN_SERVICE_WORK_DIR_REG_KEY: &str = "SOFTWARE\\EXVlan\\Service\\WorkDir";
 
 pub const EXVLAN_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-const EXVLAN_TAG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v", env!("CARGO_PKG_VERSION"));
 
 // 在 release tag 上，git describe 输出 v<版本>，拼接得到 "<版本>-v<版本>"（冗余）。
 // 此处检测该形态并还原为纯 "<版本>"；其他情况（如 "<版本>-<commit>"）原样保留。
