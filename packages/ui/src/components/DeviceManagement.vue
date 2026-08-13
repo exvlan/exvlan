@@ -96,11 +96,11 @@ const newConfigGenerator = () => {
 
 :deep(.p-menu .p-menuitem.p-error .p-menuitem-text,
     .p-menu .p-menuitem.p-error .p-menuitem-icon) {
-    color: var(--p-red-500);
+    color: var(--red-500);
 }
 
 :deep(.p-menu .p-menuitem:hover.p-error .p-menuitem-link) {
-    background-color: var(--p-red-50);
+    background-color: var(--red-50);
 }
 
 /* 按钮图标样式 */

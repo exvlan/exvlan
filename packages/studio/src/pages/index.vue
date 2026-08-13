@@ -508,7 +508,7 @@ const configServerConnectionStatus = computed(() => {
   width: 100vw;
 }
 
-.p-select :deep(.p-select-overlay .p-select-list .p-select-option) {
+.p-dropdown :deep(.p-dropdown-panel .p-dropdown-items .p-dropdown-item) {
   padding: 0 0.5rem;
 }
 </style>
@@ -529,4 +529,10 @@ body {
 .p-select-overlay {
   max-width: calc(100% - 2rem);
 }
+
+/*
+
+.p-tabview-panel {
+  height: 100%;
+} */
 </style>

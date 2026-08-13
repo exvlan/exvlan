@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button, Drawer, ProgressSpinner, useToast, ToggleSwitch, Popover, Select, Toolbar } from 'primevue';
+import { Button, Drawer, ProgressSpinner, useToast, InputSwitch, Popover, Dropdown, Toolbar } from 'primevue';
 import Tooltip from 'primevue/tooltip';
 import { useRoute, useRouter } from 'vue-router';
 import { Utils } from '@exvlan/std';
@@ -394,7 +394,7 @@ const handleResize = () => {
 }
 
 .sort-controls {
-    background-color: var(--p-content-background);
+    background-color: var(--surface-card);
     border-radius: 0.5rem;
     padding: 0.25rem 0.5rem;
     box-shadow: var(--card-shadow, 0 1px 3px rgba(0, 0, 0, 0.05));
@@ -407,7 +407,7 @@ const handleResize = () => {
 
 .sort-label {
     font-weight: 500;
-    color: var(--p-text-muted-color);
+    color: var(--text-color-secondary);
 }
 
 .sort-dropdown {
@@ -588,7 +588,7 @@ const handleResize = () => {
     transform: translateX(-50%);
     width: 4rem;
     height: 4px;
-    background-color: var(--p-content-border-color);
+    background-color: var(--surface-border);
     border-radius: 2px;
     opacity: 0.8;
 }
@@ -632,25 +632,25 @@ const handleResize = () => {
 }
 
 /* 工具栏样式优化 */
-:deep(.p-select) {
+:deep(.p-dropdown) {
     background: transparent;
-    border: 1px solid var(--p-content-border-color);
+    border: 1px solid var(--surface-border);
     transition: all 0.2s;
 }
 
-:deep(.p-select:hover) {
-    border-color: var(--p-primary-color);
+:deep(.p-dropdown:hover) {
+    border-color: var(--primary-color);
 }
 
-:deep(.p-select-overlay) {
-    .p-select-list .p-select-option {
+:deep(.p-dropdown-panel) {
+    .p-dropdown-items .p-dropdown-item {
         padding: 0.75rem 1rem;
     }
 }
 
-:deep(.p-toggleswitch) {
-    .p-toggleswitch-slider {
-        background: var(--p-surface-200);
+:deep(.p-inputswitch) {
+    .p-inputswitch-slider {
+        background: var(--surface-200);
     }
 }
 
@@ -662,7 +662,7 @@ const handleResize = () => {
 
 /* 位置样式 */
 .location-icon {
-    color: var(--p-pink-500);
+    color: var(--pink-500);
     font-size: 0.9rem;
 }
 
@@ -683,11 +683,11 @@ const handleResize = () => {
 
 @media (prefers-color-scheme: dark) {
     .location-text {
-        color: var(--p-text-muted-color, #cbd5e1);
+        color: var(--text-color-secondary, #cbd5e1);
     }
 
     .location-icon {
-        color: var(--p-pink-400);
+        color: var(--pink-400);
     }
 }
 </style>
@@ -703,8 +703,8 @@ const handleResize = () => {
             <template #start>
                 <div class="flex items-center gap-2">
                     <label for="sort-by" class="text-sm text-500 hidden sm:block">{{ t('web.device.sort_by') }}：</label>
-                    <Select id="sort-by" v-model="selectedSortOption" :options="sortOptions" optionLabel="name"
-                        class="sort-dropdown text-sm min-w-[120px]! sm:min-w-[140px]!" overlayClass="text-sm">
+                    <Dropdown id="sort-by" v-model="selectedSortOption" :options="sortOptions" optionLabel="name"
+                        class="sort-dropdown text-sm min-w-[120px]! sm:min-w-[140px]!" panelClass="text-sm">
                         <template #value="slotProps">
                             <div class="flex items-center gap-2">
                                 <i :class="[slotProps.value.icon, 'text-600']"></i>
@@ -717,7 +717,7 @@ const handleResize = () => {
                                 <span>{{ slotProps.option.name() }}</span>
                             </div>
                         </template>
-                    </Select>
+                    </Dropdown>
                     <Button severity="secondary" text rounded class="sort-direction-btn min-w-10 h-10" v-tooltip.top="ascending ? t('web.device.sort_direction_asc') : t('web.device.sort_direction_desc')" @click="toggleSortDirection"><i :class="ascending ? 'pi pi-sort-amount-up' : 'pi pi-sort-amount-down'"></i></Button>
                 </div>
             </template>
@@ -727,7 +727,7 @@ const handleResize = () => {
                     <div class="flex items-center gap-2">
                         <label for="detailed-view" class="text-sm text-500 hidden sm:block">{{
                             t('web.device.show_detailed_view') }}</label>
-                        <ToggleSwitch id="detailed-view" v-model="showDetailedView" />
+                        <InputSwitch id="detailed-view" v-model="showDetailedView" />
                     </div>
                 </div>
             </template>

@@ -2,11 +2,7 @@ import './style.css'
 
 import type { App } from 'vue';
 import { Config, Status, ConfigEditDialog, RemoteManagement } from "./components";
-// 使用 aura-compat（14px 基准校准）而非标准 aura（16px 基准）：
-// 应用 root font-size 为 12px（studio/std）与 0.9rem≈14.4px（ui），
-// 标准 aura 会让控件按 16px 缩放（12px root 下文字仅 10.5px），
-// compat 预设保持 v4 时代外观（1rem = 与应用正文一致）。
-import Aura from '@primeuix/themes/aura-compat';
+import Aura from '@primeuix/themes/aura';
 import PrimeVue from 'primevue/config'
 
 import I18nUtils from './modules/i18n'
@@ -41,8 +37,7 @@ export default {
                 overlay: 1200,      //select, popover
                 menu: 1300,         //overlay menus
                 tooltip: 1400       //tooltip
-            },
-            license: import.meta.env.VITE_PRIMEUI_LICENSE
+            }
         });
 
         app.component('Config', Config);

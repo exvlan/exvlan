@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, inject, ref } from 'vue';
-import { Card, InputPassword, Button } from 'primevue';
+import { Card, Password, Button } from 'primevue';
 import ApiClient from '../modules/api';
 
 const dialogRef = inject<any>('dialogRef');
@@ -24,7 +24,7 @@ const changePassword = async () => {
             </template>
             <template #content>
                 <div class="flex flex-col space-y-4">
-                    <InputPassword v-model="password" placeholder="New Password" :feedback="false" toggleMask />
+                    <Password v-model="password" placeholder="New Password" :feedback="false" toggleMask />
                     <Button @click="changePassword">Ok</Button>
                 </div>
             </template>

@@ -52,6 +52,7 @@ export default defineConfig({
       // 否则 @primevue/core 的 basecomponent 与 @primeuix/styled 引擎会被打进本库，
       // 消费端（studio/ui）将出现两份引擎单例，主题只设在配置引擎上，
       // 组件样式加载走空引擎，导致组件 token（--p-button-* 等）缺失、组件全裸。
+      // （对 primevue 4.x 与 5.x 均适用）
       external: ['vue', /^primevue(\/|$)/, /^@primevue(\/|$)/, /^@primeuix(\/|$)/, /^@primeicons(\/|$)/],
       output: [{
         globals: {

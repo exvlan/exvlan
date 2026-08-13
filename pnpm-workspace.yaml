@@ -31,5 +31,3 @@ peerDependencyRules:
     - vite
   allowedVersions:
     vite: '*'
-patchedDependencies:
-  '@primevue/core@5.0.0': patches/@primevue__core@5.0.0.patch
