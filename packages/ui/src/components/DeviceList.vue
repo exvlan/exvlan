@@ -394,7 +394,7 @@ const handleResize = () => {
 }
 
 .sort-controls {
-    background-color: var(--surface-card);
+    background-color: var(--p-content-background);
     border-radius: 0.5rem;
     padding: 0.25rem 0.5rem;
     box-shadow: var(--card-shadow, 0 1px 3px rgba(0, 0, 0, 0.05));
@@ -407,7 +407,7 @@ const handleResize = () => {
 
 .sort-label {
     font-weight: 500;
-    color: var(--text-color-secondary);
+    color: var(--p-text-muted-color);
 }
 
 .sort-dropdown {
@@ -588,7 +588,7 @@ const handleResize = () => {
     transform: translateX(-50%);
     width: 4rem;
     height: 4px;
-    background-color: var(--surface-border);
+    background-color: var(--p-content-border-color);
     border-radius: 2px;
     opacity: 0.8;
 }
@@ -632,25 +632,25 @@ const handleResize = () => {
 }
 
 /* 工具栏样式优化 */
-:deep(.p-dropdown) {
+:deep(.p-select) {
     background: transparent;
-    border: 1px solid var(--surface-border);
+    border: 1px solid var(--p-content-border-color);
     transition: all 0.2s;
 }
 
-:deep(.p-dropdown:hover) {
-    border-color: var(--primary-color);
+:deep(.p-select:hover) {
+    border-color: var(--p-primary-color);
 }
 
-:deep(.p-dropdown-panel) {
-    .p-dropdown-items .p-dropdown-item {
+:deep(.p-select-overlay) {
+    .p-select-list .p-select-option {
         padding: 0.75rem 1rem;
     }
 }
 
-:deep(.p-inputswitch) {
-    .p-inputswitch-slider {
-        background: var(--surface-200);
+:deep(.p-toggleswitch) {
+    .p-toggleswitch-slider {
+        background: var(--p-surface-200);
     }
 }
 
@@ -662,7 +662,7 @@ const handleResize = () => {
 
 /* 位置样式 */
 .location-icon {
-    color: var(--pink-500);
+    color: var(--p-pink-500);
     font-size: 0.9rem;
 }
 
@@ -683,11 +683,11 @@ const handleResize = () => {
 
 @media (prefers-color-scheme: dark) {
     .location-text {
-        color: var(--text-color-secondary, #cbd5e1);
+        color: var(--p-text-muted-color, #cbd5e1);
     }
 
     .location-icon {
-        color: var(--pink-400);
+        color: var(--p-pink-400);
     }
 }
 </style>
