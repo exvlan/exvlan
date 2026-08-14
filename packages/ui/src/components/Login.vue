@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Card, InputText, InputPassword, Button, AutoComplete } from 'primevue';
+import { Card, InputText, Password, Button, AutoComplete } from 'primevue';
 import { useRouter } from 'vue-router';
 import { useToast } from 'primevue/usetoast';
 import { I18nUtils } from '@exvlan/std';
@@ -130,7 +130,7 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="p-field">
                         <label for="password" class="block text-sm font-medium">{{ t('web.login.password') }}</label>
-                        <InputPassword id="password" v-model="password" required toggleMask :feedback="false" />
+                        <Password id="password" v-model="password" required toggleMask :feedback="false" />
                     </div>
                     <div class="flex items-center justify-between">
                         <Button type="submit" class="w-full"><span>{{ t('web.login.login') }}</span></Button>
@@ -152,7 +152,7 @@ onBeforeUnmount(() => {
                     <div class="p-field">
                         <label for="register-password" class="block text-sm font-medium">{{ t('web.login.password')
                             }}</label>
-                        <InputPassword id="register-password" v-model="registerPassword" required toggleMask
+                        <Password id="register-password" v-model="registerPassword" required toggleMask
                             :feedback="false" class="w-full" />
                     </div>
                     <div class="p-field">

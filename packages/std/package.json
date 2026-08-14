@@ -25,13 +25,13 @@
     "preview": "vp preview"
   },
   "dependencies": {
-    "@primeuix/themes": "^3.0.0",
+    "@primeuix/themes": "2.0.3",
     "@vueuse/core": "^14.4.0",
     "axios": "^1.19.0",
     "chart.js": "^4.5.1",
     "floating-vue": "^5.2.2",
     "ip-num": "^1.6.2",
-    "primeicons": "^8.0.0",
+    "primeicons": "7.0.0",
     "tailwindcss-primeui": "^0.6.1",
     "ts-md5": "^2.0.1",
     "uuid": "^14.0.1",
@@ -54,7 +54,7 @@
     "vite-plus": "catalog:"
   },
   "peerDependencies": {
-    "primevue": "^5.0.0",
+    "primevue": "4.5.5",
     "vue": "^3.5.41"
   }
 }
