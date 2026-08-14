@@ -20,7 +20,7 @@
   "dependencies": {
     "@exvlan/ipc": "workspace:*",
     "@exvlan/std": "workspace:*",
-    "@primeuix/themes": "^3.0.0",
+    "@primeuix/themes": "2.0.3",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-os": "^2.3.2",
@@ -29,14 +29,14 @@
     "@vueuse/core": "^14.4.0",
     "ip-num": "^1.6.2",
     "pinia": "^4.0.2",
-    "primevue": "^5.0.0",
+    "primevue": "4.5.5",
     "vue": "^3.5.41",
     "vue-router": "^5.2.0"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^9.3.0",
     "@intlify/unplugin-vue-i18n": "^11.2.4",
-    "@primevue/auto-import-resolver": "^5.0.0",
+    "@primevue/auto-import-resolver": "4.5.5",
     "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/api": "^2.11.1",

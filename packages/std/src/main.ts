@@ -37,8 +37,7 @@ export default {
                 overlay: 1200,      //select, popover
                 menu: 1300,         //overlay menus
                 tooltip: 1400       //tooltip
-            },
-            license: import.meta.env.VITE_PRIMEUI_LICENSE
+            }
         });
 
         app.component('Config', Config);

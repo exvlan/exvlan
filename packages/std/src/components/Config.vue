@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, InputText, Panel, InputPassword, SelectButton, ToggleButton } from 'primevue'
+import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, InputText, Panel, Password, SelectButton, ToggleButton } from 'primevue'
 import InputGroup from 'primevue/inputgroup'
 import InputGroupAddon from 'primevue/inputgroupaddon'
 import {
@@ -199,7 +199,7 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                 </div>
                 <div class="flex flex-col gap-2 basis-5/12 grow">
                   <label for="network_secret">{{ t('network_secret') }}</label>
-                  <InputPassword id="network_secret" v-model="curNetwork.network_secret"
+                  <Password id="network_secret" v-model="curNetwork.network_secret"
                     aria-describedby="network_secret-help" toggleMask :feedback="false" />
                 </div>
               </div>

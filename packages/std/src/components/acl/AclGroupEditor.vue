@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Column, DataTable, Dialog, InputText, Select, InputPassword } from 'primevue';
+import { Button, Column, DataTable, Dialog, InputText, Select, Password } from 'primevue';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { GroupIdentity, GroupInfo } from '../../types/network';
@@ -74,7 +74,7 @@ function saveGroup() {
         <Column field="group_name" :header="t('acl.group.name')" />
         <Column field="group_secret" :header="t('acl.group.secret')">
           <template #body="{ data }">
-            <InputPassword v-model="data.group_secret" :feedback="false" toggleMask readonly class="w-full" />
+            <Password v-model="data.group_secret" :feedback="false" toggleMask readonly class="w-full" />
           </template>
         </Column>
         <Column :header="t('web.common.edit')" headerStyle="width: 8rem">
@@ -103,7 +103,7 @@ function saveGroup() {
         </div>
         <div class="flex flex-col gap-2">
           <label class="font-bold">{{ t('acl.group.secret') }}</label>
-          <InputPassword v-model="editingGroup.group_secret" :feedback="false" toggleMask fluid />
+          <Password v-model="editingGroup.group_secret" :feedback="false" toggleMask fluid />
         </div>
       </div>
       <template #footer>

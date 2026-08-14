@@ -5,7 +5,7 @@ import { NetworkInstance, type TunnelInfo, type NodeInfo, type PeerRoutePair } f
 import { useI18n } from 'vue-i18n';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { ipv4InetToString, ipv4ToString, ipv6ToString } from '../modules/utils';
-import { Badge, DataTable, Column, Tag, Chip, Button, Dialog, ScrollArea, Timeline, Divider, Card, } from 'primevue';
+import { Badge, DataTable, Column, Tag, Chip, Button, Dialog, ScrollPanel, Timeline, Divider, Card, } from 'primevue';
 import NetworkChart from './NetworkChart.vue';
 
 const props = defineProps<{
@@ -352,9 +352,9 @@ function showEventLogs() {
   <div class="frontend-lib">
     <Dialog v-model:visible="dialogVisible" modal :header="t(dialogHeader)" class="w-full h-auto max-h-full"
       :baseZIndex="2000">
-      <ScrollArea v-if="dialogHeader === 'vpn_portal_config'">
+      <ScrollPanel v-if="dialogHeader === 'vpn_portal_config'">
         <pre>{{ dialogContent }}</pre>
-      </ScrollArea>
+      </ScrollPanel>
       <Timeline v-else :value="dialogContent">
         <template #opposite="slotProps">
           <small class="text-surface-500 dark:text-surface-400">{{ useTimeAgo(Date.parse(slotProps.item.time))

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button, Drawer, ProgressSpinner, useToast, ToggleSwitch, Popover, Select, Toolbar } from 'primevue';
+import { Button, Drawer, ProgressSpinner, useToast, InputSwitch, Popover, Dropdown, Toolbar } from 'primevue';
 import Tooltip from 'primevue/tooltip';
 import { useRoute, useRouter } from 'vue-router';
 import { Utils } from '@exvlan/std';
@@ -703,8 +703,8 @@ const handleResize = () => {
             <template #start>
                 <div class="flex items-center gap-2">
                     <label for="sort-by" class="text-sm text-500 hidden sm:block">{{ t('web.device.sort_by') }}：</label>
-                    <Select id="sort-by" v-model="selectedSortOption" :options="sortOptions" optionLabel="name"
-                        class="sort-dropdown text-sm min-w-[120px]! sm:min-w-[140px]!" overlayClass="text-sm">
+                    <Dropdown id="sort-by" v-model="selectedSortOption" :options="sortOptions" optionLabel="name"
+                        class="sort-dropdown text-sm min-w-[120px]! sm:min-w-[140px]!" panelClass="text-sm">
                         <template #value="slotProps">
                             <div class="flex items-center gap-2">
                                 <i :class="[slotProps.value.icon, 'text-600']"></i>
@@ -717,7 +717,7 @@ const handleResize = () => {
                                 <span>{{ slotProps.option.name() }}</span>
                             </div>
                         </template>
-                    </Select>
+                    </Dropdown>
                     <Button severity="secondary" text rounded class="sort-direction-btn min-w-10 h-10" v-tooltip.top="ascending ? t('web.device.sort_direction_asc') : t('web.device.sort_direction_desc')" @click="toggleSortDirection"><i :class="ascending ? 'pi pi-sort-amount-up' : 'pi pi-sort-amount-down'"></i></Button>
                 </div>
             </template>
@@ -727,7 +727,7 @@ const handleResize = () => {
                     <div class="flex items-center gap-2">
                         <label for="detailed-view" class="text-sm text-500 hidden sm:block">{{
                             t('web.device.show_detailed_view') }}</label>
-                        <ToggleSwitch id="detailed-view" v-model="showDetailedView" />
+                        <InputSwitch id="detailed-view" v-model="showDetailedView" />
                     </div>
                 </div>
             </template>
