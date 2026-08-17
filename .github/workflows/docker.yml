@@ -122,15 +122,14 @@ jobs:
 
           TAGS="${BASE_IMAGE}:${IMAGE_TAG}"
 
-          if [[ "${{ inputs.is_alpha }}" == "true" ]]; then
-            TAGS="${TAGS},${BASE_IMAGE}:alpha"
-          elif [[ "${{ inputs.mark_latest }}" == "true" && "${{ github.ref_type }}" == "tag" ]]; then
-            # latest 仅 tag release 发版时打
+          if [[ "${{ inputs.mark_latest }}" == "true" ]]; then
+            # release：主镜像打 latest，registry 镜像打 registry
             TAGS="${TAGS},${BASE_IMAGE}:latest"
-          fi
-
-          if [[ "${{ inputs.mark_unstable }}" == "true" ]]; then
-            TAGS="${TAGS},${BASE_IMAGE}:unstable"
+            REGISTRY_TAG="${BASE_IMAGE}:registry"
+          else
+            # 分支构建：主镜像打 alpha，registry 镜像打 registry-alpha
+            TAGS="${TAGS},${BASE_IMAGE}:alpha"
+            REGISTRY_TAG="${BASE_IMAGE}:registry-alpha"
           fi
 
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
@@ -140,8 +139,7 @@ jobs:
 
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "Generated tags: ${TAGS}"
-          # registry 镜像（exvlan-api-embed）固定标签
-          echo "registry_tag=${BASE_IMAGE}:registry" >> $GITHUB_OUTPUT
+          echo "registry_tag=${REGISTRY_TAG}" >> $GITHUB_OUTPUT
 
       - name: Build and push (exvlan)
         uses: docker/build-push-action@v7
