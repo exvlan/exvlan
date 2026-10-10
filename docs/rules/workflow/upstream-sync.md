@@ -2,7 +2,7 @@
 时间: 2026-10-10 19:30
 版本: v2.7.0
 引用源: [AGENTS.md](../../../AGENTS.md) / [CLAUDE.md](../../../CLAUDE.md) / [upstream-path-map.yaml](./upstream-path-map.yaml) / git 历史实测
-状态: 进行中（v2.7.0 同步）
+状态: 已完成（v2.7.0 已并入 feature）
 ---
 
 # 历史上游同步工作流程（Upstream Sync Workflow）
@@ -84,7 +84,7 @@ refs/original/refs/remotes/ci-test/feature/ci
 | `31c4eeae`              | `origin/develop` → `feature` | 常规同步                                                |
 | `d634f7a6`              | `develop` → `feature`        | 内容一致，**仅建立祖先关系**（bridge）                  |
 | `cc2430ea` / `8c5c2fc7` | `develop` → `feature`        | 常规同步                                                |
-| `（本次）sync/v2.7.0`   | merge → `feature`            | `upstream/releases/v2.7.0` (2026-10-05) — 单 merge 提交 |
+| `615c9de1`→`38c71b3a`   | merge → `feature`            | `upstream/releases/v2.7.0` (2026-10-05) — 合并+重定位+rebrand，已 push origin/feature |
 
 **结论**：`upstream/releases/v2.6.0`~`v2.7.0` 均为 `feature` 祖先；`upstream/main` **不是** `feature`/`develop` 的祖先——即只取**打了标签的 release**，不追 `main`。
 
