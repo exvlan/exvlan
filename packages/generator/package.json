@@ -1,7 +1,7 @@
 {
   "name": "@exvlan/generator",
   "private": true,
-  "version": "0.0.0",
+  "version": "26.410.20700",
   "type": "module",
   "scripts": {
     "build:config-wasm": "wasm-pack build ../../exvlan-core --target web --out-dir ../exvlan-api/config-generator/src/generated/config-wasm --out-name exvlan_config --release --no-pack -- --no-default-features --features browser-config",

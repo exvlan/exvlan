@@ -1,7 +1,7 @@
 {
   "name": "@exvlan/std",
   "private": true,
-  "version": "0.0.0",
+  "version": "26.410.20700",
   "type": "module",
   "main": "./dist/@exvlan/std.umd.cjs",
   "module": "./dist/@exvlan/std.js",

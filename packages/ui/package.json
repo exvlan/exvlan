@@ -1,7 +1,7 @@
 {
   "name": "@exvlan/ui",
   "private": true,
-  "version": "0.0.0",
+  "version": "26.410.20700",
   "type": "module",
   "scripts": {
     "dev": "pnpm --dir ../frontend-lib build && vite",

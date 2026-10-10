@@ -149,11 +149,11 @@ git push origin develop
 ### D. 版本对齐
 
 - 标准版本：`YY.QMM.Mmpp`，其中 `YY`=年、`QMM`=季度+月份（zero-padded）、`Mmpp`=major + minor(2位) + patch(2位)。
-  - 示例：`26.308.20604` = 2026 年 Q3 8 月，对齐上游 `v2.6.4`。
+  - 示例：`26.410.20700` = 2026 年 Q3 8 月，对齐上游 `v2.6.4`。
 - Windows MSI 专用版本：`YY.MMQ.mmmm-pp`（因 MSI 中段每段上限 255/255/65535），仅经
   `packages/studio/src-tauri/tauri.windows.conf.json` 对 Windows 生效。
 - 版本号需同步更新各 `Cargo.toml` / `package.json` / `magisk` 清单 / README 版本串；
-  详见 `c21eac5d version: v26.308.20604`。
+  详见 `c21eac5d version: v26.410.20700`。
 
 ## 6. 冲突解决策略
 

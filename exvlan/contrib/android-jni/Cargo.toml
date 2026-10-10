@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-android-jni"
-version = "0.1.0"
+version = "26.410.20700"
 edition.workspace = true
 rust-version.workspace = true
 

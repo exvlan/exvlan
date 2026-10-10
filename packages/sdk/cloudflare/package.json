@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/cloudflare",
-  "version": "0.1.0",
+  "version": "26.410.20700",
   "description": "Run an Exvlan relay in a Cloudflare Durable Object",
   "type": "module",
   "license": "Apache-2.0",

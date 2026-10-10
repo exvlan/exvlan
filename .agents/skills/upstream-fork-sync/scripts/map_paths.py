@@ -82,7 +82,7 @@ def main() -> int:
     if not args.quiet:
         print(f"# 映射审计 ref={ref}  （顶层 {len(tops)} 项）\n")
         for top in tops:
-            # 顶层已覆盖：显式映射，或有以该顶层为前缀的子项映射（如 easytier-contrib/*）
+            # 顶层已覆盖：显式映射，或有以该顶层为前缀的子项映射（如 exvlan/contrib/*）
             covered = top in mapped or any(k.split("/")[0] == top for k in mapped)
             if covered:
                 tgt = resolve(top + "/x")

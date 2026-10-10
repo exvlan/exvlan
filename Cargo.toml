@@ -36,12 +36,12 @@ cidr = "0.3.2"
 clap = "4.6.7"
 crossbeam = "0.8.5"
 dashmap = "6.2.1"
-exvlan = { version = "2.7.0", path = "exvlan/exvlan", default-features = false }
-exvlan-core = { version = "2.7.0", path = "exvlan/core", default-features = false }
-exvlan-ffi = { version = "0.1.0", path = "exvlan/contrib/ffi", default-features = false }
-exvlan-ohos-core = { version = "0.1.0", path = "exvlan/contrib/ohrs/crates/exvlan-ohos-core", default-features = false }
-exvlan-ohos-features = { version = "0.1.0", path = "exvlan/contrib/ohrs/crates/exvlan-ohos-features", default-features = false }
-exvlan-proto = { version = "2.7.0", path = "exvlan/proto", default-features = false }
+exvlan = { version = "26.410.20700", path = "exvlan/exvlan", default-features = false }
+exvlan-core = { version = "26.410.20700", path = "exvlan/core", default-features = false }
+exvlan-ffi = { version = "26.410.20700", path = "exvlan/contrib/ffi", default-features = false }
+exvlan-ohos-core = { version = "26.410.20700", path = "exvlan/contrib/ohrs/crates/exvlan-ohos-core", default-features = false }
+exvlan-ohos-features = { version = "26.410.20700", path = "exvlan/contrib/ohrs/crates/exvlan-ohos-features", default-features = false }
+exvlan-proto = { version = "26.410.20700", path = "exvlan/proto", default-features = false }
 futures = "0.3"
 gethostname = "1.1"
 guarden = "0.3"
