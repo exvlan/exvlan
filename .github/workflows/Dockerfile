@@ -20,10 +20,9 @@ RUN ARTIFACT_ARCH=""; \
         echo "Unsupported architecture: $TARGETPLATFORM"; \
         exit 1; \
     fi; \
-    cp /tmp/artifacts/exvlan-linux-${ARTIFACT_ARCH}/* /tmp/output;
+    cp /tmp/artifacts/easytier-linux-${ARTIFACT_ARCH}/* /tmp/output;
 
-# 主镜像：exvlan 守护进程
-FROM base AS exvlan
+FROM base
 
 RUN apk add --no-cache tzdata tini
 WORKDIR /app
@@ -43,14 +42,7 @@ EXPOSE 11011/tcp
 # wss
 EXPOSE 11012/tcp
 
-ENTRYPOINT ["/sbin/tini", "--", "exvlan"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+    CMD ["/usr/local/bin/easytier-cli", "--rpc-portal", "127.0.0.1:15888", "--output", "json", "node", "info"]
 
-# registry 镜像：exvlan-api-embed（注册表/API 服务）
-FROM exvlan AS registry
-
-RUN mkdir -p /data
-VOLUME ["/data"]
-# config-server / REST API
-EXPOSE 22020/tcp
-
-ENTRYPOINT ["/sbin/tini", "--", "exvlan-api-embed", "--db=/data/exvlan.db", "--console-log-level", "warn", "--file-log-level", "warn"]
+ENTRYPOINT ["/sbin/tini", "--", "easytier-core"]

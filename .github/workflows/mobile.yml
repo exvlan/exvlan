@@ -1,31 +1,18 @@
-name: Builder Mobile
+name: EasyTier Mobile
 
 on:
-  workflow_call:
-    inputs:
-      targets:
-        description: 'Build targets: JSON array of target triples, or "all"'
-        type: string
-        default: 'all'
-  workflow_dispatch:
-    inputs:
-      targets:
-        description: 'Build targets: JSON array of target triples, or "all"'
-        default: 'all'
-
-permissions:
-  contents: read
-  actions: write
+  push:
+    branches: ["develop", "main", "releases/**"]
+  pull_request:
+    branches: ["develop", "main"]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
-  group: mobile-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  BUILD_TOOLS_VERSION: "36.1.0"
-  NDK_VERSION: "28.2.13676358"
-  TARGET_SDK_VERSION: "36"
 
 defaults:
   run:
@@ -34,88 +21,92 @@ defaults:
 
 jobs:
   pre_job:
-    name: Run Pre check
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    env:
+      RELEVANT_PATHS: >-
+        ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**",
+        "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "easytier/**",
+        "easytier-core/**", "easytier-proto/**", "easytier-rpc-build/**",
+        "easytier-gui/**", "tauri-plugin-vpnservice/**",
+        "easytier-web/frontend-lib/**", ".github/workflows/mobile.yml",
+        ".github/actions/**"]
     outputs:
-      should_skip: 'false'
+      # Release builds must run even if they only change release metadata.
+      should_skip: >-
+        ${{
+          (
+            steps.skip_check.outputs.should_skip == 'true' ||
+            (
+              github.event_name == 'pull_request' &&
+              steps.path_filter.outputs.relevant != 'true'
+            )
+          ) &&
+          !startsWith(github.ref_name, 'releases/')
+        }}
     steps:
-      - run: echo "Skip disabled (pipeline chaining requires artifacts)"
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
+        with:
+          concurrent_skipping: 'same_content_newer'
+          skip_after_successful_duplicate: 'true'
+          cancel_others: 'true'
+          paths: ${{ env.RELEVANT_PATHS }}
 
-  prepare_matrix:
-    name: Prepare build matrix
-    runs-on: ubuntu-latest
-    needs: pre_job
-    if: needs.pre_job.outputs.should_skip != 'true'
-    outputs:
-      include: ${{ steps.gen.outputs.include }}
-    steps:
-      - name: Generate matrix include
-        id: gen
-        run: |
-          python3 - '${{ inputs.targets }}' <<'PY'
-          import json, os, sys
+      - id: path_filter
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.skip_check.outputs.should_skip != 'true'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            relevant: ${{ env.RELEVANT_PATHS }}
 
-          ALL = [
-            {"TARGET": "aarch64-linux-android", "ARCH": "aarch64"},
-            {"TARGET": "armv7-linux-androideabi", "ARCH": "armv7"},
-            {"TARGET": "x86_64-linux-android", "ARCH": "x86_64"},
-          ]
-
-          selected = sys.argv[1]
-          if selected == "all":
-              result = ALL
-          else:
-              wanted = set(json.loads(selected))
-              result = [e for e in ALL if e["TARGET"] in wanted]
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write("include=" + json.dumps(result) + "\n")
-          print(json.dumps(result))
-          PY
-
-  build:
+  build-mobile:
     strategy:
-      # ABI 构建彼此独立：一个 ABI 失败/上传失败不应取消其余已完成的构建
-      fail-fast: false
+      fail-fast: true
       matrix:
-        include: ${{ fromJSON(needs.prepare_matrix.outputs.include) }}
-
+        include:
+          - TARGET: aarch64-linux-android
+            ARCH: aarch64
+          - TARGET: armv7-linux-androideabi
+            ARCH: armv7
+          - TARGET: i686-linux-android
+            ARCH: i686
+          - TARGET: x86_64-linux-android
+            ARCH: x86_64
     runs-on: ubuntu-latest
     env:
-      NAME: exvlan
+      NAME: easytier
       TARGET: ${{ matrix.TARGET }}
       ARCH: ${{ matrix.ARCH }}
-    needs: [ pre_job, prepare_matrix ]
-    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+      OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
+    needs: pre_job
+    if: needs.pre_job.outputs.should_skip != 'true'    
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v5
 
       - name: Set current ref as env variable
         run: |
           echo "GIT_DESC=$(git log -1 --format=%cd.%h --date=format:%Y-%m-%d_%H:%M:%S)" >> $GITHUB_ENV
 
-      - name: Setup Java
-        uses: actions/setup-java@v5
+      - uses: actions/setup-java@v4
         with:
           distribution: 'oracle'
           java-version: '21'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
         with:
-          cmdline-tools-version: 14742923
-          packages: 'build-tools;${{ env.BUILD_TOOLS_VERSION }} ndk;${{ env.NDK_VERSION }} platform-tools platforms;android-${{ env.TARGET_SDK_VERSION }}'
-        env:
-          ANDROID_SDK_ROOT:  ${{ github.workspace }}/android-sdk
+          cmdline-tools-version: 12.0
+          packages: 'build-tools;34.0.0 ndk;26.0.10792818 platform-tools platforms;android-34 '
 
       - name: Setup Android Environment
         run: |
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
-          echo "$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}" >> $GITHUB_PATH
-          echo "$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
-          echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/ndk/26.0.10792818/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+          echo "NDK_HOME=$ANDROID_HOME/ndk/26.0.10792818/" >> $GITHUB_ENV
+
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
         with:
@@ -125,50 +116,45 @@ jobs:
           pnpm-build-filter: ''
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "exvlan-shared"
-          cache-targets: true
+          # The prefix cache key, this can be changed to start a new cache manually.
+          # default: "v0-rust"
+          prefix-key: ""
+          shared-key: "gui-registry"
+          cache-targets: "false"
 
-      - name: Prepare Keystore File
+      - name: Build
         run: |
-          # 1. 创建临时目录存储密钥（确保安全）
-          mkdir -p ./keys
-          
-          # 2. 将 Base64 Secret 解码为二进制文件
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > ./keys/release.keystore
-          
-          # 3. 将文件绝对路径写入 $GITHUB_ENV 供后续步骤使用
-          # 同时也把其他非敏感的别名等信息存入环境变量
-          echo "KEYSTORE_PATH=$(pwd)/keys/release.keystore" >> $GITHUB_ENV
-          echo "KEYSTORE_ALIAS=${{ secrets.KEYSTORE_ALIAS }}" >> $GITHUB_ENV
-          echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
-
-      - name: Build Android APK
-        run: |
-          cd packages/studio
+          cd easytier-gui
           pnpm tauri android build --apk --target "$ARCH" --split-per-abi
-        env:
-          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
       - name: Collect artifact
         run: |
-          mkdir -p ./artifacts/
-          # 收集 APK
-          find packages/studio/src-tauri/gen/android/app/build/outputs/apk/ -name "*.apk" -exec cp {} ./artifacts/ \; 2>/dev/null || true
-          # 打印列表，确保 CI 日志可见
-          echo "📦 Collected APKs:"
-          ls -F ./artifacts/
+          mkdir -p ./artifacts/objects/
+          mv easytier-gui/src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk ./artifacts/objects/
+          
+          if [[ $GITHUB_REF_TYPE =~ ^tag$ ]]; then
+            TAG=$GITHUB_REF_NAME
+          else
+            TAG=$GITHUB_SHA
+          fi
+
+          mv ./artifacts/objects/* ./artifacts/
+          rm -rf ./artifacts/objects/
 
       - name: Archive artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v5
         with:
-          name: exvlan-studio-${{ matrix.ARCH }}
-          path: ./artifacts/*.apk
-          if-no-files-found: error
-          # 防止 artifact 跨 run 无限累积耗尽存储配额：
-          # 同名覆盖（每 ABI 只保留最新一份）+ 短期保留
-          overwrite: true
-          retention-days: 3
+          name: easytier-mobile-android-${{ matrix.ARCH }}
+          path: |
+            ./artifacts/*
+
+  mobile-result:
+    runs-on: ubuntu-latest
+    needs: [ pre_job, build-mobile ]
+    if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
+    steps:
+      - name: Mark result as failed
+        if: contains(needs.*.result, 'failure')
+        run: exit 1

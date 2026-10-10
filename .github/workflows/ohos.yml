@@ -1,33 +1,38 @@
-name: Builder OHOS
+name: ohos
 
 on:
-  workflow_call: # push:
-
-  #   branches: ["develop", "main", "releases/**"]
-  #   tags:
-  #     - 'v*'
-  #     - '!*-pre'
-  #   # 替代 fkirc，只有修改相关代码才触发 OHOS 构建
-  #   paths: &ohos_paths
-  #     - "Cargo.toml"
-  #     - "Cargo.lock"
-  #     - "exvlan/core/**"
-  #     - "exvlan/contrib/ohrs/**"
-  #     - ".github/workflows/ohos.yml"
-  #     - ".github/actions/**"
-  # pull_request:
-  #   branches: ["develop", "main"]
-  #   types: [opened, synchronize, reopened, ready_for_review]
-  #   paths: *ohos_paths
+  push:
+    branches: [develop, main, "releases/**", "ohos/**"]
+    tags:
+      - "v*"
+      - "!*-pre"
+  pull_request:
+    branches: [develop, main, "ohos/**"]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - "easytier/**"
+      - "easytier-core/**"
+      - "easytier-proto/**"
+      - "easytier-rpc-build/**"
+      - "easytier-contrib/easytier-ohrs/**"
+      - ".github/workflows/ohos.yml"
+      - ".github/actions/**"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish this non-main branch and dispatch downstream builds
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
   actions: write
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  contents: read
+  pull-requests: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,154 +42,199 @@ defaults:
     shell: bash
 
 jobs:
-  cargo_fmt_check:
-    name: Cargo fmt check
+  pre_job:
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip == 'true' && github.ref_type != 'tag' && github.ref_name != 'main' && !startsWith(github.ref_name, 'releases/') }}
     steps:
-      - uses: actions/checkout@v7
-      - name: Prepare build environment
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
+        with:
+          concurrent_skipping: 'same_content_newer'
+          skip_after_successful_duplicate: 'true'
+          cancel_others: 'true'
+          paths: '["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**", "easytier/**", "easytier-core/**", "easytier-proto/**", "easytier-contrib/easytier-ohrs/**", ".github/workflows/ohos.yml", ".github/actions/**"]'
+
+  ohos:
+    name: ohos
+    needs: pre_job
+    if: needs.pre_job.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
         uses: ./.github/actions/prepare-build
         with:
+          target: aarch64-unknown-linux-ohos
           gui: false
           pnpm: false
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Rust fmt
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
-
-      - name: Check formatting
-        working-directory: ./exvlan/contrib/ohrs
-        run: cargo fmt --all -- --check
-
-  build-ohos:
-    name: Build HarmonyOS Har
-    runs-on: ubuntu-latest
-    needs: cargo_fmt_check
-    env:
-      OHPM_PUBLISH_CODE: ${{ secrets.OHPM_PUBLISH_CODE }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # 必须拉取全部记录以进行版本计算
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -qq build-essential wget unzip git pkg-config curl libgl1-mesa-dev expect jq
-
-      - name: Resolve exvlan version
-        run: |
-          # 优化后的版本计算逻辑
-          CARGO_VERSION=$(cargo metadata --format-version 1 --no-deps --manifest-path exvlan/core/Cargo.toml | jq -r '.packages[0].version')
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          LAST_TAG_VERSION="${LAST_TAG#v}"
-
-          # 使用 sort -V 进行版本比较
-          if [ "$(printf '%s\n%s' "$CARGO_VERSION" "$LAST_TAG_VERSION" | sort -V | tail -n1)" = "$CARGO_VERSION" ]; then
-            BASE_VERSION="$CARGO_VERSION"
-          else
-            BASE_VERSION="$LAST_TAG_VERSION"
-          fi
-
-          COMMIT_HASH=$(git rev-parse --short HEAD)
-          EXVLAN_VERSION="${BASE_VERSION}-${COMMIT_HASH}"
-
-          echo "EXVLAN_VERSION=$EXVLAN_VERSION" >> $GITHUB_ENV
-          cd ./exvlan/contrib/ohrs/package
-          jq --arg v "$EXVLAN_VERSION" '.version = $v' oh-package.json5 > oh-package.tmp.json5 && mv oh-package.tmp.json5 oh-package.json5
-
-      - name: Setup HarmonyOS CLI tools
-        uses: ErBWs/setup-ohos@v2
-
-      - name: Download and Extract Custom SDK
-        run: |
-          wget https://github.com/FrankHan052176/Easytier-OHOS-sdk/releases/download/v1/ohos-sdk.zip -O /tmp/ohos-sdk.zip
-          sudo unzip -o /tmp/ohos-sdk.zip -d /tmp/custom-sdk
-          sudo cp -rf /tmp/custom-sdk/linux/native/* $OHOS_NDK_HOME/native
-
-      - name: Setup build environment
-        run: |
-          rustup install stable
-          rustup default stable
-
-          rustup target add aarch64-unknown-linux-ohos
+      - name: Set up HarmonyOS
+        uses: ErBWs/setup-ohos@v1
 
       - name: Install ohrs
-        uses: taiki-e/install-action@v2.85.11
+        uses: taiki-e/install-action@v2
         with:
           tool: ohrs
 
-      - name: Build latest Har
-        working-directory: ./exvlan/contrib/ohrs
-        run: |
-          sudo apt-get install -y llvm clang protobuf-compiler
-          source env.sh
-          # 创建 clang wrapper 以确保 ohrs 正确识别交叉编译工具链
-          mkdir -p $OHOS_NDK_HOME/native/llvm
-          echo "#!/bin/sh" > $OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh
-          echo "exec $OHOS_NDK_HOME/native/llvm/bin/clang -target aarch64-linux-ohos --sysroot=$OHOS_NDK_HOME/native/sysroot -D__MUSL__ \"\$@\"" >> $OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh
-          chmod +x $OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh
-
-          ohrs build --release --arch aarch
-          ohrs artifact
-          mv package.har exvlan-ohrs.har
-
-      - name: Build Release Package
-        if: startsWith(github.ref, 'refs/tags/')
-        working-directory: ./exvlan/contrib/ohrs
-        run: |
-          echo "🎉 Official Release detected. Building exvlan-release..."
-          TAG_NAME="${{ github.ref_name }}"
-          TAG_VERSION="${TAG_NAME#v}"
-          echo "Release Version: $TAG_VERSION"
-          cd package
-          jq --arg v "$TAG_VERSION" '.name = "exvlan-release" | .version = $v' oh-package.json5 > oh-package.tmp.json5 && mv oh-package.tmp.json5 oh-package.json5
-          cd ..
-          ohrs build --release --arch aarch
-          cd dist/arm64-v8a
-          mv libexvlan_ohrs.so libexvlan_release.so
-          cd ../..
-          ohrs artifact
-          mv package.har exvlan-release.har
-
-      - name: Archive OHOS Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: exvlan-ohos
-          path: ./exvlan/contrib/ohrs/exvlan-ohrs.har
-          retention-days: 5
-
-      - name: Publish To OHPM Center
-        working-directory: ./exvlan/contrib/ohrs
+      - name: Build HAR
+        id: package
         env:
-          OHPM_PRIVATE_KEY: ${{ secrets.OHPM_PRIVATE_KEY }}
-          OHPM_KEY_PASSPHRASE: ${{ secrets.OHPM_KEY_PASSPHRASE }}
-        if: github.event_name == 'push' && env.OHPM_PUBLISH_CODE != ''
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          ohpm config set publish_id "$OHPM_PUBLISH_CODE"
-          ohpm config set publish_registry https://ohpm.openharmony.cn/ohpm
-          TMP_DIR=$(mktemp -d)
-          PRIVATE_KEY_FILE="$TMP_DIR/private_key"
-          printf '%s' "$OHPM_PRIVATE_KEY" > "$PRIVATE_KEY_FILE"
-          chmod 600 "$PRIVATE_KEY_FILE"
-          ohpm config set key_path $PRIVATE_KEY_FILE
-          unzip ohpm_crypto.zip -d /home/runner/work/
-          ohpm config set crypto_path /home/runner/work/ohpm_crypto
-          chmod 755 /home/runner/work/ohpm_crypto/*
-          PASSPHRASE="$(printf '%s' "$OHPM_KEY_PASSPHRASE" | tr -d '\r\n')"
-          ohpm config set key_passphrase "$PASSPHRASE"
-          ohpm publish exvlan-ohrs.har
+          set -euo pipefail
+          sudo apt-get install -qqy \
+            pkg-config curl libgl1-mesa-dev expect llvm clang lldb lld
+          rustup component add rustfmt
+          cargo fmt --all --manifest-path \
+            easytier-contrib/easytier-ohrs/Cargo.toml -- --check
+          cargo test --locked --manifest-path \
+            easytier-contrib/easytier-ohrs/Cargo.toml \
+            -p easytier-ohos-core -p easytier-ohos-features \
+            --lib -- --test-threads=1
+          cargo check --locked --manifest-path \
+            easytier-contrib/easytier-ohrs/Cargo.toml \
+            -p easytier-ohrs --tests
 
-      - name: Publish To Private Ohpm
-        working-directory: ./exvlan/contrib/ohrs
-        if: ${{ env.OHPM_PUBLISH_CODE != '' && github.event_name == 'push' }}
-        run: |
-          printf '%s' "${{ secrets.CODEARTS_PRIVATE_OHPM }}" > ~/.ohpm/.ohpmrc
-          ohpm config set strict_ssl false
-          ohpm publish exvlan-ohrs.har
-          if [ -f "exvlan-release.har" ]; then
-             echo "🚀 Publishing Release package..."
-             ohpm publish exvlan-release.har
+          cargo_version=$(cargo metadata --format-version 1 --no-deps \
+            --manifest-path easytier/Cargo.toml | jq -r '.packages[0].version')
+          last_tag=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || true)
+          if [ -n "$last_tag" ]; then
+            base_version=$(printf '%s\n' "$cargo_version" "${last_tag#v}" \
+              | sort -V | tail -n 1)
+            commit_count=$(git rev-list --count "$last_tag..HEAD")
+          else
+            base_version=$cargo_version
+            commit_count=0
           fi
-          curl --header "Content-Type: application/json" --request POST --data "{}" ${{ secrets.CODEARTS_WEBHOOKS }}
+
+          source_branch=${GITHUB_HEAD_REF:-}
+          if [ -z "$source_branch" ]; then
+            if [ "$GITHUB_REF_TYPE" = branch ]; then
+              source_branch=$GITHUB_REF_NAME
+            else
+              source_branch=${DEFAULT_BRANCH:-main}
+            fi
+          fi
+          branch_id=$(printf '%s' "$source_branch" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//' \
+            | cut -c1-64)
+          branch_id=${branch_id:-main}
+
+          package_name=easytier-ohrs
+          package_version="${base_version}-${branch_id}-${commit_count}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}-g$(git rev-parse --short=8 HEAD)"
+          echo "name=$package_name" >> "$GITHUB_OUTPUT"
+          echo "EASYTIER_PACKAGE_NAME=$package_name" >> "$GITHUB_ENV"
+          echo "EASYTIER_VERSION=$package_version" >> "$GITHUB_ENV"
+
+          package_dir=easytier-contrib/easytier-ohrs/package
+          jq --arg name "$package_name" --arg version "$package_version" \
+            '.name = $name | .version = $version' \
+            "$package_dir/oh-package.json5" > "$package_dir/oh-package.tmp.json5"
+          mv "$package_dir/oh-package.tmp.json5" "$package_dir/oh-package.json5"
+          {
+            echo "## $package_name $package_version"
+            echo
+            echo "- Core version: $base_version"
+            echo "- Core commit: $GITHUB_SHA"
+            git log -1 --pretty=format:'- %s'
+            echo
+          } > "$package_dir/CHANGELOG.md"
+
+          sudo mkdir -p "$OHOS_NDK_HOME/native/llvm"
+          sudo tee "$OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh" >/dev/null <<'EOF'
+          #!/bin/sh
+          exec "$OHOS_NDK_HOME/native/llvm/bin/clang" \
+            -target aarch64-linux-ohos \
+            --sysroot="$OHOS_NDK_HOME/native/sysroot" \
+            -D__MUSL__ "$@"
+          EOF
+          sudo chmod +x \
+            "$OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh"
+
+          cd easytier-contrib/easytier-ohrs
+          source env.sh
+          ohrs build --release --arch aarch
+          ohrs artifact
+          mv package.har "$package_name.har"
+
+      - name: Upload HAR
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: easytier-contrib/easytier-ohrs/${{ steps.package.outputs.name }}.har
+          retention-days: 5
+          if-no-files-found: error
+
+      - name: Publish and dispatch
+        if: >-
+          (github.event_name == 'push' &&
+           github.ref_type == 'branch' &&
+           github.ref_name == 'main' &&
+           github.event.forced != true) ||
+          (github.event_name == 'workflow_dispatch' &&
+           github.ref_type == 'branch' &&
+           (github.ref_name == 'main' || inputs.publish))
+        working-directory: easytier-contrib/easytier-ohrs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEARTS_PRIVATE_OHPM: ${{ secrets.CODEARTS_PRIVATE_OHPM }}
+          DOWNSTREAM_DISPATCH_TOKEN: ${{ secrets.DOWNSTREAM_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            pull_requests=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls")
+            if ! jq -e \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg branch "$GITHUB_REF_NAME" \
+              --arg sha "$GITHUB_SHA" \
+              'any(.[];
+                .merged_at != null and
+                .base.repo.full_name == $repository and
+                .base.ref == $branch and
+                .merge_commit_sha == $sha)' \
+              <<< "$pull_requests" >/dev/null; then
+              echo "Direct push: HAR built without publishing."
+              exit 0
+            fi
+          fi
+
+          mkdir -p "$HOME/.ohpm"
+          umask 077
+          printf '%s' "$CODEARTS_PRIVATE_OHPM" > "$HOME/.ohpm/.ohpmrc"
+          trap 'rm -f "$HOME/.ohpm/.ohpmrc"' EXIT
+          ohpm publish "$EASYTIER_PACKAGE_NAME.har"
+
+          payload=$(jq -nc \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg ref "refs/heads/$GITHUB_REF_NAME" \
+            --arg package "$EASYTIER_PACKAGE_NAME" \
+            '{
+              event_type: "core-har-published",
+              client_payload: {
+                core_repository: $repository,
+                core_ref: $ref,
+                package_name: $package
+              }
+            }')
+          for repository in \
+            FrankHan052176/EasyTier-ArkTS \
+            FrankHan052176/easytier-pro-app; do
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $DOWNSTREAM_DISPATCH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$GITHUB_API_URL/repos/$repository/dispatches" \
+              --data "$payload"
+          done

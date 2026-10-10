@@ -1,5 +1,4 @@
-package era.exvlan.studio
-import android.app.Notification
+package com.kkrainbow.easytier
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -12,7 +11,7 @@ import android.util.Log
 
 class MainForegroundService : Service() {
     companion object {
-        const val CHANNEL_ID = "exvlan_channel"
+        const val CHANNEL_ID = "easytier_channel"
         const val NOTIFICATION_ID = 1355
         // You can add more constants if needed
     }
@@ -24,15 +23,15 @@ class MainForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("EXVlan Running")
-            .setContentText("EXVlan is available on localhost")
+            .setContentTitle("EasyTier is running")
+            .setContentText("EasyTier background service is active")
             .setSmallIcon(android.R.drawable.ic_menu_manage)
             .build()
-       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -51,8 +50,8 @@ class MainForegroundService : Service() {
           try {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "EXVlan notice",
-                NotificationManager.IMPORTANCE_DEFAULT
+                "easytier notice",
+                NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)

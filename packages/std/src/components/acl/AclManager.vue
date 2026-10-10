@@ -2,7 +2,7 @@
 import { Button, Menu, Tab, TabList, TabPanel, TabPanels, Tabs } from 'primevue'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Acl, AclAction, AclChainType } from '../../types/network'
+import { Acl, AclAction, AclChainType, ensureAclV1 } from '../../types/network'
 import AclChainEditor from './AclChainEditor.vue'
 import AclGroupEditor from './AclGroupEditor.vue'
 
@@ -12,6 +12,7 @@ const { t } = useI18n()
 
 const activeTab = ref(0)
 const menu = ref()
+const aclV1 = computed(() => ensureAclV1(acl.value))
 
 const addMenuModel = ref([
   { label: () => t('acl.inbound'), command: () => addChain(AclChainType.Inbound) },
@@ -20,10 +21,6 @@ const addMenuModel = ref([
 ])
 
 function addChain(type: AclChainType) {
-  if (!acl.value.acl_v1) {
-    acl.value.acl_v1 = { chains: [], group: { declares: [], members: [] } }
-  }
-
   let defaultName = ''
   switch (type) {
     case AclChainType.Inbound: defaultName = 'Inbound'; break;
@@ -31,7 +28,7 @@ function addChain(type: AclChainType) {
     case AclChainType.Forward: defaultName = 'Forward'; break;
   }
 
-  acl.value.acl_v1.chains.push({
+  aclV1.value.chains.push({
     name: defaultName,
     chain_type: type,
     description: '',
@@ -40,21 +37,20 @@ function addChain(type: AclChainType) {
     default_action: AclAction.Allow
   })
 
-  activeTab.value = acl.value.acl_v1.chains.length - 1
+  activeTab.value = aclV1.value.chains.length - 1
 }
 
 function removeChain(index: number) {
   if (confirm(t('acl.delete_chain_confirm'))) {
-    acl.value.acl_v1?.chains.splice(index, 1)
-    if (activeTab.value >= (acl.value.acl_v1?.chains.length || 0)) {
-      activeTab.value = Math.max(0, (acl.value.acl_v1?.chains.length || 0))
+    aclV1.value.chains.splice(index, 1)
+    if (activeTab.value >= aclV1.value.chains.length) {
+      activeTab.value = Math.max(0, aclV1.value.chains.length)
     }
   }
 }
 
 function handleRenameGroup({ oldName, newName }: { oldName: string, newName: string }) {
-  if (!acl.value.acl_v1) return
-  acl.value.acl_v1.chains.forEach(chain => {
+  aclV1.value.chains.forEach(chain => {
     chain.rules.forEach(rule => {
       rule.source_groups = rule.source_groups.map(g => g === oldName ? newName : g)
       rule.destination_groups = rule.destination_groups.map(g => g === oldName ? newName : g)
@@ -63,11 +59,11 @@ function handleRenameGroup({ oldName, newName }: { oldName: string, newName: str
 }
 
 const groupNames = computed(() => {
-  return acl.value.acl_v1?.group?.declares.map(g => g.group_name) || []
+  return aclV1.value.group?.declares.map(g => g.group_name) || []
 })
 
 const tabs = computed(() => {
-  const chains = acl.value.acl_v1?.chains || []
+  const chains = aclV1.value.chains
   const result: { type: string, label: string, index: number }[] = []
 
   if (chains.length === 0) {
@@ -96,13 +92,15 @@ const tabs = computed(() => {
           <Tab v-for="tab in tabs" :key="tab.type + tab.index" :value="tab.index">
             <div class="flex items-center gap-2 whitespace-nowrap">
               {{ tab.label }}
-              <Button v-if="tab.type === 'chain'" severity="danger" text rounded size="small" class="w-6 h-6 p-0" @click.stop="removeChain(tab.index)"><i class="pi pi-times"></i></Button>
+              <Button v-if="tab.type === 'chain'" icon="pi pi-times" severity="danger" text rounded size="small"
+                class="w-6 h-6 p-0" @click.stop="removeChain(tab.index)" />
             </div>
           </Tab>
         </TabList>
         <div
           class="flex-shrink-0 flex items-center px-2 bg-white dark:bg-gray-900 border-l border-surface-100 dark:border-surface-800">
-          <Button text rounded size="small" class="w-8 h-8 p-0" @click="(event) => menu.toggle(event)"><i class="pi pi-plus"></i></Button>
+          <Button icon="pi pi-plus" text rounded size="small" class="w-8 h-8 p-0"
+            @click="(event) => menu.toggle(event)" />
           <Menu ref="menu" :model="addMenuModel" :popup="true" />
         </div>
       </div>
@@ -115,29 +113,20 @@ const tabs = computed(() => {
             <div class="text-xl font-bold mb-2">{{ t('acl.chains') }}</div>
             <p class="text-surface-500 mb-8 text-center max-w-sm px-4">{{ t('acl.help') }}</p>
             <div class="flex flex-wrap gap-3 justify-center">
-              <Button @click="addChain(AclChainType.Inbound)"><i class="pi pi-arrow-down-left"></i><span>{{ t('acl.inbound') }}</span></Button>
-              <Button @click="addChain(AclChainType.Outbound)"><i class="pi pi-arrow-up-right"></i><span>{{ t('acl.outbound') }}</span></Button>
-              <Button @click="addChain(AclChainType.Forward)"><i class="pi pi-directions"></i><span>{{ t('acl.forward') }}</span></Button>
+              <Button :label="t('acl.inbound')" icon="pi pi-arrow-down-left" @click="addChain(AclChainType.Inbound)" />
+              <Button :label="t('acl.outbound')" icon="pi pi-arrow-up-right" @click="addChain(AclChainType.Outbound)" />
+              <Button :label="t('acl.forward')" icon="pi pi-directions" @click="addChain(AclChainType.Forward)" />
             </div>
           </div>
 
           <!-- Rule Chains -->
-          <div v-if="tab.type === 'chain' && acl.acl_v1 && acl.acl_v1.chains[tab.index]" class="py-4">
-            <AclChainEditor v-model="acl.acl_v1.chains[tab.index]" :group-names="groupNames" />
+          <div v-if="tab.type === 'chain' && aclV1.chains[tab.index]" class="py-4">
+            <AclChainEditor v-model="aclV1.chains[tab.index]" :group-names="groupNames" />
           </div>
 
           <!-- Group Management -->
           <div v-if="tab.type === 'groups'" class="py-4">
-            <template v-if="acl.acl_v1">
-              <AclGroupEditor v-if="acl.acl_v1.group" v-model="acl.acl_v1.group" :group-names="groupNames"
-                @rename-group="handleRenameGroup" />
-              <div v-else class="flex justify-center p-4">
-                <Button @click="acl.acl_v1.group = { declares: [], members: [] }"><span>{{ t('web.common.add') + ' ' + t('acl.groups') }}</span></Button>
-              </div>
-            </template>
-            <div v-else class="flex justify-center p-4">
-              <Button @click="acl.acl_v1 = { chains: [], group: { declares: [], members: [] } }"><span>{{ t('acl.enabled') }}</span></Button>
-            </div>
+            <AclGroupEditor v-model="aclV1.group" :group-names="groupNames" @rename-group="handleRenameGroup" />
           </div>
         </TabPanel>
       </TabPanels>

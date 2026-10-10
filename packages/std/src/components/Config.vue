@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, InputText, Panel, Password, SelectButton, ToggleButton } from 'primevue'
+import { v4 as uuidv4 } from 'uuid'
+import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, InputSwitch, InputText, MultiSelect, Panel, Password, SelectButton, ToggleButton } from 'primevue'
 import InputGroup from 'primevue/inputgroup'
 import InputGroupAddon from 'primevue/inputgroupaddon'
 import {
@@ -7,22 +8,76 @@ import {
   DEFAULT_NETWORK_CONFIG,
   NetworkConfig,
   normalizeNetworkConfig,
-  removeRow
+  removeRow,
 } from '../types/network'
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AclManager from './acl/AclManager.vue'
 import UrlListInput from './UrlListInput.vue'
+import { createVpnPortalConfig } from '../modules/vpnPortal'
+import type { VpnPortalClientConfig } from '../types/network'
 
 const props = defineProps<{
+  actionLabel?: string
   configInvalid?: boolean
   hostname?: string
+  /// Hide the secure-mode switch and the temporary-credential entry; for
+  /// callers where secure mode is a network-level property managed
+  /// elsewhere.
+  hideSecureMode?: boolean
+  /// Central members save their clients through the configuration owner.
+  editVpnPortalClients?: boolean
 }>()
 
 defineEmits(['runNetwork'])
 
-const curNetwork = defineModel<NetworkConfig>('curNetwork', {
+const curNetwork = defineModel('curNetwork', {
+  type: Object as () => NetworkConfig,
   default: DEFAULT_NETWORK_CONFIG,
+})
+
+// --- network identity: shared secret (default) or admin-issued credential ---
+const identityMode = ref<'secret' | 'credential'>('secret')
+
+// A pasted credential switches the form to credential mode; replacing the
+// whole config object (loading another network) re-derives the mode from it.
+watch(
+  () => curNetwork.value.credential_secret,
+  (secret) => {
+    if (secret) {
+      identityMode.value = 'credential'
+    }
+  },
+  { immediate: true },
+)
+watch(
+  curNetwork,
+  (network) => {
+    identityMode.value = network.credential_secret ? 'credential' : 'secret'
+  },
+  { immediate: true },
+)
+
+const useCredentialMode = () => {
+  identityMode.value = 'credential'
+}
+
+const useSecretMode = () => {
+  // Switching back is an explicit choice: drop the credential so saving
+  // uses the network secret instead of silently joining as the credential.
+  curNetwork.value.credential_secret = undefined
+  identityMode.value = 'secret'
+}
+
+const credentialInvalid = computed(
+  () => identityMode.value === 'credential' && !(curNetwork.value.credential_secret ?? '').trim(),
+)
+
+const secureModeEnabled = computed({
+  get: () => curNetwork.value.secure_mode?.enabled === true,
+  set: (value: boolean) => {
+    curNetwork.value.secure_mode = value ? { enabled: true } : undefined
+  },
 })
 
 const { t } = useI18n()
@@ -41,13 +96,18 @@ const protos: { [proto: string]: number } = {
   srv: 0,
 }
 
+const listenerExcludedProtos = new Set(['http', 'https', 'txt', 'srv'])
+const listenerProtos: { [proto: string]: number } = Object.fromEntries(
+  Object.entries(protos).filter(([proto]) => !listenerExcludedProtos.has(proto))
+)
+
 const inetSuggestions = ref([''])
 
 function searchInetSuggestions(e: { query: string }) {
   if (e.query.search('/') >= 0) {
     inetSuggestions.value = [e.query]
   } else {
-    const ret: string[] = []
+    const ret = []
     for (let i = 0; i < 32; i++) {
       ret.push(`${e.query}/${i}`)
     }
@@ -58,7 +118,7 @@ function searchInetSuggestions(e: { query: string }) {
 const exitNodesSuggestions = ref([''])
 
 function searchExitNodesSuggestions(e: { query: string }) {
-  const ret: string[] = []
+  const ret = []
   ret.push(e.query)
   exitNodesSuggestions.value = ret
 }
@@ -66,7 +126,7 @@ function searchExitNodesSuggestions(e: { query: string }) {
 const whitelistSuggestions = ref([''])
 
 function searchWhitelistSuggestions(e: { query: string }) {
-  const ret: string[] = []
+  const ret = []
   ret.push(e.query)
   whitelistSuggestions.value = ret
 }
@@ -133,6 +193,7 @@ function savePortForward() {
 const portForwardContainer = ref<HTMLElement | null>(null);
 const isCompact = ref(false);
 
+const UINT64_MAX = (1n << 64n) - 1n
 
 onMounted(() => {
   if (portForwardContainer.value) {
@@ -157,9 +218,86 @@ function syncNormalizedNetwork(network: NetworkConfig | undefined): void {
   }
 
   Object.assign(network, normalizeNetworkConfig(network))
+  if (network.vpn_portal_config?.enabled !== false && network.vpn_portal_config
+    && !network.vpn_portal_config.wireguard_private_key) {
+    network.vpn_portal_config.wireguard_private_key = createVpnPortalConfig().wireguard_private_key
+  }
 }
 
 watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: false })
+
+function parseInstanceRecvBpsLimitInput(value: string): number | string | null | undefined {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    return undefined
+  }
+
+  const limit = BigInt(trimmed)
+  if (limit === 0n) {
+    return null
+  }
+  if (limit > UINT64_MAX) {
+    return undefined
+  }
+
+  return limit <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(limit) : limit.toString()
+}
+
+const instanceRecvBpsLimitInput = computed<string>({
+  get: () => {
+    const limit = curNetwork.value.instance_recv_bps_limit
+    return limit == null ? '' : String(limit)
+  },
+  set: (value) => {
+    const limit = parseInstanceRecvBpsLimitInput(value)
+    if (limit !== undefined) {
+      curNetwork.value.instance_recv_bps_limit = limit
+    }
+  },
+})
+
+const vpnPortalEnabled = computed({
+  get: () => curNetwork.value.vpn_portal_config !== undefined
+    && curNetwork.value.vpn_portal_config.enabled !== false,
+  set: (enabled: boolean) => {
+    if (enabled && !curNetwork.value.vpn_portal_config) {
+      curNetwork.value.vpn_portal_config = createVpnPortalConfig()
+    } else if (curNetwork.value.vpn_portal_config) {
+      if (enabled && !curNetwork.value.vpn_portal_config.wireguard_private_key) {
+        curNetwork.value.vpn_portal_config.wireguard_private_key = createVpnPortalConfig().wireguard_private_key
+      }
+      curNetwork.value.vpn_portal_config.enabled = enabled
+    }
+  },
+})
+
+const vpnPortalGroupOptions = computed(() => (
+  curNetwork.value.acl?.acl_v1?.group?.declares ?? []
+).map((group) => group.group_name))
+
+const vpnPortalClientViewKeys = new WeakMap<VpnPortalClientConfig, string>()
+
+function vpnPortalClientViewKey(client: VpnPortalClientConfig): string {
+  let key = vpnPortalClientViewKeys.get(client)
+  if (!key) {
+    key = uuidv4()
+    vpnPortalClientViewKeys.set(client, key)
+  }
+  return key
+}
+
+function addVpnPortalClient() {
+  curNetwork.value.vpn_portal_config?.clients.push({
+    name: `device-${uuidv4().slice(0, 8)}`, virtual_ip: '', groups: [],
+  })
+}
+
+function removeVpnPortalClient(index: number) {
+  curNetwork.value.vpn_portal_config?.clients.splice(index, 1)
+}
 </script>
 
 <template>
@@ -196,11 +334,36 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                 <div class="flex flex-col gap-2 basis-5/12 grow">
                   <label for="network_name">{{ t('network_name') }}</label>
                   <InputText id="network_name" v-model="curNetwork.network_name" aria-describedby="network_name-help" />
+                  <div v-if="!hideSecureMode && identityMode === 'secret'" class="flex items-center gap-2">
+                    <InputSwitch inputId="secure_mode" v-model="secureModeEnabled" />
+                    <label for="secure_mode" class="cursor-pointer">{{ t('secure_mode') }}</label>
+                    <span class="pi pi-question-circle text-sm" v-tooltip.top="t('secure_mode_hint')"></span>
+                  </div>
                 </div>
-                <div class="flex flex-col gap-2 basis-5/12 grow">
+                <div v-if="identityMode === 'secret'" class="flex flex-col gap-2 basis-5/12 grow">
                   <label for="network_secret">{{ t('network_secret') }}</label>
                   <Password id="network_secret" v-model="curNetwork.network_secret"
-                    aria-describedby="network_secret-help" toggleMask :feedback="false" />
+                    aria-describedby="network_secret-help" toggleMask :feedback="false" fluid />
+                  <template v-if="!hideSecureMode">
+                    <button type="button" class="self-start text-sm underline cursor-pointer bg-transparent border-none p-0"
+                      @click="useCredentialMode">
+                      {{ t('use_credential') }} <i class="pi pi-angle-right"></i>
+                    </button>
+                  </template>
+                </div>
+                <div v-else class="flex flex-col gap-2 basis-5/12 grow">
+                  <label for="credential_secret">{{ t('credential_secret') }}</label>
+                  <Password id="credential_secret" v-model="curNetwork.credential_secret"
+                    aria-describedby="credential_secret-help" toggleMask :feedback="false" fluid
+                    :class="{ 'p-invalid': credentialInvalid }" />
+                  <small id="credential_secret-help" class="text-xs">{{ t('credential_secret_hint') }}</small>
+                  <template v-if="!hideSecureMode">
+                    <div class="text-xs">{{ t('credential_mode_hint') }}</div>
+                    <button type="button" class="self-start text-sm underline cursor-pointer bg-transparent border-none p-0"
+                      @click="useSecretMode">
+                      <i class="pi pi-angle-left"></i> {{ t('use_network_secret') }}
+                    </button>
+                  </template>
                 </div>
               </div>
 
@@ -257,36 +420,56 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                 </div>
               </div>
 
-              <div class="flex flex-row gap-x-9 flex-wrap ">
-                <div class="flex flex-col gap-2 grow">
-                  <label for="username">VPN Portal</label>
-                  <ToggleButton v-model="curNetwork.enable_vpn_portal" on-icon="pi pi-check" off-icon="pi pi-times"
-                    :on-label="t('off_text')" :off-label="t('on_text')" class="w-48" />
-                  <div v-if="curNetwork.enable_vpn_portal" class="items-center flex flex-row gap-x-4">
-                    <div class="flex flex-row gap-x-9 flex-wrap w-full">
-                      <div class="flex flex-col gap-2 basis-8/12 grow">
-                        <InputGroup>
-                          <InputText v-model="curNetwork.vpn_portal_client_network_addr"
-                            :placeholder="t('vpn_portal_client_network')" />
-                          <InputGroupAddon>
-                            <span>/{{ curNetwork.vpn_portal_client_network_len }}</span>
-                          </InputGroupAddon>
-                        </InputGroup>
-                      </div>
-                      <div class="flex flex-col gap-2 basis-3/12 grow">
-                        <InputNumber v-model="curNetwork.vpn_portal_listen_port" :allow-empty="false" :format="false"
-                          :min="0" :max="65535" fluid />
-                      </div>
-                    </div>
-                  </div>
+              <div class="flex flex-col gap-3">
+                <div class="flex items-center gap-3">
+                  <Checkbox v-model="vpnPortalEnabled" input-id="vpn_portal_enabled" :binary="true" />
+                  <label for="vpn_portal_enabled">{{ t('vpn_portal_enable') }}</label>
                 </div>
+                <p class="text-sm text-surface-500 dark:text-surface-400">{{ t(editVpnPortalClients ? 'vpn_portal_config_clients_help' : 'vpn_portal_setup_help') }}</p>
+                <details v-if="vpnPortalEnabled && curNetwork.vpn_portal_config">
+                  <summary class="cursor-pointer text-sm">{{ t('vpn_portal_advanced') }}</summary>
+                  <div class="flex flex-col gap-2 mt-3">
+                    <label for="vpn_portal_wireguard_listen">{{ t('vpn_portal_wireguard_listen') }}</label>
+                    <InputText id="vpn_portal_wireguard_listen" v-model="curNetwork.vpn_portal_config.wireguard_listen"
+                      :placeholder="t('vpn_portal_wireguard_listen_placeholder')" />
+                  </div>
+                </details>
+                <template v-if="editVpnPortalClients && vpnPortalEnabled && curNetwork.vpn_portal_config">
+                  <div class="flex items-center justify-between gap-3">
+                    <label>{{ t('vpn_portal_clients') }}</label>
+                    <Button icon="pi pi-plus" :label="t('vpn_portal_add_client')" severity="secondary" size="small"
+                      :disabled="curNetwork.vpn_portal_config.clients.length >= 64" @click="addVpnPortalClient" />
+                  </div>
+                  <div v-if="curNetwork.vpn_portal_config.clients.length === 0"
+                    class="text-sm text-surface-500 dark:text-surface-400">{{ t('vpn_portal_no_clients') }}</div>
+                  <div v-for="(client, index) in curNetwork.vpn_portal_config.clients" :key="vpnPortalClientViewKey(client)"
+                    class="flex flex-row gap-3 flex-wrap items-end rounded border border-surface-200 dark:border-surface-700 p-3">
+                    <div class="flex flex-col gap-2 grow basis-3/12">
+                      <label :for="`vpn_portal_client_name_${index}`">{{ t('vpn_portal_client_name') }}</label>
+                      <InputText :id="`vpn_portal_client_name_${index}`" v-model="client.name" />
+                    </div>
+                    <div class="flex flex-col gap-2 grow basis-3/12">
+                      <label :for="`vpn_portal_client_virtual_ip_${index}`">{{ t('vpn_portal_client_virtual_ip') }}</label>
+                      <InputText :id="`vpn_portal_client_virtual_ip_${index}`" v-model="client.virtual_ip"
+                        :placeholder="t('vpn_portal_client_virtual_ip_placeholder')" />
+                    </div>
+                    <div v-if="vpnPortalGroupOptions.length" class="flex flex-col gap-2 grow basis-4/12">
+                      <label :for="`vpn_portal_client_groups_${index}`">{{ t('vpn_portal_client_groups') }}</label>
+                      <MultiSelect :input-id="`vpn_portal_client_groups_${index}`" v-model="client.groups"
+                        :options="vpnPortalGroupOptions" appendTo="self" filter fluid
+                        :placeholder="t('vpn_portal_client_groups_placeholder')" />
+                    </div>
+                    <Button icon="pi pi-trash" severity="danger" text rounded
+                      :aria-label="t('vpn_portal_remove_client')" @click="removeVpnPortalClient(index)" />
+                  </div>
+                </template>
               </div>
 
               <div class="flex flex-row gap-x-9 flex-wrap">
                 <div class="flex flex-col gap-2 grow p-fluid">
                   <label for="listener_urls">{{ t('listener_urls') }}</label>
-                  <UrlListInput v-model="curNetwork.listener_urls" :protos="protos" :add-label="t('add_listener_url')"
-                    placeholder="0.0.0.0" />
+                  <UrlListInput v-model="curNetwork.listener_urls" :protos="listenerProtos"
+                    :add-label="t('add_listener_url')" placeholder="0.0.0.0" />
                 </div>
               </div>
 
@@ -316,9 +499,9 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                     <span class="pi pi-question-circle ml-2 self-center"
                       v-tooltip="t('instance_recv_bps_limit_help')"></span>
                   </div>
-                  <InputNumber id="instance_recv_bps_limit" v-model="curNetwork.instance_recv_bps_limit"
-                    aria-describedby="instance_recv_bps_limit-help" :format="false"
-                    :placeholder="t('instance_recv_bps_limit_placeholder')" :min="1" fluid />
+                  <InputText id="instance_recv_bps_limit" v-model="instanceRecvBpsLimitInput"
+                    aria-describedby="instance_recv_bps_limit-help" inputmode="numeric" pattern="[0-9]*"
+                    :placeholder="t('instance_recv_bps_limit_placeholder')" fluid />
                 </div>
               </div>
 
@@ -415,7 +598,7 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                     <!-- Wide screen view -->
                     <div v-if="!isCompact" class="flex gap-2 items-end">
                       <SelectButton v-model="row.proto" :options="portForwardProtocolOptions" :allow-empty="false" />
-                      <div style="grow: 4;">
+                      <div style="flex-grow: 4;">
                         <InputGroup>
                           <InputText v-model="row.bind_ip" :placeholder="t('port_forwards_bind_addr')" />
                           <InputGroupAddon>
@@ -425,7 +608,7 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                             mode="decimal" :min="1" :max="65535" fluid class="max-w-20" />
                         </InputGroup>
                       </div>
-                      <div style="grow: 4;">
+                      <div style="flex-grow: 4;">
                         <InputGroup>
                           <InputText v-model="row.dst_ip" :placeholder="t('port_forwards_dst_addr')" />
                           <InputGroupAddon>
@@ -435,8 +618,9 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                             mode="decimal" :min="1" :max="65535" fluid class="max-w-20" />
                         </InputGroup>
                       </div>
-                      <div style="grow: 1;">
-                        <Button v-if="curNetwork.port_forwards.length > 0" severity="danger" text rounded @click="removeRow(index, curNetwork.port_forwards)"><i class="pi pi-trash"></i></Button>
+                      <div style="flex-grow: 1;">
+                        <Button v-if="curNetwork.port_forwards.length > 0" icon="pi pi-trash" severity="danger" text
+                          rounded @click="removeRow(index, curNetwork.port_forwards)" />
                       </div>
                     </div>
                     <!-- Small screen view -->
@@ -444,14 +628,16 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                       <span>{{ row.proto }}://{{ row.bind_ip }}:{{ row.bind_port }}/{{ row.dst_ip }}:{{
                         row.dst_port }}</span>
                       <div class="flex gap-2">
-                        <Button class="p-button-sm" @click="openPortForwardEditor(index)"><i class="pi pi-pencil"></i></Button>
-                        <Button class="p-button-sm p-button-danger" @click="removeRow(index, curNetwork.port_forwards)"><i class="pi pi-trash"></i></Button>
+                        <Button icon="pi pi-pencil" class="p-button-sm" @click="openPortForwardEditor(index)" />
+                        <Button icon="pi pi-trash" class="p-button-sm p-button-danger"
+                          @click="removeRow(index, curNetwork.port_forwards)" />
                       </div>
                     </div>
                   </div>
 
                   <div class="flex justify-content-end mt-4">
-                    <Button severity="success" @click="addPortForward"><i class="pi pi-plus"></i><span>{{ t('port_forwards_add_btn') }}</span></Button>
+                    <Button icon="pi pi-plus" :label="t('port_forwards_add_btn')" severity="success"
+                      @click="addPortForward" />
                   </div>
 
                   <Dialog v-model:visible="editingPortForward" modal :header="t('edit_port_forward')"
@@ -478,8 +664,9 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
                       </InputGroup>
                     </div>
                     <template #footer>
-                      <Button @click="editingPortForward = false" text><i class="pi pi-times"></i><span>{{ t('web.common.cancel') }}</span></Button>
-                      <Button @click="savePortForward"><i class="pi pi-save"></i><span>{{ t('web.common.save') }}</span></Button>
+                      <Button :label="t('web.common.cancel')" icon="pi pi-times" @click="editingPortForward = false"
+                        text />
+                      <Button :label="t('web.common.save')" icon="pi pi-save" @click="savePortForward" />
                     </template>
                   </Dialog>
                 </div>
@@ -494,12 +681,14 @@ watch(() => curNetwork.value, syncNormalizedNetwork, { immediate: true, deep: fa
               <AclManager v-model="curNetwork.acl" />
             </div>
             <div v-else class="flex justify-center p-4">
-              <Button @click="curNetwork.acl = { acl_v1: { chains: [], group: { declares: [], members: [] } } }"><span>{{ t('acl.enabled') }}</span></Button>
+              <Button :label="t('acl.enabled')"
+                @click="curNetwork.acl = { acl_v1: { chains: [], group: { declares: [], members: [] } } }" />
             </div>
           </Panel>
 
           <div class="flex pt-6 justify-center">
-            <Button :disabled="configInvalid" @click="$emit('runNetwork', curNetwork)"><span>{{ t('run_network') }}</span><i class="pi pi-arrow-right"></i></Button>
+            <Button :label="actionLabel || t('run_network')" icon="pi pi-arrow-right" icon-pos="right" :disabled="configInvalid || credentialInvalid"
+              @click="$emit('runNetwork', curNetwork)" />
           </div>
         </div>
       </div>

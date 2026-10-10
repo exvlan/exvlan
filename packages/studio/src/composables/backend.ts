@@ -1,11 +1,11 @@
-import type { Api } from '@exvlan/std'
-import { NetworkTypes } from '@exvlan/std'
 import { invoke } from '@tauri-apps/api/core'
+import { Api, NetworkTypes } from 'easytier-frontend-lib'
+import { GetNetworkMetasResponse } from 'node_modules/easytier-frontend-lib/dist/modules/api'
+import { type ConfigSource, normalizeConfigSource } from './config_source'
 
 type NetworkConfig = NetworkTypes.NetworkConfig
 type ValidateConfigResponse = Api.ValidateConfigResponse
 type ListNetworkInstanceIdResponse = Api.ListNetworkInstanceIdResponse
-type ConfigSource = 'user' | 'webhook' | 'legacy'
 interface ServiceOptions {
   config_dir: string
   rpc_portal: string
@@ -14,7 +14,7 @@ interface ServiceOptions {
   config_server?: string
 }
 
-export type ServiceStatus = 'Running' | 'Stopped' | 'NotInstalled'
+export type ServiceStatus = "Running" | "Stopped" | "NotInstalled"
 
 interface StoredGuiConfig {
   config: NetworkConfig
@@ -31,14 +31,14 @@ function parseStoredConfigs(raw: string | null): StoredGuiConfig[] {
     if (entry && typeof entry === 'object' && 'config' in entry) {
       const { config, source } = entry as {
         config?: NetworkConfig
-        source?: ConfigSource
+        source?: unknown
       }
       if (!config) {
         return []
       }
       return [{
         config: NetworkTypes.normalizeNetworkConfig(config),
-        source: source === 'user' || source === 'webhook' ? source : 'legacy',
+        source: normalizeConfigSource(source),
       }]
     }
 
@@ -66,6 +66,23 @@ export async function collectNetworkInfo(instanceId: string) {
   return await invoke<Api.CollectNetworkInfoResponse>('collect_network_info', { instanceId })
 }
 
+export async function getVpnPortalInfo(instanceId: string) {
+  const info = await invoke<NetworkTypes.VpnPortalInfo | undefined>('get_vpn_portal_info', { instanceId })
+  return info ? NetworkTypes.normalizeVpnPortalInfo(info) : undefined
+}
+
+export async function addVpnPortalClient(instanceId: string, client: { name: string, virtual_ip: string, groups: string[] }) {
+  return invoke('patch_vpn_portal_clients', { instanceId, action: 'add', name: client.name, virtualIp: client.virtual_ip, groups: client.groups })
+}
+
+export async function removeVpnPortalClient(instanceId: string, name: string) {
+  return invoke('patch_vpn_portal_clients', { instanceId, action: 'remove', name })
+}
+
+export async function clearVpnPortalClients(instanceId: string) {
+  return invoke('patch_vpn_portal_clients', { instanceId, action: 'clear' })
+}
+
 export async function setLoggingLevel(level: string) {
   return await invoke('set_logging_level', { level })
 }
@@ -74,8 +91,8 @@ export async function setTunFd(fd: number) {
   return await invoke('set_tun_fd', { fd })
 }
 
-export async function getExvlanVersion() {
-  return await invoke<string>('exvlan_version')
+export async function getEasytierVersion() {
+  return await invoke<string>('easytier_version')
 }
 
 export async function listNetworkInstanceIds() {
@@ -110,12 +127,12 @@ export async function sendConfigs(enabledNetworks: string[]) {
       config: NetworkTypes.toBackendNetworkConfig(config),
       source,
     })),
-    enabledNetworks,
+    enabledNetworks
   })
 }
 
 export async function getNetworkMetas(instanceIds: string[]) {
-  return await invoke<Api.GetNetworkMetasResponse>('get_network_metas', { instanceIds })
+  return await invoke<GetNetworkMetasResponse>('get_network_metas', { instanceIds })
 }
 
 export async function initService(opts?: ServiceOptions) {
