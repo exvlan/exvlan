@@ -1,8 +1,8 @@
-//! HarmonyOS nearby transport for the canonical EasyTier management RPC surface.
+//! HarmonyOS nearby transport for the canonical Exvlan management RPC surface.
 //!
-//! Cross-device payloads are native EasyTier `ZCPacket`s. The host-facing side
+//! Cross-device payloads are native Exvlan `ZCPacket`s. The host-facing side
 //! connects to a Unix-domain standalone RPC server owned by the process that
-//! actually runs the EasyTier instance, so a VPN Extension never accidentally
+//! actually runs the Exvlan instance, so a VPN Extension never accidentally
 //! exposes the empty `InstanceManager` loaded by `EntryAbility`.
 
 use std::{
@@ -21,15 +21,15 @@ use std::{
 
 use async_trait::async_trait;
 use bytes::BytesMut;
-use easytier::{common::config::NetworkConfigExt as _, instance::factory::NativeInstanceFactory};
-use easytier_core::{
+use exvlan::{common::config::NetworkConfigExt as _, instance::factory::NativeInstanceFactory};
+use exvlan_core::{
     management::{ConfigFileControl, ProcessManagementRpc, UnsupportedConfigFileStorage},
     packet::{PacketType, ZCPacket, ZCPacketType},
     rpc::{bidirect::BidirectRpcManager, client::Client, standalone::StandAloneServer},
     socket::{SocketListener, tcp::VirtualTcpSocket},
     tunnel::{SplitTunnel, Tunnel, tcp::TcpTunnelUpgrader},
 };
-use easytier_proto::{
+use exvlan_proto::{
     api::manage::{
         CollectNetworkInfoRequest, CollectNetworkInfoResponse, DeleteNetworkInstanceRequest,
         DeleteNetworkInstanceResponse, GetNetworkInstanceConfigRequest,
@@ -71,7 +71,7 @@ const PACKET_QUEUE_CAPACITY: usize = 64;
 const RPC_PEER_ID: u32 = 1;
 const RPC_RESPONSE_TIMEOUT: Duration = Duration::from_secs(45);
 const WEB_CLIENT_SERVICE_NAME: &str = "api.manage.WebClientService";
-const MANAGEMENT_SOCKET_FILE_NAME: &str = "easytier-nearby-management.sock";
+const MANAGEMENT_SOCKET_FILE_NAME: &str = "exvlan-nearby-management.sock";
 const MAX_PENDING_HOST_COMMANDS: usize = 8;
 const HOST_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const HOST_COMMAND_START: &str = "start_once";

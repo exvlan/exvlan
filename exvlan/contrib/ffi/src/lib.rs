@@ -1,4 +1,4 @@
-//! C ABI facade for EasyTier.
+//! C ABI facade for Exvlan.
 //!
 //! The exported API is intentionally kept in this file so C users and JNI
 //! bindings can see the full callable surface without reading the internal
@@ -12,7 +12,7 @@
 //! - `list_instance`: list running instance names and IDs.
 //! - `collect_network_infos`: collect running instance info as key/value pairs.
 //! - `set_tun_fd`: attach a TUN file descriptor to a named instance.
-//! - `call_json_rpc`: call an exposed EasyTier RPC service with JSON payload.
+//! - `call_json_rpc`: call an exposed Exvlan RPC service with JSON payload.
 //!
 //! Config server client APIs:
 //! - `start_config_server_client`: start the managed remote config client.
@@ -68,7 +68,7 @@ pub unsafe extern "C" fn parse_config(cfg_str: *const c_char) -> c_int {
     unsafe { instance_api::parse_config(cfg_str) }
 }
 
-/// Start one local EasyTier network instance from a TOML config string.
+/// Start one local Exvlan network instance from a TOML config string.
 ///
 /// The config's `inst_name` must be unique among instances started through this
 /// FFI layer. This API is mutually exclusive with config-server callback
@@ -196,7 +196,7 @@ pub unsafe extern "C" fn set_tun_fd(inst_name: *const c_char, fd: c_int) -> c_in
     unsafe { instance_api::set_tun_fd(inst_name, fd) }
 }
 
-/// Call an exposed EasyTier RPC method using protobuf JSON.
+/// Call an exposed Exvlan RPC method using protobuf JSON.
 ///
 /// This generic bridge intentionally excludes instance lifecycle management
 /// RPCs. Use the dedicated FFI APIs for starting, retaining, deleting, and
@@ -244,7 +244,7 @@ pub unsafe extern "C" fn call_json_rpc(
 
 /// Start the managed config-server client.
 ///
-/// The client reuses EasyTier's web-client path and applies remote config
+/// The client reuses Exvlan's web-client path and applies remote config
 /// changes through the shared `NativeInstanceManager`. Successful remote run
 /// and delete operations are delivered to `callback` as JSON event strings, one
 /// callback per affected instance. The event string is valid only for the

@@ -1,6 +1,6 @@
 // Derived from igd-next 0.17.0 and upstream commit
 // bb335d60348386526684d9249d7ae733772279e4, with its network transport
-// replaced by EasyTier's socket factories. See LICENSE in this
+// replaced by Exvlan's socket factories. See LICENSE in this
 // directory for the upstream license.
 
 mod errors;
@@ -13,7 +13,7 @@ use std::{collections::HashMap, fmt, net::SocketAddr, time::Duration};
 use std::net::IpAddr;
 
 use bytes::Bytes;
-use easytier_core::socket::{
+use exvlan_core::socket::{
     tcp::TcpConnectOptions,
     udp::{UdpBindOptions, VirtualUdpSocket, VirtualUdpSocketFactory},
 };

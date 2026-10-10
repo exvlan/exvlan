@@ -1,16 +1,16 @@
-//! iOS-facing C ABI for EasyTier.
+//! iOS-facing C ABI for Exvlan.
 //!
-//! This crate is the iOS counterpart of `easytier-android-jni`: a thin
-//! wrapper over the easytier-ffi C ABI (instance management + the generic
-//! `call_json_rpc` management bridge) for apps that embed EasyTier without
+//! This crate is the iOS counterpart of `exvlan-android-jni`: a thin
+//! wrapper over the exvlan-ffi C ABI (instance management + the generic
+//! `call_json_rpc` management bridge) for apps that embed Exvlan without
 //! a TUN device or NEPacketTunnel. Loopback port forwarding into the
 //! virtual network is configured through `api.config.ConfigRpcService/PatchConfig`
 //! port-forward patches; there is no forwarder in this crate. It builds as
-//! a static library for the Apple toolchain; `easytier-ios.h` declares the
+//! a static library for the Apple toolchain; `exvlan-ios.h` declares the
 //! callable surface.
 //!
 //! All exported functions are panic-safe: panics are caught at the FFI
-//! boundary and reported through `easytier_ios_last_error`.
+//! boundary and reported through `exvlan_ios_last_error`.
 
 mod diagnostic_logging;
 mod error;
@@ -31,11 +31,11 @@ use tracing_subscriber::{
 };
 
 const DIAGNOSTIC_FILTER: &str = concat!(
-    "easytier_ios::diagnostics=trace,",
-    "easytier_core::instance=trace,",
-    "easytier_core::connectivity=debug,",
-    "easytier_core::socket::udp=debug,",
-    "easytier_core::gateway::port_forward=trace"
+    "exvlan_ios::diagnostics=trace,",
+    "exvlan_core::instance=trace,",
+    "exvlan_core::connectivity=debug,",
+    "exvlan_core::socket::udp=debug,",
+    "exvlan_core::gateway::port_forward=trace"
 );
 
 struct DiagnosticLogger {
@@ -78,7 +78,7 @@ impl DiagnosticLogger {
 
 static DIAGNOSTIC_LOGGER: OnceLock<Result<DiagnosticLogger, String>> = OnceLock::new();
 
-/// Configure persistent EasyTier diagnostic logging for the embedding app.
+/// Configure persistent Exvlan diagnostic logging for the embedding app.
 ///
 /// Enabling installs a process-wide subscriber on first use, writes into
 /// `directory`, and turns on trace/debug events for connection lifecycle
@@ -89,7 +89,7 @@ static DIAGNOSTIC_LOGGER: OnceLock<Result<DiagnosticLogger, String>> = OnceLock:
 /// When `enabled` is non-zero, `directory` must be a non-null pointer to a
 /// NUL-terminated UTF-8 path.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn easytier_ios_configure_diagnostic_logging(
+pub unsafe extern "C" fn exvlan_ios_configure_diagnostic_logging(
     directory: *const c_char,
     enabled: c_int,
 ) -> c_int {
@@ -144,7 +144,7 @@ fn diagnostic_failure(message: &str) -> c_int {
 /// # Safety
 /// `message` must be a non-null pointer to a NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn easytier_ios_append_diagnostic_event(message: *const c_char) -> c_int {
+pub unsafe extern "C" fn exvlan_ios_append_diagnostic_event(message: *const c_char) -> c_int {
     unsafe {
         guarded(-1, || {
             error::clear_error();
@@ -155,7 +155,7 @@ pub unsafe extern "C" fn easytier_ios_append_diagnostic_event(message: *const c_
                     return -1;
                 }
             };
-            tracing::info!(target: "easytier_ios::diagnostics", %message, "host event");
+            tracing::info!(target: "exvlan_ios::diagnostics", %message, "host event");
             0
         })
     }
@@ -164,7 +164,7 @@ pub unsafe extern "C" fn easytier_ios_append_diagnostic_event(message: *const c_
 /// Flush buffered diagnostic output. A logger that has never been enabled is
 /// already flushed and returns success.
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_ios_flush_diagnostic_logging() -> c_int {
+pub extern "C" fn exvlan_ios_flush_diagnostic_logging() -> c_int {
     guarded(-1, || {
         error::clear_error();
         let Some(Ok(logger)) = DIAGNOSTIC_LOGGER.get() else {
@@ -182,7 +182,7 @@ pub extern "C" fn easytier_ios_flush_diagnostic_logging() -> c_int {
 
 /// Delete all rotated diagnostic content while keeping the active writer open.
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_ios_clear_diagnostic_logs() -> c_int {
+pub extern "C" fn exvlan_ios_clear_diagnostic_logs() -> c_int {
     guarded(-1, || {
         error::clear_error();
         let Some(Ok(logger)) = DIAGNOSTIC_LOGGER.get() else {
@@ -204,7 +204,7 @@ fn guarded<R>(default: R, body: impl FnOnce() -> R) -> R {
     match catch_unwind(AssertUnwindSafe(body)) {
         Ok(result) => result,
         Err(_) => {
-            error::set_error("internal panic in easytier-ios");
+            error::set_error("internal panic in exvlan-ios");
             default
         }
     }
@@ -224,14 +224,14 @@ unsafe fn cstr_arg<'a>(value: *const c_char, what: &str) -> Result<&'a str, Stri
         .map_err(|_| format!("{what} is not valid UTF-8"))
 }
 
-/// Start one EasyTier network instance from a TOML config string.
+/// Start one Exvlan network instance from a TOML config string.
 ///
-/// Returns 0 on success, -1 on failure (see `easytier_ios_last_error`).
+/// Returns 0 on success, -1 on failure (see `exvlan_ios_last_error`).
 ///
 /// # Safety
 /// `toml` must be a non-null pointer to a NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn easytier_ios_run_instance(toml: *const c_char) -> c_int {
+pub unsafe extern "C" fn exvlan_ios_run_instance(toml: *const c_char) -> c_int {
     unsafe {
         guarded(-1, || {
             error::clear_error();
@@ -242,7 +242,7 @@ pub unsafe extern "C" fn easytier_ios_run_instance(toml: *const c_char) -> c_int
                     return -1;
                 }
             };
-            easytier_ffi::run_network_instance(toml.as_ptr() as *const c_char)
+            exvlan_ffi::run_network_instance(toml.as_ptr() as *const c_char)
         })
     }
 }
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn easytier_ios_run_instance(toml: *const c_char) -> c_int
 /// `names_json` may be null; when non-null it must point to a NUL-terminated
 /// UTF-8 string containing a JSON array of strings.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn easytier_ios_retain_instances(names_json: *const c_char) -> c_int {
+pub unsafe extern "C" fn exvlan_ios_retain_instances(names_json: *const c_char) -> c_int {
     unsafe {
         guarded(-1, || {
             error::clear_error();
@@ -296,7 +296,7 @@ pub unsafe extern "C" fn easytier_ios_retain_instances(names_json: *const c_char
                 }
             };
             let pointers: Vec<*const c_char> = c_names.iter().map(|name| name.as_ptr()).collect();
-            easytier_ffi::retain_network_instance(pointers.as_ptr(), pointers.len())
+            exvlan_ffi::retain_network_instance(pointers.as_ptr(), pointers.len())
         })
     }
 }
@@ -308,7 +308,7 @@ pub unsafe extern "C" fn easytier_ios_retain_instances(names_json: *const c_char
 /// # Safety
 /// `instance_name` must be a non-null pointer to a NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn easytier_ios_delete_instance(instance_name: *const c_char) -> c_int {
+pub unsafe extern "C" fn exvlan_ios_delete_instance(instance_name: *const c_char) -> c_int {
     unsafe {
         guarded(-1, || {
             error::clear_error();
@@ -317,7 +317,7 @@ pub unsafe extern "C" fn easytier_ios_delete_instance(instance_name: *const c_ch
                 return -1;
             }
             let instance_names = [instance_name];
-            easytier_ffi::delete_network_instance(instance_names.as_ptr(), instance_names.len())
+            exvlan_ffi::delete_network_instance(instance_names.as_ptr(), instance_names.len())
         })
     }
 }
@@ -326,15 +326,15 @@ pub unsafe extern "C" fn easytier_ios_delete_instance(instance_name: *const c_ch
 /// instance name to its running info JSON.
 ///
 /// Returns a newly allocated string the caller must release with
-/// `easytier_ios_free_string`, or null on failure (see
-/// `easytier_ios_last_error`).
+/// `exvlan_ios_free_string`, or null on failure (see
+/// `exvlan_ios_last_error`).
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_ios_collect_network_infos(max_length: c_int) -> *mut c_char {
+pub extern "C" fn exvlan_ios_collect_network_infos(max_length: c_int) -> *mut c_char {
     guarded(ptr::null_mut(), || {
         error::clear_error();
         let max_length = max_length.max(0) as usize;
         let mut infos = vec![
-            easytier_ffi::KeyValuePair {
+            exvlan_ffi::KeyValuePair {
                 key: ptr::null(),
                 value: ptr::null(),
             };
@@ -342,8 +342,8 @@ pub extern "C" fn easytier_ios_collect_network_infos(max_length: c_int) -> *mut 
         ];
         // SAFETY: `infos` is writable storage for `max_length` entries; every
         // returned key/value string is released below with
-        // `easytier_ffi::free_string`.
-        let count = unsafe { easytier_ffi::collect_network_infos(infos.as_mut_ptr(), max_length) };
+        // `exvlan_ffi::free_string`.
+        let count = unsafe { exvlan_ffi::collect_network_infos(infos.as_mut_ptr(), max_length) };
         if count < 0 {
             return ptr::null_mut();
         }
@@ -353,12 +353,12 @@ pub extern "C" fn easytier_ios_collect_network_infos(max_length: c_int) -> *mut 
                 break;
             }
             // SAFETY: non-null entries are NUL-terminated strings allocated by
-            // easytier-ffi, each released exactly once after copying.
+            // exvlan-ffi, each released exactly once after copying.
             let (key, value) = unsafe {
                 let key = CStr::from_ptr(info.key).to_string_lossy().into_owned();
                 let value = CStr::from_ptr(info.value).to_string_lossy().into_owned();
-                easytier_ffi::free_string(info.key);
-                easytier_ffi::free_string(info.value);
+                exvlan_ffi::free_string(info.key);
+                exvlan_ffi::free_string(info.value);
                 (key, value)
             };
             let value = serde_json::from_str(&value).unwrap_or(serde_json::Value::String(value));
@@ -375,23 +375,23 @@ pub extern "C" fn easytier_ios_collect_network_infos(max_length: c_int) -> *mut 
     })
 }
 
-/// Call an exposed EasyTier management RPC method using protobuf JSON.
+/// Call an exposed Exvlan management RPC method using protobuf JSON.
 ///
-/// Thin wrapper over easytier-ffi's `call_json_rpc` with a null domain (the
+/// Thin wrapper over exvlan-ffi's `call_json_rpc` with a null domain (the
 /// generic management registry). `payload_json` must contain the protobuf
 /// JSON request, including any `instance` selector required by the target
 /// RPC. Port forwarding into the virtual network is driven through this
 /// bridge with `api.config.ConfigRpcService/PatchConfig` port-forward patches.
 ///
 /// Returns a newly allocated JSON response string the caller must release
-/// with `easytier_ios_free_string`, or null on failure (see
-/// `easytier_ios_last_error`).
+/// with `exvlan_ios_free_string`, or null on failure (see
+/// `exvlan_ios_last_error`).
 ///
 /// # Safety
 /// `service_name`, `method_name` and `payload_json` must be non-null
 /// pointers to NUL-terminated UTF-8 strings.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn easytier_ios_call_json_rpc(
+pub unsafe extern "C" fn exvlan_ios_call_json_rpc(
     service_name: *const c_char,
     method_name: *const c_char,
     payload_json: *const c_char,
@@ -415,7 +415,7 @@ pub unsafe extern "C" fn easytier_ios_call_json_rpc(
                 }
             };
             let mut out: *const c_char = ptr::null();
-            let rc = easytier_ffi::call_json_rpc(
+            let rc = exvlan_ffi::call_json_rpc(
                 service_name,
                 method_name,
                 ptr::null(),
@@ -423,7 +423,7 @@ pub unsafe extern "C" fn easytier_ios_call_json_rpc(
                 &mut out,
             );
             if rc != 0 {
-                // easytier-ffi already recorded the failure in its own
+                // exvlan-ffi already recorded the failure in its own
                 // last-error buffer.
                 return ptr::null_mut();
             }
@@ -435,22 +435,22 @@ pub unsafe extern "C" fn easytier_ios_call_json_rpc(
 /// Return the last error message on this thread, or null when there is none.
 ///
 /// Combines wrapper-side errors recorded by this library with the
-/// easytier-ffi last FFI error. The returned string is newly allocated and
-/// must be released with `easytier_ios_free_string`.
+/// exvlan-ffi last FFI error. The returned string is newly allocated and
+/// must be released with `exvlan_ios_free_string`.
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_ios_last_error() -> *mut c_char {
+pub extern "C" fn exvlan_ios_last_error() -> *mut c_char {
     guarded(ptr::null_mut(), error::last_error_raw)
 }
 
-/// Release a string returned by `easytier_ios_collect_network_infos`,
-/// `easytier_ios_call_json_rpc` or `easytier_ios_last_error`. Passing null
+/// Release a string returned by `exvlan_ios_collect_network_infos`,
+/// `exvlan_ios_call_json_rpc` or `exvlan_ios_last_error`. Passing null
 /// is a no-op.
 ///
 /// # Safety
 /// `s` must be null or a string previously returned by this library, not yet
 /// freed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn easytier_ios_free_string(s: *mut c_char) {
+pub unsafe extern "C" fn exvlan_ios_free_string(s: *mut c_char) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         if !s.is_null() {
             // SAFETY: caller guarantees `s` came from this library.
@@ -479,7 +479,7 @@ mod tests {
         },
     };
 
-    /// Tests share the process-wide easytier-ffi state; run them serially.
+    /// Tests share the process-wide exvlan-ffi state; run them serially.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn init_logs() {
@@ -488,7 +488,7 @@ mod tests {
         LOG_INIT.call_once(|| {
             let filter = tracing_subscriber::EnvFilter::new(
                 std::env::var("RUST_LOG")
-                    .unwrap_or_else(|_| "easytier_core=debug,easytier=debug,info".to_owned()),
+                    .unwrap_or_else(|_| "exvlan_core=debug,exvlan=debug,info".to_owned()),
             );
             let _ = tracing_subscriber::fmt()
                 .with_env_filter(filter)
@@ -503,7 +503,7 @@ mod tests {
         // ZCPacket or decrypted packet buffers. Persistent diagnostics must
         // never enable them at any level.
         assert!(!DIAGNOSTIC_FILTER.contains("peer_manager"));
-        assert!(!DIAGNOSTIC_FILTER.contains("easytier::tunnel"));
+        assert!(!DIAGNOSTIC_FILTER.contains("exvlan::tunnel"));
     }
 
     fn acquire() -> MutexGuard<'static, ()> {
@@ -533,7 +533,7 @@ mod tests {
     fn retain_all() {
         let empty = CString::new("[]").unwrap();
         // SAFETY: `empty` is a valid NUL-terminated string.
-        assert_eq!(unsafe { easytier_ios_retain_instances(empty.as_ptr()) }, 0);
+        assert_eq!(unsafe { exvlan_ios_retain_instances(empty.as_ptr()) }, 0);
     }
 
     struct InstanceGuard;
@@ -542,7 +542,7 @@ mod tests {
         fn run(instance: &str) -> Self {
             let config = minimal_config(instance);
             // SAFETY: `config` is a valid NUL-terminated string.
-            let result = unsafe { easytier_ios_run_instance(config.as_ptr()) };
+            let result = unsafe { exvlan_ios_run_instance(config.as_ptr()) };
             assert_eq!(result, 0, "run_instance failed: {:?}", take_last_error());
             Self
         }
@@ -555,32 +555,32 @@ mod tests {
     }
 
     fn take_last_error() -> Option<String> {
-        let error_ptr = easytier_ios_last_error();
+        let error_ptr = exvlan_ios_last_error();
         if error_ptr.is_null() {
             return None;
         }
-        // SAFETY: `error_ptr` was returned by `easytier_ios_last_error` and is
+        // SAFETY: `error_ptr` was returned by `exvlan_ios_last_error` and is
         // freed exactly once below.
         let message = unsafe { CStr::from_ptr(error_ptr) }
             .to_string_lossy()
             .into_owned();
-        unsafe { easytier_ios_free_string(error_ptr) };
+        unsafe { exvlan_ios_free_string(error_ptr) };
         Some(message)
     }
 
     fn collect_infos_json() -> String {
-        let json_ptr = easytier_ios_collect_network_infos(32);
+        let json_ptr = exvlan_ios_collect_network_infos(32);
         assert!(
             !json_ptr.is_null(),
             "collect failed: {:?}",
             take_last_error()
         );
         // SAFETY: `json_ptr` was returned by
-        // `easytier_ios_collect_network_infos` and is freed exactly once below.
+        // `exvlan_ios_collect_network_infos` and is freed exactly once below.
         let json = unsafe { CStr::from_ptr(json_ptr) }
             .to_string_lossy()
             .into_owned();
-        unsafe { easytier_ios_free_string(json_ptr) };
+        unsafe { exvlan_ios_free_string(json_ptr) };
         json
     }
 
@@ -591,19 +591,19 @@ mod tests {
         let payload_c = CString::new(payload.to_string()).unwrap();
         // SAFETY: all three pointers are valid NUL-terminated strings.
         let response_ptr = unsafe {
-            easytier_ios_call_json_rpc(service_c.as_ptr(), method_c.as_ptr(), payload_c.as_ptr())
+            exvlan_ios_call_json_rpc(service_c.as_ptr(), method_c.as_ptr(), payload_c.as_ptr())
         };
         assert!(
             !response_ptr.is_null(),
             "{service}/{method} failed: {:?}",
             take_last_error()
         );
-        // SAFETY: `response_ptr` was returned by `easytier_ios_call_json_rpc`
+        // SAFETY: `response_ptr` was returned by `exvlan_ios_call_json_rpc`
         // and is freed exactly once below.
         let response = unsafe { CStr::from_ptr(response_ptr) }
             .to_string_lossy()
             .into_owned();
-        unsafe { easytier_ios_free_string(response_ptr) };
+        unsafe { exvlan_ios_free_string(response_ptr) };
         response
     }
 
@@ -659,7 +659,7 @@ mod tests {
         let deleted_name = CString::new(deleted.clone()).unwrap();
         // SAFETY: `deleted_name` is a valid NUL-terminated string.
         assert_eq!(
-            unsafe { easytier_ios_delete_instance(deleted_name.as_ptr()) },
+            unsafe { exvlan_ios_delete_instance(deleted_name.as_ptr()) },
             0,
             "delete failed: {:?}",
             take_last_error()
@@ -681,7 +681,7 @@ mod tests {
         let _guard = acquire();
         let garbage = CString::new("not json").unwrap();
         // SAFETY: `garbage` is a valid NUL-terminated string.
-        let result = unsafe { easytier_ios_retain_instances(garbage.as_ptr()) };
+        let result = unsafe { exvlan_ios_retain_instances(garbage.as_ptr()) };
         assert_eq!(result, -1);
         let message = take_last_error().expect("last error must be set");
         assert!(
@@ -697,7 +697,7 @@ mod tests {
         let method = CString::new("PatchConfig").unwrap();
         // SAFETY: service/method are valid; payload null must be rejected.
         let response =
-            unsafe { easytier_ios_call_json_rpc(service.as_ptr(), method.as_ptr(), ptr::null()) };
+            unsafe { exvlan_ios_call_json_rpc(service.as_ptr(), method.as_ptr(), ptr::null()) };
         assert!(response.is_null());
         let message = take_last_error().expect("last error must be set");
         assert!(
@@ -715,7 +715,7 @@ mod tests {
 
         // SAFETY: method and payload are valid; service null must be rejected.
         let response =
-            unsafe { easytier_ios_call_json_rpc(ptr::null(), method.as_ptr(), payload.as_ptr()) };
+            unsafe { exvlan_ios_call_json_rpc(ptr::null(), method.as_ptr(), payload.as_ptr()) };
         assert!(response.is_null());
         let message = take_last_error().expect("last error must be set");
         assert!(
@@ -725,7 +725,7 @@ mod tests {
 
         // SAFETY: service and payload are valid; method null must be rejected.
         let response =
-            unsafe { easytier_ios_call_json_rpc(service.as_ptr(), ptr::null(), payload.as_ptr()) };
+            unsafe { exvlan_ios_call_json_rpc(service.as_ptr(), ptr::null(), payload.as_ptr()) };
         assert!(response.is_null());
         let message = take_last_error().expect("last error must be set");
         assert!(
@@ -781,17 +781,17 @@ mod tests {
         );
     }
 
-    /// Ownership of an easytier-ffi allocated string: freed exactly once on
-    /// drop, in a thread that itself calls back into easytier-ffi so the
-    /// easytier-ffi free runs on a thread the runtime has seen.
+    /// Ownership of an exvlan-ffi allocated string: freed exactly once on
+    /// drop, in a thread that itself calls back into exvlan-ffi so the
+    /// exvlan-ffi free runs on a thread the runtime has seen.
     struct FfiString(*const c_char);
 
     impl Drop for FfiString {
         fn drop(&mut self) {
             if !self.0.is_null() {
-                // `self.0` was allocated by easytier-ffi and is freed exactly
+                // `self.0` was allocated by exvlan-ffi and is freed exactly
                 // once here.
-                easytier_ffi::free_string(self.0);
+                exvlan_ffi::free_string(self.0);
             }
         }
     }
@@ -800,16 +800,16 @@ mod tests {
     fn next_completion(
         session: u64,
         timeout: std::time::Duration,
-    ) -> easytier_ffi::DataPlaneCompletion {
+    ) -> exvlan_ffi::DataPlaneCompletion {
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            let ready = easytier_ffi::data_plane_completion_wait(session, 1_000);
+            let ready = exvlan_ffi::data_plane_completion_wait(session, 1_000);
             assert!(ready >= 0, "completion wait failed: {ready}");
             if ready == 1 {
-                let mut completions = [easytier_ffi::DataPlaneCompletion::default(); 1];
+                let mut completions = [exvlan_ffi::DataPlaneCompletion::default(); 1];
                 // SAFETY: `completions` is writable storage for one value.
                 let drained = unsafe {
-                    easytier_ffi::data_plane_completion_drain(session, completions.as_mut_ptr(), 1)
+                    exvlan_ffi::data_plane_completion_drain(session, completions.as_mut_ptr(), 1)
                 };
                 assert!(drained >= 0, "completion drain failed: {drained}");
                 if drained == 1 {
@@ -830,7 +830,7 @@ mod tests {
         // SAFETY: `instance` is a valid NUL-terminated string and `session`
         // points to writable storage for one `u64`.
         let result =
-            unsafe { easytier_ffi::data_plane_session_open(instance.as_ptr(), &mut session) };
+            unsafe { exvlan_ffi::data_plane_session_open(instance.as_ptr(), &mut session) };
         assert_eq!(result, 0, "session open failed: {result}");
         let session = session;
 
@@ -841,7 +841,7 @@ mod tests {
         loop {
             // SAFETY: `bind_operation` points to writable storage for one `u64`.
             let result = unsafe {
-                easytier_ffi::data_plane_tcp_bind_submit(session, port, 15_000, &mut bind_operation)
+                exvlan_ffi::data_plane_tcp_bind_submit(session, port, 15_000, &mut bind_operation)
             };
             if result == 0 {
                 break;
@@ -861,10 +861,10 @@ mod tests {
             bind_completion.status, bind_completion.operation_kind
         );
         let mut listener = 0u64;
-        let mut local = easytier_ffi::DataPlaneSocketAddr::default();
+        let mut local = exvlan_ffi::DataPlaneSocketAddr::default();
         // SAFETY: outputs reference writable, non-overlapping storage.
         let result = unsafe {
-            easytier_ffi::data_plane_tcp_bind_result_take(
+            exvlan_ffi::data_plane_tcp_bind_result_take(
                 session,
                 bind_operation,
                 &mut listener,
@@ -877,7 +877,7 @@ mod tests {
             let mut accept_operation = 0u64;
             // SAFETY: `accept_operation` points to writable storage for one `u64`.
             let result = unsafe {
-                easytier_ffi::data_plane_tcp_accept_submit(
+                exvlan_ffi::data_plane_tcp_accept_submit(
                     session,
                     listener,
                     5_000,
@@ -890,17 +890,17 @@ mod tests {
             if accept_completion.status != 0 {
                 // Accept timed out or the listener was closed; re-check stop
                 // and either loop for the next connection or exit.
-                easytier_ffi::data_plane_operation_free(session, accept_operation);
+                exvlan_ffi::data_plane_operation_free(session, accept_operation);
                 if stop.load(Ordering::Acquire) {
                     break;
                 }
                 continue;
             }
             let mut stream = 0u64;
-            let mut peer = easytier_ffi::DataPlaneSocketAddr::default();
+            let mut peer = exvlan_ffi::DataPlaneSocketAddr::default();
             // SAFETY: outputs reference writable, non-overlapping storage.
             let result = unsafe {
-                easytier_ffi::data_plane_tcp_accept_result_take(
+                exvlan_ffi::data_plane_tcp_accept_result_take(
                     session,
                     accept_operation,
                     &mut stream,
@@ -913,7 +913,7 @@ mod tests {
             let mut read_operation = 0u64;
             // SAFETY: `read_operation` points to writable storage for one `u64`.
             let result = unsafe {
-                easytier_ffi::data_plane_tcp_read_submit(session, stream, 4096, &mut read_operation)
+                exvlan_ffi::data_plane_tcp_read_submit(session, stream, 4096, &mut read_operation)
             };
             assert_eq!(result, 0, "read submit failed: {result}");
             let read_completion = next_completion(session, std::time::Duration::from_secs(15));
@@ -929,7 +929,7 @@ mod tests {
             // SAFETY: `data` is writable for its length and the scalar outputs
             // reference writable, non-overlapping storage.
             let result = unsafe {
-                easytier_ffi::data_plane_tcp_read_result_take(
+                exvlan_ffi::data_plane_tcp_read_result_take(
                     session,
                     read_operation,
                     data.as_mut_ptr(),
@@ -946,7 +946,7 @@ mod tests {
             let mut write_operation = 0u64;
             // SAFETY: the ABI copies `payload` before returning.
             let result = unsafe {
-                easytier_ffi::data_plane_tcp_write_submit(
+                exvlan_ffi::data_plane_tcp_write_submit(
                     session,
                     stream,
                     payload.as_ptr(),
@@ -964,13 +964,13 @@ mod tests {
             );
 
             // `stream` was accepted above and is closed exactly once.
-            easytier_ffi::data_plane_resource_close(session, stream);
+            exvlan_ffi::data_plane_resource_close(session, stream);
         }
 
         // `listener` and `session` were opened above and are closed exactly
         // once here.
-        easytier_ffi::data_plane_resource_close(session, listener);
-        easytier_ffi::data_plane_session_close(session);
+        exvlan_ffi::data_plane_resource_close(session, listener);
+        exvlan_ffi::data_plane_session_close(session);
     }
 
     #[test]
@@ -991,7 +991,7 @@ mod tests {
         .unwrap();
         // SAFETY: `server_config` is a valid NUL-terminated string.
         assert_eq!(
-            unsafe { easytier_ios_run_instance(server_config.as_ptr()) },
+            unsafe { exvlan_ios_run_instance(server_config.as_ptr()) },
             0,
             "run server failed: {:?}",
             take_last_error()
@@ -1010,7 +1010,7 @@ mod tests {
         .unwrap();
         // SAFETY: `client_config` is a valid NUL-terminated string.
         assert_eq!(
-            unsafe { easytier_ios_run_instance(client_config.as_ptr()) },
+            unsafe { exvlan_ios_run_instance(client_config.as_ptr()) },
             0,
             "run client failed: {:?}",
             take_last_error()
@@ -1073,7 +1073,7 @@ mod tests {
         .unwrap();
         // SAFETY: `server_config` is a valid NUL-terminated string.
         assert_eq!(
-            unsafe { easytier_ios_run_instance(server_config.as_ptr()) },
+            unsafe { exvlan_ios_run_instance(server_config.as_ptr()) },
             0,
             "run server failed: {:?}",
             take_last_error()
@@ -1092,7 +1092,7 @@ mod tests {
         .unwrap();
         // SAFETY: `client_config` is a valid NUL-terminated string.
         assert_eq!(
-            unsafe { easytier_ios_run_instance(client_config.as_ptr()) },
+            unsafe { exvlan_ios_run_instance(client_config.as_ptr()) },
             0,
             "run client failed: {:?}",
             take_last_error()
@@ -1134,7 +1134,7 @@ mod tests {
         // The forward target must be a TCP listener on the server instance's
         // virtual IP. In `no_tun` mode the kernel has no such address, so the
         // server side opens one through its own data plane: an
-        // easytier-ffi data-plane session bound on the virtual stack, with a
+        // exvlan-ffi data-plane session bound on the virtual stack, with a
         // blocking accept/read/write echo loop.
         let echo_port: u16 = 23456;
         let echo_stop = Arc::new(AtomicBool::new(false));
@@ -1168,9 +1168,9 @@ mod tests {
             let payload = CString::new(patch.to_string()).unwrap();
             let mut out: *const c_char = ptr::null();
             // SAFETY: all pointers are valid NUL-terminated strings; `out` is
-            // owned by easytier-ffi and released by the FfiString guard below.
+            // owned by exvlan-ffi and released by the FfiString guard below.
             let rc = unsafe {
-                easytier_ffi::call_json_rpc(
+                exvlan_ffi::call_json_rpc(
                     service.as_ptr(),
                     method.as_ptr(),
                     ptr::null(),

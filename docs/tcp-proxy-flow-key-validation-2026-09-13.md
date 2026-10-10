@@ -36,14 +36,14 @@
 命令（Linux 需在容器内运行）：
 
 ```sh
-cargo nextest run -p easytier --features full --lib \
+cargo nextest run -p exvlan --features full --lib \
   subnet_proxy_three_node_test --test-threads 1 --no-fail-fast
 
-cargo test -p easytier-core --features proxy-smoltcp-stack --lib gateway::
+cargo test -p exvlan-core --features proxy-smoltcp-stack --lib gateway::
 
 cargo fmt --all -- --check
 
-cargo clippy -p easytier-core \
+cargo clippy -p exvlan-core \
   --features proxy-smoltcp-stack,ring-crypto --lib --tests -- -D warnings
 ```
 
@@ -67,7 +67,7 @@ cargo clippy -p easytier-core \
 
 ## 新增回归测试
 
-测试位于 `easytier-core/src/gateway/proxy/tcp_proxy_engine.rs`：
+测试位于 `exvlan-core/src/gateway/proxy/tcp_proxy_engine.rs`：
 
 1. SYN 在 accept 前后重传，均保留转换端口，且不会重复 accept。
 2. 旧连接处于 ClosingSrc、ClosingDst、Closed 时，被同一流的新连接

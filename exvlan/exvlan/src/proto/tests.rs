@@ -1,4 +1,4 @@
-pub use easytier_proto::tests::*;
+pub use exvlan_proto::tests::*;
 
 use std::sync::{Arc, Mutex};
 
@@ -293,7 +293,7 @@ async fn rpc_timeout_test() {
 #[tokio::test]
 async fn rpc_tunnel_stuck_test() {
     use crate::proto::rpc_types;
-    use easytier_core::tunnel::ring::RING_TUNNEL_CAP;
+    use exvlan_core::tunnel::ring::RING_TUNNEL_CAP;
 
     let rpc_server = Server::new();
     rpc_server.run();
@@ -375,7 +375,7 @@ async fn rpc_tunnel_stuck_test() {
 async fn test_bidirect_rpc_manager() {
     use crate::proto::rpc::bidirect::BidirectRpcManager;
     use crate::proto::rpc::standalone::{runtime_rpc_dialer, runtime_rpc_listener};
-    use easytier_core::{connectivity::protocol::raw::TunnelDialer, socket::SocketListener};
+    use exvlan_core::{connectivity::protocol::raw::TunnelDialer, socket::SocketListener};
     use tokio::sync::Notify;
     use tokio_util::task::AbortOnDropHandle;
 

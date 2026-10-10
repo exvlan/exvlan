@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# EXVlan Uptime Monitor 集成测试脚本
+# Exvlan Uptime Monitor 集成测试脚本
 
 set -e
 
-echo "🧪 Running EXVlan Uptime Monitor Integration Tests..."
+echo "🧪 Running Exvlan Uptime Monitor Integration Tests..."
 
 # 检查依赖
 echo "📦 Checking dependencies..."
@@ -112,7 +112,7 @@ echo "📋 Test logs saved to test-logs/"
 # 生成测试报告
 echo "📝 Generating test report..."
 cat > test-results/test-report.md << EOF
-# EXVlan Uptime Monitor Integration Test Report
+# Exvlan Uptime Monitor Integration Test Report
 
 ## Test Summary
 - **Test Date**: $(date)

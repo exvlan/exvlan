@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use easytier_core::{
+use exvlan_core::{
     foundation::stats::{LabelSet, LabelType, MetricName},
     peers::credential_manager::CredentialCreateOptions,
     process_runtime::CoreProcessRuntime,
@@ -34,7 +34,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 #[cfg(feature = "wireguard")]
 use defguard_wireguard_rs::key::Key;
 #[cfg(feature = "wireguard")]
-use easytier_core::gateway::vpn_portal::PortalClientState;
+use exvlan_core::gateway::vpn_portal::PortalClientState;
 
 use super::{
     InstanceTestExt as _, add_ns_to_bridge, create_netns, del_netns, drop_insts, ping_test,

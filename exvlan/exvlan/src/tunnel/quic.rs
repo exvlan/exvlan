@@ -4,7 +4,7 @@
 
 use crate::proto::common::TunnelInfo;
 use anyhow::Context;
-use easytier_core::{
+use exvlan_core::{
     connectivity::{
         protocol::{ServerProtocolAdmission, ServerTunnelAcceptor},
         transport::ConnectedUdpSession,
@@ -345,7 +345,7 @@ mod crypto {
     }
 }
 
-/// EasyTier custom QUIC version "ETQ1" (0x45545131, outside the reserved
+/// Exvlan custom QUIC version "ETQ1" (0x45545131, outside the reserved
 /// `0x??a?a?a?a` grease pattern).
 ///
 /// Connections negotiated on this version bind the packet integrity checksum
@@ -664,7 +664,7 @@ impl ServerTunnelAcceptor for QuicAcceptedSession {
 mod tests {
     use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-    use easytier_core::{
+    use exvlan_core::{
         connectivity::{
             protocol::ServerProtocolAdmissionController,
             transport::{UdpSessionMode, connect_udp},

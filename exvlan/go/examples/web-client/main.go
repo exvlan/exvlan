@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	corehost "github.com/easytier/easytier/easytier-go"
+	corehost "github.com/exvlan/exvlan/exvlan-go"
 )
 
 type options struct {
@@ -37,7 +37,7 @@ func main() {
 	)
 	defer stop()
 	if err := run(ctx, options); err != nil {
-		log.Printf("EasyTier Web client failed: %v", err)
+		log.Printf("Exvlan Web client failed: %v", err)
 		os.Exit(1)
 	}
 }
@@ -70,7 +70,7 @@ func parseOptions(arguments []string) (options, error) {
 func run(ctx context.Context, options options) error {
 	host, err := corehost.New(ctx, corehost.Options{})
 	if err != nil {
-		return fmt.Errorf("create EasyTier host: %w", err)
+		return fmt.Errorf("create Exvlan host: %w", err)
 	}
 	defer host.Close(context.Background())
 
@@ -81,11 +81,11 @@ func run(ctx context.Context, options options) error {
 		SecureMode: options.secure,
 	})
 	if err != nil {
-		return fmt.Errorf("connect EasyTier Web client: %w", err)
+		return fmt.Errorf("connect Exvlan Web client: %w", err)
 	}
 	defer client.Close(context.Background())
 
-	log.Printf("EasyTier Web client started for machine %s", options.machineID)
+	log.Printf("Exvlan Web client started for machine %s", options.machineID)
 	<-ctx.Done()
 	return nil
 }

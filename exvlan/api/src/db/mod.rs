@@ -1,4 +1,4 @@
-// sea-orm-cli generate entity -u sqlite:./et.db -o easytier-web/src/db/entity/ --with-serde both --with-copy-enums
+// sea-orm-cli generate entity -u sqlite:./et.db -o exvlan-api/src/db/entity/ --with-serde both --with-copy-enums
 mod central_intent;
 mod devices;
 #[allow(unused_imports)]
@@ -7,8 +7,8 @@ pub mod entity;
 pub(crate) use central_intent::{CentralIntentError, CentralOwnedRuntimeConfig};
 pub use devices::DeviceHeartbeatRecord;
 
-use easytier::common::config::{ConfigSource, NetworkConfig};
-use easytier_core::management::remote_client::{ListNetworkProps, Storage};
+use exvlan::common::config::{ConfigSource, NetworkConfig};
+use exvlan_core::management::remote_client::{ListNetworkProps, Storage};
 use entity::user_running_network_configs;
 use sea_orm::{
     ColumnTrait as _, DatabaseConnection, DbErr, EntityTrait, QueryFilter as _, Set,
@@ -785,8 +785,8 @@ impl Storage<(UserIdInDb, Uuid), user_running_network_configs::Model, DbErr> for
 
 #[cfg(test)]
 mod tests {
-    use easytier::{common::config::ConfigSource, proto::api::manage::NetworkConfig};
-    use easytier_core::management::remote_client::{PersistentConfig, Storage};
+    use exvlan::{common::config::ConfigSource, proto::api::manage::NetworkConfig};
+    use exvlan_core::management::remote_client::{PersistentConfig, Storage};
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter as _, Set};
 
     use crate::db::{Db, ListNetworkProps, entity::user_running_network_configs};

@@ -34,7 +34,7 @@ const id = n => `00000000-0000-0000-0000-${n.toString(16).padStart(12, '0')}`;
 function fixture() {
     const machines = ['Amsterdam gateway', 'Build server', 'Office workstation', 'Storage node', 'Travel laptop', 'Windows desktop'].map((hostname, i) => ({
         client_url: `tcp://192.0.2.${i + 10}:11010`,
-        info: { hostname, machine_id: uuid(i + 1), easytier_version: '2.4.5', report_time: '2026-09-13 12:00:00', running_network_instances: i === 0 ? [uuid(100)] : [] },
+        info: { hostname, machine_id: uuid(i + 1), exvlan_version: '2.4.5', report_time: '2026-09-13 12:00:00', running_network_instances: i === 0 ? [uuid(100)] : [] },
         location: { country: 'Netherlands', region: '', city: 'Amsterdam' },
         networks: [],
     }));
@@ -159,7 +159,7 @@ test('overview uses real counts and recovers from partial refresh failures', asy
 test('enrollment command uses the console info response', async t => {
     const { page } = await open(t);
     await page.getByRole('button', { name: 'Device Enrollment', exact: true }).click();
-    await page.getByText('easytier-core --config-server udp://127.0.0.1:22020/test-user').waitFor();
+    await page.getByText('exvlan-core --config-server udp://127.0.0.1:22020/test-user').waitFor();
 });
 
 for (const [apiHost, hostname] of [
@@ -170,7 +170,7 @@ for (const [apiHost, hostname] of [
     test(`enrollment command uses the configured API hostname for ${apiHost}`, async t => {
         const { page } = await open(t, '/h', {}, state => { state.apiHost = apiHost; });
         await page.getByRole('button', { name: 'Device Enrollment', exact: true }).click();
-        await page.getByText(`easytier-core --config-server udp://${hostname}:22020/test-user`).waitFor();
+        await page.getByText(`exvlan-core --config-server udp://${hostname}:22020/test-user`).waitFor();
     });
 }
 
@@ -483,7 +483,7 @@ test('PublicServer credential exports use the configured public server', async t
     await page.getByRole('button', { name: 'Show join command', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Temporary device join command' });
     assert.equal(await dialog.locator('pre').textContent(),
-        `easytier-core --network-name team-0 --secure-mode --credential test-credential-secret -p ${peer}`);
+        `exvlan-core --network-name team-0 --secure-mode --credential test-credential-secret -p ${peer}`);
     await dialog.getByRole('button', { name: 'Config file', exact: true }).click();
     assert.equal(await dialog.locator('pre').textContent(), [
         '[network_identity]', 'network_name = "team-0"', '',

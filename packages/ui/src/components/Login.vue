@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { Card, InputText, Password, Button } from 'primevue';
 import { useRouter } from 'vue-router';
 import { useToast } from 'primevue/usetoast';
-import { I18nUtils } from 'easytier-frontend-lib';
+import { I18nUtils } from '@exvlan/std';
 import { getApiBase } from "../modules/api-host"
 import { useI18n } from 'vue-i18n'
 import ApiClient, { Credential, RegisterData } from '../modules/api';

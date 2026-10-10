@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cidr::Ipv4Inet;
-use easytier_core::{
+use exvlan_core::{
     gateway::magic_dns::MagicDnsRoute,
     host::packet::{HostPacket, HostPacketChannelSink, HostPacketReceiver},
     process_runtime::CoreProcessRuntime,

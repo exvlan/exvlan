@@ -20,7 +20,7 @@ impl MigrationTrait for Migration {
                     machine_id TEXT NOT NULL,
                     hostname TEXT NOT NULL DEFAULT '',
                     alias TEXT NOT NULL DEFAULT '',
-                    easytier_version TEXT NOT NULL DEFAULT '',
+                    exvlan_version TEXT NOT NULL DEFAULT '',
                     device_os TEXT NOT NULL DEFAULT '{}',
                     client_url TEXT NOT NULL DEFAULT '',
                     first_seen_time TEXT NOT NULL,

@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use easytier_proto::{
+use exvlan_proto::{
     api::manage::{
         CollectNetworkInfoRequest, CollectNetworkInfoResponse, DeleteNetworkInstanceRequest,
         DeleteNetworkInstanceResponse, GetNetworkInstanceConfigRequest,

@@ -700,13 +700,13 @@ mod tests {
     }
 
     fn linux_bpf_integration_enabled(test_name: &str) -> bool {
-        if env::var_os("EASYTIER_LINUX_BPF_INTEGRATION").is_none() {
-            eprintln!("{test_name}: skipped (EASYTIER_LINUX_BPF_INTEGRATION not set)");
+        if env::var_os("EXVLAN_LINUX_BPF_INTEGRATION").is_none() {
+            eprintln!("{test_name}: skipped (EXVLAN_LINUX_BPF_INTEGRATION not set)");
             return false;
         }
         assert!(
             is_root(),
-            "{test_name}: EASYTIER_LINUX_BPF_INTEGRATION requires root"
+            "{test_name}: EXVLAN_LINUX_BPF_INTEGRATION requires root"
         );
         true
     }

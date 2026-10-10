@@ -1,6 +1,6 @@
 use std::{io, string::FromUtf8Error};
 
-use easytier_core::tunnel::TunnelError;
+use exvlan_core::tunnel::TunnelError;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum HttpTransportError {

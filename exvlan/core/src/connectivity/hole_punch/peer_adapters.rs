@@ -71,8 +71,8 @@ impl UdpHolePunchPeerSource for PeerManagerCore {
         PeerManagerCore::is_local_virtual_ip(self, ip)
     }
 
-    async fn is_easytier_managed_ipv6(&self, ip: &Ipv6Addr) -> bool {
-        PeerManagerCore::is_easytier_managed_ipv6(self, ip).await
+    async fn is_exvlan_managed_ipv6(&self, ip: &Ipv6Addr) -> bool {
+        PeerManagerCore::is_exvlan_managed_ipv6(self, ip).await
     }
 }
 

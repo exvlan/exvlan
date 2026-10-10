@@ -11,7 +11,7 @@ type ConnectorEnvironment interface {
 }
 
 // EnvironmentSnapshot is the host-observed network state captured when an
-// EasyTier instance is created. Core remains responsible for all policy
+// Exvlan instance is created. Core remains responsible for all policy
 // decisions made from these facts.
 //
 // TODO: Split static declarations from dynamic network facts and add a

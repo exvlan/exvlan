@@ -25,18 +25,18 @@ Anonymous 中，主要体现为非匿名或共享驻留页。PSS 在高连接数
 
 | 版本 | 标识 | 二进制 |
 |---|---|---|
-| 当前分支 | commit `9e2ed33aeb37`，版本 `2.6.4-9e2ed33a` | `target/x86_64-unknown-linux-musl/release/easytier-core` |
-| 2.6.4 | 版本 `2.6.4-8428a89d` | `/data/tickets/easytier/easytier-linux-x86_64/easytier-core` |
+| 当前分支 | commit `9e2ed33aeb37`，版本 `2.6.4-9e2ed33a` | `target/x86_64-unknown-linux-musl/release/exvlan-core` |
+| 2.6.4 | 版本 `2.6.4-8428a89d` | `/data/tickets/exvlan/exvlan-linux-x86_64/exvlan-core` |
 
 当前分支使用以下命令重新构建，确保被测二进制准确对应 HEAD：
 
 ```console
 cargo build --release \
   --target x86_64-unknown-linux-musl \
-  -p easytier \
+  -p exvlan \
   --features jemalloc \
-  --bin easytier-core \
-  --bin easytier-cli
+  --bin exvlan-core \
+  --bin exvlan-cli
 ```
 
 两个二进制均为 stripped static PIE。当前分支明确使用 musl 和
@@ -44,12 +44,12 @@ jemalloc。
 
 ## 测试拓扑
 
-- 两个 `easytier-core` 分别运行在独立的 network namespace；
+- 两个 `exvlan-core` 分别运行在独立的 network namespace；
 - namespace 通过 Linux bridge 和 veth 连接；
 - underlay 地址为 `10.251.89.10/24` 和 `10.251.89.11/24`；
-- EasyTier 虚拟地址为 `10.144.144.1/24` 和
+- Exvlan 虚拟地址为 `10.144.144.1/24` 和
   `10.144.144.2/24`；
-- 两个节点之间使用 UDP listener 建立 EasyTier peer 连接；
+- 两个节点之间使用 UDP listener 建立 Exvlan peer 连接；
 - 源节点启用 `--enable-quic-proxy true`；
 - 两个节点均保留默认 QUIC input；
 - TCP client 从 `10.144.144.1` 访问绑定在
@@ -73,7 +73,7 @@ jemalloc。
 
 ## 空闲连接结果
 
-以下数据均为两个 EasyTier core 的合计值：
+以下数据均为两个 Exvlan core 的合计值：
 
 | 当前连接数 | 当前 RSS | 2.6.4 RSS | 当前 PSS | 2.6.4 PSS | 当前 USS | 2.6.4 USS | USS 变化 | 当前 Anonymous | 2.6.4 Anonymous |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -169,7 +169,7 @@ jemalloc。
    将它归因到某一个具体映射。
 2. 两个相同版本进程运行在同一宿主机时会共享可执行文件代码页，
    所以 PSS 比 RSS 更适合估算该测试拓扑的宿主机总成本，USS 和
-   Anonymous 更适合判断 EasyTier 私有堆及缓冲区的变化。
+   Anonymous 更适合判断 Exvlan 私有堆及缓冲区的变化。
 3. 这是一轮受控 A/B 测试，而不是长期统计分布。数值可用于确认
    差异方向和量级；若作为发布门禁，应固定机器负载并增加多轮重复。
 4. 本文只比较 QUIC TCP proxy 内存，不使用未限速吞吐结果推断性能，

@@ -1,9 +1,5 @@
-<<<<<<<< HEAD:exvlan/contrib/ohrs/src/config_repo/validation.rs
+use exvlan::common::config::NetworkConfigExt;
 use exvlan::proto::api::manage::NetworkConfig;
-========
-use easytier::common::config::NetworkConfigExt;
-use easytier::proto::api::manage::NetworkConfig;
->>>>>>>> upstream/releases/v2.7.0:easytier-contrib/easytier-ohrs/crates/easytier-ohos-features/src/config_repo/validation.rs
 use serde_json::{Map, Value};
 use uuid::Uuid;
 

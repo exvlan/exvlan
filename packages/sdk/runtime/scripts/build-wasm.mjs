@@ -26,7 +26,7 @@ const wasmOptExecutable = path.join(
 );
 const artifact = path.join(
   repositoryRoot,
-  "target/wasm32-wasip1/release/easytier_core.wasm",
+  "target/wasm32-wasip1/release/exvlan_core.wasm",
 );
 const output = path.resolve(process.cwd(), outputArgument);
 const outputDirectory = path.dirname(output);
@@ -37,7 +37,7 @@ await new Promise((resolve, reject) => {
     [
       "build",
       "-p",
-      "easytier-core",
+      "exvlan-core",
       "--release",
       "--target",
       "wasm32-wasip1",

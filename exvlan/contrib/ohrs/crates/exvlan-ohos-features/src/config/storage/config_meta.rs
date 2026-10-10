@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static CONFIG_DB_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 static CONFIG_DB_CONNECTION: Lazy<Mutex<Option<CachedConfigDb>>> = Lazy::new(|| Mutex::new(None));
-const CONFIG_DB_FILE_NAME: &str = "easytier-config-store.db";
+const CONFIG_DB_FILE_NAME: &str = "exvlan-config-store.db";
 
 struct CachedConfigDb {
     path: PathBuf,

@@ -36,12 +36,12 @@ cidr = "0.3.2"
 clap = "4.6.7"
 crossbeam = "0.8.5"
 dashmap = "6.2.1"
-easytier = { version = "2.7.0", path = "easytier", default-features = false }
-easytier-core = { version = "2.7.0", path = "easytier-core", default-features = false }
-easytier-ffi = { version = "0.1.0", path = "easytier-contrib/easytier-ffi", default-features = false }
-easytier-ohos-core = { version = "0.1.0", path = "easytier-contrib/easytier-ohrs/crates/easytier-ohos-core", default-features = false }
-easytier-ohos-features = { version = "0.1.0", path = "easytier-contrib/easytier-ohrs/crates/easytier-ohos-features", default-features = false }
-easytier-proto = { version = "2.7.0", path = "easytier-proto", default-features = false }
+exvlan = { version = "2.7.0", path = "exvlan/exvlan", default-features = false }
+exvlan-core = { version = "2.7.0", path = "exvlan/core", default-features = false }
+exvlan-ffi = { version = "0.1.0", path = "exvlan/contrib/ffi", default-features = false }
+exvlan-ohos-core = { version = "0.1.0", path = "exvlan/contrib/ohrs/crates/exvlan-ohos-core", default-features = false }
+exvlan-ohos-features = { version = "0.1.0", path = "exvlan/contrib/ohrs/crates/exvlan-ohos-features", default-features = false }
+exvlan-proto = { version = "2.7.0", path = "exvlan/proto", default-features = false }
 futures = "0.3"
 gethostname = "1.1"
 guarden = "0.3"
@@ -62,7 +62,7 @@ quanta = "0.12"
 # rand 0.10 / x25519-dalek 3 require a coordinated RNG trait migration.
 rand = "0.8.8"
 reqwest = { version = "0.13.5", default-features = false }
-rust-i18n = "4"
+rust-i18n = "4.2"
 rustls = { version = "0.23.45", default-features = false }
 # tower-sessions-sqlx-store 0.15 requires SQLx 0.8; SeaORM 2 requires SQLx 0.9.
 sea-orm = "1.1.20"

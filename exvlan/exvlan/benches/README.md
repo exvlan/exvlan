@@ -1,6 +1,6 @@
 # Benchmarks
 
-Criterion benchmarks for EasyTier hot paths.
+Criterion benchmarks for Exvlan hot paths.
 
 | Bench                     | What it measures                                                                |
 | ------------------------- | ------------------------------------------------------------------------------- |

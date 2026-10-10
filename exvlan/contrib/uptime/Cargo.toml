@@ -1,5 +1,5 @@
 [package]
-name = "easytier-uptime"
+name = "exvlan-uptime"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -44,7 +44,7 @@ tokio-util = { workspace = true, features = ["full"] }
 dashmap.workspace = true
 clap = { workspace = true, features = ["derive"] }
 
-# EasyTier core
-easytier = { workspace = true, default-features = true }
+# Exvlan core
+exvlan = { workspace = true, default-features = true }
 
 mimalloc.workspace = true

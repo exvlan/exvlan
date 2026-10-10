@@ -1,7 +1,7 @@
-# EasyTier Web frontend
+# Exvlan Web frontend
 
 The management console uses Vue 3, PrimeVue 4 and Tailwind 3. Device
-configuration and runtime views reuse `easytier-frontend-lib`.
+configuration and runtime views reuse `@exvlan/std`.
 
 ## Development
 
@@ -9,7 +9,7 @@ From the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --dir easytier-web/frontend dev
+pnpm --dir exvlan-api/frontend dev
 ```
 
 The development proxy defaults to `http://localhost:11211`. Set
@@ -25,10 +25,10 @@ styles are not imported by the GUI or config generator.
 ## Verification
 
 ```sh
-pnpm --dir easytier-web/frontend exec playwright install chromium
-pnpm --dir easytier-web/frontend test:browser
-pnpm --dir easytier-web/frontend-lib test:config-ui
-pnpm --dir easytier-web/frontend-lib test:network-config
+pnpm --dir exvlan-api/frontend exec playwright install chromium
+pnpm --dir exvlan-api/frontend test:browser
+pnpm --dir exvlan-api/frontend-lib test:config-ui
+pnpm --dir exvlan-api/frontend-lib test:network-config
 ```
 
 The browser command builds the application, starts a local preview on
@@ -41,13 +41,13 @@ The layout checks cover English and Chinese, light and dark themes, and
 1440px, 1024px and 390px viewports. To save screenshots outside the repo:
 
 ```sh
-WEB_SCREENSHOT_DIR=/tmp/easytier-web-redesign \
-  pnpm --dir easytier-web/frontend test:browser
+WEB_SCREENSHOT_DIR=/tmp/exvlan-api-redesign \
+  pnpm --dir exvlan-api/frontend test:browser
 ```
 
 Set `WEB_TEST_URL` to test an already running frontend instead of starting
 the preview server. Browser checks exercise simulated device responses;
-they do not replace integration testing against a live EasyTier network.
+they do not replace integration testing against a live Exvlan network.
 
 ### End-to-end test
 
@@ -57,9 +57,9 @@ the container so it can run there, then restore the build directory's owner
 for the host-side Web build:
 
 ```sh
-docker exec rust bash -lc "cd \"$PWD\" && cargo build -p easytier --bin easytier-core"
+docker exec rust bash -lc "cd \"$PWD\" && cargo build -p exvlan --bin exvlan-core"
 sudo chown -R "$(id -u):$(id -g)" target
-pnpm --dir easytier-web/frontend test:e2e
+pnpm --dir exvlan-api/frontend test:e2e
 ```
 
 This test uses a fresh SQLite database, a real Web server, a Chromium browser,

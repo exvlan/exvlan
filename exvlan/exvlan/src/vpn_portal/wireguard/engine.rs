@@ -18,7 +18,7 @@ use boringtun::{
     },
     x25519::{PublicKey, StaticSecret},
 };
-use easytier_core::{
+use exvlan_core::{
     gateway::vpn_portal::{PortalClientConfig, PortalSession},
     socket::udp::VirtualUdpSocket,
 };

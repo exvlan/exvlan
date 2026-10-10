@@ -8,8 +8,8 @@ use std::{
     time::Duration,
 };
 
-use easytier::instance::host::NativeInstanceHost;
-use easytier_core::gateway::{
+use exvlan::instance::host::NativeInstanceHost;
+use exvlan_core::gateway::{
     DataPlaneCompletionDescriptor, DataPlaneError, DataPlaneErrorKind, DataPlaneOperationId,
     DataPlaneOperationKind, DataPlaneOperationResult, DataPlaneResourceId, DataPlaneSession,
 };

@@ -57,20 +57,20 @@ export interface TcpReadResult {
   eof: boolean;
 }
 
-export interface EasyTierIpv4SocketAddress {
+export interface ExvlanIpv4SocketAddress {
   ipv4: string;
   port: number;
 }
 
-export class EasyTierTcpStream {
+export class ExvlanTcpStream {
   private closed = false;
   private writeShutdown: Promise<void> | undefined;
 
   constructor(
-    private readonly dataPlane: EasyTierDataPlane,
+    private readonly dataPlane: ExvlanDataPlane,
     private readonly resource: bigint,
-    readonly localAddress: EasyTierIpv4SocketAddress,
-    readonly peerAddress: EasyTierIpv4SocketAddress,
+    readonly localAddress: ExvlanIpv4SocketAddress,
+    readonly peerAddress: ExvlanIpv4SocketAddress,
   ) {}
 
   read(maxLength = 64 * 1024): Promise<TcpReadResult> {
@@ -119,16 +119,16 @@ export class EasyTierTcpStream {
   }
 }
 
-export class EasyTierTcpListener {
+export class ExvlanTcpListener {
   private closed = false;
 
   constructor(
-    private readonly dataPlane: EasyTierDataPlane,
+    private readonly dataPlane: ExvlanDataPlane,
     private readonly resource: bigint,
-    readonly localAddress: EasyTierIpv4SocketAddress,
+    readonly localAddress: ExvlanIpv4SocketAddress,
   ) {}
 
-  accept(timeoutMilliseconds?: number): Promise<EasyTierTcpStream> {
+  accept(timeoutMilliseconds?: number): Promise<ExvlanTcpStream> {
     this.requireOpen();
     return this.dataPlane.acceptTcp(this.resource, timeoutMilliseconds);
   }
@@ -148,7 +148,7 @@ export class EasyTierTcpListener {
   }
 }
 
-export class EasyTierDataPlane {
+export class ExvlanDataPlane {
   private readonly pending = new Map<bigint, PendingOperation<unknown>>();
   private stoppedError: Error | undefined;
 
@@ -165,7 +165,7 @@ export class EasyTierDataPlane {
       await this.bindings.call("dataPlaneCapabilities", []),
     );
     if ((capabilities & DATA_PLANE_TCP_CAPABILITY) === 0n) {
-      throw new Error("EasyTier guest does not provide the TCP data plane");
+      throw new Error("Exvlan guest does not provide the TCP data plane");
     }
   }
 
@@ -173,7 +173,7 @@ export class EasyTierDataPlane {
     ipv4: string,
     port: number,
     timeoutMilliseconds?: number,
-  ): Promise<EasyTierTcpStream> {
+  ): Promise<ExvlanTcpStream> {
     const address = encodeIpv4SocketAddress(ipv4, port);
     return this.submit(
       1,
@@ -218,7 +218,7 @@ export class EasyTierDataPlane {
   bindTcp(
     localPort: number,
     timeoutMilliseconds?: number,
-  ): Promise<EasyTierTcpListener> {
+  ): Promise<ExvlanTcpListener> {
     if (!Number.isInteger(localPort) || localPort < 0 || localPort > 65_535) {
       throw new Error("TCP local port must be between 0 and 65535");
     }
@@ -250,7 +250,7 @@ export class EasyTierDataPlane {
             pointer,
             LISTENER_RESULT_LENGTH,
           );
-          return new EasyTierTcpListener(
+          return new ExvlanTcpListener(
             this,
             readU64(result, 0),
             decodeIpv4SocketAddress(result, 8),
@@ -265,7 +265,7 @@ export class EasyTierDataPlane {
   acceptTcp(
     listener: bigint,
     timeoutMilliseconds?: number,
-  ): Promise<EasyTierTcpStream> {
+  ): Promise<ExvlanTcpStream> {
     return this.submit(
       3,
       async (operationPointer) =>
@@ -413,7 +413,7 @@ export class EasyTierDataPlane {
     );
   }
 
-  shutdown(error = new Error("EasyTier runtime is stopped")): void {
+  shutdown(error = new Error("Exvlan runtime is stopped")): void {
     if (this.stoppedError !== undefined) {
       return;
     }
@@ -556,8 +556,8 @@ export class EasyTierDataPlane {
     }
   }
 
-  private streamFromResult(result: Uint8Array): EasyTierTcpStream {
-    return new EasyTierTcpStream(
+  private streamFromResult(result: Uint8Array): ExvlanTcpStream {
+    return new ExvlanTcpStream(
       this,
       readU64(result, 0),
       decodeIpv4SocketAddress(result, 8),
@@ -600,7 +600,7 @@ function encodeIpv4SocketAddress(ipv4: string, port: number): Uint8Array {
 function decodeIpv4SocketAddress(
   bytes: Uint8Array,
   offset: number,
-): EasyTierIpv4SocketAddress {
+): ExvlanIpv4SocketAddress {
   if (bytes[offset] !== 4) {
     throw new Error(`guest returned a non-IPv4 socket address`);
   }

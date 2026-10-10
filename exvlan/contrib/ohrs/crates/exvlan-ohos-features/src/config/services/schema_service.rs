@@ -1,9 +1,4 @@
-<<<<<<<< HEAD:exvlan/contrib/ohrs/src/config/services/schema_service.rs
 use exvlan::proto::ALL_DESCRIPTOR_BYTES;
-use napi_derive_ohos::napi;
-========
-use easytier::proto::ALL_DESCRIPTOR_BYTES;
->>>>>>>> upstream/releases/v2.7.0:easytier-contrib/easytier-ohrs/crates/easytier-ohos-features/src/config/services/schema_service.rs
 use once_cell::sync::Lazy;
 use prost_reflect::{Cardinality, DescriptorPool, FieldDescriptor, Kind, MessageDescriptor};
 use serde::Serialize;

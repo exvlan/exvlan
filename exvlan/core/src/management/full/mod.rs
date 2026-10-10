@@ -14,10 +14,10 @@ mod web_client;
 use std::sync::Arc;
 
 #[cfg(any(not(feature = "management"), test))]
-use easytier_proto::api::config::ConfigRpcServer;
-use easytier_proto::api::manage::WebClientServiceServer;
+use exvlan_proto::api::config::ConfigRpcServer;
+use exvlan_proto::api::manage::WebClientServiceServer;
 #[cfg(feature = "management")]
-use easytier_proto::{
+use exvlan_proto::{
     api::logger::{LoggerRpc, LoggerRpcServer},
     rpc_types::controller::BaseController,
 };
@@ -55,17 +55,17 @@ pub use web_client::{ConfigServerEndpoint, WebClient, WebClientConfig};
 pub use super::instance_rpc::full::call_instance_json_rpc;
 
 pub fn config_source_from_rpc(source: i32) -> Option<ConfigSource> {
-    match easytier_proto::api::manage::ConfigSource::try_from(source).ok() {
-        Some(easytier_proto::api::manage::ConfigSource::Web) => Some(ConfigSource::Web),
-        Some(easytier_proto::api::manage::ConfigSource::User) => Some(ConfigSource::User),
+    match exvlan_proto::api::manage::ConfigSource::try_from(source).ok() {
+        Some(exvlan_proto::api::manage::ConfigSource::Web) => Some(ConfigSource::Web),
+        Some(exvlan_proto::api::manage::ConfigSource::User) => Some(ConfigSource::User),
         _ => None,
     }
 }
 
 pub fn config_source_to_rpc(source: ConfigSource) -> i32 {
     match source {
-        ConfigSource::User => easytier_proto::api::manage::ConfigSource::User as i32,
-        ConfigSource::Web => easytier_proto::api::manage::ConfigSource::Web as i32,
+        ConfigSource::User => exvlan_proto::api::manage::ConfigSource::User as i32,
+        ConfigSource::Web => exvlan_proto::api::manage::ConfigSource::Web as i32,
     }
 }
 
@@ -90,7 +90,7 @@ pub fn register_management_rpc<F, H>(
     );
 }
 
-/// Registers the compact reverse-RPC surface required by easytier-web.
+/// Registers the compact reverse-RPC surface required by exvlan-api.
 #[cfg(any(not(feature = "management"), test))]
 pub(crate) fn register_web_client_rpc<F, H>(
     instances: Arc<InstanceManager<F>>,

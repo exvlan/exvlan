@@ -1,16 +1,16 @@
 {
-  "name": "@easytier/cloudflare",
+  "name": "@exvlan/cloudflare",
   "version": "0.1.0",
-  "description": "Run an EasyTier relay in a Cloudflare Durable Object",
+  "description": "Run an Exvlan relay in a Cloudflare Durable Object",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EasyTier/EasyTier.git",
-    "directory": "easytier-js/cloudflare"
+    "url": "git+https://github.com/exvlan/exvlan.git",
+    "directory": "exvlan-js/cloudflare"
   },
-  "homepage": "https://github.com/EasyTier/EasyTier",
-  "bugs": "https://github.com/EasyTier/EasyTier/issues",
+  "homepage": "https://github.com/exvlan/exvlan",
+  "bugs": "https://github.com/exvlan/exvlan/issues",
   "sideEffects": false,
   "exports": {
     ".": {
@@ -23,9 +23,9 @@
     "README.md"
   ],
   "scripts": {
-    "build:dependencies": "pnpm --filter @easytier/runtime build",
-    "build:wasm": "node ../runtime/scripts/build-wasm.mjs cloudflare src/generated/easytier_core.wasm && node ../runtime/scripts/validate-wasm.mjs cloudflare src/generated/easytier_core.wasm",
-    "build": "pnpm build:wasm && pnpm build:dependencies && tsc -p tsconfig.build.json && node ../runtime/scripts/copy-artifact.mjs src/generated/easytier_core.wasm dist/generated/easytier_core.wasm",
+    "build:dependencies": "pnpm --filter @exvlan/runtime build",
+    "build:wasm": "node ../runtime/scripts/build-wasm.mjs cloudflare src/generated/exvlan_core.wasm && node ../runtime/scripts/validate-wasm.mjs cloudflare src/generated/exvlan_core.wasm",
+    "build": "pnpm build:wasm && pnpm build:dependencies && tsc -p tsconfig.build.json && node ../runtime/scripts/copy-artifact.mjs src/generated/exvlan_core.wasm dist/generated/exvlan_core.wasm",
     "check": "pnpm build && tsc --noEmit && wrangler deploy --dry-run",
     "deploy": "pnpm build && wrangler deploy",
     "test": "pnpm build && vitest run",
@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@cloudflare/workers-types": "5.20260917.1",
-    "@easytier/runtime": "workspace:0.1.0"
+    "@exvlan/runtime": "workspace:0.1.0"
   },
   "devDependencies": {
     "@types/node": "22.18.1",

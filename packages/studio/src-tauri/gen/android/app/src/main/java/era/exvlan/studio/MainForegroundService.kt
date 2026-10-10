@@ -1,4 +1,4 @@
-package com.kkrainbow.easytier
+package com.kkrainbow.exvlan
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -11,7 +11,7 @@ import android.util.Log
 
 class MainForegroundService : Service() {
     companion object {
-        const val CHANNEL_ID = "easytier_channel"
+        const val CHANNEL_ID = "exvlan_channel"
         const val NOTIFICATION_ID = 1355
         // You can add more constants if needed
     }
@@ -23,8 +23,8 @@ class MainForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("EasyTier is running")
-            .setContentText("EasyTier background service is active")
+            .setContentTitle("Exvlan is running")
+            .setContentText("Exvlan background service is active")
             .setSmallIcon(android.R.drawable.ic_menu_manage)
             .build()
        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -50,7 +50,7 @@ class MainForegroundService : Service() {
           try {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "easytier notice",
+                "exvlan notice",
                 NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)

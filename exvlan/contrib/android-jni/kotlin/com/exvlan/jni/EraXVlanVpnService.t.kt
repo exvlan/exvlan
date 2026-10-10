@@ -57,7 +57,7 @@ class EraXVlanVpnService : VpnService() {
 
             // 1. 准备 VpnService.Builder
             val builder = Builder()
-            builder.setSession("EXVlan VPN")
+            builder.setSession("Exvlan VPN")
                     .addAddress(ip, networkLength)
                     .addDnsServer("223.5.5.5")
                     .addDnsServer("114.114.114.114")

@@ -1,13 +1,13 @@
 [package]
-name = "easytier"
+name = "exvlan"
 description = "A full meshed p2p VPN, connecting all your devices in one network with one command."
-homepage = "https://github.com/EasyTier/EasyTier"
-repository = "https://github.com/EasyTier/EasyTier"
+homepage = "https://github.com/exvlan/exvlan"
+repository = "https://github.com/exvlan/exvlan"
 version = "2.7.0"
 edition.workspace = true
 rust-version.workspace = true
 authors = ["kkrainbow"]
-keywords = ["vpn", "p2p", "network", "easytier"]
+keywords = ["vpn", "p2p", "network", "exvlan"]
 categories = ["network-programming", "command-line-utilities"]
 license-file = "LICENSE"
 readme = "README.md"
@@ -16,18 +16,18 @@ build = "build/main.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "easytier-core"
-path = "src/easytier-core.rs"
+name = "exvlan"
+path = "src/main.rs"
 test = false
 required-features = ["management"]
 
 [[bin]]
-name = "easytier-cli"
-path = "src/easytier-cli.rs"
+name = "exvlan-cli"
+path = "src/cli.rs"
 required-features = ["management", "cli"]
 
 [lib]
-name = "easytier"
+name = "exvlan"
 path = "src/lib.rs"
 
 [[bench]]
@@ -35,8 +35,8 @@ name = "packet_bytes_extraction"
 harness = false
 
 [dependencies]
-easytier-core.workspace = true
-easytier-proto = { workspace = true, features = ["api", "core"] }
+exvlan-core.workspace = true
+exvlan-proto = { workspace = true, features = ["api", "core"] }
 git-version = "0.3.9"
 
 tracing.workspace = true
@@ -289,7 +289,7 @@ thunk-rs = { workspace = true, features = [
 
 [dev-dependencies]
 criterion = "0.8.2"
-easytier-core = { workspace = true, features = [
+exvlan-core = { workspace = true, features = [
     "test-utils",
 ] }
 serial_test = "4.0.1"
@@ -355,16 +355,16 @@ full = [
     "tcp-hole-punch",
 ]
 cli = ["management", "dep:tabled", "dep:humansize", "dep:terminal_size", "dep:unicode-width"]
-wireguard = ["vpn-portal", "dep:boringtun", "dep:hkdf", "dep:sha2", "ring-crypto", "easytier-proto/wireguard"]
-quic = ["wrapped-transport", "easytier-core/proxy-packet", "dep:quinn", "dep:quinn-proto", "dep:seahash", "dep:rustls", "easytier-proto/quic"]
-kcp = ["wrapped-transport", "easytier-core/proxy-packet", "dep:kcp-sys"]
+wireguard = ["vpn-portal", "dep:boringtun", "dep:hkdf", "dep:sha2", "ring-crypto", "exvlan-proto/wireguard"]
+quic = ["wrapped-transport", "exvlan-core/proxy-packet", "dep:quinn", "dep:quinn-proto", "dep:seahash", "dep:rustls", "exvlan-proto/quic"]
+kcp = ["wrapped-transport", "exvlan-core/proxy-packet", "dep:kcp-sys"]
 mimalloc = ["dep:mimalloc"]
-aes-gcm = ["easytier-core/aes-gcm"]
-openssl-crypto = ["easytier-core/openssl-crypto"]
-ring-crypto = ["easytier-core/ring-crypto"]
+aes-gcm = ["exvlan-core/aes-gcm"]
+openssl-crypto = ["exvlan-core/openssl-crypto"]
+ring-crypto = ["exvlan-core/ring-crypto"]
 tun = ["dep:tun", "linux-netlink"]
 linux-netlink = ["dep:netlink-sys"]
-proxy-cidr-monitor = ["easytier-core/proxy-cidr-monitor"]
+proxy-cidr-monitor = ["exvlan-core/proxy-cidr-monitor"]
 websocket = [
     "dep:tokio-websockets",
     "dep:forwarded-header-value",
@@ -372,10 +372,10 @@ websocket = [
     "dep:rcgen",
     "dep:tokio-rustls",
     "dep:rustls",
-    "easytier-proto/websocket",
+    "exvlan-proto/websocket",
 ]
-smoltcp = ["easytier-core/proxy-smoltcp-stack"]
-icmp-proxy = ["easytier-core/proxy-packet"]
+smoltcp = ["exvlan-core/proxy-smoltcp-stack"]
+icmp-proxy = ["exvlan-core/proxy-packet"]
 socks5 = ["smoltcp"]
 ffi-dataplane = ["socks5"]
 jemalloc = ["dep:jemallocator"]
@@ -387,7 +387,7 @@ jemalloc-prof = [
     "jemalloc-sys/stats",
 ]
 tracing = ["tokio/tracing", "dep:console-subscriber", "dep:tracing-subscriber"]
-tracing-log = ["tracing/log", "easytier-core/tracing-log"]
+tracing-log = ["tracing/log", "exvlan-core/tracing-log"]
 logging = []
 dns-resolver = ["dep:hickory-proto", "dep:hickory-resolver"]
 magic-dns = [
@@ -396,16 +396,16 @@ magic-dns = [
     "dns-resolver",
     "dep:hickory-client",
     "dep:hickory-server",
-    "easytier-core/proxy-packet",
-    "easytier-proto/magic-dns",
+    "exvlan-core/proxy-packet",
+    "exvlan-proto/magic-dns",
 ]
 faketcp = [
     "dep:flume",
     "dep:pnet_datalink",
     "dep:smoltcp",
-    "easytier-proto/faketcp",
+    "exvlan-proto/faketcp",
 ]
-zstd = ["easytier-core/zstd", "easytier-proto/zstd"]
+zstd = ["exvlan-core/zstd", "exvlan-proto/zstd"]
 upnp = [
     "dep:http-body-util",
     "dep:hyper",
@@ -415,12 +415,12 @@ upnp = [
 ]
 endpoint-discovery = [
     "dns-resolver",
-    "easytier-core/endpoint-discovery",
+    "exvlan-core/endpoint-discovery",
 ]
-dhcp-ipv4 = ["easytier-core/dhcp-ipv4"]
-public-ipv6-provider = ["linux-netlink", "easytier-core/public-ipv6-provider"]
-vpn-portal = ["easytier-core/vpn-portal"]
-wrapped-transport = ["easytier-core/wrapped-transport"]
+dhcp-ipv4 = ["exvlan-core/dhcp-ipv4"]
+public-ipv6-provider = ["linux-netlink", "exvlan-core/public-ipv6-provider"]
+vpn-portal = ["exvlan-core/vpn-portal"]
+wrapped-transport = ["exvlan-core/wrapped-transport"]
 extended-services = [
     "dhcp-ipv4",
     "public-ipv6-provider",
@@ -432,14 +432,14 @@ management = [
     "dep:atomic-write-file",
     "web-client",
     "logging",
-    "easytier-core/management",
-    "easytier-proto/json-rpc",
-    "easytier-proto/utils",
+    "exvlan-core/management",
+    "exvlan-proto/json-rpc",
+    "exvlan-proto/utils",
     "tokio/full",
 ]
-management-rpc = ["easytier-core/management-rpc"]
-web-client = ["management-rpc", "easytier-core/web-client"]
-tcp-hole-punch = ["easytier-core/tcp-hole-punch"]
+management-rpc = ["exvlan-core/management-rpc"]
+web-client = ["management-rpc", "exvlan-core/web-client"]
+tcp-hole-punch = ["exvlan-core/tcp-hole-punch"]
 # Deprecated: hotpath profiling has been removed. These feature aliases are
 # retained as no-ops so existing build scripts using `--features hotpath*`
 # continue to work without pulling in any dependencies.

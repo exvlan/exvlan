@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier_proto::acl::{Action, ChainType};
+use exvlan_proto::acl::{Action, ChainType};
 use tokio::io::{AsyncRead, AsyncWrite, copy_bidirectional};
 use tokio_util::io::InspectReader;
 

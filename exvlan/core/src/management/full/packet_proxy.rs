@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 #[cfg(feature = "proxy-packet")]
-use easytier_proto::{
+use exvlan_proto::{
     api::instance::{TcpProxyRpc, TcpProxyRpcServer},
     rpc_types::controller::BaseController,
 };

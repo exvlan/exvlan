@@ -44,7 +44,7 @@ testing; socket-creation unit tests alone do not establish that result.
 
 ## Native integration and HarmonyOS
 
-The native `easytier` adapter implements the creation requirement using an async
+The native `exvlan` adapter implements the creation requirement using an async
 `NativeSocketProtector` callback. This is a native implementation detail, not a
 new portable or WASI ABI. It takes only the native handle; the creation options
 select policy, without a second purpose enum. Namespace switching is confined to synchronous socket
@@ -70,7 +70,7 @@ never allow the first SYN/query to race ahead of protection.
 
 ## WASI option format
 
-The `easytier_host` import names and function signatures are unchanged. TCP
+The `exvlan_host` import names and function signatures are unchanged. TCP
 connect, TCP listen and UDP bind use option document **version 3** (previously 2):
 one `u8` boolean `need_protect` is inserted immediately after the existing purpose
 byte and before the optional bind-device field. All other field encodings and

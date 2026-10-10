@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier_core::{
+use exvlan_core::{
     config::peers::PublicIpv6ProviderConfig,
     peers::public_ipv6::provider::{
         PublicIpv6NdpDesired, PublicIpv6PlatformError, PublicIpv6PlatformObservation,
@@ -60,7 +60,7 @@ pub(crate) fn runtime_public_ipv6_provider_platform(
 
 #[cfg(test)]
 mod tests {
-    use easytier_core::config::peers::PublicIpv6ProviderConfig;
+    use exvlan_core::config::peers::PublicIpv6ProviderConfig;
 
     #[test]
     fn public_ipv6_provider_platform_check_reports_linux_only() {

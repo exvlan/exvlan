@@ -15,7 +15,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use easytier_core::{
+use exvlan_core::{
     gateway::proxy::traits::TcpProxyStream,
     gateway::proxy::wrapped_transport::{
         WrappedTransportAcceptedStream, WrappedTransportConnect, WrappedTransportDatagram,

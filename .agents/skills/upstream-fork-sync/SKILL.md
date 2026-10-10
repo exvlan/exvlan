@@ -1,11 +1,11 @@
 ---
 name: upstream-fork-sync
-description: 同步上游 release（EasyTier）到重命名/重构过的 fork（EXVlan）。覆盖路径映射、merkle 合并策略、冲突分层裁决、不变量校验、构建验证与收口。触发词：上游同步、sync upstream vX.Y.Z、fork rebrand merge、合并 easytier 上游。
+description: 同步上游 release（Exvlan）到重命名/重构过的 fork（Exvlan）。覆盖路径映射、merkle 合并策略、冲突分层裁决、不变量校验、构建验证与收口。触发词：上游同步、sync upstream vX.Y.Z、fork rebrand merge、合并 exvlan 上游。
 ---
 
 # upstream-fork-sync
 
-把外部上游（EasyTier）的某个 release 同步进本 fork（EXVlan），同时保持 fork 的品牌、目录布局与本地行为修正。
+把外部上游（Exvlan）的某个 release 同步进本 fork（Exvlan），同时保持 fork 的品牌、目录布局与本地行为修正。
 
 ## 何时使用
 

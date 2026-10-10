@@ -239,17 +239,17 @@ fn require_ipv4(address: SocketAddr) -> Result<SocketAddr, DataPlaneError> {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_abi_version() -> u32 {
+pub extern "C" fn exvlan_data_plane_abi_version() -> u32 {
     DATA_PLANE_ABI_VERSION
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_capabilities() -> u64 {
+pub extern "C" fn exvlan_data_plane_capabilities() -> u64 {
     DATA_PLANE_CAPABILITY | DATA_PLANE_TCP_CAPABILITY | DATA_PLANE_UDP_CAPABILITY
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_connect_submit(
+pub extern "C" fn exvlan_data_plane_tcp_connect_submit(
     handle: u64,
     peer_address: u32,
     timeout_ms: u64,
@@ -270,7 +270,7 @@ pub extern "C" fn easytier_data_plane_tcp_connect_submit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_bind_submit(
+pub extern "C" fn exvlan_data_plane_tcp_bind_submit(
     handle: u64,
     local_port: u32,
     timeout_ms: u64,
@@ -290,7 +290,7 @@ pub extern "C" fn easytier_data_plane_tcp_bind_submit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_accept_submit(
+pub extern "C" fn exvlan_data_plane_tcp_accept_submit(
     handle: u64,
     listener: u64,
     timeout_ms: u64,
@@ -310,7 +310,7 @@ pub extern "C" fn easytier_data_plane_tcp_accept_submit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_read_submit(
+pub extern "C" fn exvlan_data_plane_tcp_read_submit(
     handle: u64,
     stream: u64,
     max_len: u32,
@@ -329,7 +329,7 @@ pub extern "C" fn easytier_data_plane_tcp_read_submit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_write_submit(
+pub extern "C" fn exvlan_data_plane_tcp_write_submit(
     handle: u64,
     stream: u64,
     data_pointer: u32,
@@ -356,7 +356,7 @@ pub extern "C" fn easytier_data_plane_tcp_write_submit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_shutdown_write_submit(
+pub extern "C" fn exvlan_data_plane_tcp_shutdown_write_submit(
     handle: u64,
     stream: u64,
     output_operation: u32,
@@ -374,7 +374,7 @@ pub extern "C" fn easytier_data_plane_tcp_shutdown_write_submit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_udp_bind_submit(
+pub extern "C" fn exvlan_data_plane_udp_bind_submit(
     handle: u64,
     local_port: u32,
     timeout_ms: u64,
@@ -394,7 +394,7 @@ pub extern "C" fn easytier_data_plane_udp_bind_submit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_udp_receive_submit(
+pub extern "C" fn exvlan_data_plane_udp_receive_submit(
     handle: u64,
     socket: u64,
     max_len: u32,
@@ -413,7 +413,7 @@ pub extern "C" fn easytier_data_plane_udp_receive_submit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_udp_send_submit(
+pub extern "C" fn exvlan_data_plane_udp_send_submit(
     handle: u64,
     socket: u64,
     peer_address: u32,
@@ -448,7 +448,7 @@ pub extern "C" fn easytier_data_plane_udp_send_submit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_resource_deadline_set(
+pub extern "C" fn exvlan_data_plane_resource_deadline_set(
     handle: u64,
     resource: u64,
     direction: u32,
@@ -477,7 +477,7 @@ pub extern "C" fn easytier_data_plane_resource_deadline_set(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_operation_cancel(handle: u64, operation: u64) -> i32 {
+pub extern "C" fn exvlan_data_plane_operation_cancel(handle: u64, operation: u64) -> i32 {
     data_plane_call(handle, |instance| {
         instance
             .data_plane_session()
@@ -487,7 +487,7 @@ pub extern "C" fn easytier_data_plane_operation_cancel(handle: u64, operation: u
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_operation_free(handle: u64, operation: u64) -> i32 {
+pub extern "C" fn exvlan_data_plane_operation_free(handle: u64, operation: u64) -> i32 {
     data_plane_call(handle, |instance| {
         instance
             .data_plane_session()
@@ -497,7 +497,7 @@ pub extern "C" fn easytier_data_plane_operation_free(handle: u64, operation: u64
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_resource_close(handle: u64, resource: u64) -> i32 {
+pub extern "C" fn exvlan_data_plane_resource_close(handle: u64, resource: u64) -> i32 {
     data_plane_call(handle, |instance| {
         instance
             .data_plane_session()
@@ -507,7 +507,7 @@ pub extern "C" fn easytier_data_plane_resource_close(handle: u64, resource: u64)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_completion_drain(
+pub extern "C" fn exvlan_data_plane_completion_drain(
     handle: u64,
     output: u32,
     capacity: u32,
@@ -530,7 +530,7 @@ pub extern "C" fn easytier_data_plane_completion_drain(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_result_size(handle: u64, operation: u64) -> i32 {
+pub extern "C" fn exvlan_data_plane_result_size(handle: u64, operation: u64) -> i32 {
     data_plane_call(handle, |instance| {
         let size = instance
             .data_plane_session()
@@ -540,7 +540,7 @@ pub extern "C" fn easytier_data_plane_result_size(handle: u64, operation: u64) -
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_connect_result_take(
+pub extern "C" fn exvlan_data_plane_tcp_connect_result_take(
     handle: u64,
     operation: u64,
     output: u32,
@@ -571,7 +571,7 @@ pub extern "C" fn easytier_data_plane_tcp_connect_result_take(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_bind_result_take(
+pub extern "C" fn exvlan_data_plane_tcp_bind_result_take(
     handle: u64,
     operation: u64,
     output: u32,
@@ -600,7 +600,7 @@ pub extern "C" fn easytier_data_plane_tcp_bind_result_take(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_accept_result_take(
+pub extern "C" fn exvlan_data_plane_tcp_accept_result_take(
     handle: u64,
     operation: u64,
     output: u32,
@@ -631,7 +631,7 @@ pub extern "C" fn easytier_data_plane_tcp_accept_result_take(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_read_result_take(
+pub extern "C" fn exvlan_data_plane_tcp_read_result_take(
     handle: u64,
     operation: u64,
     data_output: u32,
@@ -662,7 +662,7 @@ pub extern "C" fn easytier_data_plane_tcp_read_result_take(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_write_result_take(handle: u64, operation: u64) -> i32 {
+pub extern "C" fn exvlan_data_plane_tcp_write_result_take(handle: u64, operation: u64) -> i32 {
     data_plane_call(handle, |instance| {
         let session = instance.data_plane_session();
         let len = take_result(
@@ -679,7 +679,7 @@ pub extern "C" fn easytier_data_plane_tcp_write_result_take(handle: u64, operati
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_tcp_shutdown_write_result_take(
+pub extern "C" fn exvlan_data_plane_tcp_shutdown_write_result_take(
     handle: u64,
     operation: u64,
 ) -> i32 {
@@ -699,7 +699,7 @@ pub extern "C" fn easytier_data_plane_tcp_shutdown_write_result_take(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_udp_bind_result_take(
+pub extern "C" fn exvlan_data_plane_udp_bind_result_take(
     handle: u64,
     operation: u64,
     output: u32,
@@ -724,7 +724,7 @@ pub extern "C" fn easytier_data_plane_udp_bind_result_take(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_udp_receive_result_take(
+pub extern "C" fn exvlan_data_plane_udp_receive_result_take(
     handle: u64,
     operation: u64,
     data_output: u32,
@@ -762,7 +762,7 @@ pub extern "C" fn easytier_data_plane_udp_receive_result_take(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_data_plane_udp_send_result_take(handle: u64, operation: u64) -> i32 {
+pub extern "C" fn exvlan_data_plane_udp_send_result_take(handle: u64, operation: u64) -> i32 {
     data_plane_call(handle, |instance| {
         let session = instance.data_plane_session();
         let len = take_result(

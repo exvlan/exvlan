@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Context as _;
 use cidr::Ipv4Inet;
-use easytier_core::{
+use exvlan_core::{
     gateway::dhcp::{DhcpIpv4ApplyOutcome, DhcpIpv4ApplyPermit, DhcpIpv4Host},
     host::packet::HostPacketReceiver,
     instance::CorePacketPlane,

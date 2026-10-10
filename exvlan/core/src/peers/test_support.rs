@@ -6,7 +6,7 @@
 use std::net::IpAddr;
 
 use cidr::{Ipv4Inet, Ipv6Inet};
-use easytier_proto::common::{FlagsInConfig, SecureModeConfig};
+use exvlan_proto::common::{FlagsInConfig, SecureModeConfig};
 use hmac::Hmac;
 use sha2::Sha256;
 

@@ -94,7 +94,7 @@ pub fn aggregate_requested_tun_routes(instances: &[RuntimeInstanceState]) -> Vec
 mod tests {
     use super::{aggregate_tun_routes, simplify_routes};
     use crate::runtime::state::runtime_state::{RouteView, runtime_instance_from_config_snapshot};
-    use easytier::proto::api::manage::NetworkConfig;
+    use exvlan::proto::api::manage::NetworkConfig;
 
     #[test]
     fn simplify_routes_normalizes_deduplicates_and_removes_subnets() {

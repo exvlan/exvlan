@@ -4,7 +4,7 @@ use std::{
     sync::Mutex,
 };
 
-use easytier_ffi::{free_string, get_error_msg};
+use exvlan_ffi::{free_string, get_error_msg};
 use jni::JNIEnv;
 use jni::objects::JClass;
 use jni::sys::jstring;

@@ -91,7 +91,7 @@ export interface WebSocketHostHealth {
   pendingOperations: number;
 }
 
-export interface EasyTierCoreEvent {
+export interface ExvlanCoreEvent {
   kind: string;
   message: string;
 }
@@ -108,12 +108,12 @@ export class WebSocketHost {
 
   constructor(
     private readonly outboundFactory?: (url: string) => RuntimeWebSocket,
-    private readonly onEvent: (event: EasyTierCoreEvent) => void = (event) => {
-      console.log(JSON.stringify({ event: "easytier_core_event", ...event }));
+    private readonly onEvent: (event: ExvlanCoreEvent) => void = (event) => {
+      console.log(JSON.stringify({ event: "exvlan_core_event", ...event }));
     },
   ) {}
 
-  readonly imports: WebAssembly.Imports["easytier_host"] = {
+  readonly imports: WebAssembly.Imports["exvlan_host"] = {
     emit_event: (
       handle: bigint,
       kind: number,
@@ -227,7 +227,7 @@ export class WebSocketHost {
     if (state === undefined || state.guestOwned) {
       return;
     }
-    this.releaseSocket(handle, state, 1011, "EasyTier attach failed");
+    this.releaseSocket(handle, state, 1011, "Exvlan attach failed");
   }
 
   abort(handle: bigint, reason: string): void {
@@ -290,7 +290,7 @@ export class WebSocketHost {
     };
   }
 
-  shutdown(reason = "EasyTier runtime stopped"): void {
+  shutdown(reason = "Exvlan runtime stopped"): void {
     for (const [handle, state] of [...this.sockets]) {
       this.releaseSocket(handle, state, 1000, reason);
     }
@@ -320,7 +320,7 @@ export class WebSocketHost {
     } catch (error) {
       console.error(
         JSON.stringify({
-          event: "easytier_event_handler_failed",
+          event: "exvlan_event_handler_failed",
           error: String(error),
         }),
       );
@@ -628,7 +628,7 @@ export class WebSocketHost {
     if (state === undefined) {
       return 0;
     }
-    this.releaseSocket(handle, state, 1000, "EasyTier tunnel closed");
+    this.releaseSocket(handle, state, 1000, "Exvlan tunnel closed");
     return 0;
   }
 

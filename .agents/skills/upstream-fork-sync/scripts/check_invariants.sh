@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校验 EXVlan 分支不变量（develop 线性、上游非祖先、release 已并入 feature）。
+# 校验 Exvlan 分支不变量（develop 线性、上游非祖先、release 已并入 feature）。
 # 用法: check_invariants.sh [upstream-release-tag]   （默认从 manifest 读取）
 set -u
 

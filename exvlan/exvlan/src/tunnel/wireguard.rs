@@ -25,9 +25,9 @@ use boringtun::{
 use bytes::BytesMut;
 use crossbeam::atomic::AtomicCell;
 use dashmap::DashMap;
-use easytier_core::tunnel::ring::create_ring_tunnel_pair;
-use easytier_core::tunnel::{IpVersion, Tunnel, TunnelError, ZCPacketSink, ZCPacketStream};
-use easytier_core::{
+use exvlan_core::tunnel::ring::create_ring_tunnel_pair;
+use exvlan_core::tunnel::{IpVersion, Tunnel, TunnelError, ZCPacketSink, ZCPacketStream};
+use exvlan_core::{
     connectivity::transport::ConnectedUdpSession,
     packet::{PEER_MANAGER_HEADER_SIZE, WG_TUNNEL_HEADER_SIZE, ZCPacket, ZCPacketType},
     socket::udp::{
@@ -655,7 +655,7 @@ impl WgTunnelListener {
             UdpSessionAcceptKind::Classified(UdpSessionProtocol::WireGuard),
             NetNS::new(None),
         );
-        easytier_core::socket::SocketListener::listen(&mut session_listener).await?;
+        exvlan_core::socket::SocketListener::listen(&mut session_listener).await?;
         let session_listener = Arc::new(session_listener);
 
         self.tasks.spawn(Self::accept_udp_sessions(
@@ -679,7 +679,7 @@ impl WgTunnelListener {
 }
 
 #[async_trait]
-impl easytier_core::socket::SocketListener for WgTunnelListener {
+impl exvlan_core::socket::SocketListener for WgTunnelListener {
     type Accepted = Box<dyn Tunnel>;
 
     async fn listen(&mut self) -> anyhow::Result<()> {
@@ -693,7 +693,7 @@ impl easytier_core::socket::SocketListener for WgTunnelListener {
     fn local_url(&self) -> url::Url {
         self.session_listener
             .as_ref()
-            .map(|listener| easytier_core::socket::SocketListener::local_url(listener.as_ref()))
+            .map(|listener| exvlan_core::socket::SocketListener::local_url(listener.as_ref()))
             .unwrap_or_else(|| self.addr.clone())
     }
 }
@@ -779,7 +779,7 @@ pub mod tests {
         common::global_ctx::tests::get_mock_global_ctx, host_runtime::native_host_runtime,
         tunnel::protocol::runtime_client_protocol_upgrader,
     };
-    use easytier_core::{
+    use exvlan_core::{
         connectivity::transport::{ConnectedTransport, UdpSessionMode, connect_udp},
         socket::SocketListener,
         socket::udp::{UdpBindOptions, UdpSessionProtocol},

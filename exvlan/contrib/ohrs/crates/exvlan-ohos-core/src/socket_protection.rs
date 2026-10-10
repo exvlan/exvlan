@@ -6,7 +6,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use easytier::socket_protector::{NativeSocketProtector, set_native_socket_protector};
+use exvlan::socket_protector::{NativeSocketProtector, set_native_socket_protector};
 use once_cell::sync::Lazy;
 use tokio::sync::{Notify, oneshot};
 
@@ -198,7 +198,7 @@ pub fn fail_socket_protection() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easytier::socket_protector::NativeSocketProtector;
+    use exvlan::socket_protector::NativeSocketProtector;
     use std::os::fd::AsRawFd;
 
     #[test]

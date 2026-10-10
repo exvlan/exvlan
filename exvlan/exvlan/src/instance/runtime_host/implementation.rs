@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier_core::{
+use exvlan_core::{
     gateway::dhcp::DhcpIpv4Host,
     host::packet::HostPacketReceiver,
     instance::{CorePacketPlane, InstanceRuntimeHost, PacketEgressHost},
@@ -33,7 +33,7 @@ impl InstanceRuntimeHost for NativeInstanceRuntimeHost {
     fn synchronize_config(
         &self,
         patch: &crate::proto::api::config::InstanceConfigPatch,
-        config: &easytier_core::config::runtime::CoreInstanceRuntimeConfig,
+        config: &exvlan_core::config::runtime::CoreInstanceRuntimeConfig,
     ) {
         self.synchronize_global_ctx_config(patch, config);
     }

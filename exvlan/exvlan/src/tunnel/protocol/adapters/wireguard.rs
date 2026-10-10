@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use easytier_core::{
+use exvlan_core::{
     connectivity::{
         protocol::{
             ClientProtocolUpgrader, ServerProtocolAdmission, ServerProtocolUpgrade,

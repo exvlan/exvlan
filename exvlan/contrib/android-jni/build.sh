@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# EXVlan Android JNI 构建脚本
+# Exvlan Android JNI 构建脚本
 # 用于编译适用于 Android 平台的 JNI 库
 # 使用 cargo-ndk 工具简化 Android 编译过程
 
@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-echo -e "${GREEN}EXVlan Android JNI 构建脚本 (使用 cargo-ndk)${NC}"
+echo -e "${GREEN}Exvlan Android JNI 构建脚本 (使用 cargo-ndk)${NC}"
 echo "=============================================="
 
 # 检查 Rust 是否安装

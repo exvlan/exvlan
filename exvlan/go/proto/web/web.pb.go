@@ -7,7 +7,7 @@
 package web
 
 import (
-	common "github.com/easytier/easytier/easytier-go/proto/common"
+	common "github.com/exvlan/exvlan/exvlan-go/proto/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -87,7 +87,7 @@ type HeartbeatRequest struct {
 	MachineId               *common.UUID           `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	InstId                  *common.UUID           `protobuf:"bytes,2,opt,name=inst_id,json=instId,proto3" json:"inst_id,omitempty"`
 	UserToken               string                 `protobuf:"bytes,3,opt,name=user_token,json=userToken,proto3" json:"user_token,omitempty"`
-	EasytierVersion         string                 `protobuf:"bytes,4,opt,name=easytier_version,json=easytierVersion,proto3" json:"easytier_version,omitempty"`
+	ExvlanVersion         string                 `protobuf:"bytes,4,opt,name=exvlan_version,json=exvlanVersion,proto3" json:"exvlan_version,omitempty"`
 	ReportTime              string                 `protobuf:"bytes,5,opt,name=report_time,json=reportTime,proto3" json:"report_time,omitempty"`
 	Hostname                string                 `protobuf:"bytes,6,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	RunningNetworkInstances []*common.UUID         `protobuf:"bytes,7,rep,name=running_network_instances,json=runningNetworkInstances,proto3" json:"running_network_instances,omitempty"`
@@ -150,9 +150,9 @@ func (x *HeartbeatRequest) GetUserToken() string {
 	return ""
 }
 
-func (x *HeartbeatRequest) GetEasytierVersion() string {
+func (x *HeartbeatRequest) GetExvlanVersion() string {
 	if x != nil {
-		return x.EasytierVersion
+		return x.ExvlanVersion
 	}
 	return ""
 }
@@ -353,7 +353,7 @@ const file_web_proto_rawDesc = "" +
 	"\ainst_id\x18\x02 \x01(\v2\f.common.UUIDR\x06instId\x12\x1d\n" +
 	"\n" +
 	"user_token\x18\x03 \x01(\tR\tuserToken\x12)\n" +
-	"\x10easytier_version\x18\x04 \x01(\tR\x0feasytierVersion\x12\x1f\n" +
+	"\x10exvlan_version\x18\x04 \x01(\tR\x0fexvlanVersion\x12\x1f\n" +
 	"\vreport_time\x18\x05 \x01(\tR\n" +
 	"reportTime\x12\x1a\n" +
 	"\bhostname\x18\x06 \x01(\tR\bhostname\x12H\n" +

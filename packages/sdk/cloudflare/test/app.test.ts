@@ -16,8 +16,8 @@ vi.mock("cloudflare:workers", () => ({
   },
 }));
 
-vi.mock("@easytier/runtime/adapter", () => ({
-  createEasyTierRuntime: createRuntime,
+vi.mock("@exvlan/runtime/adapter", () => ({
+  createExvlanRuntime: createRuntime,
 }));
 
 import { createCloudflareApplication } from "../src/app";
@@ -27,7 +27,7 @@ interface TestEnv {
   secret: string;
 }
 
-describe("createEasyTierCloudflare", () => {
+describe("createExvlanCloudflare", () => {
   beforeEach(() => {
     createRuntime.mockReset();
     createRuntime.mockResolvedValue({
@@ -66,7 +66,7 @@ describe("createEasyTierCloudflare", () => {
     expect(fetch).toHaveBeenCalledWith(request);
   });
 
-  it("persists the hidden EasyTier instance identity across restarts", async () => {
+  it("persists the hidden Exvlan instance identity across restarts", async () => {
     const values = new Map<string, unknown>();
     const storage = {
       get: vi.fn(async (key: string) => values.get(key)),
@@ -90,9 +90,9 @@ describe("createEasyTierCloudflare", () => {
       namespace: {} as DurableObjectNamespace,
       secret: "do-not-log-this",
     };
-    class TestEasyTierCoreObject extends application.DurableObject {}
+    class TestExvlanCoreObject extends application.DurableObject {}
 
-    const first = new TestEasyTierCoreObject(state, env);
+    const first = new TestExvlanCoreObject(state, env);
     const firstResponse = await first.fetch!(
       new Request("https://relay.example.com/health"),
     );
@@ -102,7 +102,7 @@ describe("createEasyTierCloudflare", () => {
       connections: 2,
     });
 
-    const second = new TestEasyTierCoreObject(state, env);
+    const second = new TestExvlanCoreObject(state, env);
     await second.fetch!(new Request("https://relay.example.com/health"));
 
     expect(createRuntime).toHaveBeenCalledTimes(2);

@@ -19,8 +19,8 @@ use base64::prelude::BASE64_STANDARD;
 use cidr::Ipv4Inet;
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, builder::BoolishValueParser};
 use dashmap::DashMap;
-use easytier::ShellType;
-use easytier_core::connectivity::stun::StunInfoProvider as _;
+use exvlan::ShellType;
+use exvlan_core::connectivity::stun::StunInfoProvider as _;
 use humansize::format_size;
 use rust_i18n::t;
 use service_manager::*;
@@ -28,11 +28,11 @@ use tabled::settings::{Modify, Remove, Style, Width, location::ByColumnName, obj
 use terminal_size::{Width as TerminalWidth, terminal_size};
 use unicode_width::UnicodeWidthStr;
 
-use easytier::service_manager::{Service, ServiceInstallOptions};
+use exvlan::service_manager::{Service, ServiceInstallOptions};
 use tokio::time::timeout;
 
-use easytier::{
-    common::{constants::EASYTIER_VERSION, stun::runtime_stun_info_collector},
+use exvlan::{
+    common::{constants::EXVLAN_VERSION, stun::runtime_stun_info_collector},
     proto::{
         acl::{Acl, AclStats},
         api::{
@@ -84,13 +84,13 @@ use easytier::{
 rust_i18n::i18n!("locales", fallback = "en");
 
 #[derive(Parser, Debug)]
-#[command(name = "easytier-cli", author, version = EASYTIER_VERSION, about, long_about = None)]
+#[command(name = "exvlan-cli", author, version = EXVLAN_VERSION, about, long_about = None)]
 struct Cli {
     #[arg(
         short = 'p',
         long,
         default_value = "127.0.0.1:15888",
-        help = "easytier-core rpc portal address"
+        help = "exvlan-core rpc portal address"
     )]
     rpc_portal: SocketAddr,
 
@@ -136,9 +136,9 @@ enum SubCommand {
     PeerCenter,
     #[command(about = "manage vpn portal (wireguard) clients")]
     VpnPortal(VpnPortalArgs),
-    #[command(about = "inspect self easytier-core status")]
+    #[command(about = "inspect self exvlan-core status")]
     Node(NodeArgs),
-    #[command(about = "manage easytier-core as a system service")]
+    #[command(about = "manage exvlan-core as a system service")]
     Service(ServiceArgs),
     #[command(about = "show tcp/kcp proxy status")]
     Proxy,
@@ -319,7 +319,7 @@ struct AclArgs {
 struct AclSetArgs {
     /// Full ACL as a TOML string, or a path to a TOML file prefixed by '@'.
     ///
-    /// The TOML uses the same shape as the `[acl]` section of an easytier
+    /// The TOML uses the same shape as the `[acl]` section of an exvlan
     /// configuration file, for example:
     ///
     /// ```toml
@@ -336,7 +336,7 @@ struct AclSetArgs {
     ///
     /// Using `@/path/to/acl.toml` makes it easy to manage and debug the full
     /// ACL offline. The whole ACL is replaced at runtime without restarting
-    /// easytier-core.
+    /// exvlan-core.
     #[arg(help = "full ACL TOML string or '@path/to/acl.toml'")]
     acl: String,
 }
@@ -345,7 +345,7 @@ struct AclSetArgs {
 enum AclSubCommand {
     /// Show ACL rule hit statistics
     Stats,
-    /// Replace the whole ACL at runtime without restarting easytier-core
+    /// Replace the whole ACL at runtime without restarting exvlan-core
     Set(AclSetArgs),
 }
 
@@ -496,15 +496,15 @@ struct ServiceArgs {
 
 #[derive(Subcommand, Debug)]
 enum ServiceSubCommand {
-    #[command(about = "register easytier-core as a system service")]
+    #[command(about = "register exvlan-core as a system service")]
     Install(InstallArgs),
-    #[command(about = "unregister easytier-core system service")]
+    #[command(about = "unregister exvlan-core system service")]
     Uninstall,
-    #[command(about = "check easytier-core system service status")]
+    #[command(about = "check exvlan-core system service status")]
     Status,
-    #[command(about = "start easytier-core system service")]
+    #[command(about = "start exvlan-core system service")]
     Start,
-    #[command(about = "stop easytier-core system service")]
+    #[command(about = "stop exvlan-core system service")]
     Stop,
 }
 
@@ -528,17 +528,17 @@ struct InstallArgs {
     )]
     disable_restart_on_failure: Option<bool>,
 
-    #[arg(long, help = "path to easytier-core binary")]
+    #[arg(long, help = "path to exvlan-core binary")]
     core_path: Option<PathBuf>,
 
-    #[arg(long, help = "working directory for the easytier-core service")]
+    #[arg(long, help = "working directory for the exvlan-core service")]
     service_work_dir: Option<PathBuf>,
 
     #[arg(
         long,
         num_args = 1..,
         allow_hyphen_values = true,
-        help = "args to pass to easytier-core, must be the last option of install"
+        help = "args to pass to exvlan-core, must be the last option of install"
     )]
     core_args: Option<Vec<OsString>>,
 }
@@ -719,7 +719,7 @@ mod tests {
         // trailing_var_arg used to collect the "--core-args" token itself into
         // the value, breaking the installed service's command line.
         let args = parse_install_core_args(&[
-            "easytier-cli",
+            "exvlan-cli",
             "service",
             "install",
             "--core-args",
@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn install_core_args_support_equals_form() {
         let args = parse_install_core_args(&[
-            "easytier-cli",
+            "exvlan-cli",
             "service",
             "install",
             "--core-args=--daemon",
@@ -744,7 +744,7 @@ mod tests {
     #[test]
     fn install_options_before_core_args_still_parse() {
         let cli = Cli::try_parse_from([
-            "easytier-cli",
+            "exvlan-cli",
             "service",
             "install",
             "--disable-autostart",
@@ -1543,7 +1543,7 @@ impl<'a> CommandHandler<'a> {
                     cidr: route.ipv4_addr.map(|ip| ip.to_string()).unwrap_or_default(),
                     ipv4: route
                         .ipv4_addr
-                        .map(|ip: easytier::proto::common::Ipv4Inet| ip.address.unwrap_or_default())
+                        .map(|ip: exvlan::proto::common::Ipv4Inet| ip.address.unwrap_or_default())
                         .map(|ip| ip.to_string())
                         .unwrap_or_default(),
                     hostname: route.hostname.clone(),
@@ -1607,10 +1607,10 @@ impl<'a> CommandHandler<'a> {
                 }
 
                 let a_is_public = a.hostname.starts_with(
-                    easytier_core::peers::foreign_network::PUBLIC_SERVER_HOSTNAME_PREFIX,
+                    exvlan_core::peers::foreign_network::PUBLIC_SERVER_HOSTNAME_PREFIX,
                 );
                 let b_is_public = b.hostname.starts_with(
-                    easytier_core::peers::foreign_network::PUBLIC_SERVER_HOSTNAME_PREFIX,
+                    exvlan_core::peers::foreign_network::PUBLIC_SERVER_HOSTNAME_PREFIX,
                 );
                 if a_is_public != b_is_public {
                     return if a_is_public {
@@ -1695,7 +1695,7 @@ impl<'a> CommandHandler<'a> {
             local_provider: Option<ProviderLeaseSection>,
         }
 
-        fn fmt_ipv6_inet(value: Option<easytier::proto::common::Ipv6Inet>) -> String {
+        fn fmt_ipv6_inet(value: Option<exvlan::proto::common::Ipv6Inet>) -> String {
             value
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "-".to_string())
@@ -2660,7 +2660,7 @@ impl<'a> CommandHandler<'a> {
             println!();
             println!("To use this credential on a new node:");
             println!(
-                "  easytier-core --network-name <name> --secure-mode --credential {} -p <node-url>",
+                "  exvlan-core --network-name <name> --secure-mode --credential {} -p <node-url>",
                 response.credential_secret
             );
             Ok(())
@@ -2901,7 +2901,7 @@ impl<'a> CommandHandler<'a> {
                 println!("listener: {listener}");
             }
             for client in &resp.clients {
-                let state = easytier_proto::api::instance::VpnPortalClientState::try_from(
+                let state = exvlan_proto::api::instance::VpnPortalClientState::try_from(
                     client.state,
                 )
                 .map_or("UNKNOWN", |state| state.as_str_name());
@@ -3467,7 +3467,7 @@ async fn main() -> Result<(), Error> {
                             .unwrap()
                             .parent()
                             .unwrap()
-                            .join("easytier-core");
+                            .join("exvlan-core");
 
                         if cfg!(target_os = "windows") {
                             ret.set_extension("exe");
@@ -3476,7 +3476,7 @@ async fn main() -> Result<(), Error> {
                         ret
                     });
                     let bin_path = std::fs::canonicalize(bin_path).map_err(|e| {
-                        anyhow::anyhow!("failed to get easytier core application: {}", e)
+                        anyhow::anyhow!("failed to get exvlan core application: {}", e)
                     })?;
                     let bin_args = install_args.core_args.unwrap_or_default();
                     let work_dir = install_args.service_work_dir.unwrap_or_else(|| {
@@ -3690,10 +3690,10 @@ async fn main() -> Result<(), Error> {
         SubCommand::GenAutocomplete { shell } => {
             let mut cmd = Cli::command();
             if let Some(shell) = shell.to_shell() {
-                easytier::print_completions(shell, &mut cmd, "easytier-cli");
+                exvlan::print_completions(shell, &mut cmd, "exvlan-cli");
             } else {
                 // Handle Nushell
-                easytier::print_nushell_completions(&mut cmd, "easytier-cli");
+                exvlan::print_nushell_completions(&mut cmd, "exvlan-cli");
             }
         }
     }

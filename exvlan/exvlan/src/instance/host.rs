@@ -1,6 +1,6 @@
 use std::{net::IpAddr, sync::Arc};
 
-use easytier_core::{
+use exvlan_core::{
     connectivity::composite::{ConnectorEnvironment, ConnectorHostAdapter},
     socket::{NetNamespace, SocketContext},
 };

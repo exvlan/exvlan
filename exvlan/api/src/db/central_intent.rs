@@ -250,7 +250,7 @@ impl Db {
                 device_id,
                 instance_id,
                 &json(&config.network_config)?,
-                easytier::common::config::ConfigSource::Web,
+                exvlan::common::config::ConfigSource::Web,
                 true,
             )
             .await?
@@ -725,7 +725,7 @@ async fn load_intent(
 #[cfg(test)]
 mod tests {
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-    use easytier_core::management::remote_client::{ListNetworkProps, Storage as _};
+    use exvlan_core::management::remote_client::{ListNetworkProps, Storage as _};
     use uuid::Uuid;
 
     use super::*;
@@ -788,7 +788,7 @@ mod tests {
                 user_id,
                 machine_id: *device_id,
                 hostname: format!("device-{index}"),
-                easytier_version: "test".to_owned(),
+                exvlan_version: "test".to_owned(),
                 device_os: "{}".to_owned(),
                 client_url: format!("tcp://127.0.0.1:{}", 11010 + index),
             })
@@ -891,7 +891,7 @@ mod tests {
             .unwrap();
         let mut candidate = original.clone();
         candidate.display_name = "must not be saved".to_owned();
-        candidate.members[0].config_override = Some(easytier::common::config::NetworkConfig {
+        candidate.members[0].config_override = Some(exvlan::common::config::NetworkConfig {
             proxy_cidrs: vec!["2001:db8:240::/64".to_owned()],
             ..Default::default()
         });

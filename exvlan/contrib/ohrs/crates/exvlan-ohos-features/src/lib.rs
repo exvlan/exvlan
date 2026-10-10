@@ -28,9 +28,9 @@ pub fn emit_log(level: i32, message: String) {
         return;
     }
     match level {
-        5 => tracing::error!(target: "easytier_ohrs", "{message}"),
-        4 => tracing::info!(target: "easytier_ohrs", "{message}"),
-        _ => tracing::debug!(target: "easytier_ohrs", "{message}"),
+        5 => tracing::error!(target: "exvlan_ohrs", "{message}"),
+        4 => tracing::info!(target: "exvlan_ohrs", "{message}"),
+        _ => tracing::debug!(target: "exvlan_ohrs", "{message}"),
     }
 }
 

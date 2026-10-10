@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use easytier_core::{
+use exvlan_core::{
     connectivity::{
         protocol::{
             ClientProtocolUpgrader, CoreClientProtocolConfig, CoreClientProtocolUpgrader,
@@ -230,7 +230,7 @@ mod tests {
     #[case("wss")]
     #[tokio::test]
     async fn runtime_websocket_upgraders_share_one_native_engine(#[case] scheme: &str) {
-        use easytier_core::packet::ZCPacket;
+        use exvlan_core::packet::ZCPacket;
         use futures::{SinkExt, StreamExt};
 
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -329,7 +329,7 @@ mod tests {
             common::netns::NetNS, host_runtime::native_host_runtime,
             socket::udp::new_runtime_udp_session_listener,
         };
-        use easytier_core::{
+        use exvlan_core::{
             connectivity::transport::{UdpSessionMode, connect_udp},
             packet::ZCPacket,
             socket::SocketListener,
@@ -405,7 +405,7 @@ mod tests {
             common::netns::NetNS, host_runtime::native_host_runtime,
             socket::udp::new_runtime_udp_session_listener,
         };
-        use easytier_core::{
+        use exvlan_core::{
             connectivity::{
                 protocol::ServerProtocolAdmissionController,
                 transport::{UdpSessionMode, connect_udp},

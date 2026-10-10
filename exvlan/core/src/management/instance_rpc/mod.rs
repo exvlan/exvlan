@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier_proto::{
+use exvlan_proto::{
     api::instance::{
         Connector, ConnectorManageRpc, ConnectorStatus, DumpRouteRequest, DumpRouteResponse,
         ForeignNetworkEntryPb, GetForeignNetworkSummaryRequest, GetForeignNetworkSummaryResponse,
@@ -46,7 +46,7 @@ pub trait ReadOnlyInstanceResolver: Clone + Send + Sync + 'static {
 
     fn resolve(
         &self,
-        identifier: Option<&easytier_proto::api::instance::InstanceIdentifier>,
+        identifier: Option<&exvlan_proto::api::instance::InstanceIdentifier>,
     ) -> rpc_types::error::Result<Arc<CoreInstance<Self::Host>>>;
 }
 
@@ -79,7 +79,7 @@ where
 
     fn resolve(
         &self,
-        identifier: Option<&easytier_proto::api::instance::InstanceIdentifier>,
+        identifier: Option<&exvlan_proto::api::instance::InstanceIdentifier>,
     ) -> rpc_types::error::Result<Arc<CoreInstance<Self::Host>>> {
         resolve_instance(&self.manager, identifier).map_err(Into::into)
     }
@@ -114,7 +114,7 @@ where
 
     fn resolve(
         &self,
-        identifier: Option<&easytier_proto::api::instance::InstanceIdentifier>,
+        identifier: Option<&exvlan_proto::api::instance::InstanceIdentifier>,
     ) -> rpc_types::error::Result<Arc<CoreInstance<Self::Host>>> {
         validate_bound_identifier(
             identifier,
@@ -152,7 +152,7 @@ where
 {
     fn instance(
         &self,
-        identifier: Option<&easytier_proto::api::instance::InstanceIdentifier>,
+        identifier: Option<&exvlan_proto::api::instance::InstanceIdentifier>,
     ) -> rpc_types::error::Result<Arc<CoreInstance<R::Host>>> {
         self.resolver.resolve(identifier)
     }
@@ -348,16 +348,16 @@ mod config_patch_persistence_tests {
 
 #[cfg(any(test, target_os = "wasi"))]
 fn validate_bound_identifier(
-    identifier: Option<&easytier_proto::api::instance::InstanceIdentifier>,
+    identifier: Option<&exvlan_proto::api::instance::InstanceIdentifier>,
     instance_id: uuid::Uuid,
     instance_name: &str,
 ) -> anyhow::Result<()> {
-    use easytier_proto::api::instance::instance_identifier::Selector;
+    use exvlan_proto::api::instance::instance_identifier::Selector;
 
     let matches = match identifier.and_then(|identifier| identifier.selector.as_ref()) {
         None
         | Some(Selector::InstanceSelector(
-            easytier_proto::api::instance::instance_identifier::InstanceSelector { name: None },
+            exvlan_proto::api::instance::instance_identifier::InstanceSelector { name: None },
         )) => true,
         Some(Selector::Id(selected)) => uuid::Uuid::from(*selected) == instance_id,
         Some(Selector::InstanceSelector(selector)) => {
@@ -627,7 +627,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use easytier_proto::{
+    use exvlan_proto::{
         api::instance::{
             InstanceIdentifier,
             instance_identifier::{InstanceSelector, Selector},

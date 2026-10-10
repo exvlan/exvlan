@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/easytier/easytier/easytier-go/internal/contextutil"
-	apiconfig "github.com/easytier/easytier/easytier-go/proto/api/config"
-	apiinstance "github.com/easytier/easytier/easytier-go/proto/api/instance"
-	"github.com/easytier/easytier/easytier-go/proto/api/manage"
-	"github.com/easytier/easytier/easytier-go/proto/common"
-	errorpb "github.com/easytier/easytier/easytier-go/proto/error"
+	"github.com/exvlan/exvlan/exvlan-go/internal/contextutil"
+	apiconfig "github.com/exvlan/exvlan/exvlan-go/proto/api/config"
+	apiinstance "github.com/exvlan/exvlan/exvlan-go/proto/api/instance"
+	"github.com/exvlan/exvlan/exvlan-go/proto/api/manage"
+	"github.com/exvlan/exvlan/exvlan-go/proto/common"
+	errorpb "github.com/exvlan/exvlan/exvlan-go/proto/error"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -66,7 +66,7 @@ func (manager *instanceManager) register(entry *managedInstance) error {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if _, exists := manager.instances[id]; exists {
-		return fmt.Errorf("EasyTier instance %s already exists", id)
+		return fmt.Errorf("Exvlan instance %s already exists", id)
 	}
 	manager.instances[id] = entry
 	return nil
@@ -209,10 +209,10 @@ func (manager *instanceManager) runNetworkInstance(
 		return nil, fmt.Errorf("config is required")
 	}
 	if preparedConfig == "" {
-		return nil, fmt.Errorf("prepared EasyTier config is required")
+		return nil, fmt.Errorf("prepared Exvlan config is required")
 	}
 	if preparedInstanceID == nil {
-		return nil, fmt.Errorf("prepared EasyTier instance ID is required")
+		return nil, fmt.Errorf("prepared Exvlan instance ID is required")
 	}
 	request.InstId = cloneUUID(preparedInstanceID)
 	id := uuidString(preparedInstanceID)
@@ -233,7 +233,7 @@ func (manager *instanceManager) runNetworkInstance(
 			}, nil
 		}
 		if err := closeManagedInstance(ctx, previous.instance); err != nil {
-			return nil, fmt.Errorf("replace EasyTier instance %s: %w", id, err)
+			return nil, fmt.Errorf("replace Exvlan instance %s: %w", id, err)
 		}
 	}
 	source := request.Source
@@ -321,7 +321,7 @@ func (manager *instanceManager) patchConfig(
 	entry := manager.instances[key]
 	manager.mu.RUnlock()
 	if entry == nil {
-		return nil, fmt.Errorf("EasyTier instance %s not found", key)
+		return nil, fmt.Errorf("Exvlan instance %s not found", key)
 	}
 	if entry.owner != instanceOwnerWeb {
 		return nil, fmt.Errorf("configuration for instance %s is read-only", key)
@@ -354,13 +354,13 @@ func (manager *instanceManager) patchConfig(
 	); err != nil {
 		return nil, errors.Join(
 			patchErr,
-			fmt.Errorf("read effective EasyTier configuration: %w", err),
+			fmt.Errorf("read effective Exvlan configuration: %w", err),
 		)
 	}
 	if effective.Config == nil || effective.TomlConfig == "" {
 		return nil, errors.Join(
 			patchErr,
-			fmt.Errorf("EasyTier instance %s returned an incomplete config snapshot", key),
+			fmt.Errorf("Exvlan instance %s returned an incomplete config snapshot", key),
 		)
 	}
 
@@ -369,7 +369,7 @@ func (manager *instanceManager) patchConfig(
 		manager.mu.Unlock()
 		return nil, errors.Join(
 			patchErr,
-			fmt.Errorf("EasyTier instance %s is no longer running", key),
+			fmt.Errorf("Exvlan instance %s is no longer running", key),
 		)
 	}
 	entry.config = mergeHostedConfigPatch(entry.config, effective.Config, request.Patch)
@@ -610,7 +610,7 @@ func (manager *instanceManager) getNetworkInstanceConfig(
 	defer manager.mu.RUnlock()
 	entry := manager.instances[id]
 	if entry == nil {
-		return nil, fmt.Errorf("EasyTier instance %s not found", id)
+		return nil, fmt.Errorf("Exvlan instance %s not found", id)
 	}
 	if entry.owner != instanceOwnerWeb {
 		return nil, fmt.Errorf("configuration for instance %s is read-only", id)
@@ -676,7 +676,7 @@ func encodeManagementResponse(
 	}
 	encoded, err := proto.Marshal(envelope)
 	if err != nil {
-		panic("marshal EasyTier RPC response: " + err.Error())
+		panic("marshal Exvlan RPC response: " + err.Error())
 	}
 	return encoded
 }
@@ -714,12 +714,12 @@ func peerRoutePairs(
 func parseInstanceUUID(text string) (*common.UUID, string, error) {
 	normalized := strings.ReplaceAll(strings.TrimSpace(text), "-", "")
 	if len(normalized) != 32 {
-		return nil, "", fmt.Errorf("invalid EasyTier instance ID %q", text)
+		return nil, "", fmt.Errorf("invalid Exvlan instance ID %q", text)
 	}
 	var value [16]byte
 	decoded, err := hex.DecodeString(normalized)
 	if err != nil || len(decoded) != 16 {
-		return nil, "", fmt.Errorf("invalid EasyTier instance ID %q", text)
+		return nil, "", fmt.Errorf("invalid Exvlan instance ID %q", text)
 	}
 	copy(value[:], decoded)
 	id := &common.UUID{
@@ -734,7 +734,7 @@ func parseInstanceUUID(text string) (*common.UUID, string, error) {
 func newInstanceUUID() (*common.UUID, string, error) {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {
-		return nil, "", fmt.Errorf("generate EasyTier instance ID: %w", err)
+		return nil, "", fmt.Errorf("generate Exvlan instance ID: %w", err)
 	}
 	value[6] = value[6]&0x0f | 0x40
 	value[8] = value[8]&0x3f | 0x80

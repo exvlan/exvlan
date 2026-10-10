@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier::instance::factory::{
+use exvlan::instance::factory::{
     NativeInstanceManager, NativeProcessManagement, native_instance_manager_with_runtime,
     native_process_management,
 };
@@ -9,7 +9,7 @@ use tokio::runtime::{Builder, Runtime};
 struct FfiOwnedInstanceHooks;
 
 #[async_trait::async_trait]
-impl easytier_core::management::InstanceMutationHooks for FfiOwnedInstanceHooks {
+impl exvlan_core::management::InstanceMutationHooks for FfiOwnedInstanceHooks {
     async fn post_remove_network_instances(
         &self,
         instance_ids: &[uuid::Uuid],
@@ -31,7 +31,7 @@ impl FfiContext {
         let runtime = Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("tokio runtime for easytier-ffi");
+            .expect("tokio runtime for exvlan-ffi");
         let manager = Arc::new(native_instance_manager_with_runtime(
             runtime.handle().clone(),
         ));
@@ -52,7 +52,7 @@ pub(crate) fn ffi_context() -> &'static FfiContext {
 }
 
 pub(crate) fn resolve_instance_id_by_name(inst_name: &str) -> Result<Option<uuid::Uuid>, String> {
-    easytier_core::management::resolve_optional_instance_by_name(
+    exvlan_core::management::resolve_optional_instance_by_name(
         ffi_context().manager.as_ref(),
         inst_name,
     )

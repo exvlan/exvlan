@@ -11,7 +11,7 @@ mod credential_tests;
 mod upnp_test;
 
 use crate::instance::test_instance::TestInstance as Instance;
-use easytier_core::config::PeerId;
+use exvlan_core::config::PeerId;
 
 trait InstanceTestExt {
     fn add_connector_url(&self, url: url::Url);
@@ -166,7 +166,7 @@ pub fn add_ns_to_bridge(br_name: &str, ns_name: &str) {
 fn check_route(
     ipv4: &str,
     dst_peer_id: PeerId,
-    routes: Vec<easytier_proto::core_peer::peer::Route>,
+    routes: Vec<exvlan_proto::core_peer::peer::Route>,
 ) {
     let mut found = false;
     for r in routes.iter() {
@@ -183,9 +183,9 @@ fn check_route(
 }
 
 fn check_route_ex(
-    routes: Vec<easytier_proto::core_peer::peer::Route>,
+    routes: Vec<exvlan_proto::core_peer::peer::Route>,
     peer_id: PeerId,
-    checker: impl Fn(&easytier_proto::core_peer::peer::Route) -> bool,
+    checker: impl Fn(&exvlan_proto::core_peer::peer::Route) -> bool,
 ) {
     let mut found = false;
     for r in routes.iter() {

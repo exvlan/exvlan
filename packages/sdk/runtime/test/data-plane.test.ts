@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  EasyTierDataPlane,
+  ExvlanDataPlane,
   type DataPlaneBindings,
   type DataPlaneExportName,
   type DataPlaneValue,
@@ -217,10 +217,10 @@ class DataPlaneFixture implements DataPlaneBindings {
   }
 }
 
-describe("EasyTierDataPlane", () => {
+describe("ExvlanDataPlane", () => {
   it("connects, exchanges bytes, and closes an IPv4 TCP stream", async () => {
     const bindings = new DataPlaneFixture();
-    const dataPlane = new EasyTierDataPlane(bindings);
+    const dataPlane = new ExvlanDataPlane(bindings);
     bindings.onDrive = () => dataPlane.drainCompletions();
     await dataPlane.initialize();
 
@@ -266,7 +266,7 @@ describe("EasyTierDataPlane", () => {
 
   it("binds a TCP listener and accepts streams with endpoint metadata", async () => {
     const bindings = new DataPlaneFixture();
-    const dataPlane = new EasyTierDataPlane(bindings);
+    const dataPlane = new ExvlanDataPlane(bindings);
     bindings.onDrive = () => dataPlane.drainCompletions();
     await dataPlane.initialize();
 
@@ -301,7 +301,7 @@ describe("EasyTierDataPlane", () => {
 
   it("rejects invalid browser TCP endpoints before guest submission", async () => {
     const bindings = new DataPlaneFixture();
-    const dataPlane = new EasyTierDataPlane(bindings);
+    const dataPlane = new ExvlanDataPlane(bindings);
     await dataPlane.initialize();
 
     expect(() => dataPlane.connectTcp("example.com", 443)).toThrow(
@@ -317,7 +317,7 @@ describe("EasyTierDataPlane", () => {
 
   it("invalidates existing resources when the runtime stops", async () => {
     const bindings = new DataPlaneFixture();
-    const dataPlane = new EasyTierDataPlane(bindings);
+    const dataPlane = new ExvlanDataPlane(bindings);
     bindings.onDrive = () => dataPlane.drainCompletions();
     await dataPlane.initialize();
     const listener = await dataPlane.bindTcp(22);
@@ -325,10 +325,10 @@ describe("EasyTierDataPlane", () => {
     dataPlane.shutdown();
 
     await expect(listener.accept()).rejects.toThrow(
-      "EasyTier runtime is stopped",
+      "Exvlan runtime is stopped",
     );
     await expect(listener.close()).rejects.toThrow(
-      "EasyTier runtime is stopped",
+      "Exvlan runtime is stopped",
     );
   });
 });

@@ -1,4 +1,4 @@
-use easytier_core::socket::SocketContext;
+use exvlan_core::socket::SocketContext;
 use futures::Future;
 
 #[cfg(target_os = "linux")]

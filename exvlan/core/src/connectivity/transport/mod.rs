@@ -48,7 +48,7 @@ impl<S> ConnectedByteStream<S> {
 /// A transport endpoint established by a connectivity strategy.
 ///
 /// Manual, direct, and hole-punch strategies stop at this boundary. Protocol
-/// code consumes the endpoint and upgrades it into an EasyTier tunnel.
+/// code consumes the endpoint and upgrades it into an Exvlan tunnel.
 pub enum ConnectedTransport<TcpSocket> {
     Tcp(TcpSocket),
     Udp(ConnectedUdpSession),

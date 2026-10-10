@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use easytier_ffi::ConfigServerEventCallback;
+use exvlan_ffi::ConfigServerEventCallback;
 use jni::JNIEnv;
 use jni::objects::{GlobalRef, JObject, JValue};
 use once_cell::sync::Lazy;

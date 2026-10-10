@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use easytier_core::listener::{
+use exvlan_core::listener::{
     ExternalListenerFactory, ExternalListenerRequest, transport::AcceptedTransport,
 };
-use easytier_core::socket::SocketListener;
+use exvlan_core::socket::SocketListener;
 
 #[cfg(feature = "faketcp")]
 use crate::common::netns::NetNS;
@@ -183,11 +183,11 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn unix_adapters_exchange_bytes_and_unlink_listener() {
-        use easytier_core::connectivity::composite::ConnectorRuntime;
+        use exvlan_core::connectivity::composite::ConnectorRuntime;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("easytier.sock");
+        let path = directory.path().join("exvlan.sock");
         let url: url::Url = format!("unix://{}", path.display()).parse().unwrap();
         let mut listener = RuntimeUnixStreamListener::new(url.clone());
         SocketListener::listen(&mut listener).await.unwrap();

@@ -15,13 +15,13 @@ const cycleThemeMode = () => {
     applyThemeMode(next);
 };
 
-import { I18nUtils } from 'easytier-frontend-lib'
+import { I18nUtils } from '@exvlan/std'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Button, Drawer, Menu, OverlayBadge, Popover, TieredMenu, useToast } from 'primevue';
 import { useRoute, useRouter } from 'vue-router';
 import { useDialog } from 'primevue/usedialog';
 import ChangePassword from './ChangePassword.vue';
-import Icon from '../assets/easytier.png'
+import Icon from '../assets/exvlan.png'
 import { useI18n } from 'vue-i18n'
 import ApiClient, { type BlockedDevice, type CentralNetworkSummary } from '../modules/api';
 import { getApiBase } from '../modules/api-host';
@@ -111,7 +111,7 @@ const enrollCommand = computed(() => {
     if (!enrollInfo.value) return '';
     const host = new URL(getApiBase(), window.location.href).hostname;
     const { config_server_protocol: proto, config_server_port: port, username } = enrollInfo.value;
-    return `easytier-core --config-server ${proto}://${host}:${port}/${username}`;
+    return `exvlan-core --config-server ${proto}://${host}:${port}/${username}`;
 });
 
 const toggleEnrollBell = async (event: Event) => {
@@ -202,7 +202,7 @@ watch(() => route.fullPath, () => { forceShowSideBar.value = false; });
         <a class="skip-link" href="#main-content" @click.prevent="mainContent?.focus()">{{ t('web.console.skip_content') }}</a>
         <aside class="console-sidebar">
             <RouterLink :to="{ name: 'dashboard' }" class="console-brand">
-                <img :src="Icon" alt="" /><span>EasyTier<span class="brand-caption">{{ t('web.console.console') }}</span></span>
+                <img :src="Icon" alt="" /><span>Exvlan<span class="brand-caption">{{ t('web.console.console') }}</span></span>
             </RouterLink>
             <div class="nav-caption">{{ t('web.console.workspace') }}</div>
             <nav :aria-label="t('web.console.navigation')">
@@ -229,7 +229,7 @@ watch(() => route.fullPath, () => { forceShowSideBar.value = false; });
                         </template>
                 </Menu>
             </nav>
-            <a href="https://easytier.cn" target="_blank" rel="noopener noreferrer" class="console-docs">
+            <a href="https://exvlan.cn" target="_blank" rel="noopener noreferrer" class="console-docs">
                 <i class="pi pi-book" aria-hidden="true"></i>{{ t('web.console.documentation') }}<i class="pi pi-arrow-up-right" aria-hidden="true"></i>
             </a>
         </aside>

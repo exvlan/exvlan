@@ -2,7 +2,7 @@
 
 ## Context
 
-EXVlan 的 secure mode 已实现 Noise XX 握手 + X25519 静态公钥认证。当前节点通过 `network_secret` 双向确认身份。用户需要一种"临时凭据"机制：
+Exvlan 的 secure mode 已实现 Noise XX 握手 + X25519 静态公钥认证。当前节点通过 `network_secret` 双向确认身份。用户需要一种"临时凭据"机制：
 
 - **管理节点**（任何持有 network_secret 的节点）可为当前网络生成凭据
 - **新节点**可使用凭据代替 `network_secret` 加入网络

@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 
 use anyhow::Context;
-use easytier_proto::api::manage;
+use exvlan_proto::api::manage;
 
 use crate::config::{
     MappedListenerPolicy, normalize_secure_mode_config,
@@ -48,8 +48,8 @@ pub fn add_proxy_network_to_config(
     Ok(())
 }
 
-pub type NetworkingMethod = easytier_proto::api::manage::NetworkingMethod;
-pub type NetworkConfig = easytier_proto::api::manage::NetworkConfig;
+pub type NetworkingMethod = exvlan_proto::api::manage::NetworkingMethod;
+pub type NetworkConfig = exvlan_proto::api::manage::NetworkConfig;
 
 pub(crate) fn managed_credential_from_proto(
     credential: &manage::ManagedCredentialConfig,
@@ -450,7 +450,7 @@ impl NetworkConfigExt for NetworkConfig {
 
         if let Some(credential_secret) = credential_secret {
             cfg.set_secure_mode(Some(normalize_secure_mode_config(
-                easytier_proto::common::SecureModeConfig {
+                exvlan_proto::common::SecureModeConfig {
                     enabled: true,
                     local_private_key: Some(credential_secret),
                     local_public_key: None,

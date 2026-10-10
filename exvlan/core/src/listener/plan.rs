@@ -184,8 +184,8 @@ where
             }
             ListenerKind::UdpSession => {
                 let accept_kind = match protocol_transport(listener.url.scheme()) {
-                    Some(ProtocolTransport::Udp(UdpSessionMode::EasyTierMux)) => {
-                        UdpSessionAcceptKind::EasyTierMux
+                    Some(ProtocolTransport::Udp(UdpSessionMode::ExvlanMux)) => {
+                        UdpSessionAcceptKind::ExvlanMux
                     }
                     Some(ProtocolTransport::Udp(UdpSessionMode::Classified(protocol))) => {
                         UdpSessionAcceptKind::Classified(protocol)

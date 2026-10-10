@@ -1,6 +1,6 @@
 //! Central-console device registration through the ordinary webhook contract.
 
-use easytier::proto::web::DeviceOsInfo;
+use exvlan::proto::web::DeviceOsInfo;
 use uuid::Uuid;
 
 use crate::{
@@ -67,7 +67,7 @@ impl WebhookHandler for DeviceAuth {
                 user_id,
                 machine_id,
                 hostname: request.hostname.clone(),
-                easytier_version: request.version.clone(),
+                exvlan_version: request.version.clone(),
                 device_os: serde_json::to_string(&DeviceOsInfo {
                     os_type: request.os_type.clone().unwrap_or_default(),
                     version: request.os_version.clone().unwrap_or_default(),
@@ -91,7 +91,7 @@ impl WebhookHandler for DeviceAuth {
 mod tests {
     use std::{sync::Arc, time::Duration};
 
-    use easytier::{
+    use exvlan::{
         common::config::{ConfigSource, NetworkConfig, NetworkConfigExt},
         instance::factory::native_instance_manager,
         proto::rpc::standalone::{runtime_udp_tunnel_dialer, runtime_udp_tunnel_listener},
@@ -313,7 +313,7 @@ mod tests {
             user_id,
             machine_id,
             hostname: initial.hostname,
-            easytier_version: initial.easytier_version,
+            exvlan_version: initial.exvlan_version,
             device_os: initial.device_os,
             client_url: "tcp://192.0.2.2:1234".to_owned(),
         })
@@ -330,7 +330,7 @@ mod tests {
         );
         let refreshed = db.get_device(device).await.unwrap().unwrap();
         assert_eq!(refreshed.hostname, "renamed");
-        assert_eq!(refreshed.easytier_version, "2.8.0");
+        assert_eq!(refreshed.exvlan_version, "2.8.0");
         assert_eq!(refreshed.alias, "office");
         assert_eq!(refreshed.client_url, "tcp://192.0.2.2:1234");
         assert_eq!(refreshed.first_seen_time, initial.first_seen_time);

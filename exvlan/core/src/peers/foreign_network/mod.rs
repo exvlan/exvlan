@@ -11,7 +11,7 @@ use std::{
 };
 
 use dashmap::{DashMap, DashSet};
-use easytier_proto::common::FlagsInConfig;
+use exvlan_proto::common::FlagsInConfig;
 use guarden::defer;
 use tokio::sync::{
     Mutex, RwLock, RwLockReadGuard,
@@ -118,7 +118,7 @@ fn build_foreign_peer_context(
         host_routing: parent_context_dyn.host_routing_policy(),
     };
     let mut snapshot = PeerRuntimeSnapshot::new(runtime, flags);
-    snapshot.easytier_version = parent_context_dyn.easytier_version();
+    snapshot.exvlan_version = parent_context_dyn.exvlan_version();
     snapshot.ospf_update_my_foreign_network_interval_sec =
         parent_context_dyn.ospf_update_my_foreign_network_interval_sec();
     snapshot.max_direct_conns_per_peer_in_foreign_network =
@@ -1593,7 +1593,7 @@ mod tests {
     };
 
     use dashmap::DashMap;
-    use easytier_proto::common::{FlagsInConfig, PeerFeatureFlag};
+    use exvlan_proto::common::{FlagsInConfig, PeerFeatureFlag};
 
     use super::{
         ForeignNetworkEntry, ForeignNetworkManager, ForeignNetworkManagerData,

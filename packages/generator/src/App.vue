@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { exec, moduleInfo } from 'kernelsu'
-import { Config, I18nUtils, NetworkTypes } from 'easytier-frontend-lib'
+import { Config, I18nUtils, NetworkTypes } from '@exvlan/std'
 import { Button, SelectButton, Textarea } from 'primevue'
 import { computed, onMounted, ref, watch } from 'vue'
 import initConfigWasm, {
   generate_config as generateTomlConfig,
   merge_config as mergeTomlConfig,
   parse_config as parseTomlConfig,
-} from './generated/config-wasm/easytier_config'
+} from './generated/config-wasm/exvlan_config'
 
 type ModuleStatus = 'running' | 'stopped' | 'restarting'
 

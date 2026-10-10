@@ -89,7 +89,7 @@ type TCPListenOptions struct {
 	Purpose TCPListenPurpose
 }
 
-// SocketFactory creates sockets authorized for one EasyTier instance.
+// SocketFactory creates sockets authorized for one Exvlan instance.
 // The host runtime owns every resource returned after a successful call.
 type SocketFactory interface {
 	ConnectTCP(context.Context, TCPConnectOptions) (net.Conn, error)

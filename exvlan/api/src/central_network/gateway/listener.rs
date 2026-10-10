@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use easytier_core::{
+use exvlan_core::{
     packet::{PacketType, ZCPacket},
     socket::{ListenerConnectionCounter, SocketListener},
     tunnel::{Tunnel, TunnelError, wrapper::TunnelWrapper},
@@ -144,7 +144,7 @@ fn peer_first_packet_network_name(packet: &ZCPacket) -> Result<String, TunnelErr
                 "noise msg1 has no handshake payload".to_string(),
             ));
         }
-        easytier_proto::peer_rpc::PeerConnNoiseMsg1Pb::decode(
+        exvlan_proto::peer_rpc::PeerConnNoiseMsg1Pb::decode(
             &payload[NOISE_XX_MSG1_EPHEMERAL_LEN..],
         )
         .map_err(|error| {
@@ -152,7 +152,7 @@ fn peer_first_packet_network_name(packet: &ZCPacket) -> Result<String, TunnelErr
         })?
         .a_network_name
     } else if header.packet_type == PacketType::HandShake as u8 {
-        easytier_proto::peer_rpc::HandshakeRequest::decode(packet.payload())
+        exvlan_proto::peer_rpc::HandshakeRequest::decode(packet.payload())
             .map_err(|error| {
                 TunnelError::InvalidPacket(format!("invalid peer handshake payload: {error}"))
             })?
@@ -209,7 +209,7 @@ async fn accept_demux_server_tunnel(
 
 #[cfg(test)]
 mod tests {
-    use easytier_core::tunnel::{
+    use exvlan_core::tunnel::{
         ring::create_ring_tunnel_pair,
         web_security::{
             accept_or_upgrade_server_tunnel, upgrade_client_tunnel, web_secure_tunnel_supported,
@@ -228,14 +228,14 @@ mod tests {
 
     fn peer_handshake_packet(packet_type: PacketType, network_name: &str) -> ZCPacket {
         let payload = match packet_type {
-            PacketType::HandShake => easytier_proto::peer_rpc::HandshakeRequest {
+            PacketType::HandShake => exvlan_proto::peer_rpc::HandshakeRequest {
                 network_name: network_name.to_string(),
                 ..Default::default()
             }
             .encode_to_vec(),
             PacketType::NoiseHandshakeMsg1 => {
                 let mut payload = vec![0; 32];
-                easytier_proto::peer_rpc::PeerConnNoiseMsg1Pb {
+                exvlan_proto::peer_rpc::PeerConnNoiseMsg1Pb {
                     a_network_name: network_name.to_string(),
                     ..Default::default()
                 }

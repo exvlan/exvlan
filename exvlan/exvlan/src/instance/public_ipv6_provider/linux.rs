@@ -14,10 +14,10 @@ use crate::common::{
 };
 use anyhow::Context;
 use cidr::{Ipv6Cidr, Ipv6Inet};
-use easytier_core::config::peers::PublicIpv6ProviderConfig;
-use easytier_core::peers::public_ipv6::is_global_routable_public_ipv6_prefix;
-use easytier_core::peers::public_ipv6::provider::PublicIpv6NdpTarget;
-use easytier_core::peers::public_ipv6::provider::{
+use exvlan_core::config::peers::PublicIpv6ProviderConfig;
+use exvlan_core::peers::public_ipv6::is_global_routable_public_ipv6_prefix;
+use exvlan_core::peers::public_ipv6::provider::PublicIpv6NdpTarget;
+use exvlan_core::peers::public_ipv6::provider::{
     PublicIpv6NdpDesired, PublicIpv6PlatformError, PublicIpv6PlatformObservation,
     PublicIpv6ProviderPlatform,
 };
@@ -353,7 +353,7 @@ fn detect_public_ipv6_prefix_linux() -> Result<Option<DetectedPublicIpv6Prefix>,
         return Ok(Some(prefix));
     }
 
-    // Fallback for DHCPv6 IA_NA / SLAAC — see https://github.com/EasyTier/EasyTier/issues/2333
+    // Fallback for DHCPv6 IA_NA / SLAAC — see https://github.com/exvlan/exvlan/issues/2333
     Ok(detect_public_ipv6_prefix_from_interfaces(&routes))
 }
 
@@ -1272,7 +1272,7 @@ mod tests {
         super::ensure_linux_ndp_proxy_enabled(&wan_if).unwrap();
         crate::common::ifcfg::add_ipv6_ndp_proxy(&wan_if, addr).unwrap();
 
-        sync_ndp_proxy_entries(&wan_if, "missing-easytier-tun", prefix, &mut applied).unwrap();
+        sync_ndp_proxy_entries(&wan_if, "missing-exvlan-tun", prefix, &mut applied).unwrap();
         assert!(
             !crate::common::ifcfg::list_ipv6_ndp_proxy(&wan_if)
                 .unwrap()
@@ -1355,22 +1355,22 @@ mod tests {
         global_ctx.set_tun_device_ready(tun_if);
 
         let platform = super::RuntimePublicIpv6ProviderPlatform::new(&global_ctx);
-        let runtime_config = easytier_core::config::runtime::CoreRuntimeConfigStore::new(
-            easytier_core::config::runtime::CoreRuntimeConfig {
+        let runtime_config = exvlan_core::config::runtime::CoreRuntimeConfigStore::new(
+            exvlan_core::config::runtime::CoreRuntimeConfig {
                 public_ipv6_provider: test_core_instance_config(&global_ctx)
                     .connectivity
                     .runtime
                     .public_ipv6_provider,
                 ..Default::default()
             },
-            Arc::new(easytier_core::config::peers::PeerRuntimeSnapshot::default()),
+            Arc::new(exvlan_core::config::peers::PeerRuntimeSnapshot::default()),
         );
-        let runtime = easytier_core::peers::public_ipv6::CorePublicIpv6Runtime::new(
+        let runtime = exvlan_core::peers::public_ipv6::CorePublicIpv6Runtime::new(
             runtime_config.clone(),
             global_ctx.clone(),
             global_ctx.clone(),
         );
-        let service = easytier_core::peers::public_ipv6::provider::PublicIpv6ProviderService::new(
+        let service = exvlan_core::peers::public_ipv6::provider::PublicIpv6ProviderService::new(
             platform,
             runtime_config,
             runtime,

@@ -3,7 +3,7 @@ package hostabi
 import (
 	"context"
 
-	"github.com/easytier/easytier/easytier-go/internal/reactor"
+	"github.com/exvlan/exvlan/exvlan-go/internal/reactor"
 	"github.com/metacubex/wazero/api"
 )
 

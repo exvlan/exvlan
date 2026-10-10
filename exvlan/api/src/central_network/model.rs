@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use easytier::common::config::NetworkConfig;
+use exvlan::common::config::NetworkConfig;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CentralNetworkIntent {

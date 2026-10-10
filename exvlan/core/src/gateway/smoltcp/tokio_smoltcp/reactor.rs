@@ -161,7 +161,7 @@ fn prepare_tcp_listener_socket(
         }
         Err(error) => {
             tracing::error!(
-                target: "easytier_core::gateway::smoltcp",
+                target: "exvlan_core::gateway::smoltcp",
                 ?error,
                 ?local_endpoint,
                 "failed to allocate TCP listener socket"

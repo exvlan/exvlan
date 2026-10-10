@@ -9,7 +9,7 @@ pub(crate) use hole_punch::{
 use bytes::Buf;
 use bytes::Bytes;
 use bytes::BytesMut;
-use easytier_proto::common::CompressionAlgoPb;
+use exvlan_proto::common::CompressionAlgoPb;
 use zerocopy::AsBytes;
 use zerocopy::FromBytes;
 use zerocopy::FromZeroes;

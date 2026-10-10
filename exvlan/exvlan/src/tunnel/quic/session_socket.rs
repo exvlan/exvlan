@@ -7,7 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use easytier_core::{
+use exvlan_core::{
     connectivity::transport::ConnectedUdpSession,
     socket::udp::{UdpSession, UdpSessionSocket},
 };

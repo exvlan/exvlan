@@ -59,7 +59,7 @@ struct ListCredentialsJsonResp {
 
 #[derive(Debug, serde::Deserialize)]
 struct SetMemberConfigJsonReq {
-    config: easytier::common::config::NetworkConfig,
+    config: exvlan::common::config::NetworkConfig,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -192,7 +192,7 @@ impl CentralNetworkApi {
         auth: AuthSession,
         Extension(service): Service,
         Path((network_id, device_id)): Path<(Uuid, Uuid)>,
-    ) -> Result<Json<easytier::common::config::NetworkConfig>, HttpHandleError> {
+    ) -> Result<Json<exvlan::common::config::NetworkConfig>, HttpHandleError> {
         service
             .get_member_config(user_id(&auth)?, network_id, device_id)
             .await

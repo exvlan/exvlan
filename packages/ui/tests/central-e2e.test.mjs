@@ -10,9 +10,9 @@ import { test } from 'node:test';
 import { chromium } from 'playwright';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const webBinary = join(repo, 'target/debug/easytier-web');
-const coreBinary = join(repo, 'target/debug/easytier-core');
-const cliBinary = join(repo, 'target/debug/easytier-cli');
+const webBinary = join(repo, 'target/debug/exvlan-api');
+const coreBinary = join(repo, 'target/debug/exvlan-core');
+const cliBinary = join(repo, 'target/debug/exvlan-cli');
 const username = 'central-e2e';
 const password = 'e2e-password';
 const machineId = '00000000-0000-0000-0000-000000000002';
@@ -26,7 +26,7 @@ function docker(...args) {
 }
 
 function buildCoreForDocker() {
-    docker('sh', '-c', 'cd "$1" && cargo build -p easytier --bins && chown -R "$2:$3" target',
+    docker('sh', '-c', 'cd "$1" && cargo build -p exvlan --bins && chown -R "$2:$3" target',
         'e2e-build', repo, String(process.getuid()), String(process.getgid()));
 }
 
@@ -177,7 +177,7 @@ test('browser, Web API, database and Core agree on central network lifecycle', {
     const apiPort = await freePort();
     const configPort = await freePort();
     const credentialRpcPorts = [await freePort(), await freePort()];
-    const gatewayHostname = (await readFile('/etc/hostname', 'utf8')).trim() || 'easytier-web-gateway';
+    const gatewayHostname = (await readFile('/etc/hostname', 'utf8')).trim() || 'exvlan-api-gateway';
     const base = `http://127.0.0.1:${apiPort}`;
     const route = docker('sh', '-c', 'ip route');
     const gatewayHost = route.match(/default via ([\d.]+)/)?.[1];

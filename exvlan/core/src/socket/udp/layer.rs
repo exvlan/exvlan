@@ -17,7 +17,7 @@ use crate::packet::{ZCPacket, new_hole_punch_packet};
 use super::{
     UDP_SESSION_CONNECT_TIMEOUT, UDP_SESSION_QUEUE_CAPACITY, UDP_SESSION_RESEND_INTERVAL,
     packet::{
-        EasyTierUdpPacketKind, UdpDatagramClassification, UdpSessionPacketKind,
+        ExvlanUdpPacketKind, UdpDatagramClassification, UdpSessionPacketKind,
         classify_session_udp_datagram, classify_udp_datagram,
         extract_dst_addr_from_v4_hole_punch_packet, extract_v6_hole_punch_packet, new_sack_packet,
         new_syn_packet,
@@ -236,8 +236,8 @@ where
                     self.socket.clone(),
                     local_addr,
                     key.peer_addr,
-                    UdpSessionKind::EasyTierMux,
-                    UdpSessionCodec::EasyTierData { conn_id },
+                    UdpSessionKind::ExvlanMux,
+                    UdpSessionCodec::ExvlanData { conn_id },
                     rings,
                     close,
                     self.session_shutdown_tx.subscribe(),
@@ -510,7 +510,7 @@ pub(super) async fn udp_session_layer_recv_task<S, R>(
                     UdpSessionDatagram::new(datagram_payload, recv_meta),
                 );
             }
-            UdpDatagramClassification::EasyTier {
+            UdpDatagramClassification::Exvlan {
                 kind,
                 conn_id,
                 packet,
@@ -574,7 +574,7 @@ fn dispatch_easy_tier_udp_datagram<S>(
     control: &mpsc::Sender<UdpSessionLayerControl>,
     control_permits: &Arc<Semaphore>,
     remote_addr: SocketAddr,
-    kind: EasyTierUdpPacketKind,
+    kind: ExvlanUdpPacketKind,
     conn_id: u32,
     packet: ZCPacket,
     recv_meta: UdpSocketRecvMeta,
@@ -584,10 +584,10 @@ where
     S: VirtualUdpSocket,
 {
     let consumed = match kind {
-        EasyTierUdpPacketKind::Data => {
+        ExvlanUdpPacketKind::Data => {
             return dispatch_data_packet(sessions, remote_addr, conn_id, packet, recv_meta).err();
         }
-        EasyTierUdpPacketKind::Syn => handle_new_easy_tier_mux_connect(
+        ExvlanUdpPacketKind::Syn => handle_new_easy_tier_mux_connect(
             socket.clone(),
             sessions.clone(),
             mux_accepted.clone(),
@@ -596,20 +596,20 @@ where
             &packet,
             session_shutdown.subscribe(),
         ),
-        EasyTierUdpPacketKind::Sack => {
+        ExvlanUdpPacketKind::Sack => {
             dispatch_sack_packet(sessions, pending_connects, remote_addr, conn_id, &packet)
         }
-        EasyTierUdpPacketKind::HolePunch => {
+        ExvlanUdpPacketKind::HolePunch => {
             dispatch_hole_punch_packet(pending_connects, remote_addr)
         }
-        EasyTierUdpPacketKind::V4HolePunch => dispatch_v4_hole_punch_control(
+        ExvlanUdpPacketKind::V4HolePunch => dispatch_v4_hole_punch_control(
             socket.clone(),
             control_permits.clone(),
             control,
             remote_addr,
             &packet,
         ),
-        EasyTierUdpPacketKind::V6HolePunch => dispatch_v6_hole_punch_control(
+        ExvlanUdpPacketKind::V6HolePunch => dispatch_v6_hole_punch_control(
             socket.clone(),
             control_permits.clone(),
             control,
@@ -637,7 +637,7 @@ pub(super) fn dispatch_data_packet(
     } else {
         UdpSessionEnqueuePolicy::Reliable
     };
-    let payload = UdpSessionDatagram::from_easytier_packet(packet, recv_meta);
+    let payload = UdpSessionDatagram::from_exvlan_packet(packet, recv_meta);
     let dispatched = dispatch_payload_to_session(&entry.incoming, payload, policy);
     drop(entry);
     if !dispatched {
@@ -831,8 +831,8 @@ where
         socket.clone(),
         local_addr,
         key.peer_addr,
-        UdpSessionKind::EasyTierMux,
-        UdpSessionCodec::EasyTierData { conn_id },
+        UdpSessionKind::ExvlanMux,
+        UdpSessionCodec::ExvlanData { conn_id },
         rings,
         close,
         session_shutdown,

@@ -8,8 +8,8 @@ readonly script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 readonly repository_root=$(cd -- "${script_dir}/.." && pwd)
 cd "$repository_root"
 readonly target_dir="${CARGO_TARGET_DIR:-target}"
-readonly raw_artifact="${target_dir}/wasm32-wasip1/release/easytier_core.wasm"
-readonly artifact="${target_dir}/wasm32-wasip1/release/easytier_core_go_host.wasm"
+readonly raw_artifact="${target_dir}/wasm32-wasip1/release/exvlan_core.wasm"
+readonly artifact="${target_dir}/wasm32-wasip1/release/exvlan_core_go_host.wasm"
 readonly core_features="management-rpc,proxy-smoltcp-stack,ring-crypto,wasi-crypto-offload"
 
 sha256_file() {
@@ -119,7 +119,7 @@ if [[ "$version" != *"version ${binaryen_version} "* ]]; then
     exit 1
 fi
 
-cargo build --release --target wasm32-wasip1 -p easytier-core \
+cargo build --release --target wasm32-wasip1 -p exvlan-core \
     --features "$core_features"
 
 optimized="${artifact}.wasm-opt.$$"

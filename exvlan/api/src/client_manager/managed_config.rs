@@ -4,15 +4,15 @@ use std::{
 };
 
 use dashmap::{DashMap, mapref::entry::Entry};
-use easytier::{
+use exvlan::{
     common::config::ConfigSource,
     proto::{
         api::manage::{ConfigSource as RpcConfigSource, NetworkConfig, NetworkMeta},
         common::Uuid as RpcUuid,
     },
 };
-use easytier_core::management::config_source_from_rpc;
-use easytier_core::management::remote_client::{PersistentConfig as _, Storage as _};
+use exvlan_core::management::config_source_from_rpc;
+use exvlan_core::management::remote_client::{PersistentConfig as _, Storage as _};
 
 use super::storage::Storage;
 use crate::db::{
@@ -481,11 +481,11 @@ pub(super) async fn sync_running_config_sources(
 mod tests {
     use std::collections::HashSet;
 
-    use easytier::{
+    use exvlan::{
         common::config::{ConfigLoader as _, ConfigSource, NetworkConfigExt},
         proto::api::manage::{ConfigSource as RpcConfigSource, NetworkConfig, NetworkMeta},
     };
-    use easytier_core::management::remote_client::ListNetworkProps;
+    use exvlan_core::management::remote_client::ListNetworkProps;
     use serde_json::json;
 
     use super::*;

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier_core::{
+use exvlan_core::{
     config::peers::HostRoutingPolicy,
     instance::{CoreConnectivityMode, CoreInstanceHostConfig},
     peers::credential_manager::CredentialStorage,
@@ -12,12 +12,12 @@ use crate::common::credential_manager::runtime_credential_storage;
 #[cfg(test)]
 use crate::common::global_ctx::GlobalCtxEvent;
 use crate::{
-    common::{constants::EASYTIER_VERSION, global_ctx::ArcGlobalCtx},
+    common::{constants::EXVLAN_VERSION, global_ctx::ArcGlobalCtx},
     tunnel::IpScheme,
 };
 
 /// Projects only native Host policy and build capabilities. All TOML-derived
-/// Instance configuration is normalized by `easytier-core`.
+/// Instance configuration is normalized by `exvlan-core`.
 pub(crate) fn runtime_core_host_config() -> CoreInstanceHostConfig {
     let hostname = gethostname::gethostname().to_string_lossy().to_string();
     CoreInstanceHostConfig {
@@ -60,7 +60,7 @@ pub(crate) fn runtime_core_host_config() -> CoreInstanceHostConfig {
         tcp_hole_punching_enabled: cfg!(feature = "tcp-hole-punch"),
         ignore_unsupported_config: false,
         connectivity: CoreConnectivityMode::Full,
-        easytier_version: EASYTIER_VERSION.to_owned(),
+        exvlan_version: EXVLAN_VERSION.to_owned(),
         endpoint_protocols: IpScheme::VARIANTS.iter().map(ToString::to_string).collect(),
     }
 }
@@ -99,8 +99,8 @@ pub(crate) fn runtime_peer_credential_storage(
 #[cfg(test)]
 pub(crate) fn test_core_instance_config(
     global_ctx: &ArcGlobalCtx,
-) -> easytier_core::instance::CoreInstanceConfig {
-    use easytier_core::config::toml::{ConfigLoader as _, TomlConfig};
+) -> exvlan_core::instance::CoreInstanceConfig {
+    use exvlan_core::config::toml::{ConfigLoader as _, TomlConfig};
 
     let config = TomlConfig::new_from_str(&global_ctx.config.dump())
         .expect("test configuration should round-trip through TOML");
@@ -110,16 +110,16 @@ pub(crate) fn test_core_instance_config(
     let mut host = runtime_core_host_config();
     let hostname = global_ctx.get_hostname();
     host.hostname_fallback = (!hostname.is_empty()).then_some(hostname);
-    easytier_core::instance::CoreInstanceConfig::from_toml_with_host(&config, &host)
+    exvlan_core::instance::CoreInstanceConfig::from_toml_with_host(&config, &host)
         .expect("test configuration should normalize")
 }
 
 #[cfg(test)]
 pub(crate) fn test_runtime_instance_config(
     global_ctx: &ArcGlobalCtx,
-) -> easytier_core::config::runtime::CoreInstanceRuntimeConfig {
+) -> exvlan_core::config::runtime::CoreInstanceRuntimeConfig {
     let config = test_core_instance_config(global_ctx);
-    easytier_core::config::runtime::CoreInstanceRuntimeConfig {
+    exvlan_core::config::runtime::CoreInstanceRuntimeConfig {
         services: config.connectivity.runtime,
         peer: Arc::new(config.peer.snapshot),
     }
@@ -127,7 +127,7 @@ pub(crate) fn test_runtime_instance_config(
 
 #[cfg(test)]
 mod tests {
-    use easytier_core::{
+    use exvlan_core::{
         config::toml::TomlConfig,
         events::{CoreEvent, CoreEventSink},
     };
@@ -151,7 +151,7 @@ mod tests {
             config.public_ipv6_provider_supported,
             cfg!(all(target_os = "linux", feature = "public-ipv6-provider"))
         );
-        assert_eq!(config.easytier_version, EASYTIER_VERSION);
+        assert_eq!(config.exvlan_version, EXVLAN_VERSION);
     }
 
     #[test]
@@ -161,10 +161,10 @@ mod tests {
         let cleared = TomlConfig::new_from_str("hostname = \"\"").unwrap();
 
         let initial =
-            easytier_core::instance::CoreInstanceConfig::from_toml_with_host(&initial, &host)
+            exvlan_core::instance::CoreInstanceConfig::from_toml_with_host(&initial, &host)
                 .unwrap();
         let cleared =
-            easytier_core::instance::CoreInstanceConfig::from_toml_with_host(&cleared, &host)
+            exvlan_core::instance::CoreInstanceConfig::from_toml_with_host(&cleared, &host)
                 .unwrap();
 
         assert_eq!(

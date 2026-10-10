@@ -630,7 +630,7 @@ onUnmounted(() => {
     height: 100%;
     display: flex;
     flex-direction: column;
-    /* hosts that mount this full-page (easytier-gui) have no padding of
+    /* hosts that mount this full-page (@exvlan/studio) have no padding of
        their own, so keep a safe inset here; panel chrome stays with hosts */
     padding: 0.75rem;
 }

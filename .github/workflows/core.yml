@@ -1,4 +1,4 @@
-name: EasyTier Core
+name: Exvlan Core
 
 on:
   workflow_dispatch:
@@ -27,9 +27,9 @@ jobs:
     env:
       RELEVANT_PATHS: >-
         ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**",
-        "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "easytier/**",
-        "easytier-core/**", "easytier-proto/**", "easytier-rpc-build/**",
-        "easytier-web/**", "easytier-contrib/easytier-magisk/**",
+        "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "exvlan/**",
+        "exvlan-core/**", "exvlan-proto/**", "exvlan-rpc-build/**",
+        "exvlan-api/**", "exvlan/contrib/exvlan-magisk/**",
         ".github/workflows/core.yml", ".github/actions/**"]
     outputs:
       # Release builds must run even if they only change release metadata.
@@ -72,14 +72,14 @@ jobs:
         uses: ./.github/actions/prepare-pnpm
         with:
           token: ${{ github.token }}
-          build-filter: './easytier-web/*'
+          build-filter: './exvlan-api/*'
 
       - name: Archive artifact
         uses: actions/upload-artifact@v5
         with:
-          name: easytier-web-dashboard
+          name: exvlan-api-dashboard
           path: |
-            easytier-web/frontend/dist/*
+            exvlan-api/frontend/dist/*
   build:
     strategy:
       fail-fast: true
@@ -143,7 +143,7 @@ jobs:
 
     runs-on: ${{ matrix.OS }}
     env:
-      NAME: easytier
+      NAME: exvlan
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
       OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
@@ -161,8 +161,8 @@ jobs:
       - name: Download web artifact
         uses: actions/download-artifact@v4
         with:
-          name: easytier-web-dashboard
-          path: easytier-web/frontend/dist/
+          name: exvlan-api-dashboard
+          path: exvlan-api/frontend/dist/
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
@@ -215,8 +215,8 @@ jobs:
             FEATURES="jemalloc"
           fi
           
-          cargo $BUILD --release --target $TARGET --package=easytier-web --features=embed
-          mv ./target/$TARGET/release/easytier-web"$SUFFIX" ./target/$TARGET/release/easytier-web-embed"$SUFFIX"
+          cargo $BUILD --release --target $TARGET --package=exvlan-api --features=embed
+          mv ./target/$TARGET/release/exvlan-api"$SUFFIX" ./target/$TARGET/release/exvlan-api-embed"$SUFFIX"
           
           cargo $BUILD --release --target $TARGET --features=$FEATURES
 
@@ -225,7 +225,7 @@ jobs:
         env:
           RUSTC_BOOTSTRAP: 1
         run: |
-          cargo build -r --target $TARGET -Z build-std=std,panic_abort --package=easytier --features=jemalloc
+          cargo build -r --target $TARGET -Z build-std=std,panic_abort --package=exvlan --features=jemalloc
 
       - name: Compress
         run: |
@@ -240,7 +240,7 @@ jobs:
                   aarch64*) ARCH_DIR=arm64 ;;
               esac
               if [[ -n "$ARCH_DIR" ]]; then
-                  find "easytier/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./artifacts/objects/ \;
+                  find "exvlan/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./artifacts/objects/ \;
               fi
           fi
 
@@ -265,7 +265,7 @@ jobs:
             UPX_BIN=./upx
           fi
 
-          for BIN in ./target/$TARGET/release/easytier-{core,cli,web,web-embed}"$SUFFIX"; do
+          for BIN in ./target/$TARGET/release/exvlan-{core,cli,web,web-embed}"$SUFFIX"; do
             if [[ -f "$BIN" ]]; then
               if [[ -n "$UPX_BIN" ]]; then
                 $UPX_BIN --lzma --best "$BIN" || true
@@ -281,7 +281,7 @@ jobs:
       - name: Archive artifact
         uses: actions/upload-artifact@v5
         with:
-          name: easytier-${{ matrix.ARTIFACT_NAME }}
+          name: exvlan-${{ matrix.ARTIFACT_NAME }}
           path: |
             ./artifacts/*
 
@@ -290,10 +290,10 @@ jobs:
         run: |
           mkdir -p ./signpath-artifacts
           cp \
-            ./artifacts/easytier-core.exe \
-            ./artifacts/easytier-cli.exe \
-            ./artifacts/easytier-web.exe \
-            ./artifacts/easytier-web-embed.exe \
+            ./artifacts/exvlan-core.exe \
+            ./artifacts/exvlan-cli.exe \
+            ./artifacts/exvlan-api.exe \
+            ./artifacts/exvlan-api-embed.exe \
             ./signpath-artifacts/
 
       - name: Upload unsigned SignPath test artifact
@@ -311,7 +311,7 @@ jobs:
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: 368cf38d-86d5-4bfe-a1fa-82a50dce7e9f
-          project-slug: EasyTier
+          project-slug: Exvlan
           signing-policy-slug: test-signing
           artifact-configuration-slug: initial
           github-artifact-id: ${{ steps.signpath-upload.outputs.artifact-id }}
@@ -338,23 +338,23 @@ jobs:
       - name: Download Linux aarch64 binaries
         uses: actions/download-artifact@v4
         with:
-          name: easytier-linux-aarch64
+          name: exvlan-linux-aarch64
           path: ./downloaded-binaries/  # 独立目录避免冲突
 
       - name: Download Magisk WebUI
         uses: actions/download-artifact@v4
         with:
-          name: easytier-web-dashboard
+          name: exvlan-api-dashboard
           path: ./downloaded-webui/
 
       # 将二进制文件和 WebUI 复制到 Magisk 模块目录
       - name: Prepare Magisk module
         run: |
-          module_dir=./easytier-contrib/easytier-magisk
+          module_dir=./exvlan/contrib/exvlan-magisk
           mkdir -p "$module_dir/webroot"
-          cp ./downloaded-binaries/easytier-core "$module_dir/"
-          cp ./downloaded-binaries/easytier-cli "$module_dir/"
-          cp ./downloaded-binaries/easytier-web "$module_dir/"
+          cp ./downloaded-binaries/exvlan-core "$module_dir/"
+          cp ./downloaded-binaries/exvlan-cli "$module_dir/"
+          cp ./downloaded-binaries/exvlan-api "$module_dir/"
           cp -R ./downloaded-webui/config-generator/. "$module_dir/webroot/"
           test -f "$module_dir/webroot/index.html"
 
@@ -362,11 +362,11 @@ jobs:
       - name: Upload Magisk Module
         uses: actions/upload-artifact@v5
         with:
-          name: Easytier-Magisk
+          name: Exvlan-Magisk
           path: |
-            ./easytier-contrib/easytier-magisk
-            !./easytier-contrib/easytier-magisk/build.sh
-            !./easytier-contrib/easytier-magisk/magisk_update.json
+            ./exvlan/contrib/exvlan-magisk
+            !./exvlan/contrib/exvlan-magisk/build.sh
+            !./exvlan/contrib/exvlan-magisk/magisk_update.json
           if-no-files-found: error
 
   core-result:

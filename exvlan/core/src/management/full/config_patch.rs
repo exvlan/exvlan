@@ -1,7 +1,7 @@
 use std::{fmt::Debug, sync::Arc};
 
 use anyhow::Context as _;
-use easytier_proto::api::config::{
+use exvlan_proto::api::config::{
     self, AclPatch, ConfigPatchAction, ExitNodePatch, InstanceConfigPatch, Patchable,
     PortForwardPatch, ProxyNetworkPatch, RoutePatch, UrlPatch, VpnPortalClientPatch,
 };
@@ -352,7 +352,7 @@ fn trace_patchables<T: Debug>(patches: &[Patchable<T>]) {
 
 #[cfg(test)]
 mod managed_credential_tests {
-    use easytier_proto::api::manage::ManagedCredentialSet;
+    use exvlan_proto::api::manage::ManagedCredentialSet;
 
     use super::*;
 
@@ -601,7 +601,7 @@ where
 mod tests {
     use super::*;
     use crate::config::toml::{VpnPortalClientConfig, VpnPortalConfig};
-    use easytier_proto::api::manage::VpnPortalClientConfig as ClientPb;
+    use exvlan_proto::api::manage::VpnPortalClientConfig as ClientPb;
 
     fn portal_config() -> TomlConfig {
         let config = TomlConfig::default();

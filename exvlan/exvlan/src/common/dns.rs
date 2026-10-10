@@ -4,8 +4,8 @@ use std::{future::Future, io, pin::Pin, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use async_trait::async_trait;
-use easytier_core::host::dns::{DnsQuery, DnsRecordResolver, DnsResolver, DnsSrvRecord};
-use easytier_core::socket::SocketContext;
+use exvlan_core::host::dns::{DnsQuery, DnsRecordResolver, DnsResolver, DnsSrvRecord};
+use exvlan_core::socket::SocketContext;
 #[cfg(feature = "dns-resolver")]
 use hickory_proto::runtime::{RuntimeProvider, TokioRuntimeProvider, iocompat::AsyncIoTokioAsStd};
 #[cfg(feature = "dns-resolver")]
@@ -34,7 +34,7 @@ use crate::{
     socket_protector::native_socket_protection_available,
 };
 #[cfg(feature = "dns-resolver")]
-use easytier_core::socket::{NetNamespace, tcp::TcpBindOptions, udp::UdpBindOptions};
+use exvlan_core::socket::{NetNamespace, tcp::TcpBindOptions, udp::UdpBindOptions};
 
 #[cfg(feature = "dns-resolver")]
 pub fn get_default_resolver_config() -> ResolverConfig {
@@ -602,7 +602,7 @@ mod tests {
     fn runtime_dns_context_preserves_process_routing_inputs() {
         let context = SocketContext::default()
             .with_socket_mark(Some(0))
-            .with_netns(Some(easytier_core::socket::NetNamespace::new("instance-a")));
+            .with_netns(Some(exvlan_core::socket::NetNamespace::new("instance-a")));
 
         assert_eq!(
             RuntimeDnsIoContext::from_socket_context(&context),

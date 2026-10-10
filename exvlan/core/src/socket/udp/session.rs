@@ -34,7 +34,7 @@ pub(crate) struct UdpSessionDatagram {
 #[derive(Debug)]
 enum UdpSessionDatagramPayload {
     Bytes(BytesMut),
-    EasyTierPacket(ZCPacket),
+    ExvlanPacket(ZCPacket),
 }
 
 impl UdpSessionDatagram {
@@ -45,9 +45,9 @@ impl UdpSessionDatagram {
         }
     }
 
-    pub(crate) fn from_easytier_packet(packet: ZCPacket, meta: UdpSocketRecvMeta) -> Self {
+    pub(crate) fn from_exvlan_packet(packet: ZCPacket, meta: UdpSocketRecvMeta) -> Self {
         Self {
-            payload: UdpSessionDatagramPayload::EasyTierPacket(packet),
+            payload: UdpSessionDatagramPayload::ExvlanPacket(packet),
             dst_ip: meta.dst_ip,
         }
     }
@@ -55,14 +55,14 @@ impl UdpSessionDatagram {
     pub(crate) fn payload(&self) -> &[u8] {
         match &self.payload {
             UdpSessionDatagramPayload::Bytes(payload) => payload,
-            UdpSessionDatagramPayload::EasyTierPacket(packet) => packet.udp_payload(),
+            UdpSessionDatagramPayload::ExvlanPacket(packet) => packet.udp_payload(),
         }
     }
 
     pub(crate) fn into_tunnel_packet(self) -> Result<ZCPacket, BytesMut> {
         match self.payload {
             UdpSessionDatagramPayload::Bytes(payload) => Err(payload),
-            UdpSessionDatagramPayload::EasyTierPacket(packet) => Ok(packet),
+            UdpSessionDatagramPayload::ExvlanPacket(packet) => Ok(packet),
         }
     }
 }
@@ -83,7 +83,7 @@ pub struct UdpSessionRecvMeta {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UdpSessionKind {
-    EasyTierMux,
+    ExvlanMux,
     WireGuard,
     Quic,
 }
@@ -285,14 +285,14 @@ pub(crate) enum UdpSessionOutbound {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UdpSessionCodec {
-    EasyTierData { conn_id: u32 },
+    ExvlanData { conn_id: u32 },
     Identity,
 }
 
 impl UdpSessionCodec {
     pub(crate) fn validate_payload(&self, payload: &[u8]) -> io::Result<()> {
         self.validate_datagram_size(payload.len())?;
-        if matches!(self, Self::EasyTierData { .. }) {
+        if matches!(self, Self::ExvlanData { .. }) {
             udp_session_payload_len(payload)?;
         }
         Ok(())
@@ -300,7 +300,7 @@ impl UdpSessionCodec {
 
     fn validate_datagram_size(&self, payload_len: usize) -> io::Result<()> {
         let header_len = match self {
-            Self::EasyTierData { .. } => crate::packet::UDP_TUNNEL_HEADER_SIZE,
+            Self::ExvlanData { .. } => crate::packet::UDP_TUNNEL_HEADER_SIZE,
             Self::Identity => 0,
         };
         let datagram_len = payload_len.checked_add(header_len).ok_or_else(|| {
@@ -324,7 +324,7 @@ impl UdpSessionCodec {
     fn encode(&self, payload: &[u8]) -> io::Result<BytesMut> {
         self.validate_payload(payload)?;
         match self {
-            Self::EasyTierData { conn_id } => {
+            Self::ExvlanData { conn_id } => {
                 Ok(new_data_packet(*conn_id, payload)?.into_bytes().into())
             }
             Self::Identity => Ok(BytesMut::from(payload)),
@@ -335,7 +335,7 @@ impl UdpSessionCodec {
         let mut packet = packet.convert_type(ZCPacketType::UDP);
         self.validate_datagram_size(packet.udp_payload().len())?;
         match self {
-            Self::EasyTierData { conn_id } => {
+            Self::ExvlanData { conn_id } => {
                 let payload_len = udp_session_payload_len(packet.udp_payload())?;
                 let header = packet.mut_udp_tunnel_header().unwrap();
                 header.conn_id.set(*conn_id);
@@ -353,7 +353,7 @@ impl UdpSessionCodec {
 enum UdpSessionCloseTarget {
     #[cfg(test)]
     SignalOnly,
-    EasyTier {
+    Exvlan {
         key: UdpSessionKey,
         sessions: Arc<UdpSessionRegistry>,
     },
@@ -377,7 +377,7 @@ impl UdpSessionClose {
     ) -> Self {
         Self {
             close,
-            target: UdpSessionCloseTarget::EasyTier { key, sessions },
+            target: UdpSessionCloseTarget::Exvlan { key, sessions },
         }
     }
 
@@ -396,7 +396,7 @@ impl UdpSessionClose {
         match &self.target {
             #[cfg(test)]
             UdpSessionCloseTarget::SignalOnly => {}
-            UdpSessionCloseTarget::EasyTier { key, sessions } => {
+            UdpSessionCloseTarget::Exvlan { key, sessions } => {
                 close_udp_session(sessions, *key);
             }
             UdpSessionCloseTarget::Classified { key, sessions } => {

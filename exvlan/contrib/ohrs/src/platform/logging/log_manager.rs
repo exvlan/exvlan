@@ -8,8 +8,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const LOG_DIR_NAME: &str = "easytier-logs";
-const LOG_FILE_PREFIX: &str = "easytier-";
+const LOG_DIR_NAME: &str = "exvlan-logs";
+const LOG_FILE_PREFIX: &str = "exvlan-";
 const LOG_FILE_SUFFIX: &str = ".log";
 const MAX_LOG_FILES: usize = 10;
 const MAX_MEMORY_LINES: usize = 500;

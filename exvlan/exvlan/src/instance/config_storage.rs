@@ -2,7 +2,7 @@ use std::{io::Write as _, path::Path};
 
 use atomic_write_file::{AtomicWriteFile, OpenOptions};
 
-use easytier_core::management::{ConfigFileControl, ConfigFilePermission, ConfigFileStorage};
+use exvlan_core::management::{ConfigFileControl, ConfigFilePermission, ConfigFileStorage};
 
 #[derive(Default)]
 pub(crate) struct NativeConfigFileStorage;

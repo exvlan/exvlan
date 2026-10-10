@@ -5,7 +5,7 @@ manual: Manual
 standalone: Standalone
 initial_nodes: Initial Nodes
 initial_nodes_help: |
-  EXVlan does not distinguish between server and client roles.
+  Exvlan does not distinguish between server and client roles.
   • Filling in Initial Nodes = plugging in the cable and joining an existing network.
   • Leaving it empty = the node starts alone until others connect to it, or you connect it later yourself.
   • Direct or indirect connectivity, including through relay nodes, can form one network.
@@ -33,7 +33,7 @@ vpn_portal_devices: "WireGuard devices"
 vpn_portal_devices_help: "Each device has its own connection configuration."
 vpn_portal_client_address: "Device virtual IP"
 vpn_portal_client_prefix: "Network prefix length"
-vpn_portal_address_help: "The device uses its own address in the EasyTier network. Suggested addresses exclude known occupied addresses."
+vpn_portal_address_help: "The device uses its own address in the Exvlan network. Suggested addresses exclude known occupied addresses."
 vpn_portal_invalid_name: "Use a unique name with 1–63 letters, digits or hyphens, starting and ending with a letter or digit."
 vpn_portal_invalid_address: "Enter a valid, unused device IP and check the network prefix in advanced settings."
 vpn_portal_generate_config: "Generate connection config"
@@ -94,7 +94,7 @@ copy_config: Copy Config
 config_copied: Copied
 config_generation_failed: Generation failed
 config_copy_failed: Copy failed
-magisk_module_configuration: EasyTier Module Configuration
+magisk_module_configuration: Exvlan Module Configuration
 magisk_status_loading: Loading status
 magisk_status_running: Running
 magisk_status_stopped: Stopped
@@ -104,8 +104,8 @@ magisk_command_args_warning: Startup argument mode is active, so the module igno
 magisk_invalid_module_directory: KernelSU returned an invalid module directory
 magisk_load_failed: 'Failed to load module configuration: {error}'
 magisk_save_failed: 'Failed to save module configuration: {error}'
-magisk_config_saved: Configuration validated and saved; EasyTier restarted
-magisk_config_saved_restart_pending: Configuration validated and saved; the EasyTier supervisor is still starting
+magisk_config_saved: Configuration validated and saved; Exvlan restarted
+magisk_config_saved_restart_pending: Configuration validated and saved; the Exvlan supervisor is still starting
 retain_network_instance: Retain Network Instance
 collect_network_infos: Collect Network Infos
 settings: Settings
@@ -119,7 +119,7 @@ logging_level_off: Off
 logging_open_dir: Open Log Directory
 logging_copy_dir: Copy Log Path
 vpn_tile_no_network: No configured network
-vpn_tile_no_network_description: Configure a network in EasyTier before using the VPN tile.
+vpn_tile_no_network_description: Configure a network in Exvlan before using the VPN tile.
 vpn_tile_started: VPN network started
 vpn_tile_stopped: VPN network stopped
 vpn_tile_action_failed: 'VPN tile action failed: {error}'
@@ -211,7 +211,7 @@ lazy_p2p: Lazy P2P
 lazy_p2p_help: Only try to establish P2P when traffic actually targets a peer. Peers with need-p2p enabled are still connected proactively.
 
 bind_device: Bind to Physical Device Only
-bind_device_help: Use only the physical network interface to prevent EXVlan from connecting via virtual networks.
+bind_device_help: Use only the physical network interface to prevent Exvlan from connecting via virtual networks.
 
 no_tun: No TUN Mode
 no_tun_help: Do not use a TUN interface, suitable for environments without administrator privileges. This node is only accessible; accessing other nodes requires SOCKS5.
@@ -243,7 +243,7 @@ disable_udp_hole_punching: Disable UDP Hole Punching
 disable_udp_hole_punching_help: Disable udp hole punching
 
 enable_udp_broadcast_relay: UDP Broadcast Relay
-enable_udp_broadcast_relay_help: "Windows only: capture local UDP broadcast packets from physical interfaces and forward them to EXVlan peers. Helps games to find rooms in local network. Requires administrator privileges."
+enable_udp_broadcast_relay_help: "Windows only: capture local UDP broadcast packets from physical interfaces and forward them to Exvlan peers. Helps games to find rooms in local network. Requires administrator privileges."
 
 disable_upnp: Disable UPnP
 disable_upnp_help: Disable runtime UPnP/NAT-PMP port mapping for eligible listeners; automatic port mapping is enabled by default.
@@ -321,7 +321,7 @@ about:
   author: Author
   homepage: Homepage
   license: License
-  description: 'EXVlan is a simple, safe and decentralized VPN networking solution implemented with the Rust language and Tokio framework.'
+  description: 'Exvlan is a simple, safe and decentralized VPN networking solution implemented with the Rust language and Tokio framework.'
   check_update: Check Update
 
 event:
@@ -391,7 +391,7 @@ web:
     retry: "Retry"
     load_failed: "Unable to refresh data. Any displayed data is from the last successful refresh."
     devices_empty: "No devices yet"
-    devices_empty_hint: "Connect an EasyTier client to this controller to start managing it here."
+    devices_empty_hint: "Connect an Exvlan client to this controller to start managing it here."
     networks_empty: "No managed networks yet"
     networks_empty_hint: "Create a network, then add devices to connect them."
     search_devices: "Search name or address"
@@ -607,7 +607,7 @@ web:
     log_debug: Debug
     log_trace: Trace
     export_config: Export Config
-    export_config_hint: The node's effective TOML config (as easytier-cli node config)
+    export_config_hint: The node's effective TOML config (as exvlan-cli node config)
     download: Download
     node_detail: Node Detail
     node_detail_offline: Node detail requires the device to be online
@@ -720,7 +720,7 @@ mode:
   normal: Normal
   service: Service
   remote: Remote
-  normal_description: Run EXVlan directly, suitable for local use.
+  normal_description: Run Exvlan directly, suitable for local use.
   service_description: Run as a system service, supporting auto-startup and background operation. The service continues to run in the background after exiting the GUI.
   remote_description: Connect to a remote RPC service to manage and control remote nodes.
   service_status: Service Status
@@ -736,7 +736,7 @@ mode:
   service_config_empty: Service Config cannot be empty
   rpc_connection_failed: "RPC connection failed: {error}"
   autostart: Start on Boot
-  autostart_hint: Auto-start on boot is provided by service mode. After switching to Service mode and saving, EasyTier will be registered as a system service that starts automatically at boot and keeps running in the background.
+  autostart_hint: Auto-start on boot is provided by service mode. After switching to Service mode and saving, Exvlan will be registered as a system service that starts automatically at boot and keeps running in the background.
 
 config-server:
   title: Config Server

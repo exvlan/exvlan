@@ -24,7 +24,7 @@ export interface FrontendLibOptions {
     skipPrimeVue?: boolean;
 }
 
-const EasytierFrontendLib: { install: (app: App, options?: FrontendLibOptions) => void } = {
+const ExvlanFrontendLib: { install: (app: App, options?: FrontendLibOptions) => void } = {
     install: (app: App, options: FrontendLibOptions = {}): void => {
         app.use(I18nUtils.i18n, { useScope: 'global' })
         if (!options.skipPrimeVue) {
@@ -69,6 +69,6 @@ const EasytierFrontendLib: { install: (app: App, options?: FrontendLibOptions) =
     }
 };
 
-export default EasytierFrontendLib;
+export default ExvlanFrontendLib;
 
 export { Config, ConfigEditDialog, RemoteManagement, Status, UrlListInput, I18nUtils, NetworkTypes, Api, Utils };

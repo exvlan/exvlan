@@ -1,6 +1,6 @@
-# GUI for EXVlan
+# GUI for Exvlan
 
-this is a GUI implementation for EXVlan, based on Tauri2.
+this is a GUI implementation for Exvlan, based on Tauri2.
 
 ## Compile
 

@@ -1,7 +1,7 @@
 //! Locally attached peers backed by their own portable peer runtime.
 //!
 //! An attached peer participates in routing, ACL identity, and peer lifecycle
-//! exactly like a remote EasyTier node. The only privileged part of the seam is
+//! exactly like a remote Exvlan node. The only privileged part of the seam is
 //! the authenticated in-process connection to another peer manager.
 
 use std::{
@@ -158,7 +158,7 @@ fn build_attached_services(
     services
 }
 
-/// One complete EasyTier peer connected to another manager in process.
+/// One complete Exvlan peer connected to another manager in process.
 ///
 /// The runtime owns the attached manager's lifecycle. Callers exchange only
 /// raw IPv4 packets through the Host packet seam.

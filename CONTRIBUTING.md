@@ -1,8 +1,8 @@
-# Contributing to EXVlan
+# Contributing to Exvlan
 
 [中文版](CONTRIBUTING_zh.md)
 
-Thank you for your interest in contributing to EXVlan! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to Exvlan! This document provides guidelines and instructions for contributing to the project.
 
 ## Table of Contents
 
@@ -73,7 +73,7 @@ sudo apt install -y bridge-utils
 1. Clone the repository:
    ```bash
    git clone https://github.com/exvlan/exvlan.git
-   cd EXVlan
+   cd Exvlan
    ```
 
 2. Install dependencies:
@@ -222,4 +222,4 @@ Feel free to:
 - Join our community discussions
 - Reach out to maintainers
 
-Thank you for contributing to EXVlan! 
+Thank you for contributing to Exvlan! 

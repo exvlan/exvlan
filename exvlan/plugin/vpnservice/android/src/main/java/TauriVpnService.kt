@@ -29,7 +29,7 @@ class TauriVpnService : VpnService() {
         const val DISALLOWED_APPLICATIONS = "DISALLOWED_APPLICATIONS"
         const val MTU = "MTU"
 
-        private const val NOTIFICATION_CHANNEL_ID = "easytier_vpn_channel"
+        private const val NOTIFICATION_CHANNEL_ID = "exvlan_vpn_channel"
         private const val NOTIFICATION_ID = 1356
     }
 
@@ -49,7 +49,7 @@ class TauriVpnService : VpnService() {
         var event_data = JSObject()
         event_data.put("fd", vpnInterface.fd)
         triggerCallback("vpn_service_start", event_data)
-        EasyTierVpnTileService.requestStateUpdate(this)
+        ExvlanVpnTileService.requestStateUpdate(this)
 
         return START_STICKY
     }
@@ -66,7 +66,7 @@ class TauriVpnService : VpnService() {
         setMainForegroundServiceEnabled(true)
         stopForeground(STOP_FOREGROUND_REMOVE)
         self = null
-        EasyTierVpnTileService.requestStateUpdate(this)
+        ExvlanVpnTileService.requestStateUpdate(this)
         super.onDestroy()
     }
 
@@ -76,7 +76,7 @@ class TauriVpnService : VpnService() {
         setMainForegroundServiceEnabled(true)
         stopForeground(STOP_FOREGROUND_REMOVE)
         self = null
-        EasyTierVpnTileService.requestStateUpdate(this)
+        ExvlanVpnTileService.requestStateUpdate(this)
         super.onRevoke()
     }
 
@@ -110,7 +110,7 @@ class TauriVpnService : VpnService() {
         }
         val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_manage)
-            .setContentTitle("EasyTier VPN is running")
+            .setContentTitle("Exvlan VPN is running")
             .setContentText("VPN connection is active")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -152,7 +152,7 @@ class TauriVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 NOTIFICATION_CHANNEL_ID,
-                "EasyTier VPN",
+                "Exvlan VPN",
                 NotificationManager.IMPORTANCE_LOW,
             )
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
@@ -161,7 +161,7 @@ class TauriVpnService : VpnService() {
 
     private fun createVpnInterface(args: Bundle?): ParcelFileDescriptor {
         var builder = Builder()
-                .setSession("EXVlan")
+                .setSession("Exvlan")
                 .setBlocking(false)
         
         var mtu = args?.getInt(MTU) ?: 1500

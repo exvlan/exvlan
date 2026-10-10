@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier_core::connectivity::protocol::{ClientProtocolUpgrader, ServerProtocolUpgrader};
+use exvlan_core::connectivity::protocol::{ClientProtocolUpgrader, ServerProtocolUpgrader};
 
 use crate::{common::global_ctx::ArcGlobalCtx, socket::tcp::RuntimeTcpSocket};
 

@@ -1,8 +1,8 @@
-//! STUN wire codec for the attributes EasyTier NAT traversal uses.
+//! STUN wire codec for the attributes Exvlan NAT traversal uses.
 //!
-//! EasyTier speaks STUN (RFC 5389/5780) for NAT mapping detection and port
+//! Exvlan speaks STUN (RFC 5389/5780) for NAT mapping detection and port
 //! mapping. This module holds the wire-level attribute types, their codecs,
-//! and the EasyTier transaction-id convention (a `0xdeadbeef` prefix); it
+//! and the Exvlan transaction-id convention (a `0xdeadbeef` prefix); it
 //! performs no I/O. The connectivity layer drives probing and responding on
 //! top of it.
 
@@ -310,7 +310,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn easytier_transaction_id_roundtrips_u32() {
+    fn exvlan_transaction_id_roundtrips_u32() {
         let tid = u32_to_tid(0x1122_3344);
 
         assert_eq!(&tid.as_bytes()[..4], &[0xde, 0xad, 0xbe, 0xef]);

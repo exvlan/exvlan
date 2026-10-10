@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use easytier_proto::{
+use exvlan_proto::{
     api::{
         config::ConfigRpc,
         instance::{

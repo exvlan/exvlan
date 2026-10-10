@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Button, Column, ConfirmDialog, DataTable, Dialog, Drawer, InputSwitch, InputText, Message, ProgressSpinner, ScrollPanel, Select, SelectButton, Skeleton, Tab, TabList, TabPanel, TabPanels, Tabs, Tag, useConfirm, useToast } from 'primevue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Config, NetworkTypes, UrlListInput, Utils } from 'easytier-frontend-lib';
+import { Config, NetworkTypes, UrlListInput, Utils } from '@exvlan/std';
 import AclPolicyTab from './AclPolicyTab.vue';
 import ApiClient, { type CentralNetworkDetail, type CentralNetworkMember, type NetworkCredential, type NodeAclRuleStat, type NodePeerInfo, type NodeRouteInfo, type TemporaryPeer } from '../modules/api';
 
@@ -751,7 +751,7 @@ const credentialJoinCommand = (secret: string) => {
     if (!network.value) return '';
     const peer = credentialJoinPeer();
     return [
-        'easytier-core',
+        'exvlan-core',
         `--network-name ${network.value.network_name}`,
         '--secure-mode',
         `--credential ${secret}`,
@@ -1208,7 +1208,7 @@ const switchTab = async (tab: string) => {
                 scrollHeight="20rem" selectionMode="multiple">
                 <Column selectionMode="multiple" style="width: 3rem" />
                 <Column field="hostname" :header="t('web.device.hostname')" />
-                <Column field="easytier_version" :header="t('web.device.version')" />
+                <Column field="exvlan_version" :header="t('web.device.version')" />
             </DataTable>
             <div class="flex flex-col gap-2 mt-2">
                 <div class="flex items-center gap-2">

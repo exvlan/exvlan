@@ -17,13 +17,13 @@ const (
 type RPCOperationID uint64
 
 func (core *Core) validateRPCABI(ctx context.Context) error {
-	version, err := core.callOne(ctx, "easytier_rpc_abi_version")
+	version, err := core.callOne(ctx, "exvlan_rpc_abi_version")
 	if err != nil {
 		return err
 	}
 	if version != RPCABIVersion {
 		return fmt.Errorf(
-			"unsupported EasyTier RPC ABI version %d, want %d",
+			"unsupported Exvlan RPC ABI version %d, want %d",
 			version,
 			RPCABIVersion,
 		)
@@ -61,7 +61,7 @@ func (core *Core) SubmitRPC(
 
 	result, err := core.callOne(
 		ctx,
-		"easytier_rpc_request_submit",
+		"exvlan_rpc_request_submit",
 		core.handle,
 		uint64(requestPointer),
 		uint64(len(encodedRequest)),
@@ -71,7 +71,7 @@ func (core *Core) SubmitRPC(
 		return 0, err
 	}
 	if status := int32(result); status != 0 {
-		return 0, core.statusError(ctx, "submit EasyTier RPC request", status)
+		return 0, core.statusError(ctx, "submit Exvlan RPC request", status)
 	}
 	wire, ok := core.module.Memory().Read(
 		operationPointer,
@@ -82,7 +82,7 @@ func (core *Core) SubmitRPC(
 	}
 	operation = RPCOperationID(binary.BigEndian.Uint64(wire))
 	if operation == 0 {
-		return 0, fmt.Errorf("EasyTier RPC submit returned zero operation ID")
+		return 0, fmt.Errorf("Exvlan RPC submit returned zero operation ID")
 	}
 	return operation, nil
 }
@@ -93,7 +93,7 @@ func (core *Core) TakeRPCResponse(
 ) (response []byte, ready bool, err error) {
 	result, err := core.callOne(
 		ctx,
-		"easytier_rpc_response_take",
+		"exvlan_rpc_response_take",
 		core.handle,
 		uint64(operation),
 		0,
@@ -109,7 +109,7 @@ func (core *Core) TakeRPCResponse(
 	if required < 0 {
 		return nil, false, core.statusError(
 			ctx,
-			"probe EasyTier RPC response",
+			"probe Exvlan RPC response",
 			required,
 		)
 	}
@@ -133,7 +133,7 @@ func (core *Core) TakeRPCResponse(
 	defer core.cleanupBuffer(ctx, outputPointer, &err)
 	result, err = core.callOne(
 		ctx,
-		"easytier_rpc_response_take",
+		"exvlan_rpc_response_take",
 		core.handle,
 		uint64(operation),
 		uint64(outputPointer),
@@ -149,7 +149,7 @@ func (core *Core) TakeRPCResponse(
 	if length < 0 {
 		return nil, false, core.statusError(
 			ctx,
-			"take EasyTier RPC response",
+			"take Exvlan RPC response",
 			length,
 		)
 	}
@@ -176,7 +176,7 @@ func (core *Core) FreeRPCOperation(
 ) error {
 	result, err := core.callOne(
 		ctx,
-		"easytier_rpc_operation_free",
+		"exvlan_rpc_operation_free",
 		core.handle,
 		uint64(operation),
 	)
@@ -184,7 +184,7 @@ func (core *Core) FreeRPCOperation(
 		return err
 	}
 	if status := int32(result); status != 0 {
-		return core.statusError(ctx, "free EasyTier RPC operation", status)
+		return core.statusError(ctx, "free Exvlan RPC operation", status)
 	}
 	return nil
 }

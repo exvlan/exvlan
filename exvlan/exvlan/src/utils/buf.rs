@@ -3,7 +3,7 @@ use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
 use std::mem::{MaybeUninit, take};
 use std::ptr::copy_nonoverlapping;
 
-pub use easytier_core::tunnel::buf::BufList;
+pub use exvlan_core::tunnel::buf::BufList;
 
 #[derive(Debug, Clone, Copy, Default, From, Into, PartialEq, Eq)]
 pub struct BufMargins {

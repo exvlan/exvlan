@@ -6,12 +6,12 @@ use std::{net::SocketAddr, sync::Arc};
 #[cfg(test)]
 use async_trait::async_trait;
 #[cfg(test)]
-use easytier_core::connectivity::stun::{StunInfoProvider, StunSocketMapper};
-use easytier_core::{
+use exvlan_core::connectivity::stun::{StunInfoProvider, StunSocketMapper};
+use exvlan_core::{
     connectivity::stun::StunInfoCollector as CoreStunInfoCollector, socket::SocketContext,
 };
 #[cfg(test)]
-use easytier_proto::common::{NatType, StunInfo};
+use exvlan_proto::common::{NatType, StunInfo};
 
 use crate::host_runtime::{NativeHostRuntime, native_host_runtime};
 #[cfg(test)]
@@ -86,7 +86,7 @@ impl StunSocketMapper<RuntimeUdpSocket> for MockStunInfoCollector {
         &self,
         socket: Arc<RuntimeUdpSocket>,
     ) -> anyhow::Result<SocketAddr> {
-        use easytier_core::socket::udp::VirtualUdpSocket as _;
+        use exvlan_core::socket::udp::VirtualUdpSocket as _;
         self.get_udp_port_mapping(socket.local_addr()?.port()).await
     }
 }
@@ -116,7 +116,7 @@ mod tests {
     use std::time::Duration;
 
     use bytecodec::{DecodeExt as _, EncodeExt as _};
-    use easytier_core::{
+    use exvlan_core::{
         connectivity::stun::{TcpNatTypeDetector, UdpNatTypeDetector},
         packet::stun::Attribute,
         socket::SocketListener,

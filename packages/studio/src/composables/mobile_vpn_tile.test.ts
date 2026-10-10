@@ -1,8 +1,8 @@
-import type { Api, NetworkTypes } from 'easytier-frontend-lib'
+import type { Api, NetworkTypes } from '@exvlan/std'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { executeVpnTileAction } from './mobile_vpn_tile'
 
-vi.mock('easytier-frontend-lib', () => ({
+vi.mock('@exvlan/std', () => ({
   Utils: {
     UuidToStr: (value: unknown) => String(value),
   },

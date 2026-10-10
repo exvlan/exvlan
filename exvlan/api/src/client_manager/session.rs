@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Context;
-use easytier::proto::{
+use exvlan::proto::{
     api::{
         config::{ConfigRpc, ConfigRpcClientFactory},
         manage::{WebClientService, WebClientServiceClientFactory},
@@ -16,7 +16,7 @@ use easytier::proto::{
     rpc_types::{self, controller::BaseController},
     web::{HeartbeatRequest, HeartbeatResponse, WebServerService, WebServerServiceServer},
 };
-use easytier_core::tunnel::Tunnel;
+use exvlan_core::tunnel::Tunnel;
 use tokio::sync::{Notify, RwLock, broadcast};
 use tokio_util::task::AbortOnDropHandle;
 
@@ -900,10 +900,10 @@ impl WebServerService for SessionRpcService {
     async fn get_feature(
         &self,
         _: BaseController,
-        _: easytier::proto::web::GetFeatureRequest,
-    ) -> rpc_types::error::Result<easytier::proto::web::GetFeatureResponse> {
-        Ok(easytier::proto::web::GetFeatureResponse {
-            support_encryption: easytier_core::tunnel::web_security::web_secure_tunnel_supported(),
+        _: exvlan::proto::web::GetFeatureRequest,
+    ) -> rpc_types::error::Result<exvlan::proto::web::GetFeatureResponse> {
+        Ok(exvlan::proto::web::GetFeatureResponse {
+            support_encryption: exvlan_core::tunnel::web_security::web_secure_tunnel_supported(),
         })
     }
 }

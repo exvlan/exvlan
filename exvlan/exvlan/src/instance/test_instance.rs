@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use easytier_core::{
+use exvlan_core::{
     config::toml::TomlConfig, connectivity::stun::StunSocketMapper, instance::CoreInstance,
     process_runtime::CoreProcessRuntime,
 };
@@ -44,7 +44,7 @@ impl TestInstance {
         config: TomlConfig,
         process_runtime: Arc<CoreProcessRuntime>,
         customize: impl FnOnce(
-            &mut easytier_core::instance::CoreHostAdapters<
+            &mut exvlan_core::instance::CoreHostAdapters<
                 crate::instance::host::NativeInstanceHost,
             >,
         ),
@@ -95,13 +95,13 @@ impl TestConfigPatcher {
         &self,
         patch: crate::proto::api::config::InstanceConfigPatch,
     ) -> anyhow::Result<()> {
-        easytier_core::management::apply_config_patch(&self.core, patch, None).await
+        exvlan_core::management::apply_config_patch(&self.core, patch, None).await
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use easytier_core::config::{
+    use exvlan_core::config::{
         normalize_secure_mode_config,
         toml::{ConfigLoader as _, TomlConfig},
     };

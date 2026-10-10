@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 )
 
 type createOperation struct {

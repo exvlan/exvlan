@@ -1,4 +1,4 @@
-//! Complete EasyTier TOML configuration model.
+//! Complete Exvlan TOML configuration model.
 
 use std::{
     net::{IpAddr, SocketAddr},
@@ -1490,7 +1490,7 @@ socket_mark = 66
 
     #[cfg(feature = "config-write")]
     #[test]
-    fn dump_preserves_flags_that_differ_from_easytier_defaults() {
+    fn dump_preserves_flags_that_differ_from_exvlan_defaults() {
         let cfg = TomlConfigLoader::default();
         let mut flags = gen_default_flags();
         flags.dev_name = "et_test".to_string();
@@ -1554,7 +1554,7 @@ socket_mark = 66
         assert!(config.get_tcp_stun_servers().is_none());
 
         // Test setting custom stun servers
-        let custom_servers = vec!["txt:stun.easytier.cn".to_string()];
+        let custom_servers = vec!["txt:stun.exvlan.cn".to_string()];
         config.set_stun_servers(Some(custom_servers.clone()));
 
         let retrieved_servers = config.get_stun_servers();
@@ -1574,7 +1574,7 @@ instance_name = "test"
 stun_servers = [
     "stun.l.google.com:19302",
     "stun1.l.google.com:19302",
-    "txt:stun.easytier.cn"
+    "txt:stun.exvlan.cn"
 ]
 tcp_stun_servers = [
     "tcp-stun.example.com:3478"
@@ -1587,7 +1587,7 @@ tcp_stun_servers = [
         assert_eq!(stun_servers.len(), 3);
         assert_eq!(stun_servers[0], "stun.l.google.com:19302");
         assert_eq!(stun_servers[1], "stun1.l.google.com:19302");
-        assert_eq!(stun_servers[2], "txt:stun.easytier.cn");
+        assert_eq!(stun_servers[2], "txt:stun.exvlan.cn");
         assert_eq!(tcp_stun_servers, ["tcp-stun.example.com:3478"]);
     }
 
@@ -1913,8 +1913,8 @@ allow = ["tcp", "icmp"]
 
 [file_logger]
 level = "info"
-file = "easytier"
-dir = "/tmp/easytier"
+file = "exvlan"
+dir = "/tmp/exvlan"
 
 [console_logger]
 level = "warn"

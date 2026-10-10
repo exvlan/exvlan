@@ -6,7 +6,7 @@
 ## 分支模型
 
 ```
-upstream (EasyTier)  ──releases/v*──►  feature  ──squash──►  develop
+upstream (Exvlan)  ──releases/v*──►  feature  ──squash──►  develop
                                         ▲                      │
                                         └──── merge ───────────┘
                                         (develop 同步进 feature)

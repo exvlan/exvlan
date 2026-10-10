@@ -1,5 +1,5 @@
 use anyhow::Context as _;
-use easytier::{
+use exvlan::{
     common::config::{
         ConfigLoader, EncryptionAlgorithm, NetworkConfigExt,
         PortForwardConfig as RuntimePortForwardConfig,
@@ -191,7 +191,7 @@ fn normalized_port_forwards(
         .get_port_forwards()
         .into_iter()
         .map(|cfg| {
-            RuntimePortForwardConfig::from(easytier::proto::common::PortForwardConfigPb::from(cfg))
+            RuntimePortForwardConfig::from(exvlan::proto::common::PortForwardConfigPb::from(cfg))
         })
         .collect())
 }
@@ -244,7 +244,7 @@ fn diff_vpn_portal_clients(
         {
             patches.push(VpnPortalClientPatch {
                 action: ConfigPatchAction::Add as i32,
-                client: Some(easytier::proto::api::manage::VpnPortalClientConfig {
+                client: Some(exvlan::proto::api::manage::VpnPortalClientConfig {
                     name: client.name.clone(),
                     virtual_ip: client.virtual_ip.to_string(),
                     groups: client.groups.clone(),
@@ -255,8 +255,8 @@ fn diff_vpn_portal_clients(
     patches
 }
 
-fn client_name_only(name: &str) -> easytier::proto::api::manage::VpnPortalClientConfig {
-    easytier::proto::api::manage::VpnPortalClientConfig {
+fn client_name_only(name: &str) -> exvlan::proto::api::manage::VpnPortalClientConfig {
+    exvlan::proto::api::manage::VpnPortalClientConfig {
         name: name.to_owned(),
         virtual_ip: String::new(),
         groups: Vec::new(),
@@ -536,7 +536,7 @@ pub(super) async fn apply_web_source_runtime_reconcile(
 
 #[cfg(test)]
 mod tests {
-    use easytier::proto::{
+    use exvlan::proto::{
         api::{
             config::ConfigPatchAction,
             manage::{NetworkingMethod, PortForwardConfig},
@@ -586,8 +586,8 @@ mod tests {
         )
     }
 
-    fn portal_client(name: &str, ip: &str) -> easytier::proto::api::manage::VpnPortalClientConfig {
-        easytier::proto::api::manage::VpnPortalClientConfig {
+    fn portal_client(name: &str, ip: &str) -> exvlan::proto::api::manage::VpnPortalClientConfig {
+        exvlan::proto::api::manage::VpnPortalClientConfig {
             name: name.to_owned(),
             virtual_ip: ip.to_owned(),
             groups: Vec::new(),
@@ -595,14 +595,14 @@ mod tests {
     }
 
     fn config_with_vpn_portal(
-        clients: Vec<easytier::proto::api::manage::VpnPortalClientConfig>,
+        clients: Vec<exvlan::proto::api::manage::VpnPortalClientConfig>,
         listen: &str,
     ) -> NetworkConfig {
         let mut config = config_with_port_forwards(Vec::new());
         config.dhcp = Some(false);
         config.virtual_ipv4 = Some("10.144.0.1".to_string());
         config.network_length = Some(24);
-        config.vpn_portal_config = Some(easytier::proto::api::manage::VpnPortalConfig {
+        config.vpn_portal_config = Some(exvlan::proto::api::manage::VpnPortalConfig {
             enabled: None,
             wireguard_listen: listen.to_owned(),
             wireguard_private_key: Some("dGVzdC1rZXk=".to_owned()),
@@ -1189,13 +1189,13 @@ mod tests {
     fn runtime_patch_rejects_credential_private_key_change() {
         let mut current = config_with_port_forwards(Vec::new());
         current.network_secret = None;
-        current.secure_mode = Some(easytier::proto::common::SecureModeConfig {
+        current.secure_mode = Some(exvlan::proto::common::SecureModeConfig {
             enabled: true,
             local_private_key: Some("mUuD5fsIm/ftvgS4WBAYFMNLqWX3qT9rnm4PrnOqb9s=".to_string()),
             local_public_key: None,
         });
         let mut desired = current.clone();
-        desired.secure_mode = Some(easytier::proto::common::SecureModeConfig {
+        desired.secure_mode = Some(exvlan::proto::common::SecureModeConfig {
             enabled: true,
             local_private_key: Some("aEpz80FuYbaY4QLJizAIuIcK4TYsoSA9jHHCXCOQJoc=".to_string()),
             local_public_key: None,
@@ -1209,14 +1209,14 @@ mod tests {
     #[test]
     fn runtime_patch_ignores_generated_secure_key_when_network_secret_exists() {
         let mut current = config_with_port_forwards(vec![port_forward(23000, 5174)]);
-        current.secure_mode = Some(easytier::proto::common::SecureModeConfig {
+        current.secure_mode = Some(exvlan::proto::common::SecureModeConfig {
             enabled: true,
             local_private_key: Some("mUuD5fsIm/ftvgS4WBAYFMNLqWX3qT9rnm4PrnOqb9s=".to_string()),
             local_public_key: Some("4x6L5dZjB8hsPO4f96Hyhi4xFealBu6i3BxRVBYR1Fc=".to_string()),
         });
         let mut desired =
             config_with_port_forwards(vec![port_forward(23000, 5174), port_forward(23007, 3389)]);
-        desired.secure_mode = Some(easytier::proto::common::SecureModeConfig {
+        desired.secure_mode = Some(exvlan::proto::common::SecureModeConfig {
             enabled: true,
             local_private_key: None,
             local_public_key: None,

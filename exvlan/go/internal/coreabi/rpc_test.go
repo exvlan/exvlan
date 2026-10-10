@@ -21,7 +21,7 @@ func TestValidateRPCABI(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			version := exportTestFunction(
-				"easytier_rpc_abi_version",
+				"exvlan_rpc_abi_version",
 				func(context.Context, api.Module) uint32 {
 					return test.version
 				},
@@ -51,7 +51,7 @@ func TestRPCRequestResponseAndFree(t *testing.T) {
 	response := []byte{0x0a, 0x02, 0x08, 0x01}
 
 	allocate := exportTestFunction(
-		"easytier_buffer_alloc",
+		"exvlan_buffer_alloc",
 		func(_ context.Context, _ api.Module, length uint32) uint32 {
 			pointer := nextPointer
 			nextPointer += length + 8
@@ -59,13 +59,13 @@ func TestRPCRequestResponseAndFree(t *testing.T) {
 		},
 	)
 	free := exportTestFunction(
-		"easytier_buffer_free",
+		"exvlan_buffer_free",
 		func(context.Context, api.Module, uint32) int32 {
 			return 0
 		},
 	)
 	submit := exportTestFunction(
-		"easytier_rpc_request_submit",
+		"exvlan_rpc_request_submit",
 		func(
 			_ context.Context,
 			module api.Module,
@@ -83,7 +83,7 @@ func TestRPCRequestResponseAndFree(t *testing.T) {
 		},
 	)
 	take := exportTestFunction(
-		"easytier_rpc_response_take",
+		"exvlan_rpc_response_take",
 		func(
 			_ context.Context,
 			module api.Module,
@@ -100,7 +100,7 @@ func TestRPCRequestResponseAndFree(t *testing.T) {
 		},
 	)
 	freeOperation := exportTestFunction(
-		"easytier_rpc_operation_free",
+		"exvlan_rpc_operation_free",
 		func(
 			_ context.Context,
 			_ api.Module,
@@ -155,7 +155,7 @@ func TestRPCRequestResponseAndFree(t *testing.T) {
 
 func TestTakeRPCResponseReportsPending(t *testing.T) {
 	take := exportTestFunction(
-		"easytier_rpc_response_take",
+		"exvlan_rpc_response_take",
 		func(
 			context.Context,
 			api.Module,

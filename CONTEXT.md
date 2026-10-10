@@ -1,8 +1,8 @@
-# EasyTier Domain Context
+# Exvlan Domain Context
 
 ## Module layers
 
-`easytier-core` layers dependencies from `foundation` upward through the
+`exvlan-core` layers dependencies from `foundation` upward through the
 portable networking domains. `foundation` contains infrastructure Modules
 that have no dependency on a networking domain and may be used by any higher
 layer.
@@ -93,13 +93,13 @@ are silent no-ops and must not be advertised as live network capabilities.
 
 ## Web compatibility Host
 
-The Web compatibility Host runs the portable EasyTier guest in JavaScript
+The Web compatibility Host runs the portable Exvlan guest in JavaScript
 runtimes that provide WebAssembly JSPI. Its shared runtime Module owns guest
 lifecycle, Host capability operations, data-plane resources, and WebSocket
 message handling. Browser and Cloudflare Adapters own only the platform-specific
 way that WebSockets are dialed or accepted and the matching guest artifact.
 
-The Browser Adapter is an outbound-only EasyTier instance with a smoltcp TCP
+The Browser Adapter is an outbound-only Exvlan instance with a smoltcp TCP
 data plane. The Cloudflare Adapter is an inbound-only relay hosted by one named
 Durable Object. Their public configuration exposes only capabilities each Host
 can execute; guest ABI details and serialized TOML remain internal.

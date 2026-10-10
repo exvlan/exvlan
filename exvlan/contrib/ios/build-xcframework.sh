@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# Build the easytier-ios static library slices for the Flutter iOS client.
+# Build the exvlan-ios static library slices for the Flutter iOS client.
 #
 # This script only runs on macOS: it needs the Apple SDK (aarch64-apple-ios*,
-# x86_64-apple-ios targets) plus `lipo`. Run it from the EasyTier repository
+# x86_64-apple-ios targets) plus `lipo`. Run it from the Exvlan repository
 # root or from this crate directory.
 #
 #   rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 #   ./build-xcframework.sh
 #
 # Output (workspace target directory + ./xcframework/sim):
-#   target/aarch64-apple-ios/release/libeasytier_ios.a  (device)
-#   xcframework/sim/libeasytier_ios.a                   (simulator, lipo merged)
+#   target/aarch64-apple-ios/release/libexvlan_ios.a  (device)
+#   xcframework/sim/libexvlan_ios.a                   (simulator, lipo merged)
 
 set -euo pipefail
 
@@ -44,27 +44,27 @@ SIM_SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 
 echo "==> building aarch64-apple-ios (device)"
 RUSTFLAGS="${CLANG_RT_RUSTFLAGS} -C link-arg=-lclang_rt.ios" \
-    cargo build -p easytier-ios --release --target aarch64-apple-ios
+    cargo build -p exvlan-ios --release --target aarch64-apple-ios
 
 echo "==> building aarch64-apple-ios-sim (Apple Silicon simulator)"
 BINDGEN_EXTRA_CLANG_ARGS="--target=arm64-apple-ios17.0-simulator -isysroot ${SIM_SDK}" \
     RUSTFLAGS="${CLANG_RT_RUSTFLAGS} -C link-arg=-lclang_rt.iossim" \
-    cargo build -p easytier-ios --release --target aarch64-apple-ios-sim
+    cargo build -p exvlan-ios --release --target aarch64-apple-ios-sim
 
 echo "==> building x86_64-apple-ios (Intel simulator)"
 BINDGEN_EXTRA_CLANG_ARGS="--target=x86_64-apple-ios17.0-simulator -isysroot ${SIM_SDK}" \
     RUSTFLAGS="${CLANG_RT_RUSTFLAGS} -C link-arg=-lclang_rt.iossim" \
-    cargo build -p easytier-ios --release --target x86_64-apple-ios
+    cargo build -p exvlan-ios --release --target x86_64-apple-ios
 
 rm -rf "${OUT_DIR}"
 mkdir -p "${OUT_DIR}/sim"
 
 echo "==> lipo: merge simulator slices"
 lipo -create \
-    "${TARGET_DIR}/aarch64-apple-ios-sim/release/libeasytier_ios.a" \
-    "${TARGET_DIR}/x86_64-apple-ios/release/libeasytier_ios.a" \
-    -output "${OUT_DIR}/sim/libeasytier_ios.a"
+    "${TARGET_DIR}/aarch64-apple-ios-sim/release/libexvlan_ios.a" \
+    "${TARGET_DIR}/x86_64-apple-ios/release/libexvlan_ios.a" \
+    -output "${OUT_DIR}/sim/libexvlan_ios.a"
 
 echo "==> done:"
-echo "  device:    ${TARGET_DIR}/aarch64-apple-ios/release/libeasytier_ios.a"
-echo "  simulator: ${OUT_DIR}/sim/libeasytier_ios.a"
+echo "  device:    ${TARGET_DIR}/aarch64-apple-ios/release/libexvlan_ios.a"
+echo "  simulator: ${OUT_DIR}/sim/libexvlan_ios.a"

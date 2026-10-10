@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
-use easytier_core::connectivity::hole_punch::port_mapping::{
+use exvlan_core::connectivity::hole_punch::port_mapping::{
     ActiveUdpPortMapping as CoreActiveUdpPortMapping, UdpPortMappingAttemptError,
     UdpPortMappingBackend, UdpPortMappingLifecycle,
 };
@@ -26,7 +26,7 @@ const UPNP_SEARCH_TIMEOUT: Duration = Duration::from_secs(1);
 const UPNP_SEARCH_RESPONSE_TIMEOUT: Duration = Duration::from_millis(300);
 const NAT_PMP_RESPONSE_TIMEOUT: Duration = Duration::from_secs(1);
 const UPNP_LEASE_DURATION_SECS: u32 = 300;
-const UPNP_DESCRIPTION: &str = "EasyTier udp hole punch";
+const UPNP_DESCRIPTION: &str = "Exvlan udp hole punch";
 
 async fn new_protected_natpmp(
     gateway: Option<Ipv4Addr>,
@@ -36,7 +36,7 @@ async fn new_protected_natpmp(
         .unwrap_or_else(|| get_default_gateway().map_err(anyhow::Error::from))?;
     let gateway_addr = SocketAddr::V4(SocketAddrV4::new(gateway, natpmp::NATPMP_PORT));
     let socket = crate::socket::udp::create_udp_socket(
-        &easytier_core::socket::udp::UdpBindOptions::direct_connect()
+        &exvlan_core::socket::udp::UdpBindOptions::direct_connect()
             .with_local_addr(Some("0.0.0.0:0".parse().unwrap())),
     )
     .await
@@ -535,7 +535,7 @@ async fn resolve_internal_addr(
         listener_ipv4_host(local_listener).ok_or_else(|| anyhow!("listener must be ipv4"))?;
 
     let ip = if host.is_unspecified() {
-        let options = easytier_core::socket::udp::UdpBindOptions::default()
+        let options = exvlan_core::socket::udp::UdpBindOptions::default()
             .with_local_addr(Some("0.0.0.0:0".parse().unwrap()));
         let udp = crate::socket::udp::create_udp_socket(&options)
             .await

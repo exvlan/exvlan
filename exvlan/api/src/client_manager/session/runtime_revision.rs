@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use easytier::proto::{
+use exvlan::proto::{
     api::manage::{
         DeleteNetworkInstanceRequest, DeleteNetworkInstanceResponse,
         ListNetworkInstanceMetaRequest, ListNetworkInstanceRequest, NetworkConfig, NetworkMeta,
@@ -9,7 +9,7 @@ use easytier::proto::{
     rpc_types::controller::BaseController,
     web::HeartbeatRequest,
 };
-use easytier_core::management::remote_client::{ListNetworkProps, Storage as _};
+use exvlan_core::management::remote_client::{ListNetworkProps, Storage as _};
 use tokio::sync::{RwLock, broadcast};
 
 use super::{
@@ -1297,7 +1297,7 @@ fn record_applied_config_revision(
 
 #[cfg(test)]
 mod tests {
-    use easytier::proto::api::manage::{NetworkingMethod, PortForwardConfig};
+    use exvlan::proto::api::manage::{NetworkingMethod, PortForwardConfig};
 
     use super::*;
 

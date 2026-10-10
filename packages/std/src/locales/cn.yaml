@@ -5,7 +5,7 @@ manual: 手动
 standalone: 独立
 initial_nodes: 初始节点
 initial_nodes_help: |
-  EXVlan 不分服务端/客户端。
+  Exvlan 不分服务端/客户端。
   • 填“初始节点” = 插上网线，直接加入已有网络。
   • 留空 = 节点独立启动，等别人来连，或你后续手动连。
   • 无论直接还是间接连通（通过其他节点搭桥），都能组网互通。
@@ -33,7 +33,7 @@ vpn_portal_devices: "WireGuard 设备"
 vpn_portal_devices_help: "每台设备使用独立的连接配置。"
 vpn_portal_client_address: "设备虚拟 IP"
 vpn_portal_client_prefix: "网段前缀长度"
-vpn_portal_address_help: "这是设备在 EasyTier 网络中的独立地址。建议值会避开当前已知的占用地址。"
+vpn_portal_address_help: "这是设备在 Exvlan 网络中的独立地址。建议值会避开当前已知的占用地址。"
 vpn_portal_invalid_name: "名称不能重复，限 1–63 个英文字母、数字或连字符，首尾须为字母或数字。"
 vpn_portal_invalid_address: "请输入有效且未被占用的设备 IP，并在高级设置中确认网段前缀。"
 vpn_portal_generate_config: "生成连接配置"
@@ -94,7 +94,7 @@ copy_config: 复制配置
 config_copied: 已复制
 config_generation_failed: 生成失败
 config_copy_failed: 复制失败
-magisk_module_configuration: EasyTier 模块配置
+magisk_module_configuration: Exvlan 模块配置
 magisk_status_loading: 正在读取状态
 magisk_status_running: 运行中
 magisk_status_stopped: 已停止
@@ -104,8 +104,8 @@ magisk_command_args_warning: 当前启用了启动参数模式，模块会忽略
 magisk_invalid_module_directory: KernelSU 返回了无效的模块目录
 magisk_load_failed: '加载模块配置失败：{error}'
 magisk_save_failed: '保存模块配置失败：{error}'
-magisk_config_saved: 配置已验证并保存，EasyTier 已重新启动
-magisk_config_saved_restart_pending: 配置已验证并保存，EasyTier 守护进程仍在启动
+magisk_config_saved: 配置已验证并保存，Exvlan 已重新启动
+magisk_config_saved_restart_pending: 配置已验证并保存，Exvlan 守护进程仍在启动
 retain_network_instance: 保留网络实例
 collect_network_infos: 收集网络信息
 settings: 设置
@@ -119,7 +119,7 @@ logging_level_off: 关闭
 logging_open_dir: 打开日志目录
 logging_copy_dir: 复制日志路径
 vpn_tile_no_network: 没有已配置的网络
-vpn_tile_no_network_description: 请先在 EasyTier 中配置网络，再使用 VPN 快捷磁贴。
+vpn_tile_no_network_description: 请先在 Exvlan 中配置网络，再使用 VPN 快捷磁贴。
 vpn_tile_started: VPN 网络已启动
 vpn_tile_stopped: VPN 网络已停止
 vpn_tile_action_failed: 'VPN 磁贴操作失败：{error}'
@@ -212,7 +212,7 @@ lazy_p2p: 延迟 P2P
 lazy_p2p_help: 仅在实际流量需要某个对等节点时才尝试建立 P2P。开启 need-p2p 的节点仍会被主动连接。
 
 bind_device: 仅使用物理网卡
-bind_device_help: 仅使用物理网卡，避免 EXVlan 通过其他虚拟网建立连接。
+bind_device_help: 仅使用物理网卡，避免 Exvlan 通过其他虚拟网建立连接。
 
 no_tun: 无 TUN 模式
 no_tun_help: 不使用 TUN 网卡，适合无管理员权限时使用。本节点仅允许被访问。访问其他节点需要使用 SOCK5
@@ -244,7 +244,7 @@ disable_udp_hole_punching: 禁用UDP打洞
 disable_udp_hole_punching_help: 禁用UDP打洞功能
 
 enable_udp_broadcast_relay: UDP 广播中继
-enable_udp_broadcast_relay_help: "仅 Windows：捕获物理网卡上的本机 UDP 广播包并转发给 EXVlan 对等节点，帮助局域网游戏发现房间。需要管理员权限。"
+enable_udp_broadcast_relay_help: "仅 Windows：捕获物理网卡上的本机 UDP 广播包并转发给 Exvlan 对等节点，帮助局域网游戏发现房间。需要管理员权限。"
 
 disable_upnp: 禁用 UPnP
 disable_upnp_help: 禁用符合条件监听器的运行时 UPnP/NAT-PMP 端口映射；自动端口映射默认开启。
@@ -391,7 +391,7 @@ web:
     retry: "重试"
     load_failed: "数据刷新失败，已显示的数据来自上次成功刷新。"
     devices_empty: "还没有设备"
-    devices_empty_hint: "将 EasyTier 客户端连接至此控制器，即可在这里管理设备。"
+    devices_empty_hint: "将 Exvlan 客户端连接至此控制器，即可在这里管理设备。"
     networks_empty: "还没有管理网络"
     networks_empty_hint: "创建网络后，添加设备来建立连接。"
     search_devices: "搜索名称或地址"
@@ -607,7 +607,7 @@ web:
     log_debug: 调试
     log_trace: 跟踪
     export_config: 导出配置
-    export_config_hint: 该节点当前生效的 TOML 配置（同 easytier-cli node config）
+    export_config_hint: 该节点当前生效的 TOML 配置（同 exvlan-cli node config）
     download: 下载
     node_detail: 节点详情
     node_detail_offline: 设备在线时才能查看节点详情
@@ -736,7 +736,7 @@ mode:
   service_config_empty: 服务配置不能为空
   rpc_connection_failed: "RPC 连接失败：{error}"
   autostart: 开机自启
-  autostart_hint: 开机自启由服务模式提供。切换为「服务模式」并保存后，EasyTier 将注册为系统服务，开机自动启动并在后台运行。
+  autostart_hint: 开机自启由服务模式提供。切换为「服务模式」并保存后，Exvlan 将注册为系统服务，开机自动启动并在后台运行。
 
 config-server:
   title: 配置服务器

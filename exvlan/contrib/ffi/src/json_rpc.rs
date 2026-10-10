@@ -71,9 +71,9 @@ pub(crate) unsafe fn call_json_rpc(
     let response =
         match ffi_context()
             .runtime
-            .block_on(easytier_core::management::call_management_json_rpc(
+            .block_on(exvlan_core::management::call_management_json_rpc(
                 &ffi_context().manager,
-                Arc::new(easytier::rpc_service::logger::NativeLoggerControl),
+                Arc::new(exvlan::rpc_service::logger::NativeLoggerControl),
                 &service_name,
                 &method_name,
                 domain_name.as_deref(),

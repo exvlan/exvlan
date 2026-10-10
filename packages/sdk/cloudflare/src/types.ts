@@ -1,26 +1,26 @@
 import type { DurableObject } from "cloudflare:workers";
-import type { EasyTierNetworkConfig } from "@easytier/runtime";
+import type { ExvlanNetworkConfig } from "@exvlan/runtime";
 
-export type CloudflareEasyTierConfig = EasyTierNetworkConfig;
+export type CloudflareExvlanConfig = ExvlanNetworkConfig;
 
-export interface EasyTierDurableObjectNamespace {
+export interface ExvlanDurableObjectNamespace {
   getByName(name: string): {
     fetch(request: Request): Promise<Response>;
   };
 }
 
-export interface CloudflareEasyTierOptions<Env> {
-  namespace(env: Env): EasyTierDurableObjectNamespace;
+export interface CloudflareExvlanOptions<Env> {
+  namespace(env: Env): ExvlanDurableObjectNamespace;
   config(env: Env):
-    | CloudflareEasyTierConfig
-    | Promise<CloudflareEasyTierConfig>;
+    | CloudflareExvlanConfig
+    | Promise<CloudflareExvlanConfig>;
   objectName?: string | ((request: Request, env: Env) => string);
 }
 
-export type EasyTierDurableObjectClass<Env> = typeof DurableObject<Env>;
+export type ExvlanDurableObjectClass<Env> = typeof DurableObject<Env>;
 
-export interface EasyTierCloudflareApplication<Env> {
-  readonly DurableObject: EasyTierDurableObjectClass<Env>;
+export interface ExvlanCloudflareApplication<Env> {
+  readonly DurableObject: ExvlanDurableObjectClass<Env>;
   fetch(
     request: Request,
     env: Env,

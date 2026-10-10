@@ -26,7 +26,7 @@ func NewWebClient(module api.Module) (*WebClient, error) {
 
 func (client *WebClient) Create(ctx context.Context, envelope []byte) (err error) {
 	if client.created || client.dropped {
-		return fmt.Errorf("create used EasyTier WebClient")
+		return fmt.Errorf("create used Exvlan WebClient")
 	}
 	pointer, err := client.core.allocate(ctx, uint32(len(envelope)))
 	if err != nil {
@@ -34,11 +34,11 @@ func (client *WebClient) Create(ctx context.Context, envelope []byte) (err error
 	}
 	defer client.core.cleanupBuffer(ctx, pointer, &err)
 	if !client.core.module.Memory().Write(pointer, envelope) {
-		return fmt.Errorf("write EasyTier WebClient config to guest memory")
+		return fmt.Errorf("write Exvlan WebClient config to guest memory")
 	}
 	result, err := client.core.callOne(
 		ctx,
-		"easytier_web_client_create",
+		"exvlan_web_client_create",
 		uint64(pointer),
 		uint64(len(envelope)),
 	)
@@ -46,7 +46,7 @@ func (client *WebClient) Create(ctx context.Context, envelope []byte) (err error
 		return err
 	}
 	if status := int32(result); status != 0 {
-		return client.statusError(ctx, "create EasyTier WebClient", status)
+		return client.statusError(ctx, "create Exvlan WebClient", status)
 	}
 	client.created = true
 	return nil
@@ -55,14 +55,14 @@ func (client *WebClient) Create(ctx context.Context, envelope []byte) (err error
 func (client *WebClient) Drive(ctx context.Context) error {
 	result, err := client.core.callCached(
 		ctx,
-		"easytier_web_client_drive",
+		"exvlan_web_client_drive",
 		&client.driveFunction,
 	)
 	if err != nil {
 		return err
 	}
 	if status := int32(result); status != 0 {
-		return client.statusError(ctx, "drive EasyTier WebClient", status)
+		return client.statusError(ctx, "drive Exvlan WebClient", status)
 	}
 	return nil
 }
@@ -70,14 +70,14 @@ func (client *WebClient) Drive(ctx context.Context) error {
 func (client *WebClient) NotifyCompletions(ctx context.Context) error {
 	result, err := client.core.callCached(
 		ctx,
-		"easytier_web_client_notify_completions",
+		"exvlan_web_client_notify_completions",
 		&client.completionFunction,
 	)
 	if err != nil {
 		return err
 	}
 	if status := int32(result); status != 0 {
-		return client.statusError(ctx, "notify EasyTier WebClient", status)
+		return client.statusError(ctx, "notify Exvlan WebClient", status)
 	}
 	return nil
 }
@@ -85,7 +85,7 @@ func (client *WebClient) NotifyCompletions(ctx context.Context) error {
 func (client *WebClient) NextDeadline(ctx context.Context) (int64, error) {
 	result, err := client.core.callCached(
 		ctx,
-		"easytier_web_client_next_deadline_millis",
+		"exvlan_web_client_next_deadline_millis",
 		&client.deadlineFunction,
 	)
 	if err != nil {
@@ -95,7 +95,7 @@ func (client *WebClient) NextDeadline(ctx context.Context) (int64, error) {
 	if deadline < 0 {
 		return 0, client.statusError(
 			ctx,
-			"query EasyTier WebClient deadline",
+			"query Exvlan WebClient deadline",
 			int32(deadline),
 		)
 	}
@@ -103,7 +103,7 @@ func (client *WebClient) NextDeadline(ctx context.Context) (int64, error) {
 }
 
 func (client *WebClient) IsConnected(ctx context.Context) (bool, error) {
-	result, err := client.core.callOne(ctx, "easytier_web_client_is_connected")
+	result, err := client.core.callOne(ctx, "exvlan_web_client_is_connected")
 	if err != nil {
 		return false, err
 	}
@@ -111,7 +111,7 @@ func (client *WebClient) IsConnected(ctx context.Context) (bool, error) {
 	if status < 0 {
 		return false, client.statusError(
 			ctx,
-			"query EasyTier WebClient connection",
+			"query Exvlan WebClient connection",
 			status,
 		)
 	}
@@ -122,12 +122,12 @@ func (client *WebClient) Drop(ctx context.Context) error {
 	if !client.created || client.dropped {
 		return nil
 	}
-	result, err := client.core.callOne(ctx, "easytier_web_client_drop")
+	result, err := client.core.callOne(ctx, "exvlan_web_client_drop")
 	if err != nil {
 		return err
 	}
 	if status := int32(result); status != 0 {
-		return client.statusError(ctx, "drop EasyTier WebClient", status)
+		return client.statusError(ctx, "drop Exvlan WebClient", status)
 	}
 	client.dropped = true
 	return nil

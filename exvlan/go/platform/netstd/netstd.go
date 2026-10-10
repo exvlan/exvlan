@@ -7,11 +7,11 @@ import (
 	"net/netip"
 	"syscall"
 
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 )
 
 // SocketFactory implements platform.SocketFactory with the Go standard
-// library and the socket controls required by EasyTier hole punching.
+// library and the socket controls required by Exvlan hole punching.
 type SocketFactory struct{}
 
 func (SocketFactory) ConnectTCP(

@@ -24,7 +24,7 @@ pub(crate) const fn protocol_transport(scheme: &str) -> Option<ProtocolTransport
     match scheme.as_bytes() {
         b"tcp" | b"ws" | b"wss" => Some(ProtocolTransport::Tcp),
         b"faketcp" => Some(ProtocolTransport::FakeTcp),
-        b"udp" => Some(ProtocolTransport::Udp(UdpSessionMode::EasyTierMux)),
+        b"udp" => Some(ProtocolTransport::Udp(UdpSessionMode::ExvlanMux)),
         b"wg" => Some(ProtocolTransport::Udp(UdpSessionMode::Classified(
             crate::socket::udp::UdpSessionProtocol::WireGuard,
         ))),
@@ -40,7 +40,7 @@ pub(crate) const fn protocol_uses_udp(scheme: &str) -> bool {
 }
 
 /// Returns the listener-port offset used when expanding a single base port
-/// into EasyTier's protocol-specific listener set.
+/// into Exvlan's protocol-specific listener set.
 pub const fn protocol_port_offset(scheme: &str) -> Option<u16> {
     match scheme.as_bytes() {
         b"tcp" | b"udp" => Some(0),
@@ -51,7 +51,7 @@ pub const fn protocol_port_offset(scheme: &str) -> Option<u16> {
     }
 }
 
-/// Returns the default port for a concrete EasyTier IP protocol.
+/// Returns the default port for a concrete Exvlan IP protocol.
 pub const fn protocol_default_port(scheme: &str) -> Option<u16> {
     match scheme.as_bytes() {
         b"ws" => Some(80),
@@ -725,7 +725,7 @@ mod tests {
                 local_addr: "127.0.0.1:1000".parse().unwrap(),
             }),
             "127.0.0.1:2000".parse().unwrap(),
-            UdpSessionKind::EasyTierMux,
+            UdpSessionKind::ExvlanMux,
         )
         .unwrap();
 
@@ -782,7 +782,7 @@ mod tests {
         let disabled_unix = upgrader
             .upgrade_byte_stream(
                 MockTcpSocket,
-                "unix:///tmp/easytier.sock".parse().unwrap(),
+                "unix:///tmp/exvlan.sock".parse().unwrap(),
                 None,
             )
             .await

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 )
 
 func applyTCPSocketOptions(

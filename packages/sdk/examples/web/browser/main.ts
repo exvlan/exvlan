@@ -1,7 +1,7 @@
 import {
-  createEasyTier,
-  type EasyTierInstance,
-} from "@easytier/browser";
+  createExvlan,
+  type ExvlanInstance,
+} from "@exvlan/browser";
 
 const form = requireElement<HTMLFormElement>("connection-form");
 const connectButton = requireElement<HTMLButtonElement>("connect");
@@ -9,7 +9,7 @@ const disconnectButton = requireElement<HTMLButtonElement>("disconnect");
 const status = requireElement<HTMLOutputElement>("status");
 const events = requireElement<HTMLPreElement>("events");
 
-let instance: EasyTierInstance | undefined;
+let instance: ExvlanInstance | undefined;
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -28,15 +28,15 @@ async function connect(): Promise<void> {
   const fields = new FormData(form);
   connectButton.disabled = true;
   events.textContent = "";
-  setStatus("Starting EasyTier…");
+  setStatus("Starting Exvlan…");
 
   let peerConnected = false;
   try {
-    instance = await createEasyTier(
+    instance = await createExvlan(
       {
         networkName: requiredField(fields, "network"),
         networkSecret: requiredField(fields, "secret"),
-        instanceName: "easytier-web-example",
+        instanceName: "exvlan-api-example",
         ipv4: requiredField(fields, "ipv4"),
         peers: requiredField(fields, "relay"),
       },
@@ -45,14 +45,14 @@ async function connect(): Promise<void> {
           appendEvent(event.kind, event.message);
           if (event.kind === "peer_added") {
             peerConnected = true;
-            setStatus("Connected to the EasyTier relay");
+            setStatus("Connected to the Exvlan relay");
           }
         },
       },
     );
     disconnectButton.disabled = false;
     if (!peerConnected) {
-      setStatus("EasyTier is running; waiting for the relay…");
+      setStatus("Exvlan is running; waiting for the relay…");
     }
   } catch (error) {
     instance = undefined;

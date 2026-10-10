@@ -6,7 +6,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/easytier/easytier/easytier-go/internal/engine"
+	"github.com/exvlan/exvlan/exvlan-go/internal/engine"
 )
 
 type WebClientOptions struct {
@@ -22,16 +22,16 @@ type WebClient struct {
 	engine *engine.WebClient
 }
 
-// ConnectWebClient connects this Host to an EasyTier configuration server.
+// ConnectWebClient connects this Host to an Exvlan configuration server.
 func (host *Host) ConnectWebClient(
 	ctx context.Context,
 	options WebClientOptions,
 ) (*WebClient, error) {
 	if host == nil || host.engine == nil {
-		return nil, fmt.Errorf("connect WebClient with nil EasyTier host")
+		return nil, fmt.Errorf("connect WebClient with nil Exvlan host")
 	}
 	if ctx == nil {
-		return nil, fmt.Errorf("connect EasyTier WebClient with nil context")
+		return nil, fmt.Errorf("connect Exvlan WebClient with nil context")
 	}
 	if options.Hostname == "" {
 		hostname, err := os.Hostname()

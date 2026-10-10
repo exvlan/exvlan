@@ -1,7 +1,7 @@
-# EasyTier Go
+# Exvlan Go
 
-`easytier-go` runs the `wasm32-wasip1` build of `easytier-core` in a
-pure-Go process through wazero. EasyTier remains the source and producer of the
+`exvlan-go` runs the `wasm32-wasip1` build of `exvlan-core` in a
+pure-Go process through wazero. Exvlan remains the source and producer of the
 embedded WASM; this repository adapts Go host capabilities to the ABI exported
 and imported by that artifact.
 
@@ -9,13 +9,13 @@ and imported by that artifact.
 import (
     "net/netip"
 
-    corehost "github.com/easytier/easytier/easytier-go"
+    corehost "github.com/exvlan/exvlan/exvlan-go"
 )
 ```
 
 ## Public API
 
-The public package owns wazero, standard WASI, the EasyTier host ABI, guest
+The public package owns wazero, standard WASI, the Exvlan host ABI, guest
 driving, completion notification, and resource shutdown. Applications create a
 host, build a typed instance configuration, and then use standard Go network
 interfaces:
@@ -55,7 +55,7 @@ connection, err := instance.Dial(ctx, "tcp4", "10.144.0.2:8080")
 packets, err := instance.ListenPacket("udp4", ":5353")
 ```
 
-`CreateInstanceTOML` loads a native EasyTier TOML document. Pass an empty
+`CreateInstanceTOML` loads a native Exvlan TOML document. Pass an empty
 `instanceID` to allocate a UUID. Existing `instance_id` and `instance_name`
 keys in the document are replaced by the host.
 
@@ -68,7 +68,7 @@ advertised hostname.
 
 ### Web Client management
 
-A host can also connect to an EasyTier Web configuration server. The embedded
+A host can also connect to an Exvlan Web configuration server. The embedded
 Rust WebClient retains the config-server protocol, heartbeat, reconnect, and
 secure-tunnel behavior; Go owns the resulting process-level instances:
 
@@ -91,7 +91,7 @@ for _, instance := range host.Instances() {
 
 `MachineID` must be a stable UUID persisted by the application. `Endpoint`
 accepts `tcp://`, `udp://`, or the same shorthand token understood by native
-EasyTier. WebSocket transports are not part of this initial host integration.
+Exvlan. WebSocket transports are not part of this initial host integration.
 One WebClient may run per `Host`.
 
 Web-created instances support the complete `WebClientService` lifecycle and
@@ -103,7 +103,7 @@ data-plane and management APIs as application-created instances.
 
 `Instance.ListPeer` and `Instance.ListRoute` call the embedded core's existing
 instance-scoped management RPCs and return peer and route slices directly.
-Their element types reuse the generated EasyTier protobuf models, while the
+Their element types reuse the generated Exvlan protobuf models, while the
 request and response envelopes stay internal to the host. Callers never
 construct wire bytes or a separate RPC client. Cancelling the context frees
 the pending guest operation.
@@ -129,7 +129,7 @@ future configuration path.
 `Dial` returns `net.Conn`, `Listen` returns `net.Listener`, and `ListenPacket`
 returns `net.PacketConn`. ABI v2 currently supports `tcp`, `tcp4`, `udp`, and
 `udp4`; destinations must be IPv4 literals and listeners bind all overlay IPv4
-addresses. These APIs are overlay-only: an absent EasyTier route is returned as
+addresses. These APIs are overlay-only: an absent Exvlan route is returned as
 a normal network error and never falls back to the host network.
 
 See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for current UDP and
@@ -138,20 +138,20 @@ port-forward edge cases.
 No public type exposes wazero runtimes, WebAssembly pointers, raw handles,
 submit/take operations, or the cooperative `drive` loop. Each host owns one
 wazero runtime, guest module, and host completion domain; each instance is
-represented by an EasyTier guest handle. Per-instance drivers serialize guest
-calls through the host. The engine continues driving EasyTier after `Start`
-returns, calls `easytier_instance_notify_completions` before driving a host
+represented by an Exvlan guest handle. Per-instance drivers serialize guest
+calls through the host. The engine continues driving Exvlan after `Start`
+returns, calls `exvlan_instance_notify_completions` before driving a host
 completion, and drains bounded data-plane completion batches after each guest
 turn.
 
 The host serializes the typed configuration to TOML internally, wraps it in
-EasyTier's version 14 create envelope, and adds the configured environment
+Exvlan's version 14 create envelope, and adds the configured environment
 snapshot. TOML, schema versions, and JSON envelopes are not
 application-facing APIs.
 
 ## Cross-platform TUN example
 
-The TUN example joins an existing EasyTier network with a fixed virtual IPv4
+The TUN example joins an existing Exvlan network with a fixed virtual IPv4
 address on Linux, macOS, or Windows. It creates and configures the native TUN
 interface itself, then forwards raw IPv4 packets through `SendPacket` and
 `ReceivePacket`:
@@ -218,7 +218,7 @@ matching overlay or proxy route before dialing; override that limit with
 
 ## Web Client example
 
-The Web Client example registers a Host with an EasyTier Web configuration
+The Web Client example registers a Host with an Exvlan Web configuration
 server and lets the server create, delete, and inspect its instances:
 
 ```sh
@@ -233,15 +233,15 @@ go run ./examples/web-client \
 to the system hostname. This example manages Host instances but does not create
 or attach an operating-system TUN interface.
 
-## Performance compared with native EasyTier
+## Performance compared with native Exvlan
 
 In this A/B benchmark two nodes on one i7-14700KF host (Linux 6.11) each run
 in their own network namespace, joined by a veth pair. Node A always runs a
-native `easytier-core` build of EasyTier master (`2.6.4-6a186167`) with
+native `exvlan-core` build of Exvlan master (`2.6.4-6a186167`) with
 overlay address `10.144.0.1/24`; node B runs either the same native binary or
-this Go host (commit `78889d12`, embedded EasyTier `af640d49`) with
+this Go host (commit `78889d12`, embedded Exvlan `af640d49`) with
 `10.144.0.2/24`. A master build is used as the native baseline because the
-2.6.4 release predates several native data-plane throughput fixes (EasyTier
+2.6.4 release predates several native data-plane throughput fixes (Exvlan
 #2451, #2452). The underlay tunnel between the nodes is either `tcp://` or
 `udp://`. Encryption is enabled and the overlay MTU is 1360 on both ends.
 Node A and the iperf3 server are pinned to CPUs `0,2,4,6`, node B to
@@ -273,10 +273,10 @@ UDP native port forward / Go Dial, 1 Gbit/s offered with 1200-byte datagrams
 Reading the numbers:
 
 - On TUN the Go host reaches roughly 35-45% of native single-stream
-  throughput. Both sides run the same EasyTier core logic, so the gap is the
+  throughput. Both sides run the same Exvlan core logic, so the gap is the
   WASM/Go data-plane boundary rather than routing or cryptography.
 - TCP forwarding is a tie at about 1.2 Gbit/s: both paths are bounded by the
-  virtual TCP send path inside the shared EasyTier core, not by the host.
+  virtual TCP send path inside the shared Exvlan core, not by the host.
 - TCP reverse forwarding favors native by about 3x (4.3-6.5 versus
   1.4-2.0 Gbit/s); the Go host benchmark's per-operation receive path is the
   limit.
@@ -305,23 +305,23 @@ host, err := corehost.New(ctx, corehost.Options{
 
 `platform.SocketFactory` owns only TCP connect, UDP bind, and TCP listen
 creation. Once a standard Go network resource is returned, the host runtime
-owns its reads, writes, accepts, cancellation, and close path. EasyTier retains
+owns its reads, writes, accepts, cancellation, and close path. Exvlan retains
 all routing, peer admission, protocol, retry, and connection policy.
 
 The implementation is split by responsibility:
 
 - `platform` defines public capability ports; `platform/netstd` implements
   their portable defaults.
-- `proto` contains generated Go bindings for the existing EasyTier management
+- `proto` contains generated Go bindings for the existing Exvlan management
   protobuf definitions.
 - `internal/reactor` owns typed asynchronous operations, resources, operation
   IDs, backpressure, and completion signals without depending on wazero.
-- `internal/hostabi` implements the custom `easytier_host` imports, guest
+- `internal/hostabi` implements the custom `exvlan_host` imports, guest
   memory copying, wire codecs, and ABI status translation.
 - `internal/coreabi` owns guest memory, the big-endian data-plane wire codec,
-  ABI discovery, and typed `easytier_instance_*`, `easytier_data_plane_*`, and
-  `easytier_rpc_*` export calls.
-- `internal/engine` composes standard WASI, both EasyTier ABI directions, the
+  ABI discovery, and typed `exvlan_instance_*`, `exvlan_data_plane_*`, and
+  `exvlan_rpc_*` export calls.
+- `internal/engine` composes standard WASI, both Exvlan ABI directions, the
   single-owner driver, operation cancellation, deadlines, standard Go network
   resources, and instance shutdown.
 - `internal/artifact` contains only the embedded core and its provenance.
@@ -329,29 +329,29 @@ The implementation is split by responsibility:
 ## Embedded artifact
 
 The committed WASM lets downstream Go builds and tests run without a Rust
-toolchain. Refresh it from a clean EasyTier checkout whenever the guest ABI or
+toolchain. Refresh it from a clean Exvlan checkout whenever the guest ABI or
 core implementation changes:
 
 ```sh
-EASYTIER_SOURCE=/path/to/EasyTier go generate ./...
+EXVLAN_SOURCE=/path/to/Exvlan go generate ./...
 ```
 
-Generation runs EasyTier's `script/build-wasi-core.sh`, which builds release
-`easytier_core.wasm` with the Go-host features and writes an optimized
-`easytier_core_go_host.wasm` with the pinned, SHA-256-verified Binaryen release.
+Generation runs Exvlan's `script/build-wasi-core.sh`, which builds release
+`exvlan_core.wasm` with the Go-host features and writes an optimized
+`exvlan_core_go_host.wasm` with the pinned, SHA-256-verified Binaryen release.
 The generator supplies a fixed source path remap and source-date epoch, then
-records the EasyTier commit and optimized artifact SHA-256. Tracked EasyTier
+records the Exvlan commit and optimized artifact SHA-256. Tracked Exvlan
 changes block generation; unrelated untracked files do not.
 `corehost.CoreInfo()` exposes that provenance without exposing the artifact
 bytes.
 
 The same generator rebuilds the Go protobuf bindings from that exact clean
-EasyTier commit and records their source commit and schema SHA-256. Host
+Exvlan commit and records their source commit and schema SHA-256. Host
 creation rejects an artifact/binding commit mismatch. Generation requires
 `protoc` 35.1 and `protoc-gen-go` 1.36.11 on `PATH`.
 
 The test-only socket probe is retained from
-[EasyTier commit 6a3d15f](https://github.com/EasyTier/EasyTier/tree/6a3d15f8758eed759d55401ff4ed7c47021b0819/tools/wasi-socket-poc/guest);
+[Exvlan commit 6a3d15f](https://github.com/exvlan/exvlan/tree/6a3d15f8758eed759d55401ff4ed7c47021b0819/tools/wasi-socket-poc/guest);
 its full commit and checksum are recorded in
 `testdata/wasi_socket_guest.source`.
 

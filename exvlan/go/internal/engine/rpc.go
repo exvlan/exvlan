@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/easytier/easytier/easytier-go/internal/coreabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/coreabi"
 )
 
 type rpcCore interface {
@@ -60,7 +60,7 @@ func (instance *Instance) RPC(
 	encodedRequest []byte,
 ) ([]byte, error) {
 	if ctx == nil {
-		return nil, fmt.Errorf("submit EasyTier RPC with nil context")
+		return nil, fmt.Errorf("submit Exvlan RPC with nil context")
 	}
 	response := make(chan rpcCommandResponse, 1)
 	request := rpcCommand{

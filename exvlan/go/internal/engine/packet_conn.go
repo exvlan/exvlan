@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/easytier/easytier/easytier-go/internal/coreabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/coreabi"
 )
 
 type packetConn struct {
@@ -184,7 +184,7 @@ func udpAddrPort(address net.Addr) (netip.AddrPort, error) {
 	}
 	if !peer.IsValid() || !peer.Addr().Is4() {
 		return netip.AddrPort{}, &net.AddrError{
-			Err:  "EasyTier data plane requires an IPv4 address",
+			Err:  "Exvlan data plane requires an IPv4 address",
 			Addr: address.String(),
 		}
 	}

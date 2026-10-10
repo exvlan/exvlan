@@ -14,11 +14,11 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".cargo/**"
-      - "easytier/**"
-      - "easytier-core/**"
-      - "easytier-proto/**"
-      - "easytier-rpc-build/**"
-      - "easytier-contrib/easytier-ohrs/**"
+      - "exvlan/**"
+      - "exvlan-core/**"
+      - "exvlan-proto/**"
+      - "exvlan-rpc-build/**"
+      - "exvlan/contrib/exvlan-ohrs/**"
       - ".github/workflows/ohos.yml"
       - ".github/actions/**"
   workflow_dispatch:
@@ -54,7 +54,7 @@ jobs:
           concurrent_skipping: 'same_content_newer'
           skip_after_successful_duplicate: 'true'
           cancel_others: 'true'
-          paths: '["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**", "easytier/**", "easytier-core/**", "easytier-proto/**", "easytier-contrib/easytier-ohrs/**", ".github/workflows/ohos.yml", ".github/actions/**"]'
+          paths: '["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**", "exvlan/**", "exvlan-core/**", "exvlan-proto/**", "exvlan/contrib/exvlan-ohrs/**", ".github/workflows/ohos.yml", ".github/actions/**"]'
 
   ohos:
     name: ohos
@@ -94,17 +94,17 @@ jobs:
             pkg-config curl libgl1-mesa-dev expect llvm clang lldb lld
           rustup component add rustfmt
           cargo fmt --all --manifest-path \
-            easytier-contrib/easytier-ohrs/Cargo.toml -- --check
+            exvlan/contrib/exvlan-ohrs/Cargo.toml -- --check
           cargo test --locked --manifest-path \
-            easytier-contrib/easytier-ohrs/Cargo.toml \
-            -p easytier-ohos-core -p easytier-ohos-features \
+            exvlan/contrib/exvlan-ohrs/Cargo.toml \
+            -p exvlan-ohos-core -p exvlan-ohos-features \
             --lib -- --test-threads=1
           cargo check --locked --manifest-path \
-            easytier-contrib/easytier-ohrs/Cargo.toml \
-            -p easytier-ohrs --tests
+            exvlan/contrib/exvlan-ohrs/Cargo.toml \
+            -p exvlan-ohrs --tests
 
           cargo_version=$(cargo metadata --format-version 1 --no-deps \
-            --manifest-path easytier/Cargo.toml | jq -r '.packages[0].version')
+            --manifest-path exvlan/Cargo.toml | jq -r '.packages[0].version')
           last_tag=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || true)
           if [ -n "$last_tag" ]; then
             base_version=$(printf '%s\n' "$cargo_version" "${last_tag#v}" \
@@ -129,13 +129,13 @@ jobs:
             | cut -c1-64)
           branch_id=${branch_id:-main}
 
-          package_name=easytier-ohrs
+          package_name=exvlan-ohrs
           package_version="${base_version}-${branch_id}-${commit_count}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}-g$(git rev-parse --short=8 HEAD)"
           echo "name=$package_name" >> "$GITHUB_OUTPUT"
-          echo "EASYTIER_PACKAGE_NAME=$package_name" >> "$GITHUB_ENV"
-          echo "EASYTIER_VERSION=$package_version" >> "$GITHUB_ENV"
+          echo "EXVLAN_PACKAGE_NAME=$package_name" >> "$GITHUB_ENV"
+          echo "EXVLAN_VERSION=$package_version" >> "$GITHUB_ENV"
 
-          package_dir=easytier-contrib/easytier-ohrs/package
+          package_dir=exvlan/contrib/exvlan-ohrs/package
           jq --arg name "$package_name" --arg version "$package_version" \
             '.name = $name | .version = $version' \
             "$package_dir/oh-package.json5" > "$package_dir/oh-package.tmp.json5"
@@ -160,7 +160,7 @@ jobs:
           sudo chmod +x \
             "$OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh"
 
-          cd easytier-contrib/easytier-ohrs
+          cd exvlan/contrib/exvlan-ohrs
           source env.sh
           ohrs build --release --arch aarch
           ohrs artifact
@@ -170,7 +170,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: ${{ steps.package.outputs.name }}
-          path: easytier-contrib/easytier-ohrs/${{ steps.package.outputs.name }}.har
+          path: exvlan/contrib/exvlan-ohrs/${{ steps.package.outputs.name }}.har
           retention-days: 5
           if-no-files-found: error
 
@@ -183,7 +183,7 @@ jobs:
           (github.event_name == 'workflow_dispatch' &&
            github.ref_type == 'branch' &&
            (github.ref_name == 'main' || inputs.publish))
-        working-directory: easytier-contrib/easytier-ohrs
+        working-directory: exvlan/contrib/exvlan-ohrs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CODEARTS_PRIVATE_OHPM: ${{ secrets.CODEARTS_PRIVATE_OHPM }}
@@ -213,12 +213,12 @@ jobs:
           umask 077
           printf '%s' "$CODEARTS_PRIVATE_OHPM" > "$HOME/.ohpm/.ohpmrc"
           trap 'rm -f "$HOME/.ohpm/.ohpmrc"' EXIT
-          ohpm publish "$EASYTIER_PACKAGE_NAME.har"
+          ohpm publish "$EXVLAN_PACKAGE_NAME.har"
 
           payload=$(jq -nc \
             --arg repository "$GITHUB_REPOSITORY" \
             --arg ref "refs/heads/$GITHUB_REF_NAME" \
-            --arg package "$EASYTIER_PACKAGE_NAME" \
+            --arg package "$EXVLAN_PACKAGE_NAME" \
             '{
               event_type: "core-har-published",
               client_payload: {
@@ -228,8 +228,8 @@ jobs:
               }
             }')
           for repository in \
-            FrankHan052176/EasyTier-ArkTS \
-            FrankHan052176/easytier-pro-app; do
+            FrankHan052176/Exvlan-ArkTS \
+            FrankHan052176/exvlan-pro-app; do
             curl --fail-with-body --silent --show-error \
               -X POST \
               -H "Accept: application/vnd.github+json" \

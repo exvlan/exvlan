@@ -1,33 +1,33 @@
 import {
-  createEasyTierRuntime,
+  createExvlanRuntime,
   type RuntimeWebSocket,
-} from "@easytier/runtime/adapter";
+} from "@exvlan/runtime/adapter";
 import type {
-  EasyTierEvent,
-  EasyTierInstance,
-  EasyTierNetworkConfig,
-} from "@easytier/runtime";
+  ExvlanEvent,
+  ExvlanInstance,
+  ExvlanNetworkConfig,
+} from "@exvlan/runtime";
 
-export interface BrowserEasyTierConfig extends EasyTierNetworkConfig {
+export interface BrowserExvlanConfig extends ExvlanNetworkConfig {
   ipv4: string;
   peers: string | readonly string[];
 }
 
-export interface BrowserEasyTierOptions {
-  onEvent?: (event: EasyTierEvent) => void;
+export interface BrowserExvlanOptions {
+  onEvent?: (event: ExvlanEvent) => void;
 }
 
-export async function createEasyTierWithArtifact(
+export async function createExvlanWithArtifact(
   artifact: BufferSource,
-  config: BrowserEasyTierConfig,
-  options: BrowserEasyTierOptions = {},
-): Promise<EasyTierInstance> {
-  return createEasyTierRuntime({
+  config: BrowserExvlanConfig,
+  options: BrowserExvlanOptions = {},
+): Promise<ExvlanInstance> {
+  return createExvlanRuntime({
     module: () => WebAssembly.compile(artifact),
     config: {
       profile: "browser",
       instanceId: crypto.randomUUID(),
-      instanceName: config.instanceName ?? "easytier-browser",
+      instanceName: config.instanceName ?? "exvlan-browser",
       networkName: config.networkName,
       networkSecret: config.networkSecret,
       encryption: config.encryption ?? true,

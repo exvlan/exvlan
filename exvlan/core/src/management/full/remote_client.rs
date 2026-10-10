@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use easytier_proto::{
+use exvlan_proto::{
     api::config::{ConfigRpc, InstanceConfigPatch, PatchConfigRequest, VpnPortalClientPatch},
     api::instance::{InstanceIdentifier, instance_identifier},
     api::manage::{
@@ -236,7 +236,7 @@ where
             .map_err(RemoteClientError::PersistentError)?
             .iter()
             .map(|x| {
-                Into::<easytier_proto::common::Uuid>::into(x.get_network_inst_id().to_string())
+                Into::<exvlan_proto::common::Uuid>::into(x.get_network_inst_id().to_string())
             })
             .filter(|id| !ret.inst_ids.contains(id))
             .collect::<Vec<_>>();
@@ -473,7 +473,7 @@ pub enum RemoteClientError<E> {
     #[error("Not found: {0}")]
     NotFound(String),
     #[error(transparent)]
-    RpcError(#[from] easytier_proto::rpc_types::error::Error),
+    RpcError(#[from] exvlan_proto::rpc_types::error::Error),
     #[error(transparent)]
     PersistentError(E),
     #[error("Other error: {0}")]
@@ -488,8 +488,8 @@ pub enum ListNetworkProps {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct ListNetworkInstanceIdsJsonResp {
-    running_inst_ids: Vec<easytier_proto::common::Uuid>,
-    disabled_inst_ids: Vec<easytier_proto::common::Uuid>,
+    running_inst_ids: Vec<exvlan_proto::common::Uuid>,
+    disabled_inst_ids: Vec<exvlan_proto::common::Uuid>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -539,7 +539,7 @@ where
 mod tests {
     use std::sync::Mutex;
 
-    use easytier_proto::api::{
+    use exvlan_proto::api::{
         config::{ConfigPatchAction, GetConfigRequest, GetConfigResponse, PatchConfigResponse},
         manage::{NetworkingMethod, VpnPortalClientConfig, VpnPortalConfig},
     };
@@ -609,9 +609,9 @@ mod tests {
             &self,
             _: BaseController,
             _: PatchConfigRequest,
-        ) -> easytier_proto::rpc_types::error::Result<PatchConfigResponse> {
+        ) -> exvlan_proto::rpc_types::error::Result<PatchConfigResponse> {
             if self.fail {
-                Err(easytier_proto::rpc_types::error::Error::Shutdown)
+                Err(exvlan_proto::rpc_types::error::Error::Shutdown)
             } else {
                 Ok(PatchConfigResponse::default())
             }
@@ -621,7 +621,7 @@ mod tests {
             &self,
             _: BaseController,
             _: GetConfigRequest,
-        ) -> easytier_proto::rpc_types::error::Result<GetConfigResponse> {
+        ) -> exvlan_proto::rpc_types::error::Result<GetConfigResponse> {
             unreachable!()
         }
     }

@@ -4,7 +4,7 @@
 
 ## 支持的版本
 
-EasyTier 仅为最新正式版本提供安全更新。报告漏洞前，请尽可能在最新正式版本或当前 `main` 分支上确认问题仍然存在。
+Exvlan 仅为最新正式版本提供安全更新。报告漏洞前，请尽可能在最新正式版本或当前 `main` 分支上确认问题仍然存在。
 
 | 版本 | 是否支持 |
 | --- | --- |
@@ -13,11 +13,11 @@ EasyTier 仅为最新正式版本提供安全更新。报告漏洞前，请尽�
 
 ## 报告安全漏洞
 
-请通过 GitHub 的[私有漏洞报告表单](https://github.com/EasyTier/EasyTier/security/advisories/new)报告疑似安全漏洞。
+请通过 GitHub 的[私有漏洞报告表单](https://github.com/exvlan/exvlan/security/advisories/new)报告疑似安全漏洞。
 
 请勿在公开 Issue、Discussion 或 Pull Request 中披露漏洞。一份有效的报告应包括：
 
-- 受影响的 EasyTier 版本或提交；
+- 受影响的 Exvlan 版本或提交；
 - 受影响的平台和相关配置，请移除其中的密钥等敏感信息；
 - 漏洞说明及其潜在影响；
 - 可复现的步骤或最小概念验证；

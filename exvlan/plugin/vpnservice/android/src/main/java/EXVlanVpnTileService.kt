@@ -9,9 +9,9 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 
-class EasyTierVpnTileService : TileService() {
+class ExvlanVpnTileService : TileService() {
     companion object {
-        private const val PREFS_NAME = "easytier_vpn_tile"
+        private const val PREFS_NAME = "exvlan_vpn_tile"
         private const val PENDING_ACTION_KEY = "pending_action"
         const val ACTION_START = "start"
         const val ACTION_STOP = "stop"
@@ -28,7 +28,7 @@ class EasyTierVpnTileService : TileService() {
 
         fun requestStateUpdate(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                requestListeningState(context, ComponentName(context, EasyTierVpnTileService::class.java))
+                requestListeningState(context, ComponentName(context, ExvlanVpnTileService::class.java))
             }
         }
 

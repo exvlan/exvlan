@@ -4,7 +4,7 @@
 
 ## Supported Versions
 
-Security updates are provided for the latest EasyTier release. Before reporting a vulnerability, please verify it against the latest release or the current `main` branch when practical.
+Security updates are provided for the latest Exvlan release. Before reporting a vulnerability, please verify it against the latest release or the current `main` branch when practical.
 
 | Version | Supported |
 | --- | --- |
@@ -13,11 +13,11 @@ Security updates are provided for the latest EasyTier release. Before reporting 
 
 ## Reporting a Vulnerability
 
-Please report suspected vulnerabilities through GitHub's [private vulnerability reporting form](https://github.com/EasyTier/EasyTier/security/advisories/new).
+Please report suspected vulnerabilities through GitHub's [private vulnerability reporting form](https://github.com/exvlan/exvlan/security/advisories/new).
 
 Do not disclose the vulnerability in a public issue, discussion, or pull request. A useful report should include:
 
-- the affected EasyTier version or commit;
+- the affected Exvlan version or commit;
 - the affected platform and relevant configuration, with secrets removed;
 - a description of the vulnerability and its potential impact;
 - reproducible steps or a minimal proof of concept; and

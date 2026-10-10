@@ -3,7 +3,7 @@ use std::{
     ptr,
 };
 
-use easytier_ffi::{call_json_rpc, free_string};
+use exvlan_ffi::{call_json_rpc, free_string};
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::jstring;

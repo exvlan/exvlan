@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	apiinstance "github.com/easytier/easytier/easytier-go/proto/api/instance"
-	"github.com/easytier/easytier/easytier-go/proto/common"
+	apiinstance "github.com/exvlan/exvlan/exvlan-go/proto/api/instance"
+	"github.com/exvlan/exvlan/exvlan-go/proto/common"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -17,16 +17,16 @@ const (
 	foreignNetworkSummaryRPCMethod = "api.instance.PeerManageRpc.GetForeignNetworkSummary"
 )
 
-// PeerInfo describes one peer visible to an EasyTier instance.
+// PeerInfo describes one peer visible to an Exvlan instance.
 type PeerInfo = apiinstance.PeerInfo
 
-// Route describes one route visible to an EasyTier instance.
+// Route describes one route visible to an Exvlan instance.
 type Route = apiinstance.Route
 
-// NodeInfo describes this EasyTier instance.
+// NodeInfo describes this Exvlan instance.
 type NodeInfo = apiinstance.NodeInfo
 
-// ListPeer returns the peers visible to this EasyTier instance.
+// ListPeer returns the peers visible to this Exvlan instance.
 func (instance *Instance) ListPeer(
 	ctx context.Context,
 ) ([]*PeerInfo, error) {
@@ -37,7 +37,7 @@ func (instance *Instance) ListPeer(
 	return response.PeerInfos, nil
 }
 
-// ListRoute returns the routing table visible to this EasyTier instance.
+// ListRoute returns the routing table visible to this Exvlan instance.
 func (instance *Instance) ListRoute(
 	ctx context.Context,
 ) ([]*Route, error) {
@@ -76,7 +76,7 @@ func (instance *Instance) ShowNodeInfo(ctx context.Context) (*NodeInfo, error) {
 		return nil, err
 	}
 	if response.NodeInfo == nil {
-		return nil, fmt.Errorf("EasyTier ShowNodeInfo returned no node info")
+		return nil, fmt.Errorf("Exvlan ShowNodeInfo returned no node info")
 	}
 	return response.NodeInfo, nil
 }
@@ -120,10 +120,10 @@ func (instance *Instance) callRPCRequest(
 	response proto.Message,
 ) error {
 	if instance == nil || instance.engine == nil {
-		return fmt.Errorf("call RPC through nil EasyTier instance")
+		return fmt.Errorf("call RPC through nil Exvlan instance")
 	}
 	if ctx == nil {
-		return fmt.Errorf("call EasyTier RPC with nil context")
+		return fmt.Errorf("call Exvlan RPC with nil context")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -145,7 +145,7 @@ func (instance *Instance) callRPCRequest(
 	if request != nil {
 		payload, err = proto.Marshal(request)
 		if err != nil {
-			return fmt.Errorf("encode EasyTier RPC %s request: %w", fullMethodName, err)
+			return fmt.Errorf("encode Exvlan RPC %s request: %w", fullMethodName, err)
 		}
 	}
 	encodedRequest, err := proto.Marshal(&common.DirectRpcRequest{
@@ -154,7 +154,7 @@ func (instance *Instance) callRPCRequest(
 		TimeoutMs:      timeoutMillis,
 	})
 	if err != nil {
-		return fmt.Errorf("encode EasyTier RPC envelope: %w", err)
+		return fmt.Errorf("encode Exvlan RPC envelope: %w", err)
 	}
 	encodedResponse, err := instance.engine.RPC(ctx, encodedRequest)
 	if contextErr := ctx.Err(); contextErr != nil {
@@ -165,18 +165,18 @@ func (instance *Instance) callRPCRequest(
 	}
 	var envelope common.RpcResponse
 	if err := proto.Unmarshal(encodedResponse, &envelope); err != nil {
-		return fmt.Errorf("decode EasyTier RPC %s response: %w", fullMethodName, err)
+		return fmt.Errorf("decode Exvlan RPC %s response: %w", fullMethodName, err)
 	}
 	if envelope.Error != nil {
 		return fmt.Errorf(
-			"EasyTier RPC %s failed: %s",
+			"Exvlan RPC %s failed: %s",
 			fullMethodName,
 			envelope.Error,
 		)
 	}
 	if err := proto.Unmarshal(envelope.Response, response); err != nil {
 		return fmt.Errorf(
-			"decode EasyTier RPC %s payload: %w",
+			"decode Exvlan RPC %s payload: %w",
 			fullMethodName,
 			err,
 		)

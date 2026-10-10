@@ -1,4 +1,4 @@
-# EasyTier Core Architecture
+# Exvlan Core Architecture
 
 ## Status and scope
 
@@ -9,18 +9,18 @@ design rather than the migration history.
 
 The refactor has three principal crate roles:
 
-- `easytier-core` owns portable EasyTier configuration, protocol state,
+- `exvlan-core` owns portable Exvlan configuration, protocol state,
   routing, peer state, connectivity orchestration, packet processing, and
   instance lifecycle.
-- `easytier` is the native composition root. It owns operating-system
+- `exvlan` is the native composition root. It owns operating-system
   resources, native protocol engines, process integration, CLI and native
   presentation.
-- `easytier-proto` owns generated protobuf and RPC types, descriptor data, and
+- `exvlan-proto` owns generated protobuf and RPC types, descriptor data, and
   the feature slices needed by core and presentation users.
 
-`easytier-core` is designed to compile without direct operating-system network
+`exvlan-core` is designed to compile without direct operating-system network
 access. It supports native hosts through Rust traits and has a target-only WASI
-adapter and ABI implementation under `easytier-core/src/wasi`.
+adapter and ABI implementation under `exvlan-core/src/wasi`.
 
 This architecture does not require compatibility with old internal module
 paths. Wire compatibility, configuration compatibility, management semantics,
@@ -54,7 +54,7 @@ architectural boundary.
 The principal dependency direction is:
 
 ```text
-easytier-proto <- easytier-core <- easytier
+exvlan-proto <- exvlan-core <- exvlan
 ```
 
 Presentation crates and platform integrations consume these crates. Portable
@@ -62,7 +62,7 @@ policy must not move outward merely because one current consumer is native.
 Conversely, core must not absorb an OS mechanism or a protocol engine whose
 dependencies cannot satisfy the core target contract.
 
-### `easytier-proto`
+### `exvlan-proto`
 
 The protobuf crate is split by public Cargo features:
 
@@ -74,7 +74,7 @@ The protobuf crate is split by public Cargo features:
   plane.
 - `full` is the compatibility aggregate used by complete products.
 
-The core crate depends on `easytier-proto` with default features disabled and
+The core crate depends on `exvlan-proto` with default features disabled and
 enables only `core`, adding API or JSON-RPC types through its own management
 features.
 
@@ -87,12 +87,12 @@ required so unknown fields survive mixed-version, multi-hop propagation.
 Generated Rust types remain responsible for normal message construction and
 validation.
 
-Descriptor sets are still generated and embedded by `easytier-proto`; removing
+Descriptor sets are still generated and embedded by `exvlan-proto`; removing
 runtime reflection did not remove descriptor data used by configuration and
 RPC tooling. The OHOS integration has its own schema service and dependency
 policy and is outside this replacement.
 
-### `easytier-core`
+### `exvlan-core`
 
 Core owns portable behaviour and exposes capability seams. Its normal
 dependencies use Tokio runtime, time, synchronization, and I/O traits without
@@ -103,7 +103,7 @@ enabled. It does not create real native TCP/UDP sockets, alter routes, open a
 TUN device, enter a network namespace, configure system DNS, manage a service,
 or invoke UPnP/NAT-PMP directly.
 
-### `easytier`
+### `exvlan`
 
 The native crate owns:
 
@@ -165,7 +165,7 @@ the policy that combines those facts with TOML input. This is especially
 important for a WASI build: the compile-time guest target cannot be used as a
 proxy for the Host operating system.
 
-`packet/` owns EasyTier packet structures, compression, STUN and hole-punch
+`packet/` owns Exvlan packet structures, compression, STUN and hole-punch
 wire codecs. It does not own socket I/O or connection policy.
 
 ### Socket and Host seams
@@ -213,7 +213,7 @@ not become another socket factory.
 
 ### Tunnel and listener
 
-A socket is a raw communication endpoint. A Tunnel is an EasyTier connection
+A socket is a raw communication endpoint. A Tunnel is an Exvlan connection
 created by adding framing, metadata, handshakes, and protocol lifecycle.
 
 Core owns:
@@ -228,7 +228,7 @@ Core owns:
 
 Native protocol Adapters own WebSocket/WSS, QUIC, WireGuard, and KCP engines.
 Unix and FakeTCP are socket resources that feed a core protocol upgrader; they
-are not independent owners of EasyTier peer state.
+are not independent owners of Exvlan peer state.
 
 Each protocol registration must provide a coherent client/server Adapter.
 Unavailable configured transports must be rejected during validation or
@@ -279,7 +279,7 @@ the domain rather than reaching into a parallel native peer owner.
 
 `rpc/` owns the peer-flavoured RPC transport, packet fragmentation, client and
 server lifecycle, handler registry, and standalone listener/client lifecycle.
-Generated service descriptors and message types remain in `easytier-proto`.
+Generated service descriptors and message types remain in `exvlan-proto`.
 
 ### Gateway
 
@@ -417,12 +417,12 @@ fields.
 ## Logging
 
 The main native runtime uses a small logger implemented in
-`easytier/src/common/log`:
+`exvlan/src/common/log`:
 
 - `log` records and `tracing` events share console and file sinks;
 - timestamps, compact formatting, optional terminal colours, `NO_COLOR`, and
   basic `RUST_LOG` target/level filters are implemented directly;
-- file rotation uses the existing EasyTier rolling appender;
+- file rotation uses the existing Exvlan rolling appender;
 - management RPC can reload the file level;
 - an atomic maximum-level gate rejects disabled events before target matching
   or file-filter locking;
@@ -483,7 +483,7 @@ configuration, management, packet-plane, or test-support interfaces.
 
 ## Architectural invariants
 
-1. Portable EasyTier policy has one owner in `easytier-core`.
+1. Portable Exvlan policy has one owner in `exvlan-core`.
 2. Core does not perform real OS socket, DNS, TUN, route, filesystem
    configuration, process, or service-manager operations.
 3. Host-OS policy is runtime input; a WASI compile target is not Host policy.
@@ -513,8 +513,8 @@ Changes to these boundaries should run, at minimum:
 
 ```text
 cargo fmt --all -- --check
-cargo check -p easytier-core -p easytier-proto -p easytier --features full
-cargo test -p easytier-core --lib
+cargo check -p exvlan-core -p exvlan-proto -p exvlan --features full
+cargo test -p exvlan-core --lib
 ```
 
 Feature work should add focused checks for the changed no-default, isolated,
@@ -524,9 +524,9 @@ WASI ABI or Adapter changes require a `wasm32-wasip1` build and target-side
 tests. These compiler-resolved profiles are the authority for feature and
 target boundaries.
 
-CI path filters include `easytier-core`, `easytier-proto`, native, web, GUI
-Tauri, and contrib. The archived Rust test suite contains both `easytier` and
-`easytier-core`.
+CI path filters include `exvlan-core`, `exvlan-proto`, native, web, GUI
+Tauri, and contrib. The archived Rust test suite contains both `exvlan` and
+`exvlan-core`.
 
 ## Known limitations and debt
 

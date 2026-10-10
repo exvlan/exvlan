@@ -14,7 +14,7 @@ publication to the private OHPM registry is deliberately restricted:
 
 ## Package identity
 
-All branches publish the same private package name, `easytier-ohrs`. The
+All branches publish the same private package name, `exvlan-ohrs`. The
 source branch is encoded in the package version instead of the package name:
 
 ```text
@@ -45,7 +45,7 @@ oh_modules/<package_name>/oh-package.json5
 ```
 
 The existing `oh-package-lock.json5` and `oh_modules` directory are not
-manually deleted. Because the package name remains `easytier-ohrs`, downstream
+manually deleted. Because the package name remains `exvlan-ohrs`, downstream
 source imports do not need to be rewritten.
 
 ## Secrets

@@ -12,15 +12,15 @@
     }
   ],
   "vars": {
-    "EASYTIER_NETWORK_NAME": "easytier-web-example"
+    "EXVLAN_NETWORK_NAME": "easytier-web-example"
   },
   "secrets": {
-    "required": ["EASYTIER_NETWORK_SECRET"]
+    "required": ["EXVLAN_NETWORK_SECRET"]
   },
   "durable_objects": {
     "bindings": [
       {
-        "name": "EASYTIER_CORE",
+        "name": "EXVLAN_CORE",
         "class_name": "EasyTierCoreObject"
       }
     ]

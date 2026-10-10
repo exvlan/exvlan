@@ -3,7 +3,7 @@ pub mod routing;
 pub mod runtime;
 pub mod socket_protection;
 
-use easytier::instance::factory::{NativeInstanceManager, native_instance_manager_with_runtime};
+use exvlan::instance::factory::{NativeInstanceManager, native_instance_manager_with_runtime};
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tokio::runtime::{Builder, Runtime};
@@ -13,10 +13,10 @@ pub static ASYNC_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     Builder::new_multi_thread()
         .enable_all()
         .build()
-        .expect("tokio runtime for easytier-ohos-core")
+        .expect("tokio runtime for exvlan-ohos-core")
 });
 
-/// Process-wide EasyTier instance manager. Keeping it in the kernel crate prevents feature/storage
+/// Process-wide Exvlan instance manager. Keeping it in the kernel crate prevents feature/storage
 /// code from acquiring lifecycle ownership.
 pub static INSTANCE_MANAGER: Lazy<Arc<NativeInstanceManager>> = Lazy::new(|| {
     Arc::new(native_instance_manager_with_runtime(
@@ -46,7 +46,7 @@ mod architecture_tests {
         let derive_dependency = ["napi", "derive", "ohos"].join("-");
         assert!(!manifest.contains(&runtime_dependency));
         assert!(!manifest.contains(&derive_dependency));
-        assert!(!manifest.contains("easytier-ohos-features"));
+        assert!(!manifest.contains("exvlan-ohos-features"));
         assert_no_napi_annotations(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("src")

@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 #[cfg(any(feature = "management-rpc", test))]
-use easytier_core::instance::manager::InstanceManager;
+use exvlan_core::instance::manager::InstanceManager;
 #[cfg(feature = "management-rpc")]
-use easytier_core::management::ProcessRuntimeProvider;
-use easytier_core::{
+use exvlan_core::management::ProcessRuntimeProvider;
+use exvlan_core::{
     config::toml::TomlConfig,
     instance::{CoreInstance, manager::InstanceFactory},
     process_runtime::CoreProcessRuntime,
@@ -22,7 +22,7 @@ pub type NativeCoreInstance = CoreInstance<NativeInstanceHost>;
 pub type NativeInstanceManager = InstanceManager<NativeInstanceFactory>;
 #[cfg(feature = "management")]
 pub type NativeProcessManagement =
-    easytier_core::management::ProcessManagement<NativeInstanceFactory>;
+    exvlan_core::management::ProcessManagement<NativeInstanceFactory>;
 
 #[cfg(feature = "management-rpc")]
 pub fn native_instance_manager() -> NativeInstanceManager {
@@ -74,12 +74,12 @@ pub fn native_compact_instance_manager_with_runtime(
 #[cfg(feature = "management")]
 pub fn native_process_management(
     instances: Arc<NativeInstanceManager>,
-    hooks: Arc<dyn easytier_core::management::InstanceMutationHooks>,
+    hooks: Arc<dyn exvlan_core::management::InstanceMutationHooks>,
 ) -> NativeProcessManagement {
     NativeProcessManagement::new(
         instances,
         hooks,
-        Arc::new(easytier_core::management::UnsupportedConfigFileStorage),
+        Arc::new(exvlan_core::management::UnsupportedConfigFileStorage),
     )
 }
 
@@ -170,7 +170,7 @@ impl ProcessRuntimeProvider for NativeInstanceFactory {
 
 #[cfg(test)]
 mod tests {
-    use easytier_core::{config::toml::ConfigLoader as _, instance::CoreInstanceState};
+    use exvlan_core::{config::toml::ConfigLoader as _, instance::CoreInstanceState};
 
     use super::*;
 

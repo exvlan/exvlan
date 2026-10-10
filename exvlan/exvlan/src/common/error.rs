@@ -1,7 +1,7 @@
 use std::{io, result};
 use thiserror::Error;
 
-use easytier_core::tunnel::TunnelError;
+use exvlan_core::tunnel::TunnelError;
 
 #[derive(Error, Debug)]
 pub enum Error {

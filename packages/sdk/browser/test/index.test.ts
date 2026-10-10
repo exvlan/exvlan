@@ -4,15 +4,15 @@ const { createRuntime } = vi.hoisted(() => ({
   createRuntime: vi.fn(),
 }));
 
-vi.mock("@easytier/runtime/adapter", () => ({
-  createEasyTierRuntime: createRuntime,
+vi.mock("@exvlan/runtime/adapter", () => ({
+  createExvlanRuntime: createRuntime,
 }));
 
-import { createEasyTierWithArtifact } from "../src/create";
+import { createExvlanWithArtifact } from "../src/create";
 
 const EMPTY_WASM_MODULE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
 
-describe("createEasyTier", () => {
+describe("createExvlan", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     createRuntime.mockReset();
@@ -31,7 +31,7 @@ describe("createEasyTier", () => {
     vi.stubGlobal("WebSocket", MockWebSocket);
 
     await expect(
-      createEasyTierWithArtifact(
+      createExvlanWithArtifact(
         EMPTY_WASM_MODULE,
         {
           networkName: "office",
@@ -67,7 +67,7 @@ describe("createEasyTier", () => {
     });
 
     await expect(
-      createEasyTierWithArtifact(
+      createExvlanWithArtifact(
         new Uint8Array([1, 2, 3]),
         {
           networkName: "office",

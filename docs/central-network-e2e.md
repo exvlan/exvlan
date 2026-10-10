@@ -12,9 +12,9 @@
 
 ## 环境与复现入口
 
-- 宿主机 Web：`cargo build -p easytier-web --features embed`，Docker `rust` 中 Core/CLI：`cargo build -p easytier --bins`；版本 `2.7.0-57a15acb`。
+- 宿主机 Web：`cargo build -p exvlan-api --features embed`，Docker `rust` 中 Core/CLI：`cargo build -p exvlan --bins`；版本 `2.7.0-57a15acb`。
 - `rust` 容器具备 root、TUN、iproute2、原生 wg、ping、Python。每次数据面测试创建独立 bridge 和四个 network namespace，清理时只删除本次资源。未修改容器全局 IP forwarding。
-- 数据面复现：构建后在 `easytier-web/frontend` 执行 `node tests/central-coverage.mjs`。独立 SQLite、随机端口和进程日志保存在 `.test-env/central-e2e-*`。
+- 数据面复现：构建后在 `exvlan-api/frontend` 执行 `node tests/central-coverage.mjs`。独立 SQLite、随机端口和进程日志保存在 `.test-env/central-e2e-*`。
 - 真实 baseline 使用原 `central-e2e.test.mjs`，本次临时副本仅跳过重复构建并增加截图，结束已删除。
 
 ## 用例与结果
@@ -131,7 +131,7 @@
 
 | 证据 | 最终执行 | 归档位置 |
 |---|---|---|
-| 主真实数据面 | 22/22 组通过 | `.test-env/central-e2e-2316549/results.json` 与各进程日志；复现脚本 `easytier-web/frontend/tests/central-coverage.mjs` |
+| 主真实数据面 | 22/22 组通过 | `.test-env/central-e2e-2316549/results.json` 与各进程日志；复现脚本 `exvlan-api/frontend/tests/central-coverage.mjs` |
 | 审查后加强端口断言的主套件 | 21/22 通过；M02 等待条件修正后定向4/4通过 | `.test-env/central-e2e-2745102/results.json`；`.test-env/central-e2e-2971552/results.json` |
 | 原真实 baseline | 1/1 通过，18.24 秒 | `.test-env/central-e2e-evidence-20260930/central-e2e-baseline-evidence/baseline.log`，3 张真实截图 |
 | Dashboard mock 补充 | 16/16 通过，33.56 秒 | 同上 `dashboard.log`；此项不计为真实后端验证 |
@@ -158,7 +158,7 @@
 - **major / high confidence**；对应 N09。
 - 有效网络已有真实 Core，PATCH 网络为 Manual，`peer_urls=["bogus://127.0.0.1:9999"]`。
 - 实际 HTTP 200，SQLite 网络意图被替换；真实 Core 报 `unsupported core manual connector URL`。18 秒观察内有 292 次实例创建失败重试。
-- 预期保存前拒绝并保持有效配置。根因入口 `easytier-web/src/central_network/compiler.rs:232`，目前仅检查 URL 能否解析。
+- 预期保存前拒绝并保持有效配置。根因入口 `exvlan-api/src/central_network/compiler.rs:232`，目前仅检查 URL 能否解析。
 - 证据：归档 `central-security-e2e-vM8P3H/results.json` 的 `N09-protocol` / `N09-runtime-evidence`，`central.log:1221` 起。
 - `http://` 和 `https://` 是 Core 支持的 discovery connector，不在非法协议之列。
 
@@ -175,7 +175,7 @@
 
 - **minor / high confidence**；对应 R02；实际设置日志级别能够生效。
 - 六个下拉选项显示翻译函数源码；初始 DISABLED RPC 返回 `{}`，页面误显示 Info；设置 WARNING 后 RPC 返回 `{"level":"WARNING"}`，重开详情显示 Loading。
-- 两处局部问题：`easytier-web/frontend/src/components/NetworkDetail.vue:456-463` 使用函数作为 option label；`easytier-web/frontend/src/modules/api.ts:457-463` 未转换 protobuf 字符串枚举且零值默认不正确。
+- 两处局部问题：`exvlan-api/frontend/src/components/NetworkDetail.vue:456-463` 使用函数作为 option label；`exvlan-api/frontend/src/modules/api.ts:457-463` 未转换 protobuf 字符串枚举且零值默认不正确。
 - 证据：归档 `central-node-ui-e2e-5UwmgY/results.json` 的 R02-initial/options/after-set/reopen 与四张 R02 截图。修复后六级设置、刷新和翻译均经真实浏览器与 RPC 重新验证。
 
 ## 修复回归（2026-09-30）
@@ -194,7 +194,7 @@
 | Dashboard 浏览器回归 | 17/17 通过，含日志枚举专项；mock API | `.test-env/central-fix-20260930/central-fix-dashboard.log` |
 | 真实主数据面 | 22/22 通过 | `.test-env/central-e2e-6121215/results.json` |
 | 原真实浏览器生命周期 | 1/1 通过，15.92 秒 | `.test-env/central-fix-20260930/central-fix-baseline.log` |
-| 配置拒绝与原子性专项 | 14/14 通过 | `.test-env/central-validation-6182364/results.json`；脚本 `easytier-web/frontend/tests/central-validation.mjs` |
+| 配置拒绝与原子性专项 | 14/14 通过 | `.test-env/central-validation-6182364/results.json`；脚本 `exvlan-api/frontend/tests/central-validation.mjs` |
 | 真实日志级别 UI/RPC | R01/R02 均通过；六级逐次设置、刷新、中文选项 | `.test-env/central-fix-logger-20260930/evidence/results.json` |
 
 专项的12个非法请求均返回400：对照3张中央意图表完整行、网络与成员配置、两个真实 Core 的 `show_node_info` TOML，全部不变；拒绝期间每条连续15个 ping，共180包零丢包。合法 HTTP/HTTPS/TXT/SRV × Manual/PublicServer 共8次空网保存成功；IPv4代理路由/实际ping、有效WireGuard客户端和清空均通过。

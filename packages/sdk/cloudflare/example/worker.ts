@@ -1,16 +1,16 @@
-import { createEasyTierCloudflare } from "../src/index";
+import { createExvlanCloudflare } from "../src/index";
 
-const easytier = createEasyTierCloudflare<Env>({
-  namespace: (env) => env.EASYTIER_CORE,
+const exvlan = createExvlanCloudflare<Env>({
+  namespace: (env) => env.EXVLAN_CORE,
   objectName: (request, env) =>
-    env.EASYTIER_OBJECT_NAME ?? new URL(request.url).hostname,
+    env.EXVLAN_OBJECT_NAME ?? new URL(request.url).hostname,
   config: (env) => ({
-    networkName: env.EASYTIER_NETWORK_NAME,
-    networkSecret: env.EASYTIER_NETWORK_SECRET,
+    networkName: env.EXVLAN_NETWORK_NAME,
+    networkSecret: env.EXVLAN_NETWORK_SECRET,
     instanceName: "cloudflare-worker",
-    encryption: env.EASYTIER_ENABLE_ENCRYPTION !== "false",
+    encryption: env.EXVLAN_ENABLE_ENCRYPTION !== "false",
   }),
 });
 
-export class EasyTierCoreObject extends easytier.DurableObject {}
-export default easytier;
+export class ExvlanCoreObject extends exvlan.DurableObject {}
+export default exvlan;

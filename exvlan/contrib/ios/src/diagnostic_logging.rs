@@ -116,11 +116,11 @@ impl RotatingLog {
     }
 
     fn active_path(&self) -> PathBuf {
-        self.directory.join("easytier.log")
+        self.directory.join("exvlan.log")
     }
 
     fn rotated_path(&self, index: usize) -> PathBuf {
-        self.directory.join(format!("easytier.{index}.log"))
+        self.directory.join(format!("exvlan.{index}.log"))
     }
 
     fn truncate_oversized_files(&self) -> io::Result<()> {
@@ -236,7 +236,7 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path = std::env::temp_dir().join(format!("easytier-ios-{name}-{unique}"));
+            let path = std::env::temp_dir().join(format!("exvlan-ios-{name}-{unique}"));
             fs::create_dir_all(&path).unwrap();
             Self(path)
         }
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn opening_truncates_oversized_known_files() {
         let directory = TempDir::new("oversized");
-        for name in ["easytier.log", "easytier.1.log"] {
+        for name in ["exvlan.log", "exvlan.1.log"] {
             let file = File::create(directory.0.join(name)).unwrap();
             file.set_len(MAX_LOG_BYTES + 1).unwrap();
         }

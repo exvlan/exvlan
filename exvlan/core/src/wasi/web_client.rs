@@ -344,7 +344,7 @@ impl WasiWebClientRuntime {
                         version: String::new(),
                         distribution: String::new(),
                     },
-                    easytier_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    exvlan_version: env!("CARGO_PKG_VERSION").to_owned(),
                     secure_mode: config.secure_mode,
                 },
                 backend,

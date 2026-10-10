@@ -948,19 +948,19 @@ where
             usable.push(addr);
             continue;
         };
-        if peer_manager.is_easytier_managed_ipv6(v6_addr.ip()).await {
+        if peer_manager.is_exvlan_managed_ipv6(v6_addr.ip()).await {
             rejected_reason = Some(format!(
-                "{url} resolves to EasyTier-managed IPv6 {}",
+                "{url} resolves to Exvlan-managed IPv6 {}",
                 v6_addr.ip()
             ));
             continue;
         }
         match host.local_addr_for_remote(addr, context.clone()).await {
             Ok(SocketAddr::V6(local_addr))
-                if peer_manager.is_easytier_managed_ipv6(local_addr.ip()).await =>
+                if peer_manager.is_exvlan_managed_ipv6(local_addr.ip()).await =>
             {
                 rejected_reason = Some(format!(
-                    "{url} would use EasyTier-managed IPv6 {} as local source for {v6_addr}",
+                    "{url} would use Exvlan-managed IPv6 {} as local source for {v6_addr}",
                     local_addr.ip()
                 ));
             }
@@ -1007,7 +1007,7 @@ where
     ipv6s.extend(addrs.public_ipv6);
     let mut ret = Vec::new();
     for addr in ipv6s {
-        if !peer_manager.is_easytier_managed_ipv6(&addr).await {
+        if !peer_manager.is_exvlan_managed_ipv6(&addr).await {
             ret.push(SocketAddr::new(IpAddr::V6(addr), 0));
         }
     }
@@ -1221,7 +1221,7 @@ mod tests {
             ),
             (
                 "udp://127.0.0.1:1",
-                ManualTransport::Udp(UdpSessionMode::EasyTierMux),
+                ManualTransport::Udp(UdpSessionMode::ExvlanMux),
             ),
             (
                 "wg://127.0.0.1:1",
@@ -1232,7 +1232,7 @@ mod tests {
                 ManualTransport::Udp(UdpSessionMode::Classified(UdpSessionProtocol::Quic)),
             ),
             ("ring://local", ManualTransport::ByteStream),
-            ("unix:///tmp/easytier.sock", ManualTransport::ByteStream),
+            ("unix:///tmp/exvlan.sock", ManualTransport::ByteStream),
         ];
 
         for (url, expected) in cases {

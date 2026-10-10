@@ -1,4 +1,4 @@
-use easytier_proto::api::{
+use exvlan_proto::api::{
     instance::{PeerInfo, list_peer_route_pair},
     manage::{MyNodeInfo, NetworkInstanceRunningInfo},
 };

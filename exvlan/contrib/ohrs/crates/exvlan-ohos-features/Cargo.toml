@@ -1,14 +1,14 @@
 [package]
-name = "easytier-ohos-features"
+name = "exvlan-ohos-features"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "HarmonyOS-side EasyTier configuration, schema, persistence and sharing features"
+description = "HarmonyOS-side Exvlan configuration, schema, persistence and sharing features"
 publish = false
 
 [dependencies]
 base64.workspace = true
-easytier = { workspace = true, default-features = true }
+exvlan = { workspace = true, default-features = true }
 flate2 = "1.1"
 gethostname.workspace = true
 once_cell.workspace = true

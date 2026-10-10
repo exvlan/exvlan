@@ -8,8 +8,8 @@ use anyhow::{Context, Error, anyhow, ensure};
 use atomic_refcell::AtomicRefCell;
 use bytes::{BufMut, Bytes, BytesMut};
 use derive_more::{Constructor, Deref, DerefMut, From, Into};
-use easytier_core::config::PeerId;
-use easytier_core::packet::{PacketType, TAIL_RESERVED_SIZE, ZCPacket, ZCPacketType};
+use exvlan_core::config::PeerId;
+use exvlan_core::packet::{PacketType, TAIL_RESERVED_SIZE, ZCPacket, ZCPacketType};
 use moka::future::Cache;
 use prost::Message;
 use quinn::udp::{EcnCodepoint, RecvMeta, Transmit};
@@ -35,7 +35,7 @@ use tokio::time::timeout;
 use tokio_util::sync::{CancellationToken, PollSender};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use easytier_core::{
+use exvlan_core::{
     foundation::expiring_set::ExpiringSet,
     gateway::proxy::traits::TcpProxyStream,
     gateway::proxy::wrapped_transport::{

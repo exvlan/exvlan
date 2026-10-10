@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	apiconfig "github.com/easytier/easytier/easytier-go/proto/api/config"
-	apiinstance "github.com/easytier/easytier/easytier-go/proto/api/instance"
-	"github.com/easytier/easytier/easytier-go/proto/api/manage"
-	"github.com/easytier/easytier/easytier-go/proto/common"
+	apiconfig "github.com/exvlan/exvlan/exvlan-go/proto/api/config"
+	apiinstance "github.com/exvlan/exvlan/exvlan-go/proto/api/instance"
+	"github.com/exvlan/exvlan/exvlan-go/proto/api/manage"
+	"github.com/exvlan/exvlan/exvlan-go/proto/common"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )

@@ -1,6 +1,6 @@
 use std::ffi::{CString, c_char, c_int};
 
-use easytier::common::config::{ConfigFileControl, TomlConfigLoader};
+use exvlan::common::config::{ConfigFileControl, TomlConfigLoader};
 
 use crate::{
     config_server::{in_config_server_callback, wait_for_config_server_delivery},

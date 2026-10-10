@@ -1,7 +1,7 @@
 import { Event, listen } from "@tauri-apps/api/event";
 import { type } from "@tauri-apps/plugin-os";
-import { NetworkTypes } from "easytier-frontend-lib"
-import { Utils } from "easytier-frontend-lib";
+import { NetworkTypes } from "@exvlan/std"
+import { Utils } from "@exvlan/std";
 import { normalizeConfigSource } from './config_source'
 import { onNetworkInstanceUpdate } from './mobile_vpn'
 

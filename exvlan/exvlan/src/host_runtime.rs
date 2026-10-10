@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use easytier_core::{
+use exvlan_core::{
     connectivity::{composite::ConnectorRuntime, transport::ConnectedByteStream},
     host::dns::{DnsQuery, DnsRecordResolver, DnsResolver, DnsSrvRecord},
     socket::{

@@ -1,5 +1,5 @@
 [package]
-name = "easytier-ffi"
+name = "exvlan-ffi"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -11,13 +11,13 @@ crate-type = ["cdylib", "rlib"]
 default = ["c-abi", "ffi-dataplane"]
 c-abi = []
 ffi-dataplane = [
-    "easytier/ffi-dataplane",
-    "easytier-core/proxy-smoltcp-stack",
+    "exvlan/ffi-dataplane",
+    "exvlan-core/proxy-smoltcp-stack",
 ]
 
 [dependencies]
-easytier = { workspace = true, default-features = true, features = ["tracing-log"] }
-easytier-core = { workspace = true, default-features = true }
+exvlan = { workspace = true, default-features = true, features = ["tracing-log"] }
+exvlan-core = { workspace = true, default-features = true }
 
 once_cell.workspace = true
 tokio = { workspace = true, default-features = true, features = ["rt-multi-thread", "io-util", "time", "sync", "macros"] }

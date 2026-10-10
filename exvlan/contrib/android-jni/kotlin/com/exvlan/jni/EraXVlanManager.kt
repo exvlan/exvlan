@@ -27,7 +27,7 @@ fun parseIpv4InetToString(inet: Ipv4Inet?): String? {
     return "$ip/$networkLength"
 }
 
-/** EXVlan 管理类 负责管理 EXVlan 实例的生命周期、监控网络状态变化、控制 VpnService */
+/** Exvlan 管理类 负责管理 Exvlan 实例的生命周期、监控网络状态变化、控制 VpnService */
 class EraXVlanManager(
         private val activity: Activity,
         private val instanceName: String,
@@ -59,36 +59,36 @@ class EraXVlanManager(
                 }
             }
 
-    /** 启动 EXVlan 实例和监控 */
+    /** 启动 Exvlan 实例和监控 */
     fun start() {
         if (isRunning) {
-            Log.w(TAG, "EXVlan 实例已经在运行中")
+            Log.w(TAG, "Exvlan 实例已经在运行中")
             return
         }
 
         try {
-            // 启动 EXVlan 实例
+            // 启动 Exvlan 实例
             val result = ExvlanJNI.runNetworkInstance(networkConfig)
             if (result == 0) {
                 isRunning = true
-                Log.i(TAG, "EXVlan 实例启动成功: $instanceName")
+                Log.i(TAG, "Exvlan 实例启动成功: $instanceName")
 
                 // 开始监控网络状态
                 handler.post(monitorRunnable)
             } else {
-                Log.e(TAG, "EXVlan 实例启动失败: $result")
+                Log.e(TAG, "Exvlan 实例启动失败: $result")
                 val error = ExvlanJNI.getLastError()
                 Log.e(TAG, "错误信息: $error")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "启动 EXVlan 实例时发生异常", e)
+            Log.e(TAG, "启动 Exvlan 实例时发生异常", e)
         }
     }
 
-    /** 停止 EXVlan 实例和监控 */
+    /** 停止 Exvlan 实例和监控 */
     fun stop() {
         if (!isRunning) {
-            Log.w(TAG, "EXVlan 实例未在运行")
+            Log.w(TAG, "Exvlan 实例未在运行")
             return
         }
 
@@ -101,15 +101,15 @@ class EraXVlanManager(
             // 停止 VpnService
             stopVpnService()
 
-            // 停止 EXVlan 实例
+            // 停止 Exvlan 实例
             ExvlanJNI.stopAllInstances()
-            Log.i(TAG, "EXVlan 实例已停止: $instanceName")
+            Log.i(TAG, "Exvlan 实例已停止: $instanceName")
 
             // 重置状态
             currentIpv4 = null
             currentProxyCidrs = emptyList()
         } catch (e: Exception) {
-            Log.e(TAG, "停止 EXVlan 实例时发生异常", e)
+            Log.e(TAG, "停止 Exvlan 实例时发生异常", e)
         }
     }
 
@@ -134,14 +134,14 @@ class EraXVlanManager(
 
             // 检查实例是否正在运行
             if (!networkInfo.running) {
-                Log.w(TAG, "EXVlan 实例未运行: ${networkInfo.error_msg}")
+                Log.w(TAG, "Exvlan 实例未运行: ${networkInfo.error_msg}")
                 return
             }
 
             val newIpv4Inet = networkInfo.my_node_info?.virtual_ipv4
 
             if (newIpv4Inet == null) {
-                Log.w(TAG, "EXVlan No Ipv4: $networkInfo")
+                Log.w(TAG, "Exvlan No Ipv4: $networkInfo")
                 return
             }
 

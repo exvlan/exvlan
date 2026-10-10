@@ -1,19 +1,19 @@
-import coreModule from "./generated/easytier_core.wasm";
+import coreModule from "./generated/exvlan_core.wasm";
 
 import { createCloudflareApplication } from "./app.js";
 import type {
-  CloudflareEasyTierOptions,
-  EasyTierCloudflareApplication,
+  CloudflareExvlanOptions,
+  ExvlanCloudflareApplication,
 } from "./types.js";
 
 export type {
-  CloudflareEasyTierConfig,
-  CloudflareEasyTierOptions,
-  EasyTierCloudflareApplication,
+  CloudflareExvlanConfig,
+  CloudflareExvlanOptions,
+  ExvlanCloudflareApplication,
 } from "./types.js";
 
-export function createEasyTierCloudflare<Env>(
-  options: CloudflareEasyTierOptions<Env>,
-): EasyTierCloudflareApplication<Env> {
+export function createExvlanCloudflare<Env>(
+  options: CloudflareExvlanOptions<Env>,
+): ExvlanCloudflareApplication<Env> {
   return createCloudflareApplication(coreModule, options);
 }

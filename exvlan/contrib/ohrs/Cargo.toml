@@ -1,5 +1,5 @@
 [package]
-name = "easytier-ohrs"
+name = "exvlan-ohrs"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -11,11 +11,11 @@ crate-type = ["cdylib"]
 anyhow.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
-easytier = { workspace = true, default-features = true }
-easytier-core.workspace = true
-easytier-ohos-core.workspace = true
-easytier-ohos-features.workspace = true
-easytier-proto = { workspace = true, features = [
+exvlan = { workspace = true, default-features = true }
+exvlan-core.workspace = true
+exvlan-ohos-core.workspace = true
+exvlan-ohos-features.workspace = true
+exvlan-proto = { workspace = true, features = [
     "api",
     "core",
     "json-rpc",

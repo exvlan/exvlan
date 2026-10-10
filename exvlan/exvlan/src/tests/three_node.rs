@@ -9,7 +9,7 @@ use std::{
 
 #[cfg(feature = "wireguard")]
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use easytier_core::{
+use exvlan_core::{
     connectivity::protocol::raw::TunnelDialer,
     foundation::stats::{LabelSet, LabelType, MetricName, MetricSnapshot},
     process_runtime::CoreProcessRuntime,
@@ -81,7 +81,7 @@ fn core_udp_dialer(url: url::Url) -> impl TunnelDialer {
 
 async fn reload_instance_acl(inst: &Instance, acl: Option<&crate::proto::acl::Acl>) {
     let mut config = test_runtime_instance_config(&inst.get_global_ctx());
-    config.services.acl = easytier_core::config::peers::AclRuleConfig {
+    config.services.acl = exvlan_core::config::peers::AclRuleConfig {
         acl: acl.cloned(),
         ..Default::default()
     };
@@ -107,9 +107,9 @@ use crate::{
 };
 
 #[cfg(feature = "wireguard")]
-use easytier_core::gateway::vpn_portal::PortalClientState;
+use exvlan_core::gateway::vpn_portal::PortalClientState;
 #[cfg(feature = "wireguard")]
-use easytier_proto::api::{
+use exvlan_proto::api::{
     config::{ConfigPatchAction, InstanceConfigPatch, VpnPortalClientPatch},
     manage::VpnPortalClientConfig as VpnPortalClientConfigPb,
 };
@@ -2310,7 +2310,7 @@ pub async fn wireguard_vpn_portal_dynamic_clients() {
     .await;
 
     // 不重启实例，通过配置补丁动态添加第二个客户端
-    easytier_core::management::apply_config_patch(
+    exvlan_core::management::apply_config_patch(
         &core,
         InstanceConfigPatch {
             vpn_portal_clients: vec![VpnPortalClientPatch {
@@ -2340,7 +2340,7 @@ pub async fn wireguard_vpn_portal_dynamic_clients() {
     );
 
     // 拒绝的补丁不能污染共享 TOML 模型：重复添加 client-b 必须整体失败
-    let error = easytier_core::management::apply_config_patch(
+    let error = exvlan_core::management::apply_config_patch(
         &core,
         InstanceConfigPatch {
             vpn_portal_clients: vec![VpnPortalClientPatch {
@@ -2403,7 +2403,7 @@ pub async fn wireguard_vpn_portal_dynamic_clients() {
     .await;
 
     // 动态移除 client-a：其会话被拆除，client-b 保持在线
-    easytier_core::management::apply_config_patch(
+    exvlan_core::management::apply_config_patch(
         &core,
         InstanceConfigPatch {
             vpn_portal_clients: vec![VpnPortalClientPatch {
@@ -2999,7 +2999,7 @@ pub async fn instance_recv_bps_limit_test(#[values(100, 800)] bps_limit: u64) {
 
 fn assert_limited_payload_bps(bps: u64, bps_limit: u64) {
     // The benchmark measures TCP application payload while the limiter counts
-    // EasyTier data payload, including the inner IP and transport headers.
+    // Exvlan data payload, including the inner IP and transport headers.
     let min_bps = bps_limit.saturating_sub((bps_limit / 10).max(50));
     let max_bps = bps_limit + 50;
     assert!(
@@ -3023,26 +3023,26 @@ async fn assert_peer_admission_blocked(inst: &Instance, url: url::Url) {
     let core = inst.get_core_instance();
     let connect = async {
         let connected = match url.scheme() {
-            "tcp" => easytier_core::connectivity::transport::ConnectedTransport::Tcp(
-                easytier_core::socket::tcp::VirtualTcpSocketFactory::connect_tcp(
+            "tcp" => exvlan_core::connectivity::transport::ConnectedTransport::Tcp(
+                exvlan_core::socket::tcp::VirtualTcpSocketFactory::connect_tcp(
                     host.as_ref(),
-                    easytier_core::socket::tcp::TcpConnectOptions::direct_connect(target),
+                    exvlan_core::socket::tcp::TcpConnectOptions::direct_connect(target),
                 )
                 .await?,
             ),
-            "udp" => easytier_core::connectivity::transport::ConnectedTransport::Udp(
-                easytier_core::connectivity::transport::connect_udp(
+            "udp" => exvlan_core::connectivity::transport::ConnectedTransport::Udp(
+                exvlan_core::connectivity::transport::connect_udp(
                     host,
                     target,
                     Vec::new(),
-                    easytier_core::socket::udp::UdpBindOptions::direct_connect(),
-                    easytier_core::connectivity::transport::UdpSessionMode::EasyTierMux,
+                    exvlan_core::socket::udp::UdpBindOptions::direct_connect(),
+                    exvlan_core::connectivity::transport::UdpSessionMode::ExvlanMux,
                 )
                 .await?,
             ),
             scheme => panic!("unsupported test scheme: {scheme}"),
         };
-        let tunnel = easytier_core::connectivity::protocol::ClientProtocolUpgrader::upgrade_client(
+        let tunnel = exvlan_core::connectivity::protocol::ClientProtocolUpgrader::upgrade_client(
             protocol.as_ref(),
             connected,
             url,

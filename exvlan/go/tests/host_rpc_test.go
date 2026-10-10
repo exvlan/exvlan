@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	corehost "github.com/easytier/easytier/easytier-go"
+	corehost "github.com/exvlan/exvlan/exvlan-go"
 )
 
 func TestPublicManagementRPCMethods(t *testing.T) {

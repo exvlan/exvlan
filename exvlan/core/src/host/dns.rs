@@ -34,7 +34,7 @@ pub struct DnsSrvRecord {
     pub target: String,
 }
 
-/// Resolves non-address DNS records used by EasyTier endpoint discovery.
+/// Resolves non-address DNS records used by Exvlan endpoint discovery.
 #[async_trait]
 pub trait DnsRecordResolver: Send + Sync + 'static {
     async fn resolve_txt(&self, query: DnsQuery) -> anyhow::Result<String>;
@@ -364,7 +364,7 @@ mod tests {
         runtime.notify_completions();
         assert_eq!(address_task.await.unwrap().unwrap(), addresses);
 
-        let txt_query = query("_easytier.example", IpVersion::Both);
+        let txt_query = query("_exvlan.example", IpVersion::Both);
         let mut txt = Box::pin(resolver.resolve_txt(txt_query.clone()));
         assert!(futures::poll!(&mut txt).is_pending());
         let (txt_operation, submitted) =
@@ -374,7 +374,7 @@ mod tests {
         runtime.notify_completions();
         assert_eq!(txt.await.unwrap(), "tcp://peer.example:11010");
 
-        let srv_query = query("_easytier._udp.example", IpVersion::V6);
+        let srv_query = query("_exvlan._udp.example", IpVersion::V6);
         let mut srv = Box::pin(resolver.resolve_srv(srv_query.clone()));
         assert!(futures::poll!(&mut srv).is_pending());
         let (srv_operation, submitted) =

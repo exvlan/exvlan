@@ -1,9 +1,9 @@
-module github.com/easytier/easytier/easytier-go/examples/tun
+module github.com/exvlan/exvlan/exvlan-go/examples/tun
 
 go 1.25.0
 
 require (
-	github.com/easytier/easytier/easytier-go v0.0.0
+	github.com/exvlan/exvlan/exvlan-go v0.0.0
 	github.com/sagernet/sing-tun v0.8.11
 )
 
@@ -31,4 +31,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/easytier/easytier/easytier-go => ../..
+replace github.com/exvlan/exvlan/exvlan-go => ../..

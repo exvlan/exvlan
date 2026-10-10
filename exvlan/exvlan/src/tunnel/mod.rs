@@ -5,7 +5,7 @@ use crate::common::dns::socket_addrs;
 use crate::common::error::Error;
 use derive_more::{From, TryInto};
 #[cfg(any(feature = "faketcp", feature = "websocket", feature = "wireguard"))]
-use easytier_core::tunnel::{IpVersion, TunnelError};
+use exvlan_core::tunnel::{IpVersion, TunnelError};
 use strum::{Display, EnumString, IntoStaticStr, VariantArray};
 
 pub mod common;
@@ -144,13 +144,13 @@ pub enum IpScheme {
 impl IpScheme {
     pub fn port_offset(self) -> u16 {
         let scheme: &'static str = self.into();
-        easytier_core::connectivity::protocol::protocol_port_offset(scheme)
+        exvlan_core::connectivity::protocol::protocol_port_offset(scheme)
             .expect("IpScheme must have core protocol metadata")
     }
 
     pub fn default_port(self) -> u16 {
         let scheme: &'static str = self.into();
-        easytier_core::connectivity::protocol::protocol_default_port(scheme)
+        exvlan_core::connectivity::protocol::protocol_default_port(scheme)
             .expect("IpScheme must have core protocol metadata")
     }
 }

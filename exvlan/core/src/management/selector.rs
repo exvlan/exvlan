@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier_proto::api::instance::{InstanceIdentifier, instance_identifier::Selector};
+use exvlan_proto::api::instance::{InstanceIdentifier, instance_identifier::Selector};
 
 use crate::instance::{
     CoreInstance, CoreInstanceHost,
@@ -111,7 +111,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use easytier_proto::{
+    use exvlan_proto::{
         api::instance::{
             InstanceIdentifier, instance_identifier::InstanceSelector,
             instance_identifier::Selector,

@@ -282,7 +282,7 @@ async fn udp_session_listener_reports_bound_local_addr_before_accept() {
     let mut listener = MockUdpSessionListener {
         local_addr: SocketAddr::from(([0, 0, 0, 0], 0)),
         accepted: Some(MockUdpSessionSocket {
-            kind: UdpSessionKind::EasyTierMux,
+            kind: UdpSessionKind::ExvlanMux,
             local_addr,
             peer_addr,
             incoming: Mutex::new(Vec::new()),
@@ -402,7 +402,7 @@ async fn portable_udp_receive_keeps_general_and_session_capacities_separate() {
     );
 }
 
-fn easytier_stun_request(change_ip: bool, change_port: bool) -> Vec<u8> {
+fn exvlan_stun_request(change_ip: bool, change_port: bool) -> Vec<u8> {
     let mut request = Message::<Attribute>::new(MessageClass::Request, BINDING, u32_to_tid(7));
     if change_ip || change_port {
         request.add_attribute(Attribute::ChangeRequest(ChangeRequest::new(
@@ -558,8 +558,8 @@ where
         socket,
         local_addr,
         key.peer_addr,
-        UdpSessionKind::EasyTierMux,
-        UdpSessionCodec::EasyTierData {
+        UdpSessionKind::ExvlanMux,
+        UdpSessionCodec::ExvlanData {
             conn_id: key.conn_id,
         },
         rings,
@@ -943,7 +943,7 @@ async fn udp_layer_pre_enabled_classified_accept_queues_first_packet() {
 }
 
 #[tokio::test]
-async fn udp_layer_routes_quic_like_easytier_packet_to_existing_quic_session() {
+async fn udp_layer_routes_quic_like_exvlan_packet_to_existing_quic_session() {
     let local_addr = SocketAddr::from(([127, 0, 0, 1], 12000));
     let peer_addr = SocketAddr::from(([127, 0, 0, 1], 12001));
     let socket = Arc::new(AutoSackVirtualUdpSocket::new(local_addr));
@@ -1051,7 +1051,7 @@ async fn easy_tier_mux_udp_session_wraps_sent_payloads() {
         sessions,
     );
 
-    assert_eq!(session.kind(), UdpSessionKind::EasyTierMux);
+    assert_eq!(session.kind(), UdpSessionKind::ExvlanMux);
     assert_eq!(session.send(b"payload").await.unwrap(), 7);
 
     let sent = wait_for_sent(|| socket.sent(), 1).await;
@@ -1059,7 +1059,7 @@ async fn easy_tier_mux_udp_session_wraps_sent_payloads() {
     assert_eq!(sent[0].1, peer_addr);
 
     let packet = parse_udp_session_datagram(BytesMut::from(sent[0].0.as_slice()), false)
-        .expect("sent datagram should keep EasyTier UDP packet shape");
+        .expect("sent datagram should keep Exvlan UDP packet shape");
     let header = packet.udp_tunnel_header().unwrap();
     assert_eq!(header.conn_id.get(), conn_id);
     assert_eq!(header.msg_type, UdpPacketType::Data as u8);
@@ -1100,7 +1100,7 @@ fn udp_session_codecs_enforce_datagram_boundary() {
         .unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
 
-    let easy_tier = UdpSessionCodec::EasyTierData {
+    let easy_tier = UdpSessionCodec::ExvlanData {
         conn_id: 0x1122_3344,
     };
     let max_payload = MAX_UDP_SESSION_DATAGRAM_SIZE - UDP_TUNNEL_HEADER_SIZE;
@@ -1210,7 +1210,7 @@ async fn udp_session_layer_connects_with_shared_recv_loop() {
         .unwrap();
 
     assert_eq!(layer.local_addr().unwrap(), local_addr);
-    assert_eq!(session.kind(), UdpSessionKind::EasyTierMux);
+    assert_eq!(session.kind(), UdpSessionKind::ExvlanMux);
     assert_eq!(session.peer_addr().unwrap(), peer_addr);
 
     let sent = socket.sent();
@@ -1357,7 +1357,7 @@ async fn udp_session_layer_accepts_syn_and_sends_sack() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(accepted.kind(), UdpSessionKind::EasyTierMux);
+    assert_eq!(accepted.kind(), UdpSessionKind::ExvlanMux);
     assert_eq!(accepted.peer_addr().unwrap(), peer_addr);
     assert!(sessions.contains_key(&UdpSessionKey::new(peer_addr, conn_id)));
 
@@ -1452,8 +1452,8 @@ async fn udp_session_layer_routes_stun_and_hole_punch_control_packets() {
         ip: "2001:db8::2".parse().unwrap(),
         ifindex: 42,
     };
-    let stun = easytier_stun_request(false, false);
-    let change_stun = easytier_stun_request(true, false);
+    let stun = exvlan_stun_request(false, false);
+    let change_stun = exvlan_stun_request(true, false);
     let socket = Arc::new(MockVirtualUdpSocket::new(
         local_addr,
         vec![
@@ -1992,7 +1992,7 @@ async fn udp_session_socket_listener_accepts_easy_tier_mux_session() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(session.kind(), UdpSessionKind::EasyTierMux);
+    assert_eq!(session.kind(), UdpSessionKind::ExvlanMux);
     assert_eq!(session.local_addr().unwrap(), local_addr);
     assert_eq!(session.peer_addr().unwrap(), peer_addr);
 }
@@ -2005,7 +2005,7 @@ async fn udp_session_dialer_uses_factory_as_stun_responder() {
     let expected_session_bind = request.bind.clone();
     let factory = Arc::new(MockVirtualUdpSocketFactory::with_socket_incoming(
         13000,
-        vec![(easytier_stun_request(true, false), stun_remote_addr)],
+        vec![(exvlan_stun_request(true, false), stun_remote_addr)],
     ));
     let mut dialer = UdpSessionDialer::new(factory.clone());
 
@@ -2168,11 +2168,11 @@ fn parses_udp_session_datagram_and_rejects_bad_payload_len() {
 }
 
 #[test]
-fn inspects_easytier_udp_datagram_without_owning_buffer() {
+fn inspects_exvlan_udp_datagram_without_owning_buffer() {
     let packet = new_syn_packet(7, 42).into_bytes();
-    let info = inspect_easytier_udp_datagram(&packet).unwrap().unwrap();
+    let info = inspect_exvlan_udp_datagram(&packet).unwrap().unwrap();
 
-    assert_eq!(info.kind, EasyTierUdpPacketKind::Syn);
+    assert_eq!(info.kind, ExvlanUdpPacketKind::Syn);
     assert_eq!(info.conn_id, 7);
 
     let unknown_packet = new_udp_packet(
@@ -2185,7 +2185,7 @@ fn inspects_easytier_udp_datagram_without_owning_buffer() {
     )
     .into_bytes();
     assert_eq!(
-        inspect_easytier_udp_datagram(&unknown_packet).unwrap(),
+        inspect_exvlan_udp_datagram(&unknown_packet).unwrap(),
         None
     );
 
@@ -2193,8 +2193,8 @@ fn inspects_easytier_udp_datagram_without_owning_buffer() {
     bad_packet.pop();
 
     assert!(matches!(
-        inspect_easytier_udp_datagram(&bad_packet),
-        Err(EasyTierUdpDatagramInspectError::PayloadLenMismatch { .. })
+        inspect_exvlan_udp_datagram(&bad_packet),
+        Err(ExvlanUdpDatagramInspectError::PayloadLenMismatch { .. })
     ));
 }
 

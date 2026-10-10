@@ -1,4 +1,4 @@
-//! Raw `easytier_host` imports, compiled only for the WASI guest.
+//! Raw `exvlan_host` imports, compiled only for the WASI guest.
 //!
 //! [`crate::wasi::abi`] declares the shared contract metadata; each import
 //! below documents its own ownership and completion rules. Concrete adapters
@@ -9,7 +9,7 @@ pub(crate) const HOST_WOULD_BLOCK: i32 = -5;
 #[cfg(feature = "wasm-host-tunnel")]
 pub(crate) const HOST_TUNNEL_CLOSED: i32 = -10;
 
-#[link(wasm_import_module = "easytier_host")]
+#[link(wasm_import_module = "exvlan_host")]
 unsafe extern "C" {
     /// Emits one best-effort instance event after the host copies both strings.
     ///

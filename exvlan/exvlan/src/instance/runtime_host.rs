@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier_core::{
+use exvlan_core::{
     config::runtime::CoreInstanceRuntimeConfig, gateway::dhcp::DhcpIpv4Host,
     host::packet::HostPacketReceiver, instance::CorePacketPlane,
 };
@@ -136,7 +136,7 @@ mod tests {
 
     #[cfg(feature = "web-client")]
     fn runtime_config(config: &TomlConfig) -> CoreInstanceRuntimeConfig {
-        let normalized = easytier_core::instance::CoreInstanceConfig::from_toml(config).unwrap();
+        let normalized = exvlan_core::instance::CoreInstanceConfig::from_toml(config).unwrap();
         CoreInstanceRuntimeConfig {
             services: normalized.connectivity.runtime,
             peer: Arc::new(normalized.peer.snapshot),
@@ -160,7 +160,7 @@ mod tests {
     #[cfg(feature = "web-client")]
     #[test]
     fn runtime_host_synchronizes_normalized_config_without_management() {
-        use easytier_core::{config::toml::ConfigLoader as _, instance::InstanceRuntimeHost as _};
+        use exvlan_core::{config::toml::ConfigLoader as _, instance::InstanceRuntimeHost as _};
 
         let config = TomlConfig::default();
         config.set_hostname(Some("before".to_owned()));
@@ -204,7 +204,7 @@ mod tests {
     #[cfg(feature = "web-client")]
     #[test]
     fn runtime_host_preserves_dhcp_ipv4_during_config_synchronization() {
-        use easytier_core::{config::toml::ConfigLoader as _, instance::InstanceRuntimeHost as _};
+        use exvlan_core::{config::toml::ConfigLoader as _, instance::InstanceRuntimeHost as _};
 
         let config = TomlConfig::default();
         config.set_dhcp(true);

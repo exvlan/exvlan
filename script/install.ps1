@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    EXVlan Windows Installer
+    Exvlan Windows Installer
 
 .DESCRIPTION
-    Download EXVlan from GitHub Release and install it.
+    Download Exvlan from GitHub Release and install it.
     Copies binaries to the install directory and updates the system PATH.
 
 .PARAMETER Version
@@ -11,18 +11,18 @@
     Default: "latest"
 
 .PARAMETER InstallDir
-    Directory to install EXVlan binaries.
-    Default: "$env:ProgramFiles\EXVlan"
+    Directory to install Exvlan binaries.
+    Default: "$env:ProgramFiles\Exvlan"
 
 .EXAMPLE
     .\install.ps1
     .\install.ps1 -Version v26.308.20604
-    .\install.ps1 -InstallDir "C:\EXVlan"
+    .\install.ps1 -InstallDir "C:\Exvlan"
 
 .NOTES
     Administrator privileges are required.
     After installation, run: exvlan-cli service install
-    to register EXVlan as a system service.
+    to register Exvlan as a system service.
 #>
 param(
     [Parameter(Position = 0)]
@@ -30,7 +30,7 @@ param(
     [string]$Version = 'latest',
 
     [Parameter(Position = 1)]
-    [string]$InstallDir = "$env:ProgramFiles\EXVlan"
+    [string]$InstallDir = "$env:ProgramFiles\Exvlan"
 )
 
 Set-StrictMode -Version Latest
@@ -76,7 +76,7 @@ $assetBaseName = "exvlan-windows-$arch"
 
 Write-Host ''
 Write-Host '  ===============================================' -ForegroundColor Cyan
-Write-Host '        EXVlan Windows Installer              ' -ForegroundColor Cyan
+Write-Host '        Exvlan Windows Installer              ' -ForegroundColor Cyan
 Write-Host '  ===============================================' -ForegroundColor Cyan
 Write-Host ''
 Write-Host "  Architecture : $arch" -ForegroundColor White
@@ -91,14 +91,14 @@ try {
     if ($Version -eq 'latest' -or $Version -eq 'stable') {
         $releaseInfo = Invoke-RestMethod `
             -Uri "$GITHUB_API/releases/latest" `
-            -Headers @{ 'User-Agent' = 'EXVlan-Installer/1.0' } `
+            -Headers @{ 'User-Agent' = 'Exvlan-Installer/1.0' } `
             -ErrorAction Stop
     }
     else {
         $tag = if ($Version -notmatch '^v') { "v$Version" } else { $Version }
         $releaseInfo = Invoke-RestMethod `
             -Uri "$GITHUB_API/releases/tags/$tag" `
-            -Headers @{ 'User-Agent' = 'EXVlan-Installer/1.0' } `
+            -Headers @{ 'User-Agent' = 'Exvlan-Installer/1.0' } `
             -ErrorAction Stop
     }
 }
@@ -225,7 +225,7 @@ catch {
 # Done
 # ---------------------------------------------------------------------------
 Write-Host ''
-Write-Host "  [OK] EXVlan $releaseVersion installation complete!" -ForegroundColor Green
+Write-Host "  [OK] Exvlan $releaseVersion installation complete!" -ForegroundColor Green
 Write-Host ''
 Write-Host "  Install dir : $InstallDir" -ForegroundColor White
 Write-Host '  User guide  : https://doc.vlan.era-x.cn/en/guide/network/decentralized-networking.html' -ForegroundColor DarkGray

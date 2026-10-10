@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	corehost "github.com/easytier/easytier/easytier-go"
+	corehost "github.com/exvlan/exvlan/exvlan-go"
 	tun "github.com/sagernet/sing-tun"
 )
 
@@ -42,12 +42,12 @@ func main() {
 	)
 	defer stop()
 	if err := run(ctx, options); err != nil {
-		log.Printf("EasyTier TUN failed: %v", err)
+		log.Printf("Exvlan TUN failed: %v", err)
 		os.Exit(1)
 	}
 }
 
-// EasyTier lifecycle
+// Exvlan lifecycle
 
 func run(ctx context.Context, options options) error {
 	prefix, err := options.validate()
@@ -57,7 +57,7 @@ func run(ctx context.Context, options options) error {
 
 	host, err := corehost.New(ctx, corehost.Options{})
 	if err != nil {
-		return fmt.Errorf("create EasyTier host: %w", err)
+		return fmt.Errorf("create Exvlan host: %w", err)
 	}
 	defer host.Close(context.Background())
 
@@ -68,11 +68,11 @@ func run(ctx context.Context, options options) error {
 		AddPortForwards([]corehost.PortForwardConfig(options.portForwards)...).
 		Build()
 	if err != nil {
-		return fmt.Errorf("build EasyTier instance config: %w", err)
+		return fmt.Errorf("build Exvlan instance config: %w", err)
 	}
 	instance, err := host.CreateInstance(ctx, config)
 	if err != nil {
-		return fmt.Errorf("create EasyTier instance: %w", err)
+		return fmt.Errorf("create Exvlan instance: %w", err)
 	}
 	defer instance.Close(context.Background())
 	go logEvents(ctx, instance.Events())
@@ -88,11 +88,11 @@ func run(ctx context.Context, options options) error {
 	}
 
 	if err := instance.Start(ctx); err != nil {
-		return fmt.Errorf("start EasyTier instance: %w", err)
+		return fmt.Errorf("start Exvlan instance: %w", err)
 	}
 	startManagementSignals(ctx, instance)
 	log.Printf(
-		"connected %s to EasyTier network %q as %s",
+		"connected %s to Exvlan network %q as %s",
 		deviceName,
 		options.networkName,
 		prefix,
@@ -107,7 +107,7 @@ func logEvents(ctx context.Context, events <-chan corehost.Event) {
 			if !open {
 				return
 			}
-			log.Printf("EasyTier event [%s]: %s", event.Kind, event.Message)
+			log.Printf("Exvlan event [%s]: %s", event.Kind, event.Message)
 		case <-ctx.Done():
 			return
 		}
@@ -142,16 +142,16 @@ func startManagementSignals(
 				case peerSignal:
 					response, err := instance.ListPeer(queryContext)
 					if err != nil {
-						log.Printf("query EasyTier peer list: %v", err)
+						log.Printf("query Exvlan peer list: %v", err)
 					} else {
-						log.Printf("EasyTier peer list: %v", response)
+						log.Printf("Exvlan peer list: %v", response)
 					}
 				case routeSignal:
 					response, err := instance.ListRoute(queryContext)
 					if err != nil {
-						log.Printf("query EasyTier route list: %v", err)
+						log.Printf("query Exvlan route list: %v", err)
 					} else {
-						log.Printf("EasyTier route list: %v", response)
+						log.Printf("Exvlan route list: %v", response)
 					}
 				}
 				cancel()
@@ -304,9 +304,9 @@ func bridgePackets(
 	defer cancel()
 	results := make(chan error, tunReadWorkers+1)
 	for range tunReadWorkers {
-		go func() { results <- copyTunToEasyTier(pumpContext, device, instance) }()
+		go func() { results <- copyTunToExvlan(pumpContext, device, instance) }()
 	}
-	go func() { results <- copyEasyTierToTun(pumpContext, instance, device) }()
+	go func() { results <- copyExvlanToTun(pumpContext, instance, device) }()
 
 	errs := []error{<-results}
 	cancel()
@@ -317,7 +317,7 @@ func bridgePackets(
 	return errors.Join(errs...)
 }
 
-func copyTunToEasyTier(
+func copyTunToExvlan(
 	ctx context.Context,
 	device io.Reader,
 	instance *corehost.Instance,
@@ -338,12 +338,12 @@ func copyTunToEasyTier(
 			if ctx.Err() != nil {
 				return nil
 			}
-			return fmt.Errorf("send TUN packet to EasyTier: %w", err)
+			return fmt.Errorf("send TUN packet to Exvlan: %w", err)
 		}
 	}
 }
 
-func copyEasyTierToTun(
+func copyExvlanToTun(
 	ctx context.Context,
 	instance *corehost.Instance,
 	device io.Writer,
@@ -354,14 +354,14 @@ func copyEasyTierToTun(
 			if ctx.Err() != nil {
 				return nil
 			}
-			return fmt.Errorf("receive EasyTier packet: %w", err)
+			return fmt.Errorf("receive Exvlan packet: %w", err)
 		}
 		written, err := device.Write(packet)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return fmt.Errorf("write EasyTier packet to TUN: %w", err)
+			return fmt.Errorf("write Exvlan packet to TUN: %w", err)
 		}
 		// Wintun reports a full send ring as (0, nil), meaning that it has
 		// dropped this packet. Keep the bridge alive for subsequent packets.
@@ -442,15 +442,15 @@ func parsePortForwardRule(value string) (corehost.PortForwardConfig, error) {
 
 func parseOptions() options {
 	var options options
-	flag.Var(&options.peers, "p", "EasyTier peer URI; may be repeated")
+	flag.Var(&options.peers, "p", "Exvlan peer URI; may be repeated")
 	flag.Var(
 		&options.portForwards,
 		"port-forward",
 		"tcp://bind/overlay-target or udp://bind/overlay-target; may be repeated",
 	)
-	flag.StringVar(&options.networkName, "network-name", "", "EasyTier network name")
-	flag.StringVar(&options.networkSecret, "network-secret", "", "EasyTier network secret")
-	flag.StringVar(&options.ipv4, "ipv4", "", "fixed EasyTier IPv4 address and prefix")
+	flag.StringVar(&options.networkName, "network-name", "", "Exvlan network name")
+	flag.StringVar(&options.networkSecret, "network-secret", "", "Exvlan network secret")
+	flag.StringVar(&options.ipv4, "ipv4", "", "fixed Exvlan IPv4 address and prefix")
 	flag.Parse()
 	return options
 }

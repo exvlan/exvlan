@@ -1,16 +1,16 @@
 {
-  "name": "@easytier/runtime",
+  "name": "@exvlan/runtime",
   "version": "0.1.0",
-  "description": "Shared WebAssembly runtime for EasyTier web hosts",
+  "description": "Shared WebAssembly runtime for Exvlan web hosts",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EasyTier/EasyTier.git",
-    "directory": "easytier-js/runtime"
+    "url": "git+https://github.com/exvlan/exvlan.git",
+    "directory": "exvlan-js/runtime"
   },
-  "homepage": "https://github.com/EasyTier/EasyTier",
-  "bugs": "https://github.com/EasyTier/EasyTier/issues",
+  "homepage": "https://github.com/exvlan/exvlan",
+  "bugs": "https://github.com/exvlan/exvlan/issues",
   "sideEffects": false,
   "exports": {
     ".": {

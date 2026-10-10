@@ -29,7 +29,7 @@ struct ClientInfo {
 #[derive(Debug, Clone)]
 struct ManagedRuntimeContinuity {
     // Accepted trade-off: continuity assumes managed configuration is only
-    // mutated through easytier-web. A local management RPC can make Core
+    // mutated through exvlan-api. A local management RPC can make Core
     // drift without invalidating this state; detecting that would require a
     // Core-wide mutation generation outside this compatibility path.
     runtime_id: Option<uuid::Uuid>,

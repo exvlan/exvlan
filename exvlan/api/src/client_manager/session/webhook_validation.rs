@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context as _;
-use easytier::proto::web::HeartbeatRequest;
+use exvlan::proto::web::HeartbeatRequest;
 use tokio::sync::RwLock;
 
 use super::{
@@ -50,7 +50,7 @@ async fn request_heartbeat_validation(
         machine_id: input.machine_id.to_string(),
         public_ip: input.client_url.host_str().map(str::to_string),
         hostname: input.req.hostname.clone(),
-        version: input.req.easytier_version.clone(),
+        version: input.req.exvlan_version.clone(),
         os_type: input
             .req
             .device_os
@@ -492,7 +492,7 @@ pub(super) async fn apply_success(
                 token: runtime_req.user_token.clone(),
                 user_id: Some(user_id),
                 hostname: runtime_req.hostname.clone(),
-                version: runtime_req.easytier_version.clone(),
+                version: runtime_req.exvlan_version.clone(),
                 os_type: runtime_req
                     .device_os
                     .as_ref()

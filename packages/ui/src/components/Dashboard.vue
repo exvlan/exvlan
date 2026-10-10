@@ -2,7 +2,7 @@
 import { Button, Message, Skeleton } from 'primevue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Utils } from 'easytier-frontend-lib';
+import { Utils } from '@exvlan/std';
 import ApiClient, { type Summary, type CentralNetworkSummary } from '../modules/api';
 
 const props = defineProps<{ api: ApiClient; centralEnabled: boolean }>();
@@ -66,7 +66,7 @@ const stats = computed(() => [
                 <div v-if="devices === undefined && !loadError" class="loading-rows"><Skeleton v-for="i in 3" :key="i" height="2rem" /></div>
                 <div v-else-if="devices?.length === 0" class="console-empty-state">
                     <i class="pi pi-server" aria-hidden="true"></i><h2>{{ t('web.console.devices_empty') }}</h2><p>{{ t('web.console.devices_empty_hint') }}</p>
-                    <a href="https://easytier.cn" target="_blank" rel="noopener noreferrer" class="entity-link">{{ t('web.console.documentation') }}<i class="pi pi-arrow-up-right" aria-hidden="true"></i></a>
+                    <a href="https://exvlan.cn" target="_blank" rel="noopener noreferrer" class="entity-link">{{ t('web.console.documentation') }}<i class="pi pi-arrow-up-right" aria-hidden="true"></i></a>
                 </div>
                 <RouterLink v-for="device in devicePreview" :key="device.machine_id" class="preview-row"
                     :to="{ name: 'deviceManagement', params: { deviceId: device.machine_id, instanceId: device.running_network_instances?.[0] } }">

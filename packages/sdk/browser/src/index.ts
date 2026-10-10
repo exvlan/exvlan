@@ -1,39 +1,39 @@
-import coreBytes from "./generated/easytier_core.wasm";
-import { createEasyTierWithArtifact } from "./create.js";
+import coreBytes from "./generated/exvlan_core.wasm";
+import { createExvlanWithArtifact } from "./create.js";
 import type {
-  EasyTierEvent,
-  EasyTierInstance,
-  EasyTierIpv4SocketAddress,
-  EasyTierNetworkConfig,
-  EasyTierOperationOptions,
-  EasyTierState,
-  EasyTierStatus,
-  EasyTierTcpListener,
-  EasyTierTcpReadResult,
-  EasyTierTcpStream,
-} from "@easytier/runtime";
+  ExvlanEvent,
+  ExvlanInstance,
+  ExvlanIpv4SocketAddress,
+  ExvlanNetworkConfig,
+  ExvlanOperationOptions,
+  ExvlanState,
+  ExvlanStatus,
+  ExvlanTcpListener,
+  ExvlanTcpReadResult,
+  ExvlanTcpStream,
+} from "@exvlan/runtime";
 import type {
-  BrowserEasyTierConfig,
-  BrowserEasyTierOptions,
+  BrowserExvlanConfig,
+  BrowserExvlanOptions,
 } from "./create.js";
 
 export type {
-  EasyTierEvent,
-  EasyTierInstance,
-  EasyTierIpv4SocketAddress,
-  EasyTierNetworkConfig,
-  EasyTierOperationOptions,
-  EasyTierState,
-  EasyTierStatus,
-  EasyTierTcpListener,
-  EasyTierTcpReadResult,
-  EasyTierTcpStream,
+  ExvlanEvent,
+  ExvlanInstance,
+  ExvlanIpv4SocketAddress,
+  ExvlanNetworkConfig,
+  ExvlanOperationOptions,
+  ExvlanState,
+  ExvlanStatus,
+  ExvlanTcpListener,
+  ExvlanTcpReadResult,
+  ExvlanTcpStream,
 };
-export type { BrowserEasyTierConfig, BrowserEasyTierOptions };
+export type { BrowserExvlanConfig, BrowserExvlanOptions };
 
-export async function createEasyTier(
-  config: BrowserEasyTierConfig,
-  options: BrowserEasyTierOptions = {},
-): Promise<EasyTierInstance> {
-  return createEasyTierWithArtifact(coreBytes, config, options);
+export async function createExvlan(
+  config: BrowserExvlanConfig,
+  options: BrowserExvlanOptions = {},
+): Promise<ExvlanInstance> {
+  return createExvlanWithArtifact(coreBytes, config, options);
 }

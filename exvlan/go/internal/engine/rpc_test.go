@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/easytier/easytier/easytier-go/internal/coreabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/coreabi"
 )
 
 type readyRPC struct {

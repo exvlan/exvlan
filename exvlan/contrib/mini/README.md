@@ -1,6 +1,6 @@
-# easytier-mini
+# exvlan-mini
 
-`easytier-mini` is a native EasyTier POC binary. It shares EasyTier's TOML
+`exvlan-mini` is a native Exvlan POC binary. It shares Exvlan's TOML
 configuration model, peer protocol, TCP/UDP tunnel implementations, TUN,
 dynamic IPv4 allocation, the smoltcp userspace path and STUN/UDP hole-punching
 core with the full binary. It includes AES-GCM so its default encryption
@@ -9,13 +9,13 @@ setting interoperates with the full binary's default configuration.
 Build it with:
 
 ```sh
-cargo build --release -p easytier-mini
+cargo build --release -p exvlan-mini
 ```
 
 For the static size target used by this POC:
 
 ```sh
-cargo build --profile mini --target x86_64-unknown-linux-musl -p easytier-mini
+cargo build --profile mini --target x86_64-unknown-linux-musl -p exvlan-mini
 ```
 
 MIPS targets use the repository's existing musl-cross toolchains. The helper
@@ -23,13 +23,13 @@ builds the standard library for size, applies immediate-abort only to the mini
 MIPS target graph, and can build either or both byte orders:
 
 ```sh
-./easytier-contrib/easytier-mini/build-mips.sh all
-./easytier-contrib/easytier-mini/build-mips.sh mips
-./easytier-contrib/easytier-mini/build-mips.sh mipsel
+./exvlan/contrib/exvlan-mini/build-mips.sh all
+./exvlan/contrib/exvlan-mini/build-mips.sh mips
+./exvlan/contrib/exvlan-mini/build-mips.sh mipsel
 ```
 
 The `mini` profile derives from `release` and applies `opt-level=z` to the
-entire compact binary dependency graph. Full EasyTier release builds retain
+entire compact binary dependency graph. Full Exvlan release builds retain
 their normal `opt-level=3` profile. The musl builds use a mini-only static
 linker policy to stay below 5,000,000 bytes on x86-64 and 5,500,000 bytes on
 MIPS without UPX or another executable compressor. The compact x86-64 linker
@@ -38,18 +38,18 @@ MIPS builds omit standard-library backtrace support and use immediate abort;
 normal workspace MIPS builds are not affected. Compact linker policies omit
 unwind tables.
 
-Start it with a normal EasyTier TOML file:
+Start it with a normal Exvlan TOML file:
 
 ```sh
-easytier-mini --config mini.toml
+exvlan-mini --config mini.toml
 ```
 
 `-c` is accepted as the short form of `--config`.
 
-Start it as an EasyTier Web managed node with a complete config-server URL:
+Start it as an Exvlan Web managed node with a complete config-server URL:
 
 ```sh
-easytier-mini --config-server udp://config-server.easytier.cn:22020/TOKEN
+exvlan-mini --config-server udp://config-server.exvlan.cn:22020/TOKEN
 ```
 
 `--machine-id`, `--hostname`, and `--secure-mode` match the full client's Web
@@ -57,14 +57,14 @@ identity and transport options. `--config` and `--config-server` may be used
 together: the local instance remains static while Web-owned instances are
 created, updated, retained, and deleted independently.
 
-The node also exposes the native EasyTier management RPC protocol on
-`127.0.0.1:15888`, so the full `easytier-cli` can inspect it:
+The node also exposes the native Exvlan management RPC protocol on
+`127.0.0.1:15888`, so the full `exvlan-cli` can inspect it:
 
 ```sh
-easytier-cli node info
-easytier-cli peer
-easytier-cli route
-easytier-cli connector list
+exvlan-cli node info
+exvlan-cli peer
+exvlan-cli route
+exvlan-cli connector list
 ```
 
 For example:
@@ -84,7 +84,7 @@ uri = "tcp://example.net:11010"
 
 Local TOML and Web configuration both retain the complete authoritative model.
 The compact runtime silently omits unsupported capabilities while normalizing
-that model into live runtime state. EasyTier Web therefore sees every accepted
+that model into live runtime state. Exvlan Web therefore sees every accepted
 configuration value unchanged and its consistency checks converge. This also
 applies to hot patches: for example, a port-forward patch remains visible to
 the controller while no port-forward service starts in mini. ChaCha20 falls
@@ -101,7 +101,7 @@ hole punching, endpoint discovery (`http://`, `https://`, `txt://` and
 management surface. Unsupported connector URLs are accepted as no-ops. Its
 local RPC surface remains read-only for node, peer, route and connector
 queries. OSPF route messages keep their original protobuf wire data, so fields
-added by future EasyTier versions are forwarded without requiring
+added by future Exvlan versions are forwarded without requiring
 `prost-reflect`.
 
 For size, this POC reads one file directly and does not support configuration

@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-shell'
 import { exit } from '@tauri-apps/plugin-process'
-import { I18nUtils, RemoteManagement, Utils } from "easytier-frontend-lib"
+import { I18nUtils, RemoteManagement, Utils } from "@exvlan/std"
 import type { MenuItem } from 'primevue/menuitem'
 import { useTray } from '~/composables/tray'
 import {
@@ -22,7 +22,7 @@ import { useToast, useConfirm } from 'primevue'
 import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mode'
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
-import { getEasytierVersion, getServiceStatus } from '~/composables/backend'
+import { getExvlanVersion, getServiceStatus } from '~/composables/backend'
 
 const { t, locale } = useI18n()
 const confirm = useConfirm()
@@ -170,7 +170,7 @@ async function initWithMode(mode: Mode) {
         return initWithMode({ ...mode, mode: 'normal' });
       }
       let serviceStatus = await getServiceStatus()
-      const coreVersion = await getEasytierVersion()
+      const coreVersion = await getExvlanVersion()
       if (serviceStatus === "NotInstalled" || modeConfigChanged(mode) || mode.installed_core_version !== coreVersion) {
         mode.config_server_url = mode.config_server_url || undefined
         await initService({
@@ -230,7 +230,7 @@ onMounted(async () => {
     try {
       await initMobileVpnService()
     } catch (e: any) {
-      console.error("easytier init vpn service failed", e)
+      console.error("exvlan init vpn service failed", e)
     }
   }
 
@@ -245,7 +245,7 @@ onMounted(async () => {
       await consumePendingMobileVpnTileAction()
       await syncMobileVpnService()
     } catch (e: any) {
-      console.error("easytier sync vpn service failed", e)
+      console.error("exvlan sync vpn service failed", e)
     }
   }
 
@@ -446,7 +446,7 @@ const setting_menu_items: Ref<MenuItem[]> = ref([
 
 async function connectRpcClient(isNormalMode: boolean, url?: string) {
   await initRpcConnection(isNormalMode, url)
-  console.log("easytier rpc connection established, isNormalMode: ", isNormalMode)
+  console.log("exvlan rpc connection established, isNormalMode: ", isNormalMode)
 }
 
 async function openConfigServerDialog() {

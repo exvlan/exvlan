@@ -1,4 +1,4 @@
-use easytier_proto::{
+use exvlan_proto::{
     api::config::{
         ConfigRpc, GetConfigRequest, GetConfigResponse, PatchConfigRequest, PatchConfigResponse,
     },

@@ -24,7 +24,7 @@ pub struct ManualEndpointDiscoveryConfig {
 impl Default for ManualEndpointDiscoveryConfig {
     fn default() -> Self {
         Self {
-            user_agent: "easytier-core".to_owned(),
+            user_agent: "exvlan-core".to_owned(),
             network_name: String::new(),
             http_timeout: Duration::from_secs(20),
             http_ip_version: IpVersion::Both,

@@ -7,8 +7,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/easytier/easytier/easytier-go/internal/contextutil"
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/internal/contextutil"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 )
 
 var (

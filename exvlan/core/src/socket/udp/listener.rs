@@ -17,7 +17,7 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UdpSessionAcceptKind {
-    EasyTierMux,
+    ExvlanMux,
     Classified(UdpSessionProtocol),
 }
 
@@ -30,7 +30,7 @@ where
     R: UdpSessionStunResponder<S>,
 {
     match accept_kind {
-        UdpSessionAcceptKind::EasyTierMux => layer.accept().await,
+        UdpSessionAcceptKind::ExvlanMux => layer.accept().await,
         UdpSessionAcceptKind::Classified(protocol) => {
             layer.accept_classified_session(protocol).await
         }
@@ -60,7 +60,7 @@ where
         let request = UdpSessionListenRequest::new(
             UdpBindOptions::port_bound_listener(local_addr).with_only_v6(true),
         );
-        Self::new_with_request(url, request, UdpSessionAcceptKind::EasyTierMux, factory)
+        Self::new_with_request(url, request, UdpSessionAcceptKind::ExvlanMux, factory)
     }
 
     pub fn new_with_request(

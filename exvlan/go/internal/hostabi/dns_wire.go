@@ -7,7 +7,7 @@ import (
 	"net/netip"
 	"unicode/utf8"
 
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 )
 
 const (

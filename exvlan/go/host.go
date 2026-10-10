@@ -3,7 +3,7 @@ package host
 import (
 	"context"
 
-	internalhost "github.com/easytier/easytier/easytier-go/internal/host"
+	internalhost "github.com/exvlan/exvlan/exvlan-go/internal/host"
 )
 
 type State = internalhost.State
@@ -20,7 +20,7 @@ type Options = internalhost.Options
 
 type EmbeddedCoreInfo = internalhost.EmbeddedCoreInfo
 
-// Event is one best-effort notification emitted by an EasyTier instance.
+// Event is one best-effort notification emitted by an Exvlan instance.
 type Event = internalhost.Event
 
 type Host = internalhost.Host

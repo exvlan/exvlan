@@ -84,7 +84,7 @@ func TestTCPPortForward(t *testing.T) {
 	}
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
-	sent := bytes.Repeat([]byte("easytier"), 1024)
+	sent := bytes.Repeat([]byte("exvlan"), 1024)
 	if _, err := connection.Write(sent); err != nil {
 		t.Fatalf("write forward: %v", err)
 	}

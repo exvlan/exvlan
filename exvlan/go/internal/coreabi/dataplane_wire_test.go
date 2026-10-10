@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestSocketAddressWireMatchesEasyTierABI(t *testing.T) {
+func TestSocketAddressWireMatchesExvlanABI(t *testing.T) {
 	address := netip.MustParseAddrPort("192.0.2.1:11013")
 	wire, err := encodeSocketAddress(address)
 	if err != nil {
@@ -48,7 +48,7 @@ func TestSocketAddressWireRejectsIPv6AndNoncanonicalIPv4(t *testing.T) {
 	}
 }
 
-func TestCompletionWireMatchesEasyTierABI(t *testing.T) {
+func TestCompletionWireMatchesExvlanABI(t *testing.T) {
 	wire := make([]byte, completionLength*2)
 	binary.BigEndian.PutUint64(wire[:8], 0x0102_0304_0506_0708)
 	binary.BigEndian.PutUint16(wire[8:10], uint16(OperationUDPReceive))

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EasyTierRuntime } from "../src/runtime";
+import { ExvlanRuntime } from "../src/runtime";
 
 interface RuntimeHarness {
   armNextDrive(): void;
@@ -19,7 +19,7 @@ interface AttachHarness {
   serial: Promise<void>;
 }
 
-describe("EasyTierRuntime timer ownership", () => {
+describe("ExvlanRuntime timer ownership", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -27,7 +27,7 @@ describe("EasyTierRuntime timer ownership", () => {
   it("installs only the latest queued deadline timer", async () => {
     vi.useFakeTimers();
     const runtime = Object.create(
-      EasyTierRuntime.prototype,
+      ExvlanRuntime.prototype,
     ) as RuntimeHarness;
     Object.assign(runtime, {
       call: async (name: string) =>
@@ -57,7 +57,7 @@ describe("EasyTierRuntime timer ownership", () => {
       syncWallTime: vi.fn(),
     };
     const runtime = Object.create(
-      EasyTierRuntime.prototype,
+      ExvlanRuntime.prototype,
     ) as RuntimeHarness;
     Object.assign(runtime, {
       call: async (name: string) =>
@@ -90,11 +90,11 @@ describe("EasyTierRuntime timer ownership", () => {
   });
 });
 
-describe("EasyTierRuntime host tunnel ownership", () => {
+describe("ExvlanRuntime host tunnel ownership", () => {
   it("commits guest ownership before driving admission", async () => {
     const events: string[] = [];
     const runtime = Object.create(
-      EasyTierRuntime.prototype,
+      ExvlanRuntime.prototype,
     ) as AttachHarness;
     Object.assign(runtime, {
       ready: Promise.resolve(),
@@ -133,7 +133,7 @@ describe("EasyTierRuntime host tunnel ownership", () => {
   it("aborts guest-owned socket when admission drive fails", async () => {
     const events: string[] = [];
     const runtime = Object.create(
-      EasyTierRuntime.prototype,
+      ExvlanRuntime.prototype,
     ) as AttachHarness;
     Object.assign(runtime, {
       ready: Promise.resolve(),
@@ -162,13 +162,13 @@ describe("EasyTierRuntime host tunnel ownership", () => {
   });
 });
 
-describe("EasyTierRuntime data plane", () => {
+describe("ExvlanRuntime data plane", () => {
   it("exposes TCP listener creation after runtime initialization", async () => {
-    const listener = {} as Awaited<ReturnType<EasyTierRuntime["bindTcp"]>>;
+    const listener = {} as Awaited<ReturnType<ExvlanRuntime["bindTcp"]>>;
     const bindTcp = vi.fn().mockResolvedValue(listener);
     const runtime = Object.create(
-      EasyTierRuntime.prototype,
-    ) as EasyTierRuntime;
+      ExvlanRuntime.prototype,
+    ) as ExvlanRuntime;
     Object.assign(runtime, {
       ready: Promise.resolve(),
       dataPlane: { bindTcp },
@@ -191,8 +191,8 @@ describe("EasyTierRuntime data plane", () => {
       advanceMillis: vi.fn(),
     };
     const runtime = Object.create(
-      EasyTierRuntime.prototype,
-    ) as EasyTierRuntime;
+      ExvlanRuntime.prototype,
+    ) as ExvlanRuntime;
     Object.assign(runtime, {
       ready: Promise.resolve(),
       serial: Promise.resolve(),

@@ -39,18 +39,18 @@ use config::services::share_link_service::{
     parse_config_share_link as parse_config_share_link_inner,
 };
 use config::storage::config_meta::get_config_display_name;
-use easytier::common::config::NetworkConfigExt;
-use easytier::common::constants::EASYTIER_VERSION;
-use easytier::common::{
+use exvlan::common::config::NetworkConfigExt;
+use exvlan::common::constants::EXVLAN_VERSION;
+use exvlan::common::{
     MachineIdOptions,
     config::{ConfigLoader, TomlConfigLoader},
 };
-use easytier::proto::api::manage::NetworkConfig;
-use easytier::proto::api::manage::NetworkingMethod;
-use easytier::web_client::{WebClient, WebClientHooks, run_web_client};
-use easytier_ohos_core::runtime;
-use easytier_ohos_core::{ASYNC_RUNTIME, INSTANCE_MANAGER};
-use easytier_ohos_features::config;
+use exvlan::proto::api::manage::NetworkConfig;
+use exvlan::proto::api::manage::NetworkingMethod;
+use exvlan::web_client::{WebClient, WebClientHooks, run_web_client};
+use exvlan_ohos_core::runtime;
+use exvlan_ohos_core::{ASYNC_RUNTIME, INSTANCE_MANAGER};
+use exvlan_ohos_features::config;
 use kernel_bridge::{
     start_local_socket_server as start_local_socket_server_inner,
     stop_local_socket_server as stop_local_socket_server_inner,
@@ -77,7 +77,7 @@ pub(crate) fn feature_log_enabled(level: i32) -> bool {
 
 static WEB_CLIENTS: once_cell::sync::Lazy<Mutex<HashMap<String, ManagedWebClient>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
-const PRO_CONFIG_SERVER_CLIENT_ID: &str = "__easytier_pro_config_server_client__";
+const PRO_CONFIG_SERVER_CLIENT_ID: &str = "__exvlan_pro_config_server_client__";
 
 #[derive(Default)]
 struct TrackedWebClientHooks {
@@ -935,8 +935,8 @@ pub fn resolve_instance_id(instance_name: String) -> Option<String> {
 }
 
 #[napi]
-pub fn easytier_version() -> String {
-    EASYTIER_VERSION.to_string()
+pub fn exvlan_version() -> String {
+    EXVLAN_VERSION.to_string()
 }
 
 #[napi]
@@ -1060,12 +1060,12 @@ pub fn set_tun_fd(config_id: String, fd: i32) -> bool {
 
 #[napi]
 pub fn enable_socket_protection() -> bool {
-    easytier_ohos_core::socket_protection::enable_socket_protection()
+    exvlan_ohos_core::socket_protection::enable_socket_protection()
 }
 
 #[napi]
 pub async fn next_socket_protection_request() -> Option<SocketProtectionRequest> {
-    easytier_ohos_core::socket_protection::SOCKET_PROTECTION_MANAGER
+    exvlan_ohos_core::socket_protection::SOCKET_PROTECTION_MANAGER
         .next_request()
         .await
         .map(Into::into)
@@ -1080,18 +1080,18 @@ pub fn complete_socket_protection(
     let Ok(request_id) = request_id.parse::<u64>() else {
         return false;
     };
-    easytier_ohos_core::socket_protection::SOCKET_PROTECTION_MANAGER
+    exvlan_ohos_core::socket_protection::SOCKET_PROTECTION_MANAGER
         .complete_request(request_id, success, error)
 }
 
 #[napi]
 pub fn disable_socket_protection() -> bool {
-    easytier_ohos_core::socket_protection::disable_socket_protection()
+    exvlan_ohos_core::socket_protection::disable_socket_protection()
 }
 
 #[napi]
 pub fn fail_socket_protection() -> bool {
-    easytier_ohos_core::socket_protection::fail_socket_protection()
+    exvlan_ohos_core::socket_protection::fail_socket_protection()
 }
 
 #[napi]

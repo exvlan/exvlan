@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"net/url"
 
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 )
 
 const createConfigVersion = 14
@@ -49,7 +49,7 @@ func encodeCreateEnvelope(
 	snapshot platform.EnvironmentSnapshot,
 ) ([]byte, error) {
 	if configTOML == "" {
-		return nil, fmt.Errorf("EasyTier TOML configuration is empty")
+		return nil, fmt.Errorf("Exvlan TOML configuration is empty")
 	}
 	environment, err := encodeEnvironmentSnapshot(snapshot)
 	if err != nil {
@@ -61,7 +61,7 @@ func encodeCreateEnvelope(
 		Environment: environment,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("encode EasyTier create envelope: %w", err)
+		return nil, fmt.Errorf("encode Exvlan create envelope: %w", err)
 	}
 	return encoded, nil
 }
@@ -71,13 +71,13 @@ func encodeWebClientEnvelope(
 	snapshot platform.EnvironmentSnapshot,
 ) ([]byte, error) {
 	if options.Endpoint == "" {
-		return nil, fmt.Errorf("EasyTier WebClient endpoint is empty")
+		return nil, fmt.Errorf("Exvlan WebClient endpoint is empty")
 	}
 	if options.MachineID == "" {
-		return nil, fmt.Errorf("EasyTier WebClient machine ID is empty")
+		return nil, fmt.Errorf("Exvlan WebClient machine ID is empty")
 	}
 	if options.Hostname == "" {
-		return nil, fmt.Errorf("EasyTier WebClient hostname is empty")
+		return nil, fmt.Errorf("Exvlan WebClient hostname is empty")
 	}
 	environment, err := encodeEnvironmentSnapshot(snapshot)
 	if err != nil {
@@ -93,7 +93,7 @@ func encodeWebClientEnvelope(
 		Environment: environment,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("encode EasyTier WebClient envelope: %w", err)
+		return nil, fmt.Errorf("encode Exvlan WebClient envelope: %w", err)
 	}
 	return encoded, nil
 }

@@ -1,9 +1,9 @@
-# EasyTier Web Managed Config Incremental Sync Plan
+# Exvlan Web Managed Config Incremental Sync Plan
 
 ## Status
 
 - 状态：Implemented（核心协议、持久化与 Session 增量收敛）
-- 实施范围：EasyTier Web 的 HTTP 接收、校验、SQLite 持久化和 Session 运行态收敛
+- 实施范围：Exvlan Web 的 HTTP 接收、校验、SQLite 持久化和 Session 运行态收敛
 - 上游依赖：后续由 Console 计算并发送 Patch
 - 兼容要求：保留现有 Full PUT
 
@@ -397,7 +397,7 @@ revision。只影响 user-owned rows 的操作不清除 managed revision。
   row 时回退 Full，以保留 ownership 规则。完成前再次校验 persisted target
   revision；只有全部 touched instances 成功且 target 仍相同，才推进 applied
   revision。
-- 任何通过 EasyTier Web mutation route 直接 Run、Save、Delete 或切换实例状态的
+- 任何通过 Exvlan Web mutation route 直接 Run、Save、Delete 或切换实例状态的
   操作在执行前和结束后（包括部分 side effect 后返回错误）都清除 Session applied
   revision、可信 runtime base 与 pending hint，增加运行配置 cache epoch，并唤醒一次 Full
   reconcile。旧 round 只有 epoch 仍匹配时才能推进 applied revision；新一轮不得
@@ -450,7 +450,7 @@ Receiver 不保存 Patch delivery ledger。Publisher 根据自己的完整目标
 2. 将 Full rows/revision 改为一个 atomic transaction。
 3. 为 alternate web-row mutation 增加 revision invalidation。
 4. 增加 PATCH、typed conflict、capacity limits 和 metrics。
-5. 在 Console 仍只发送 PUT 时部署到全部 EasyTier Web 实例。
+5. 在 Console 仍只发送 PUT 时部署到全部 Exvlan Web 实例。
 6. 完成旧 Console PUT、新 Console PUT/PATCH contract 测试。
 7. 最后启用 Console Patch 发布。
 
@@ -463,7 +463,7 @@ response 当作旧 receiver 并静默换一种 mutation contract；出现 404 �
 
 ### 9.2 Rollback
 
-- Console 尚未发送 Patch 时，EasyTier Web 可正常回滚。
+- Console 尚未发送 Patch 时，Exvlan Web 可正常回滚。
 - Console 已发送 Patch 后，先回滚 Console，使调用恢复为 PUT，再回滚 Web。
 - PUT 在整个发布周期保持兼容。
 - Patch 和 Full 写入相同 rows/revision，不需要格式级数据迁移。
@@ -561,10 +561,10 @@ snapshot ID、staging rows、expiry、finalize 和 atomic swap 的协议。在�
 
 主要涉及：
 
-- `easytier-web/src/restful/network.rs`
-- `easytier-web/src/client_manager/mod.rs`
-- `easytier-web/src/client_manager/managed_config.rs`
-- `easytier-web/src/db/mod.rs`
+- `exvlan-api/src/restful/network.rs`
+- `exvlan-api/src/client_manager/mod.rs`
+- `exvlan-api/src/client_manager/managed_config.rs`
+- `exvlan-api/src/db/mod.rs`
 - 对应 contract、database 和 managed-config tests
 
 完成条件：

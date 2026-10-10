@@ -4,16 +4,10 @@ use crate::config::storage::config_meta::{
     reset_config_meta_store, upsert_config_meta_in_tx,
 };
 use crate::config::types::stored_config::{ExportTomlResult, StoredConfigRecord};
-<<<<<<<< HEAD:exvlan/contrib/ohrs/src/config_repo.rs
-use exvlan::common::config::ConfigLoader;
+use exvlan::common::config::{NetworkConfigExt, TomlConfigLoader};
 use exvlan::proto::api::manage::NetworkConfig;
-use ohos_hilog_binding::{hilog_debug, hilog_error};
-========
-use easytier::common::config::{NetworkConfigExt, TomlConfigLoader};
-use easytier::proto::api::manage::NetworkConfig;
-use easytier::proto::common::CompressionAlgoPb;
+use exvlan::proto::common::CompressionAlgoPb;
 use once_cell::sync::Lazy;
->>>>>>>> upstream/releases/v2.7.0:easytier-contrib/easytier-ohrs/crates/easytier-ohos-features/src/config_repo.rs
 use rusqlite::params;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -22,15 +16,10 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 static CONFIG_ROOT_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
-<<<<<<<< HEAD:exvlan/contrib/ohrs/src/config_repo.rs
-pub(crate) const CONFIG_DIR_NAME: &str = "exvlan-configs";
-pub(crate) const KERNEL_SOCKET_FILE_NAME: &str = "exvlan-kernel.sock";
-========
 static RUNTIME_CONFIG_SNAPSHOTS: Lazy<Mutex<HashMap<String, RuntimeConfigSnapshot>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-pub const CONFIG_DIR_NAME: &str = "easytier-configs";
-pub const KERNEL_SOCKET_FILE_NAME: &str = "easytier-kernel.sock";
->>>>>>>> upstream/releases/v2.7.0:easytier-contrib/easytier-ohrs/crates/easytier-ohos-features/src/config_repo.rs
+pub const CONFIG_DIR_NAME: &str = "exvlan-configs";
+pub const KERNEL_SOCKET_FILE_NAME: &str = "exvlan-kernel.sock";
 
 #[derive(Clone)]
 pub struct RuntimeConfigSnapshot {

@@ -12,8 +12,8 @@
 普通测试函数。四项旧版兼容测试继续覆盖能力协商、双向数据、半关闭及
 重复 SYN；15 项 library 与 12 项协议回归不变。
 
-整理后 Linux 共 31/31 测试通过，格式与严格 Clippy 通过。EasyTier
-同步依赖 pin 与锁文件，并通过 `cargo +1.95 check --locked -p easytier
+整理后 Linux 共 31/31 测试通过，格式与严格 Clippy 通过。Exvlan
+同步依赖 pin 与锁文件，并通过 `cargo +1.95 check --locked -p exvlan
 --features full`。此次只整理测试与测试依赖，协议源码未改变。
 历史三平台 34/34 和全部流量结果仍属于下述 `3ef5c416` 实现验证，
 没有重写为整理后版本的执行结果。中间基线作为调查证据保留在本文。
@@ -25,16 +25,16 @@
 - kcp-sys 初版实现：`c84733d4479b40a299d51f4c5b8bb02ccacadc68`。
 - kcp-sys 最终实现：`3ef5c4161faf99940f3ed51efd43cef0cbc02b4f`，补齐
   可靠模式下未知连接 RST 输出队列饱和时的非阻塞处理。
-- EasyTier 基线：`851e7523`；接入提交：`4fedbdd1`、`ee02b8f7`，
+- Exvlan 基线：`851e7523`；接入提交：`4fedbdd1`、`ee02b8f7`，
   仅修改依赖 pin 和 Cargo.lock。
-- 最终真实流量二进制：`final-easytier-core`，SHA-256：
+- 最终真实流量二进制：`final-exvlan-core`，SHA-256：
   `962f2480cb611ceb6cab293560d0dfb337218594cdc298a08f0e83801a2d17b8`。
   它在接入提交前构建，源码及依赖内容与该提交一致；识别产物以哈希和
-  依赖 revision 为准，不单凭内嵌的 EasyTier git 版本字符串。
+  依赖 revision 为准，不单凭内嵌的 Exvlan git 版本字符串。
 
-依赖已发布到 `EasyTier/kcp-sys` 的独立分支
+依赖已发布到 `Exvlan/kcp-sys` 的独立分支
 `fix/control-reliability-20260914`，远端引用核对为上述最终 revision。
-EasyTier 任务分支为 `fix/kcp-control-reliability`。
+Exvlan 任务分支为 `fix/kcp-control-reliability`。
 
 实现保留 14 字节 header，通过 SYN/SYNACK 的 `rsv` 协商可靠控制模式。
 收到旧 SYNACK 后固定使用 legacy，旧源端连接新目标端也从头使用 legacy。
@@ -66,17 +66,17 @@ RST。FIN 一旦确认，正常半关闭不受 FIN 重试期限限制。
 | Windows 格式、Clippy | 所选 stable 缺少组件，未执行 |
 | Linux 原生网关测试 | 200/200 |
 | macOS、Windows 原生网关测试 | 各 200/200 |
-| EasyTier 完整三节点及补充集成测试 | 276/276，834.639 s |
-| EasyTier Linux 严格 Clippy | 通过 |
+| Exvlan 完整三节点及补充集成测试 | 276/276，834.639 s |
+| Exvlan Linux 严格 Clippy | 通过 |
 
 macOS 首次获取依赖遇到 GitHub TLS 错误，随后导入本机真实 Git 对象与
 checkout，在依赖 revision 不变的情况下离线测试；没有改成 path 依赖，
 也没有用新实现替换旧依赖。Windows 原始日志为 UTF-16LE，另保存 UTF-8
 副本。两平台复用原 target，没有另开编译目录绕过权限问题。
 
-协议修改集中在 kcp-sys，EasyTier core 源码没有变化。原生网关验证检查
+协议修改集中在 kcp-sys，Exvlan core 源码没有变化。原生网关验证检查
 与现有相同 core 源码的兼容行为，不能替代上面的真实新旧 KCP 端点测试。
-远端应用 manifest 仍锁定旧依赖 `d7427c2`，网关命令只选择 easytier-core；
+远端应用 manifest 仍锁定旧依赖 `d7427c2`，网关命令只选择 exvlan-core；
 关键转发文件 `tcp_proxy_service.rs` 哈希与本地一致。因此不能将这组
 网关测试描述为完整原生应用已经接入最终新依赖。
 
@@ -145,7 +145,7 @@ dev-dependency 固定并实际运行 `d7427c2`、`b37ee660` 两个历史实现�
 
 ### 初版 c84733d
 
-二进制 `protocol-easytier-core` 的 SHA-256 为
+二进制 `protocol-exvlan-core` 的 SHA-256 为
 `f41ff98762ed1ce8691d8f83b8c9e47acc4548c76432a17cd2daba36e2cc7b80`。
 
 - 六模式主矩阵：1,800 次短连接、12 次大小请求半关闭、6 次反向
@@ -156,7 +156,7 @@ dev-dependency 固定并实际运行 `d7427c2`、`b37ee660` 两个历史实现�
 - 新旧双方向各六模式：3,600 次短连接、24 次大小半关闭、384 次纯空
   和每组合 3 s 持续流量通过；**反向半关闭为 11/12，存在一次失败**。
 
-旧端为依赖 b37 的 `delivery-easytier-core`，SHA-256 为
+旧端为依赖 b37 的 `delivery-exvlan-core`，SHA-256 为
 `4635810ac9a536258f9b7ff606e5e1a5eb0243cb0f187825ba6f721d92dfc4fe`。
 失败发生在新 source → 旧 destination 的 KCP/smoltcp，连接
 `conv=3560055726`、源端口 `40748`：客户端已经收到完整 1 MiB，随后
@@ -243,7 +243,7 @@ CPU 也不是纯协议开销或吞吐基准。RSS 未回到起点，无法由这
 ## 审查、复现与限制
 
 初轮独立子代理只读审查 `b37ee660..c84733d`，没有高置信度缺陷发现。
-最终由新子代理审查完整 `b37ee660..3ef5c416` 及 EasyTier 最终 pin，
+最终由新子代理审查完整 `b37ee660..3ef5c416` 及 Exvlan 最终 pin，
 未发现 blocker / major；重点检查旧版输出规则、握手与关闭交叉状态、
 队列、取消清理和锁序。
 
@@ -262,13 +262,13 @@ cargo test --all-targets
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 
-# EasyTier，Linux root 集成测试在 rust 容器内执行
-cargo +1.95 test --locked -p easytier-core \
+# Exvlan，Linux root 集成测试在 rust 容器内执行
+cargo +1.95 test --locked -p exvlan-core \
   --features proxy-smoltcp-stack --lib gateway::
-cargo +1.95 nextest run --locked -p easytier --features full --lib \
+cargo +1.95 nextest run --locked -p exvlan --features full --lib \
   -E 'test(subnet_proxy_three_node_test) | test(subnet_proxy_half_close_test) | test(acl_rule_test_inbound) | test(acl_rule_test_subnet_proxy) | test(proxy_three_node_disconnect_test) | test(config_patch_test) | test(port_forward_with_inbound_default_drop_acl_test)' \
   --test-threads 1 --no-fail-fast
-cargo +1.95 clippy --locked -p easytier --features full \
+cargo +1.95 clippy --locked -p exvlan --features full \
   --lib --tests -- -D warnings
 ```
 

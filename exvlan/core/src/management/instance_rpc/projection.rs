@@ -2,7 +2,7 @@ use crate::instance::{CoreInstance, CoreInstanceHost};
 
 #[cfg(not(feature = "management"))]
 pub(super) fn format_last_update(
-    last_update: &easytier_proto::common::RuntimeTimestamp,
+    last_update: &exvlan_proto::common::RuntimeTimestamp,
 ) -> anyhow::Result<String> {
     let last_update = last_update.normalized();
     let date_time = chrono::DateTime::from_timestamp(last_update.seconds, last_update.nanos as u32)
@@ -12,7 +12,7 @@ pub(super) fn format_last_update(
 
 #[cfg(feature = "management")]
 pub(super) fn format_last_update(
-    last_update: &easytier_proto::common::RuntimeTimestamp,
+    last_update: &exvlan_proto::common::RuntimeTimestamp,
 ) -> anyhow::Result<String> {
     serde_json::to_string(last_update).map_err(anyhow::Error::from)
 }

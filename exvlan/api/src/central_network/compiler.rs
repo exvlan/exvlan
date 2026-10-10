@@ -3,7 +3,7 @@ use std::{
     net::Ipv4Addr,
 };
 
-use easytier::{
+use exvlan::{
     common::config::{NetworkConfig, NetworkConfigExt, NetworkingMethod},
     proto::{
         acl::{Acl, AclV1, Action, Chain, ChainType, GroupInfo, Protocol, Rule},
@@ -11,7 +11,7 @@ use easytier::{
         common::SecureModeConfig,
     },
 };
-use easytier_core::{
+use exvlan_core::{
     config::runtime::CoreInstanceRuntimeConfig, connectivity::manual::validate_manual_url,
     gateway::vpn_portal::validate_clients, instance::CoreInstanceConfig,
     peers::credential_manager::validate_managed_credential_set,
@@ -629,7 +629,7 @@ fn compile_acl(
     let permanent_groups: Vec<_> = members
         .iter()
         .filter(|member| member.credential_id.is_none())
-        .map(|member| easytier::proto::acl::GroupIdentity {
+        .map(|member| exvlan::proto::acl::GroupIdentity {
             group_name: member_group_name(member.id),
             group_secret: member
                 .acl_group_secret
@@ -792,7 +792,7 @@ fn protocol_name(protocol: AclProtocol) -> &'static str {
 #[cfg(test)]
 mod tests {
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-    use easytier::proto::{acl::ChainType, api::manage::NetworkingMethod};
+    use exvlan::proto::{acl::ChainType, api::manage::NetworkingMethod};
     use uuid::Uuid;
 
     use super::*;
@@ -968,7 +968,7 @@ mod tests {
 
     #[test]
     fn member_portal_clients_use_core_validation() {
-        use easytier::proto::api::manage::{VpnPortalClientConfig, VpnPortalConfig};
+        use exvlan::proto::api::manage::{VpnPortalClientConfig, VpnPortalConfig};
 
         let mut candidate = intent();
         let client = VpnPortalClientConfig {

@@ -15,7 +15,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text", default_value = "")]
     pub alias: String,
     #[sea_orm(column_type = "Text")]
-    pub easytier_version: String,
+    pub exvlan_version: String,
     #[sea_orm(column_type = "Text")]
     pub device_os: String,
     #[sea_orm(column_type = "Text")]

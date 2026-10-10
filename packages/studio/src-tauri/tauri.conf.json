@@ -16,9 +16,9 @@
     ],
     "createUpdaterArtifacts": false
   },
-  "productName": "easytier-gui",
+  "productName": "@exvlan/studio",
   "version": "2.7.0",
-  "identifier": "com.kkrainbow.easytier",
+  "identifier": "com.kkrainbow.exvlan",
   "plugins": {
     "shell": {
       "open": "^.+"
@@ -27,7 +27,7 @@
   "app": {
     "windows": [
       {
-        "title": "easytier-gui",
+        "title": "@exvlan/studio",
         "width": 800,
         "height": 600
       }

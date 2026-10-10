@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
 #[cfg(feature = "wrapped-transport")]
-use easytier_core::gateway::proxy::wrapped_transport::WrappedTransportEngines;
+use exvlan_core::gateway::proxy::wrapped_transport::WrappedTransportEngines;
 #[cfg(feature = "wireguard")]
-use easytier_core::gateway::vpn_portal::PortalHost;
+use exvlan_core::gateway::vpn_portal::PortalHost;
 #[cfg(test)]
-use easytier_core::host::packet::{HostPacket, PacketSink};
+use exvlan_core::host::packet::{HostPacket, PacketSink};
 #[cfg(feature = "web-client")]
-use easytier_core::{
+use exvlan_core::{
     connectivity::manual::ManualTunnelConnector,
     host::dns::{DnsRecordResolver, DnsResolver},
 };
-use easytier_core::{
+use exvlan_core::{
     events::{CoreEvent, CoreEventSink},
     instance::{CoreHostAdapters, CoreInstance, CoreInstanceConfig, PacketEgressHost},
     process_runtime::CoreProcessRuntime,
@@ -38,7 +38,7 @@ use crate::gateway::kcp_proxy::KcpProxyService;
 use crate::gateway::quic_proxy::QuicProxyService;
 use crate::tunnel::protocol::{runtime_client_protocol_upgrader, runtime_server_protocol_upgrader};
 #[cfg(any(feature = "kcp", feature = "quic"))]
-use easytier_core::gateway::proxy::wrapped_transport::WrappedTransportEngine;
+use exvlan_core::gateway::proxy::wrapped_transport::WrappedTransportEngine;
 
 pub(crate) type NativeCoreInstance = CoreInstance<NativeInstanceHost>;
 
@@ -153,7 +153,7 @@ impl CoreEventSink for GlobalCtx {
 
 #[cfg(feature = "wrapped-transport")]
 fn runtime_wrapped_transport_engines(
-    config: &easytier_core::instance::CoreInstanceHostConfig,
+    config: &exvlan_core::instance::CoreInstanceHostConfig,
 ) -> WrappedTransportEngines {
     #[cfg(feature = "kcp")]
     let kcp = config
@@ -200,7 +200,7 @@ fn runtime_core_host_adapters_with_packet_egress_and_config(
     global_ctx: ArcGlobalCtx,
     process_runtime: Arc<CoreProcessRuntime>,
     packet_egress: Arc<dyn PacketEgressHost>,
-    host_config: easytier_core::instance::CoreInstanceHostConfig,
+    host_config: exvlan_core::instance::CoreInstanceHostConfig,
 ) -> CoreHostAdapters<NativeInstanceHost> {
     let host = native_instance_host(global_ctx.clone());
     let runtime_dns = native_host_runtime();
@@ -212,7 +212,7 @@ fn runtime_core_host_adapters_with_packet_egress_and_config(
 fn configure_runtime_core_host_adapters(
     global_ctx: ArcGlobalCtx,
     mut adapters: CoreHostAdapters<NativeInstanceHost>,
-    host_config: easytier_core::instance::CoreInstanceHostConfig,
+    host_config: exvlan_core::instance::CoreInstanceHostConfig,
 ) -> CoreHostAdapters<NativeInstanceHost> {
     #[cfg(test)]
     adapters.replace_stun_provider(Arc::new(crate::common::stun::MockStunInfoCollector {
@@ -295,10 +295,10 @@ mod tests {
     use std::sync::Arc;
 
     #[cfg(feature = "kcp")]
-    use easytier_core::gateway::proxy::wrapped_transport::{
+    use exvlan_core::gateway::proxy::wrapped_transport::{
         WrappedTransportConnect, WrappedTransportEngine,
     };
-    use easytier_core::listener::plan::ListenerRuntimeConfig;
+    use exvlan_core::listener::plan::ListenerRuntimeConfig;
     use smoltcp::wire::{IpAddress, IpProtocol, Ipv4Packet, UdpPacket};
     #[cfg(feature = "kcp")]
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

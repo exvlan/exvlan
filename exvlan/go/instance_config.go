@@ -1,6 +1,6 @@
 package host
 
-import internalhost "github.com/easytier/easytier/easytier-go/internal/host"
+import internalhost "github.com/exvlan/exvlan/exvlan-go/internal/host"
 
 // P2PPolicy controls when an instance attempts peer-to-peer connections.
 type P2PPolicy = internalhost.P2PPolicy
@@ -16,10 +16,10 @@ const (
 	PortForwardUDP PortForwardProtocol = internalhost.PortForwardUDP
 )
 
-// PortForwardConfig exposes a host socket through the EasyTier data plane.
+// PortForwardConfig exposes a host socket through the Exvlan data plane.
 type PortForwardConfig = internalhost.PortForwardConfig
 
-// InstanceConfig is an immutable EasyTier instance configuration.
+// InstanceConfig is an immutable Exvlan instance configuration.
 type InstanceConfig = internalhost.InstanceConfig
 
 // InstanceConfigBuilder builds a validated InstanceConfig.

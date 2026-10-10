@@ -36,11 +36,11 @@ use crate::{
 };
 use anyhow::Context;
 use cidr::Ipv4Inet;
-use easytier_core::gateway::magic_dns::{
+use exvlan_core::gateway::magic_dns::{
     MagicDnsQuery, MagicDnsQueryResolver, MagicDnsRecordStore, MagicDnsResolverRegistration,
     MagicDnsRoute,
 };
-use easytier_core::instance::CorePacketPlane;
+use exvlan_core::instance::CorePacketPlane;
 use hickory_proto::rr::LowerName;
 use hickory_proto::serialize::binary::{BinDecodable, BinEncoder};
 use hickory_server::authority::{MessageRequest, MessageResponse};

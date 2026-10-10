@@ -26,7 +26,7 @@ use crate::{
     tunnel::encrypt::algorithm_is_available,
 };
 
-use easytier_proto::common::CompressionAlgoPb;
+use exvlan_proto::common::CompressionAlgoPb;
 
 use super::{CoreConnectivityConfig, CoreConnectivityMode, CoreInstanceConfig};
 
@@ -59,7 +59,7 @@ pub struct CoreInstanceHostConfig {
     pub tcp_hole_punching_enabled: bool,
     pub ignore_unsupported_config: bool,
     pub connectivity: CoreConnectivityMode,
-    pub easytier_version: String,
+    pub exvlan_version: String,
     pub endpoint_protocols: Vec<String>,
 }
 
@@ -85,7 +85,7 @@ impl Default for CoreInstanceHostConfig {
             tcp_hole_punching_enabled: true,
             ignore_unsupported_config: false,
             connectivity: CoreConnectivityMode::Full,
-            easytier_version: env!("CARGO_PKG_VERSION").to_owned(),
+            exvlan_version: env!("CARGO_PKG_VERSION").to_owned(),
             endpoint_protocols: ManualEndpointDiscoveryConfig::default().srv_protocols,
         }
     }
@@ -239,7 +239,7 @@ impl CoreInstanceConfig {
                 secure_mode: config.get_secure_mode(),
                 host_routing: host.host_routing,
                 acl: acl.clone(),
-                easytier_version: host.easytier_version.clone(),
+                exvlan_version: host.exvlan_version.clone(),
                 pinned_peers: peers
                     .iter()
                     .cloned()
@@ -372,7 +372,7 @@ impl CoreInstanceConfig {
                         .unwrap_or_else(|| StunServerConfig::default().udp_v6_servers),
                 },
                 endpoint_discovery: ManualEndpointDiscoveryConfig {
-                    user_agent: format!("easytier/{}", host.easytier_version),
+                    user_agent: format!("exvlan/{}", host.exvlan_version),
                     network_name: network_name.clone(),
                     http_tcp_bind: tcp_bind.clone(),
                     dns_record_context: socket_context,
@@ -594,7 +594,7 @@ disable_p2p = true
             public_ipv6_provider_supported: true,
             gateway_enabled: false,
             connectivity: CoreConnectivityMode::InboundOnly,
-            easytier_version: "host-version".to_owned(),
+            exvlan_version: "host-version".to_owned(),
             endpoint_protocols: vec!["host-protocol".to_owned()],
             ..Default::default()
         };
@@ -624,7 +624,7 @@ disable_p2p = true
                 .host_routing
                 .local_exit_node_fallback
         );
-        assert_eq!(normalized.peer.snapshot.easytier_version, "host-version");
+        assert_eq!(normalized.peer.snapshot.exvlan_version, "host-version");
         assert!(normalized.connectivity.runtime.proxy.enable_exit_node);
         assert!(normalized.connectivity.runtime.proxy.force_smoltcp);
         assert!(normalized.connectivity.runtime.proxy.icmp_failure_is_fatal);

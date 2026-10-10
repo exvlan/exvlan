@@ -1,12 +1,12 @@
 //! Native UDP hole-punch platform adapter.
 //!
 //! Peer selection, signaling, RPC registration, socket/session ownership and
-//! lifecycle live in `easytier-core`. Native only supplies OS port mapping.
+//! lifecycle live in `exvlan-core`. Native only supplies OS port mapping.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use easytier_core::connectivity::hole_punch::port_mapping::{
+use exvlan_core::connectivity::hole_punch::port_mapping::{
     ActiveUdpPortMapping, UdpPortMappingAttemptError, UdpPortMappingBackend,
     UdpPortMappingLifecycle, UdpPortMappingPlatform,
 };

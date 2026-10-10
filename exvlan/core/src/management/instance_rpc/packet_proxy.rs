@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use easytier_proto::{
+use exvlan_proto::{
     api::instance::{
         ListTcpProxyEntryRequest, ListTcpProxyEntryResponse, TcpProxyEntry, TcpProxyEntryState,
         TcpProxyEntryTransportType, TcpProxyRpc,

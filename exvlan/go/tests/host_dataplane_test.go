@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	corehost "github.com/easytier/easytier/easytier-go"
-	"github.com/easytier/easytier/easytier-go/platform"
+	corehost "github.com/exvlan/exvlan/exvlan-go"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 )
 
 func TestPublicDataPlaneTCPAndUDP(t *testing.T) {
@@ -104,11 +104,11 @@ func testTCPDataPlane(
 	select {
 	case result := <-accepted:
 		if result.err != nil {
-			t.Fatalf("accept EasyTier TCP: %v", result.err)
+			t.Fatalf("accept Exvlan TCP: %v", result.err)
 		}
 		serverConnection = result.connection
 	case <-ctx.Done():
-		t.Fatalf("accept EasyTier TCP: %v", ctx.Err())
+		t.Fatalf("accept Exvlan TCP: %v", ctx.Err())
 	}
 	defer serverConnection.Close()
 
@@ -220,7 +220,7 @@ func testUDPDataPlane(
 	buffer := make([]byte, 64)
 	n, peer, err := serverPacket.ReadFrom(buffer)
 	if err != nil {
-		t.Fatalf("read EasyTier UDP: %v", err)
+		t.Fatalf("read Exvlan UDP: %v", err)
 	}
 	if string(buffer[:n]) != "datagram" {
 		t.Fatalf("UDP payload = %q", buffer[:n])
@@ -230,12 +230,12 @@ func testUDPDataPlane(
 	}
 
 	if _, err := serverPacket.WriteTo([]byte("reply"), clientOverlay); err != nil {
-		t.Fatalf("reply over EasyTier UDP: %v", err)
+		t.Fatalf("reply over Exvlan UDP: %v", err)
 	}
 	for {
 		n, _, err = clientPacket.ReadFrom(buffer)
 		if err != nil {
-			t.Fatalf("read EasyTier UDP reply: %v", err)
+			t.Fatalf("read Exvlan UDP reply: %v", err)
 		}
 		if string(buffer[:n]) == "reply" {
 			break
@@ -270,7 +270,7 @@ func testConnectedUDPDataPlane(
 	}
 	clientConnection, err := client.Dial(ctx, "udp4", serverOverlay.String())
 	if err != nil {
-		t.Fatalf("dial through EasyTier UDP: %v", err)
+		t.Fatalf("dial through Exvlan UDP: %v", err)
 	}
 	defer clientConnection.Close()
 	if err := clientConnection.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -285,15 +285,15 @@ func testConnectedUDPDataPlane(
 		Port: clientConnection.LocalAddr().(*net.UDPAddr).Port,
 	}
 	if _, err := serverPacket.WriteTo([]byte("warmup"), clientOverlay); err != nil {
-		t.Fatalf("warm connected EasyTier UDP path: %v", err)
+		t.Fatalf("warm connected Exvlan UDP path: %v", err)
 	}
 	if _, err := clientConnection.Write([]byte("connected")); err != nil {
-		t.Fatalf("write connected EasyTier UDP: %v", err)
+		t.Fatalf("write connected Exvlan UDP: %v", err)
 	}
 	buffer := make([]byte, 64)
 	n, peer, err := serverPacket.ReadFrom(buffer)
 	if err != nil {
-		t.Fatalf("read connected EasyTier UDP: %v", err)
+		t.Fatalf("read connected Exvlan UDP: %v", err)
 	}
 	if string(buffer[:n]) != "connected" {
 		t.Fatalf("connected UDP payload = %q", buffer[:n])
@@ -303,15 +303,15 @@ func testConnectedUDPDataPlane(
 	}
 
 	if _, err := wrongPeer.WriteTo([]byte("wrong-peer"), clientOverlay); err != nil {
-		t.Fatalf("write wrong-peer EasyTier UDP: %v", err)
+		t.Fatalf("write wrong-peer Exvlan UDP: %v", err)
 	}
 	if _, err := serverPacket.WriteTo([]byte("right-peer"), clientOverlay); err != nil {
-		t.Fatalf("write fixed-peer EasyTier UDP: %v", err)
+		t.Fatalf("write fixed-peer Exvlan UDP: %v", err)
 	}
 	for {
 		n, err = clientConnection.Read(buffer)
 		if err != nil {
-			t.Fatalf("read connected EasyTier UDP reply: %v", err)
+			t.Fatalf("read connected Exvlan UDP reply: %v", err)
 		}
 		if string(buffer[:n]) == "right-peer" {
 			break
@@ -344,12 +344,12 @@ func listenTCPEventually(
 			return listener
 		}
 		if !errors.Is(err, syscall.ENETUNREACH) {
-			t.Fatalf("listen through EasyTier TCP: %v", err)
+			t.Fatalf("listen through Exvlan TCP: %v", err)
 		}
 		select {
 		case <-time.After(20 * time.Millisecond):
 		case <-ctx.Done():
-			t.Fatalf("wait for EasyTier TCP data plane: %v", ctx.Err())
+			t.Fatalf("wait for Exvlan TCP data plane: %v", ctx.Err())
 		}
 	}
 }
@@ -366,12 +366,12 @@ func listenUDPEventually(
 			return connection
 		}
 		if !errors.Is(err, syscall.ENETUNREACH) {
-			t.Fatalf("listen through EasyTier UDP: %v", err)
+			t.Fatalf("listen through Exvlan UDP: %v", err)
 		}
 		select {
 		case <-time.After(20 * time.Millisecond):
 		case <-ctx.Done():
-			t.Fatalf("wait for EasyTier UDP data plane: %v", ctx.Err())
+			t.Fatalf("wait for Exvlan UDP data plane: %v", ctx.Err())
 		}
 	}
 }
@@ -393,12 +393,12 @@ func dialEventually(
 		if !errors.Is(err, syscall.ENETUNREACH) &&
 			!errors.Is(err, syscall.ECONNREFUSED) &&
 			!errors.Is(err, os.ErrDeadlineExceeded) {
-			t.Fatalf("dial through EasyTier TCP: %v", err)
+			t.Fatalf("dial through Exvlan TCP: %v", err)
 		}
 		select {
 		case <-time.After(20 * time.Millisecond):
 		case <-ctx.Done():
-			t.Fatalf("wait for EasyTier TCP route: %v", ctx.Err())
+			t.Fatalf("wait for Exvlan TCP route: %v", ctx.Err())
 		}
 	}
 }
@@ -415,12 +415,12 @@ func writePacketEventually(
 		if _, err := connection.WriteTo(data, peer); err == nil {
 			return
 		} else if !errors.Is(err, syscall.ENETUNREACH) {
-			t.Fatalf("write through EasyTier UDP: %v", err)
+			t.Fatalf("write through Exvlan UDP: %v", err)
 		}
 		select {
 		case <-time.After(20 * time.Millisecond):
 		case <-ctx.Done():
-			t.Fatalf("wait for EasyTier UDP route: %v", ctx.Err())
+			t.Fatalf("wait for Exvlan UDP route: %v", ctx.Err())
 		}
 	}
 }
@@ -433,11 +433,11 @@ func assertStreamExchange(
 ) {
 	t.Helper()
 	if _, err := writer.Write(payload); err != nil {
-		t.Fatalf("write EasyTier TCP: %v", err)
+		t.Fatalf("write Exvlan TCP: %v", err)
 	}
 	received := make([]byte, len(payload))
 	if _, err := io.ReadFull(reader, received); err != nil {
-		t.Fatalf("read EasyTier TCP: %v", err)
+		t.Fatalf("read Exvlan TCP: %v", err)
 	}
 	if string(received) != string(payload) {
 		t.Fatalf("TCP payload = %q, want %q", received, payload)

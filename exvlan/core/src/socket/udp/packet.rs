@@ -157,8 +157,8 @@ pub fn is_stun_packet(data: &[u8]) -> bool {
 #[derive(Debug)]
 pub(super) enum UdpDatagramClassification {
     Stun(BytesMut),
-    EasyTier {
-        kind: EasyTierUdpPacketKind,
+    Exvlan {
+        kind: ExvlanUdpPacketKind,
         conn_id: u32,
         packet: ZCPacket,
     },
@@ -175,7 +175,7 @@ pub(super) enum UdpSessionPacketKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum EasyTierUdpPacketKind {
+pub(super) enum ExvlanUdpPacketKind {
     Data,
     Syn,
     Sack,
@@ -184,7 +184,7 @@ pub(super) enum EasyTierUdpPacketKind {
     V6HolePunch,
 }
 
-impl EasyTierUdpPacketKind {
+impl ExvlanUdpPacketKind {
     fn from_msg_type(msg_type: u8) -> Option<Self> {
         match msg_type {
             msg_type if msg_type == UdpPacketType::Data as u8 => Some(Self::Data),
@@ -199,13 +199,13 @@ impl EasyTierUdpPacketKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct EasyTierUdpDatagramInfo {
-    pub(super) kind: EasyTierUdpPacketKind,
+pub(super) struct ExvlanUdpDatagramInfo {
+    pub(super) kind: ExvlanUdpPacketKind,
     pub(super) conn_id: u32,
 }
 
 #[derive(Debug)]
-pub(super) enum EasyTierUdpDatagramInspectError {
+pub(super) enum ExvlanUdpDatagramInspectError {
     TooSmall {
         datagram_size: usize,
     },
@@ -303,26 +303,26 @@ fn is_quic_packet(data: &[u8]) -> bool {
     parse_quic_initial_dcid(data).is_some()
 }
 
-pub(super) fn inspect_easytier_udp_datagram(
+pub(super) fn inspect_exvlan_udp_datagram(
     data: &[u8],
-) -> Result<Option<EasyTierUdpDatagramInfo>, EasyTierUdpDatagramInspectError> {
+) -> Result<Option<ExvlanUdpDatagramInfo>, ExvlanUdpDatagramInspectError> {
     let datagram_size = data.len();
     if datagram_size < UDP_TUNNEL_HEADER_SIZE {
-        return Err(EasyTierUdpDatagramInspectError::TooSmall { datagram_size });
+        return Err(ExvlanUdpDatagramInspectError::TooSmall { datagram_size });
     }
 
     let header = UDPTunnelHeader::ref_from_prefix(data).unwrap();
     let header_len = header.len.get() as usize;
     let real_len = datagram_size - UDP_TUNNEL_HEADER_SIZE;
     if header_len != real_len {
-        return Err(EasyTierUdpDatagramInspectError::PayloadLenMismatch {
+        return Err(ExvlanUdpDatagramInspectError::PayloadLenMismatch {
             header_len,
             datagram_size,
         });
     }
 
     Ok(
-        EasyTierUdpPacketKind::from_msg_type(header.msg_type).map(|kind| EasyTierUdpDatagramInfo {
+        ExvlanUdpPacketKind::from_msg_type(header.msg_type).map(|kind| ExvlanUdpDatagramInfo {
             kind,
             conn_id: header.conn_id.get(),
         }),
@@ -334,8 +334,8 @@ pub(super) fn classify_udp_datagram(datagram: BytesMut) -> UdpDatagramClassifica
         return UdpDatagramClassification::Stun(datagram);
     }
 
-    let easytier = match inspect_easytier_udp_datagram(&datagram) {
-        Ok(Some(easytier)) => easytier,
+    let exvlan = match inspect_exvlan_udp_datagram(&datagram) {
+        Ok(Some(exvlan)) => exvlan,
         Ok(None) => {
             return UdpDatagramClassification::SessionPacket {
                 kind: classify_session_udp_datagram(&datagram),
@@ -344,10 +344,10 @@ pub(super) fn classify_udp_datagram(datagram: BytesMut) -> UdpDatagramClassifica
         }
         Err(err) => {
             match err {
-                EasyTierUdpDatagramInspectError::TooSmall { datagram_size } => {
+                ExvlanUdpDatagramInspectError::TooSmall { datagram_size } => {
                     tracing::debug!(datagram_size, "udp session packet too small");
                 }
-                EasyTierUdpDatagramInspectError::PayloadLenMismatch {
+                ExvlanUdpDatagramInspectError::PayloadLenMismatch {
                     header_len,
                     datagram_size,
                 } => {
@@ -366,9 +366,9 @@ pub(super) fn classify_udp_datagram(datagram: BytesMut) -> UdpDatagramClassifica
     };
     let packet = ZCPacket::new_from_buf(datagram, ZCPacketType::UDP);
 
-    UdpDatagramClassification::EasyTier {
-        kind: easytier.kind,
-        conn_id: easytier.conn_id,
+    UdpDatagramClassification::Exvlan {
+        kind: exvlan.kind,
+        conn_id: exvlan.conn_id,
         packet,
     }
 }

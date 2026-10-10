@@ -35,7 +35,7 @@ pub type HostAcceptedTcpSocket<H> =
 /// The transport boundary of a core listener.
 ///
 /// Socket creation and binding belong to the host factory. Protocol handling
-/// consumes this value and may turn it into one or more EasyTier tunnels.
+/// consumes this value and may turn it into one or more Exvlan tunnels.
 #[allow(clippy::large_enum_variant)]
 pub enum AcceptedTransport<TcpSocket> {
     Tunnel {
@@ -211,7 +211,7 @@ impl TransportListenerConfig {
                 self,
                 Self::Udp {
                     url,
-                    accept_kind: UdpSessionAcceptKind::EasyTierMux,
+                    accept_kind: UdpSessionAcceptKind::ExvlanMux,
                     ..
                 } if url.scheme() == "udp"
             )
@@ -1250,7 +1250,7 @@ mod tests {
                 &udp_v6_url,
                 SocketContext::default(),
             ),
-            UdpSessionAcceptKind::EasyTierMux,
+            UdpSessionAcceptKind::ExvlanMux,
             host.clone(),
             Arc::new(MockDns),
         );
@@ -1400,7 +1400,7 @@ mod tests {
         let udp_session = UdpSession::identity_standalone(
             udp_socket,
             "127.0.0.1:32000".parse().unwrap(),
-            UdpSessionKind::EasyTierMux,
+            UdpSessionKind::ExvlanMux,
         )?;
         handler
             .handle_accepted_socket(AcceptedTransport::Udp {
@@ -1442,7 +1442,7 @@ mod tests {
         let udp_session = UdpSession::identity_standalone(
             udp_socket,
             "127.0.0.1:32000".parse()?,
-            UdpSessionKind::EasyTierMux,
+            UdpSessionKind::ExvlanMux,
         )?;
         let admission_error = handler
             .handle_accepted_socket(AcceptedTransport::Udp {
@@ -1462,7 +1462,7 @@ mod tests {
                     local_addr: "127.0.0.1:21000".parse()?,
                     peer_addr: "127.0.0.1:31000".parse()?,
                 },
-                local_url: "unix:///tmp/easytier.sock".parse()?,
+                local_url: "unix:///tmp/exvlan.sock".parse()?,
                 remote_url: Some("unix://anonymous/remote".parse()?),
             })
             .await?;
@@ -1496,7 +1496,7 @@ mod tests {
                     request: UdpSessionListenRequest::new(UdpBindOptions::port_bound_listener(
                         "127.0.0.1:0".parse().unwrap(),
                     )),
-                    accept_kind: UdpSessionAcceptKind::EasyTierMux,
+                    accept_kind: UdpSessionAcceptKind::ExvlanMux,
                     must_succeed: true,
                 },
                 TransportListenerConfig::Udp {
@@ -1537,7 +1537,7 @@ mod tests {
         assert!(events.contains(&AcceptedEvent::Tcp { port: 21000 }));
         assert!(events.contains(&AcceptedEvent::Udp {
             port: 22000,
-            kind: UdpSessionKind::EasyTierMux,
+            kind: UdpSessionKind::ExvlanMux,
         }));
         assert!(events.contains(&AcceptedEvent::Udp {
             port: 22001,

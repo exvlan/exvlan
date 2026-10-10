@@ -692,7 +692,7 @@ mod abi {
     ///
     /// The runtime may write at most `length` bytes through wasm memory, then
     /// pass the pointer to another lifecycle export and eventually free it.
-    pub extern "C" fn easytier_buffer_alloc(length: u32) -> u32 {
+    pub extern "C" fn exvlan_buffer_alloc(length: u32) -> u32 {
         let length = usize::try_from(length).expect("u32 fits usize on wasm32");
         if length == 0 || length > MAX_GUEST_BUFFER_LEN {
             set_abi_error("invalid guest buffer length");
@@ -716,8 +716,8 @@ mod abi {
     }
 
     #[unsafe(no_mangle)]
-    /// Releases a buffer previously returned by [`easytier_buffer_alloc`].
-    pub extern "C" fn easytier_buffer_free(pointer: u32) -> i32 {
+    /// Releases a buffer previously returned by [`exvlan_buffer_alloc`].
+    pub extern "C" fn exvlan_buffer_free(pointer: u32) -> i32 {
         with_abi_state_mut(|state| {
             if state.buffers.remove(&pointer).is_some() {
                 0
@@ -735,7 +735,7 @@ mod abi {
     /// `event_sink_handle` identify the host sinks used for locally delivered
     /// raw IP packets and best-effort instance events.
     /// Returns zero on failure; retrieve the reason through the error exports.
-    pub extern "C" fn easytier_instance_create(
+    pub extern "C" fn exvlan_instance_create(
         config_pointer: u32,
         config_length: u32,
         packet_sink_handle: u64,
@@ -800,7 +800,7 @@ mod abi {
 
     #[unsafe(no_mangle)]
     /// Schedules instance startup. Completion is advanced by subsequent drive calls.
-    pub extern "C" fn easytier_instance_start(handle: u64) -> i32 {
+    pub extern "C" fn exvlan_instance_start(handle: u64) -> i32 {
         with_instance(handle, |instance| match instance.start() {
             Ok(()) => Ok(0),
             Err(error) => {
@@ -812,7 +812,7 @@ mod abi {
 
     #[unsafe(no_mangle)]
     /// Requests graceful instance shutdown. Completion is advanced by drive calls.
-    pub extern "C" fn easytier_instance_stop(handle: u64) -> i32 {
+    pub extern "C" fn exvlan_instance_stop(handle: u64) -> i32 {
         with_instance(handle, |instance| {
             instance.stop();
             Ok(0)
@@ -824,7 +824,7 @@ mod abi {
     ///
     /// The return value is the current lifecycle state code, or a negative ABI
     /// status on failure. Call after a timer deadline or host completion.
-    pub extern "C" fn easytier_instance_drive(handle: u64) -> i32 {
+    pub extern "C" fn exvlan_instance_drive(handle: u64) -> i32 {
         with_instance(handle, |instance| {
             instance.drive()?;
             Ok(instance.state_code())
@@ -834,9 +834,9 @@ mod abi {
     #[unsafe(no_mangle)]
     /// Wakes tasks whose host I/O operation may have completed.
     ///
-    /// The runtime calls this after finishing one or more `easytier_host`
+    /// The runtime calls this after finishing one or more `exvlan_host`
     /// operations; it does not itself consume a host completion.
-    pub extern "C" fn easytier_instance_notify_completions(handle: u64) -> i32 {
+    pub extern "C" fn exvlan_instance_notify_completions(handle: u64) -> i32 {
         with_instance(handle, |instance| {
             instance.core.notify_host_completions();
             Ok(0)
@@ -845,7 +845,7 @@ mod abi {
 
     #[unsafe(no_mangle)]
     /// Returns the current lifecycle state code without running the instance.
-    pub extern "C" fn easytier_instance_state(handle: u64) -> i32 {
+    pub extern "C" fn exvlan_instance_state(handle: u64) -> i32 {
         with_instance(handle, |instance| Ok(instance.state_code()))
     }
 
@@ -853,7 +853,7 @@ mod abi {
     /// means lifecycle work remains locally runnable. `i64::MAX` means core is
     /// waiting only for a host completion; negative values are ABI status codes.
     #[unsafe(no_mangle)]
-    pub extern "C" fn easytier_instance_next_deadline_millis(handle: u64) -> i64 {
+    pub extern "C" fn exvlan_instance_next_deadline_millis(handle: u64) -> i64 {
         let instance_id = match with_abi_state_mut(|state| state.begin_instance_call(handle)) {
             Ok(instance_id) => instance_id,
             Err(status) => return i64::from(status),
@@ -876,12 +876,12 @@ mod abi {
     }
 
     #[unsafe(no_mangle)]
-    /// Copies a raw IP packet from a guest ABI buffer into EasyTier ingress.
+    /// Copies a raw IP packet from a guest ABI buffer into Exvlan ingress.
     ///
     /// Packet processing is asynchronous; success only means the ingress task
     /// was scheduled. The caller retains and may free the source buffer once
     /// this function returns.
-    pub extern "C" fn easytier_instance_send_packet(
+    pub extern "C" fn exvlan_instance_send_packet(
         handle: u64,
         packet_pointer: u32,
         packet_length: u32,
@@ -902,7 +902,7 @@ mod abi {
     #[cfg(feature = "wasm-host-tunnel")]
     #[unsafe(no_mangle)]
     /// Returns the host tunnel ABI version implemented by this guest.
-    pub extern "C" fn easytier_host_tunnel_abi_version() -> u32 {
+    pub extern "C" fn exvlan_host_tunnel_abi_version() -> u32 {
         crate::wasi::abi::HOST_TUNNEL_ABI_VERSION
     }
 
@@ -914,7 +914,7 @@ mod abi {
     /// ownership of `tunnel_handle` to the guest; on failure the host keeps
     /// ownership and must close it. Admission is scheduled and completed by
     /// later drive calls so the export never waits for the peer handshake.
-    pub extern "C" fn easytier_instance_accept_tunnel(
+    pub extern "C" fn exvlan_instance_accept_tunnel(
         handle: u64,
         tunnel_handle: u64,
         metadata_pointer: u32,
@@ -958,7 +958,7 @@ mod abi {
 
     #[unsafe(no_mangle)]
     /// Destroys an instance and releases its lifecycle, timer, and runtime state.
-    pub extern "C" fn easytier_instance_drop(handle: u64) -> i32 {
+    pub extern "C" fn exvlan_instance_drop(handle: u64) -> i32 {
         let instance_id = match with_abi_state_mut(|state| state.begin_instance_drop(handle)) {
             Ok(instance_id) => instance_id,
             Err(status) => return status,
@@ -985,7 +985,7 @@ mod abi {
 
     #[unsafe(no_mangle)]
     /// Returns the byte length of the most recent lifecycle error for `handle`.
-    pub extern "C" fn easytier_instance_error_len(handle: u64) -> u32 {
+    pub extern "C" fn exvlan_instance_error_len(handle: u64) -> u32 {
         with_abi_state(|state| {
             u32::try_from(state.error_for_handle(handle).len()).unwrap_or(u32::MAX)
         })
@@ -996,7 +996,7 @@ mod abi {
     ///
     /// `capacity` must contain the whole error; on success returns the copied
     /// byte count, otherwise a negative ABI status code.
-    pub extern "C" fn easytier_instance_error_copy(
+    pub extern "C" fn exvlan_instance_error_copy(
         handle: u64,
         destination: u32,
         capacity: u32,

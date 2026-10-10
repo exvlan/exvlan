@@ -18,4 +18,4 @@ pub mod tunnel;
 #[cfg(any(test, target_os = "wasi"))]
 pub mod wasi;
 
-pub(crate) use easytier_proto as proto;
+pub(crate) use exvlan_proto as proto;

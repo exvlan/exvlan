@@ -1,5 +1,5 @@
 use cidr::Ipv4Inet;
-use easytier_core::instance::CorePacketPlane;
+use exvlan_core::instance::CorePacketPlane;
 #[cfg(feature = "magic-dns")]
 use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 

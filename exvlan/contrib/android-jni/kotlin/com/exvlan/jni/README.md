@@ -38,4 +38,4 @@ wire {
 4. 调用 exvlan-contrib/exvlan-android-jni/build.sh 生成 jni 和 ffi 的 so 文件。
 并将生成的 so 文件放到 android/app/src/main/jniLibs/arm64-v8a 目录下。
 
-5. 使用 EXVlanManager 可以拉起 EXVlan 实例并启动 Android VpnService 组件。
+5. 使用 ExvlanManager 可以拉起 Exvlan 实例并启动 Android VpnService 组件。

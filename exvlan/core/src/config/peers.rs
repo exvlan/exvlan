@@ -6,7 +6,7 @@
 
 use anyhow::Context as _;
 use cidr::Ipv6Cidr;
-use easytier_proto::common::{FlagsInConfig, PeerFeatureFlag, SecureModeConfig, StunInfo};
+use exvlan_proto::common::{FlagsInConfig, PeerFeatureFlag, SecureModeConfig, StunInfo};
 use serde::{Deserialize, Serialize};
 
 use crate::proto::acl::{Acl, AclV1, Action, Chain, ChainType, GroupInfo, Protocol, Rule};
@@ -234,7 +234,7 @@ pub struct HostRoutingPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerRuntimeSnapshot {
     pub runtime: PeerRuntimeConfig,
-    pub easytier_version: String,
+    pub exvlan_version: String,
     pub avoid_relay_data_preference: bool,
     pub flags: FlagsInConfig,
     pub pinned_peers: Vec<(url::Url, Option<String>)>,
@@ -250,7 +250,7 @@ impl PeerRuntimeSnapshot {
         let avoid_relay_data_preference = runtime.feature_flags.avoid_relay_data;
         Self {
             runtime,
-            easytier_version: env!("CARGO_PKG_VERSION").to_owned(),
+            exvlan_version: env!("CARGO_PKG_VERSION").to_owned(),
             avoid_relay_data_preference,
             flags,
             pinned_peers: Vec::new(),

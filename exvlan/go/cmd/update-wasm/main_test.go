@@ -46,7 +46,7 @@ func TestReproducibleBuildEnvironmentControlsRustInputs(t *testing.T) {
 		t.Fatalf("uncontrolled Rust flags remained in environment:\n%s", joined)
 	}
 	for _, want := range []string{
-		"CARGO_ENCODED_RUSTFLAGS=--remap-path-prefix=/checkout=/workspace/EasyTier",
+		"CARGO_ENCODED_RUSTFLAGS=--remap-path-prefix=/checkout=/workspace/Exvlan",
 		"SOURCE_DATE_EPOCH=1700000000",
 	} {
 		if !strings.Contains(joined, want) {
@@ -57,7 +57,7 @@ func TestReproducibleBuildEnvironmentControlsRustInputs(t *testing.T) {
 
 func TestProtoSchemaDigestCoversEveryInput(t *testing.T) {
 	source := t.TempDir()
-	protoRoot := filepath.Join(source, "easytier-proto", "proto")
+	protoRoot := filepath.Join(source, "exvlan-proto", "proto")
 	if err := os.MkdirAll(protoRoot, 0o755); err != nil {
 		t.Fatalf("create proto root: %v", err)
 	}

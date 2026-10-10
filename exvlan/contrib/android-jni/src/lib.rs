@@ -1,7 +1,7 @@
-//! JNI facade for Android callers of EasyTier.
+//! JNI facade for Android callers of Exvlan.
 //!
 //! This file intentionally lists every Java-visible native method exported by
-//! `libeasytier_android_jni.so`. The implementation details live in sibling
+//! `libexvlan_android_jni.so`. The implementation details live in sibling
 //! modules so this facade stays readable as an API map.
 //!
 //! Network management APIs:
@@ -12,7 +12,7 @@
 //! - `deleteNetworkInstance(instanceName)`: stop exactly one named instance.
 //! - `listInstances()`: return running instance names and IDs as JSON.
 //! - `collectNetworkInfos()`: return running instance info as a JSON string.
-//! - `callJsonRpc(...)`: call an exposed EasyTier RPC service with JSON payload.
+//! - `callJsonRpc(...)`: call an exposed Exvlan RPC service with JSON payload.
 //!
 //! Config server client APIs:
 //! - `startConfigServerClient(url, hostname, machineId, secureMode, callback)`:
@@ -35,17 +35,17 @@ use jni::JNIEnv;
 use jni::objects::{JClass, JObject, JObjectArray, JString};
 use jni::sys::{jboolean, jint, jstring};
 
-/// Attach a TUN file descriptor to an EasyTier network instance.
+/// Attach a TUN file descriptor to an Exvlan network instance.
 ///
 /// Java signature:
-/// `EasyTierJNI.setTunFd(instanceName: String, fd: Int): Int`
+/// `ExvlanJNI.setTunFd(instanceName: String, fd: Int): Int`
 ///
 /// `instanceName` must name an instance known to the shared FFI instance cache.
 /// The `fd` must be a valid Android TUN file descriptor. On failure this
 /// returns `-1` and throws `RuntimeException` with the FFI error message when
 /// one is available.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_setTunFd(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_setTunFd(
     env: JNIEnv,
     class: JClass,
     inst_name: JString,
@@ -58,12 +58,12 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_setTunFd(
 /// Validate a TOML network config string.
 ///
 /// Java signature:
-/// `EasyTierJNI.parseConfig(config: String): Int`
+/// `ExvlanJNI.parseConfig(config: String): Int`
 ///
 /// This only validates the config text; it does not start or mutate any
 /// instance. On failure this returns `-1` and throws `RuntimeException`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_parseConfig(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_parseConfig(
     env: JNIEnv,
     class: JClass,
     config: JString,
@@ -72,15 +72,15 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_parseConfig(
     network_api::parse_config_jni(env, class, config)
 }
 
-/// Start one local EasyTier network instance from TOML config text.
+/// Start one local Exvlan network instance from TOML config text.
 ///
 /// Java signature:
-/// `EasyTierJNI.runNetworkInstance(config: String): Int`
+/// `ExvlanJNI.runNetworkInstance(config: String): Int`
 ///
 /// The instance name in the config must be unique in the FFI instance cache.
 /// On failure this returns `-1` and throws `RuntimeException`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_runNetworkInstance(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_runNetworkInstance(
     env: JNIEnv,
     class: JClass,
     config: JString,
@@ -92,13 +92,13 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_runNetworkInstance(
 /// Retain the named network instances and stop all other instances.
 ///
 /// Java signature:
-/// `EasyTierJNI.retainNetworkInstance(instanceNames: Array<String>?): Int`
+/// `ExvlanJNI.retainNetworkInstance(instanceNames: Array<String>?): Int`
 ///
 /// Passing `null` or an empty array stops all instances. Null elements inside a
 /// non-empty array are invalid. On failure this returns `-1` and throws
 /// `RuntimeException`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_retainNetworkInstance(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_retainNetworkInstance(
     env: JNIEnv,
     class: JClass,
     instance_names: JObjectArray,
@@ -110,12 +110,12 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_retainNetworkInstance(
 /// Stop exactly one named network instance without affecting other instances.
 ///
 /// Java signature:
-/// `EasyTierJNI.deleteNetworkInstance(instanceName: String): Int`
+/// `ExvlanJNI.deleteNetworkInstance(instanceName: String): Int`
 ///
 /// An unknown name is a no-op. On failure this returns `-1` and throws
 /// `RuntimeException`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_deleteNetworkInstance(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_deleteNetworkInstance(
     env: JNIEnv,
     class: JClass,
     instance_name: JString,
@@ -127,13 +127,13 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_deleteNetworkInstance(
 /// Collect running network instance information.
 ///
 /// Java signature:
-/// `EasyTierJNI.collectNetworkInfos(maxLength: Int): String?`
+/// `ExvlanJNI.collectNetworkInfos(maxLength: Int): String?`
 ///
 /// Returns a JSON string containing `NetworkInstanceRunningInfoMap`, or null if
 /// collection fails. `maxLength` limits how many FFI entries are collected. On
 /// failure this throws `RuntimeException` when an error message is available.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_collectNetworkInfos(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_collectNetworkInfos(
     env: JNIEnv,
     class: JClass,
     max_length: jint,
@@ -145,13 +145,13 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_collectNetworkInfos(
 /// List running network instance names and IDs.
 ///
 /// Java signature:
-/// `EasyTierJNI.listInstances(maxLength: Int): String?`
+/// `ExvlanJNI.listInstances(maxLength: Int): String?`
 ///
 /// Returns a JSON object whose keys are instance names and whose values are
 /// instance ID strings. On failure this returns null and throws
 /// `RuntimeException`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_listInstances(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_listInstances(
     env: JNIEnv,
     class: JClass,
     max_length: jint,
@@ -160,17 +160,17 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_listInstances(
     network_api::list_instances_jni(env, class, max_length)
 }
 
-/// Call an exposed EasyTier RPC method using protobuf JSON.
+/// Call an exposed Exvlan RPC method using protobuf JSON.
 ///
 /// Java signature:
-/// `EasyTierJNI.callJsonRpc(serviceName, methodName, domainName, payloadJson): String?`
+/// `ExvlanJNI.callJsonRpc(serviceName, methodName, domainName, payloadJson): String?`
 ///
 /// Instance lifecycle management RPCs are intentionally not exposed here. Use
-/// the dedicated EasyTierJNI instance APIs for start/retain/delete/collect.
+/// the dedicated ExvlanJNI instance APIs for start/retain/delete/collect.
 /// `payloadJson` must include any `instance` selector required by the target
 /// RPC. On failure this returns null and throws `RuntimeException`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_callJsonRpc(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_callJsonRpc(
     env: JNIEnv,
     class: JClass,
     service_name: JString,
@@ -192,12 +192,12 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_callJsonRpc(
 /// Return the latest FFI/JNI error string for the calling thread.
 ///
 /// Java signature:
-/// `EasyTierJNI.getLastError(): String?`
+/// `ExvlanJNI.getLastError(): String?`
 ///
 /// This combines the FFI thread-local error with any pending config-server Java
 /// callback error. It returns null when no error is available.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_getLastError(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_getLastError(
     env: JNIEnv,
     class: JClass,
 ) -> jstring {
@@ -207,7 +207,7 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_getLastError(
 /// Start the managed config-server client.
 ///
 /// Java signature:
-/// `EasyTierJNI.startConfigServerClient(url, hostname, machineId, secureMode, callback): Int`
+/// `ExvlanJNI.startConfigServerClient(url, hostname, machineId, secureMode, callback): Int`
 ///
 /// JNI only converts Java values and keeps the Java callback alive. The FFI
 /// layer owns singleton lifecycle, config-server/data-plane mutual exclusion,
@@ -217,7 +217,7 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_getLastError(
 ///
 /// On failure this returns `-1` and throws `RuntimeException`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_startConfigServerClient(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_startConfigServerClient(
     mut env: JNIEnv,
     _class: JClass,
     config_server_url: JString,
@@ -240,13 +240,13 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_startConfigServerClient
 /// Stop the managed config-server client.
 ///
 /// Java signature:
-/// `EasyTierJNI.stopConfigServerClient(): Int`
+/// `ExvlanJNI.stopConfigServerClient(): Int`
 ///
 /// The FFI layer performs the actual stop and managed instance cleanup. JNI
 /// releases the Java callback reference after FFI stop succeeds. On failure
 /// this returns `-1` and throws `RuntimeException`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_stopConfigServerClient(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_stopConfigServerClient(
     env: JNIEnv,
     class: JClass,
 ) -> jint {
@@ -257,12 +257,12 @@ pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_stopConfigServerClient(
 /// Report whether the managed config-server client is connected.
 ///
 /// Java signature:
-/// `EasyTierJNI.isConfigServerClientConnected(): Boolean`
+/// `ExvlanJNI.isConfigServerClientConnected(): Boolean`
 ///
 /// Returns `JNI_TRUE` only when the FFI config-server client exists and reports
 /// connected.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_easytier_jni_EasyTierJNI_isConfigServerClientConnected(
+pub extern "system" fn Java_com_exvlan_jni_ExvlanJNI_isConfigServerClientConnected(
     env: JNIEnv,
     class: JClass,
 ) -> jboolean {

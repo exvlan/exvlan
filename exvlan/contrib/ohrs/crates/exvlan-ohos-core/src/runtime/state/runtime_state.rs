@@ -1,9 +1,4 @@
-<<<<<<<< HEAD:exvlan/contrib/ohrs/src/runtime/state/runtime_state.rs
 use exvlan::proto::{api, common};
-use napi_derive_ohos::napi;
-========
-use easytier::proto::{api, common};
->>>>>>>> upstream/releases/v2.7.0:easytier-contrib/easytier-ohrs/crates/easytier-ohos-core/src/runtime/state/runtime_state.rs
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Mutex;

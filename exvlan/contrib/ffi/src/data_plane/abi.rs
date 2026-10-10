@@ -4,7 +4,7 @@ use std::{
     ptr,
 };
 
-use easytier_core::gateway::DataPlaneErrorKind;
+use exvlan_core::gateway::DataPlaneErrorKind;
 
 use super::session::{self, NativeDataPlaneError, NativeDataPlaneResult};
 use crate::{

@@ -1,14 +1,14 @@
 {
-  "name": "easytier-frontend-lib",
+  "name": "@exvlan/std",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "main": "./dist/easytier-frontend-lib.umd.cjs",
-  "module": "./dist/easytier-frontend-lib.js",
+  "main": "./dist/@exvlan/std.umd.cjs",
+  "module": "./dist/@exvlan/std.js",
   "exports": {
     ".": {
-      "import": "./dist/easytier-frontend-lib.js",
-      "require": "./dist/easytier-frontend-lib.umd.cjs"
+      "import": "./dist/@exvlan/std.js",
+      "require": "./dist/@exvlan/std.umd.cjs"
     },
     "./*.css": "./dist/*.css"
   },

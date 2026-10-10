@@ -1,23 +1,23 @@
 import { DurableObject } from "cloudflare:workers";
 
 import {
-  createEasyTierRuntime,
+  createExvlanRuntime,
   type HostTunnelMetadata,
   type RuntimeAdapter,
   type RuntimeWebSocket,
-} from "@easytier/runtime/adapter";
+} from "@exvlan/runtime/adapter";
 import type {
-  CloudflareEasyTierOptions,
-  EasyTierCloudflareApplication,
+  CloudflareExvlanOptions,
+  ExvlanCloudflareApplication,
 } from "./types.js";
 
-const INSTANCE_ID_STORAGE_KEY = "easytier.instance-id";
+const INSTANCE_ID_STORAGE_KEY = "exvlan.instance-id";
 
 export function createCloudflareApplication<Env>(
   module: WebAssembly.Module,
-  options: CloudflareEasyTierOptions<Env>,
-): EasyTierCloudflareApplication<Env> {
-  const EasyTierDurableObject = class extends DurableObject<Env> {
+  options: CloudflareExvlanOptions<Env>,
+): ExvlanCloudflareApplication<Env> {
+  const ExvlanDurableObject = class extends DurableObject<Env> {
     private runtimePromise: Promise<RuntimeAdapter> | undefined;
 
     async fetch(request: Request): Promise<Response> {
@@ -33,7 +33,7 @@ export function createCloudflareApplication<Env>(
         } catch (error) {
           console.error(
             JSON.stringify({
-              event: "easytier_cloudflare_health_failed",
+              event: "exvlan_cloudflare_health_failed",
               error: String(error),
             }),
           );
@@ -50,11 +50,11 @@ export function createCloudflareApplication<Env>(
       } catch (error) {
         console.error(
           JSON.stringify({
-            event: "easytier_cloudflare_start_failed",
+            event: "exvlan_cloudflare_start_failed",
             error: String(error),
           }),
         );
-        return new Response("EasyTier relay unavailable", { status: 503 });
+        return new Response("Exvlan relay unavailable", { status: 503 });
       }
       if (!runtime.canAcceptWebSocket()) {
         return new Response("WebSocket connection limit reached", {
@@ -73,11 +73,11 @@ export function createCloudflareApplication<Env>(
       } catch (error) {
         console.error(
           JSON.stringify({
-            event: "easytier_cloudflare_admission_failed",
+            event: "exvlan_cloudflare_admission_failed",
             error: String(error),
           }),
         );
-        return new Response("EasyTier relay unavailable", { status: 503 });
+        return new Response("Exvlan relay unavailable", { status: 503 });
       }
 
       return new Response(null, { status: 101, webSocket: client });
@@ -97,12 +97,12 @@ export function createCloudflareApplication<Env>(
         instanceId = crypto.randomUUID();
         await this.ctx.storage.put(INSTANCE_ID_STORAGE_KEY, instanceId);
       }
-      return createEasyTierRuntime({
+      return createExvlanRuntime({
         module,
         config: {
           profile: "cloudflare",
           instanceId,
-          instanceName: config.instanceName ?? "easytier-cloudflare",
+          instanceName: config.instanceName ?? "exvlan-cloudflare",
           networkName: config.networkName,
           networkSecret: config.networkSecret,
           encryption: config.encryption ?? true,
@@ -112,14 +112,14 @@ export function createCloudflareApplication<Env>(
   };
 
   return {
-    DurableObject: EasyTierDurableObject,
+    DurableObject: ExvlanDurableObject,
     async fetch(request, env, _context): Promise<Response> {
       const objectName =
         typeof options.objectName === "function"
           ? options.objectName(request, env)
           : (options.objectName ?? "primary");
       if (objectName.trim() === "") {
-        return new Response("EasyTier object name is empty", { status: 500 });
+        return new Response("Exvlan object name is empty", { status: 500 });
       }
       return options.namespace(env).getByName(objectName).fetch(request);
     },

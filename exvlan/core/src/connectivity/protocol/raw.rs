@@ -256,7 +256,7 @@ where
             remote_addr,
             bind_addrs,
             self.bind.clone(),
-            UdpSessionMode::EasyTierMux,
+            UdpSessionMode::ExvlanMux,
         )
         .await?;
         Ok(upgrade_connected_udp(connected, self.remote_url.clone())?)
@@ -294,7 +294,7 @@ where
             inner: UdpSessionSocketListener::new_with_request(
                 local_url,
                 request,
-                UdpSessionAcceptKind::EasyTierMux,
+                UdpSessionAcceptKind::ExvlanMux,
                 host,
             ),
         }
@@ -864,7 +864,7 @@ pub(crate) mod tests {
         let session = UdpSession::identity_standalone(
             Arc::new(MockUdpSocket { local_addr }),
             peer_addr,
-            UdpSessionKind::EasyTierMux,
+            UdpSessionKind::ExvlanMux,
         )
         .unwrap();
 
@@ -881,7 +881,7 @@ pub(crate) mod tests {
         let session = UdpSession::identity_standalone(
             Arc::new(MockUdpSocket { local_addr }),
             "127.0.0.1:2000".parse().unwrap(),
-            UdpSessionKind::EasyTierMux,
+            UdpSessionKind::ExvlanMux,
         )
         .unwrap();
 
@@ -942,7 +942,7 @@ pub(crate) mod tests {
                 "127.0.0.1:1000".parse().unwrap(),
                 "127.0.0.1:2000".parse().unwrap(),
             ),
-            "unix:///tmp/easytier.sock".parse().unwrap(),
+            "unix:///tmp/exvlan.sock".parse().unwrap(),
             None,
         )
         .unwrap();
@@ -963,7 +963,7 @@ pub(crate) mod tests {
                 "127.0.0.1:2000".parse().unwrap(),
             ),
             None,
-            "unix:///tmp/easytier.sock".parse().unwrap(),
+            "unix:///tmp/exvlan.sock".parse().unwrap(),
             None,
         ))
         .unwrap();
@@ -973,7 +973,7 @@ pub(crate) mod tests {
                 "127.0.0.1:2000".parse().unwrap(),
                 "127.0.0.1:1000".parse().unwrap(),
             ),
-            "unix:///tmp/easytier.sock".parse().unwrap(),
+            "unix:///tmp/exvlan.sock".parse().unwrap(),
             Some("unix://anonymous/peer".parse().unwrap()),
         )
         .unwrap();

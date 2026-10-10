@@ -163,7 +163,7 @@ impl From<RoutePeerInfo> for crate::core_peer::peer::Route {
                 Some(stun_info)
             },
             inst_id: val.inst_id.map(|x| x.to_string()).unwrap_or_default(),
-            version: val.easytier_version,
+            version: val.exvlan_version,
             feature_flag: val.feature_flag,
 
             next_hop_peer_id_latency_first: None,
@@ -208,7 +208,7 @@ impl From<RoutePeerInfo> for crate::api::instance::Route {
                 Some(stun_info)
             },
             inst_id: val.inst_id.map(|x| x.to_string()).unwrap_or_default(),
-            version: val.easytier_version,
+            version: val.exvlan_version,
             feature_flag: val.feature_flag,
 
             next_hop_peer_id_latency_first: None,

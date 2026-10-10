@@ -28,7 +28,7 @@ declare global {
   const getConfig: typeof import('./composables/backend')['getConfig']
   const getCurrentInstance: typeof import('vue')['getCurrentInstance']
   const getCurrentScope: typeof import('vue')['getCurrentScope']
-  const getEasytierVersion: typeof import('./composables/backend')['getEasytierVersion']
+  const getExvlanVersion: typeof import('./composables/backend')['getExvlanVersion']
   const getNetworkMetas: typeof import('./composables/backend')['getNetworkMetas']
   const getServiceStatus: typeof import('./composables/backend')['getServiceStatus']
   const getVpnPortalInfo: typeof import('./composables/backend')['getVpnPortalInfo']
@@ -159,7 +159,7 @@ declare module 'vue' {
     readonly getConfig: UnwrapRef<typeof import('./composables/backend')['getConfig']>
     readonly getCurrentInstance: UnwrapRef<typeof import('vue')['getCurrentInstance']>
     readonly getCurrentScope: UnwrapRef<typeof import('vue')['getCurrentScope']>
-    readonly getEasytierVersion: UnwrapRef<typeof import('./composables/backend')['getEasytierVersion']>
+    readonly getExvlanVersion: UnwrapRef<typeof import('./composables/backend')['getExvlanVersion']>
     readonly getNetworkMetas: UnwrapRef<typeof import('./composables/backend')['getNetworkMetas']>
     readonly getServiceStatus: UnwrapRef<typeof import('./composables/backend')['getServiceStatus']>
     readonly getVpnPortalInfo: UnwrapRef<typeof import('./composables/backend')['getVpnPortalInfo']>

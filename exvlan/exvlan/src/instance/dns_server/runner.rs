@@ -3,7 +3,7 @@ use tokio_util::sync::CancellationToken;
 
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 
-use easytier_core::instance::CorePacketPlane;
+use exvlan_core::instance::CorePacketPlane;
 
 use crate::common::global_ctx::ArcGlobalCtx;
 

@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/easytier/easytier/easytier-go/internal/contextutil"
-	"github.com/easytier/easytier/easytier-go/internal/coreabi"
-	"github.com/easytier/easytier/easytier-go/internal/reactor"
+	"github.com/exvlan/exvlan/exvlan-go/internal/contextutil"
+	"github.com/exvlan/exvlan/exvlan-go/internal/coreabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/reactor"
 )
 
 type commandKind uint8
@@ -112,7 +112,7 @@ type Instance struct {
 
 func (instance *Instance) Start(ctx context.Context) error {
 	if ctx == nil {
-		return fmt.Errorf("start EasyTier instance with nil context")
+		return fmt.Errorf("start Exvlan instance with nil context")
 	}
 	if err := instance.execute(ctx, command{kind: commandStart}); err != nil {
 		return err
@@ -121,7 +121,7 @@ func (instance *Instance) Start(ctx context.Context) error {
 	case <-instance.running:
 		return nil
 	case <-instance.done:
-		return instance.finishedError("start EasyTier instance")
+		return instance.finishedError("start Exvlan instance")
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -129,7 +129,7 @@ func (instance *Instance) Start(ctx context.Context) error {
 
 func (instance *Instance) Stop(ctx context.Context) error {
 	if ctx == nil {
-		return fmt.Errorf("stop EasyTier instance with nil context")
+		return fmt.Errorf("stop Exvlan instance with nil context")
 	}
 	if err := instance.execute(ctx, command{kind: commandStop}); err != nil {
 		return err
@@ -138,7 +138,7 @@ func (instance *Instance) Stop(ctx context.Context) error {
 	case <-instance.stopped:
 		return nil
 	case <-instance.done:
-		return instance.finishedError("stop EasyTier instance")
+		return instance.finishedError("stop Exvlan instance")
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -146,7 +146,7 @@ func (instance *Instance) Stop(ctx context.Context) error {
 
 func (instance *Instance) SendPacket(ctx context.Context, packet []byte) error {
 	if ctx == nil {
-		return fmt.Errorf("send EasyTier packet with nil context")
+		return fmt.Errorf("send Exvlan packet with nil context")
 	}
 	if len(packet) == 0 {
 		return fmt.Errorf("send empty packet")
@@ -159,11 +159,11 @@ func (instance *Instance) SendPacket(ctx context.Context, packet []byte) error {
 
 func (instance *Instance) ReceivePacket(ctx context.Context) ([]byte, error) {
 	if ctx == nil {
-		return nil, fmt.Errorf("receive EasyTier packet with nil context")
+		return nil, fmt.Errorf("receive Exvlan packet with nil context")
 	}
 	select {
 	case <-instance.done:
-		return nil, instance.finishedError("receive EasyTier packet")
+		return nil, instance.finishedError("receive Exvlan packet")
 	default:
 	}
 	return instance.reactor.ReceivePacket(ctx, instance.packetSink)
@@ -175,13 +175,13 @@ func (instance *Instance) Events() <-chan Event {
 
 func (instance *Instance) Wait(ctx context.Context) error {
 	if ctx == nil {
-		return fmt.Errorf("wait for EasyTier instance with nil context")
+		return fmt.Errorf("wait for Exvlan instance with nil context")
 	}
 	select {
 	case <-instance.stopped:
 		return nil
 	case <-instance.done:
-		return instance.finishedError("wait for EasyTier instance")
+		return instance.finishedError("wait for Exvlan instance")
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -201,7 +201,7 @@ func (instance *Instance) TerminalError() error {
 
 func (instance *Instance) Close(ctx context.Context) error {
 	if ctx == nil {
-		return fmt.Errorf("close EasyTier instance with nil context")
+		return fmt.Errorf("close Exvlan instance with nil context")
 	}
 	instance.closeOnce.Do(func() {
 		instance.closing.Store(true)
@@ -217,18 +217,18 @@ func (instance *Instance) Close(ctx context.Context) error {
 
 func (instance *Instance) execute(ctx context.Context, request command) error {
 	if ctx == nil {
-		return fmt.Errorf("execute EasyTier command with nil context")
+		return fmt.Errorf("execute Exvlan command with nil context")
 	}
 	request.response = make(chan error, 1)
 	if instance.closing.Load() {
-		return fmt.Errorf("execute EasyTier command on closing instance")
+		return fmt.Errorf("execute Exvlan command on closing instance")
 	}
 	select {
 	case instance.commands <- request:
 	case <-instance.done:
-		return instance.finishedError("execute EasyTier command")
+		return instance.finishedError("execute Exvlan command")
 	case <-instance.closeRequested:
-		return fmt.Errorf("execute EasyTier command on closing instance")
+		return fmt.Errorf("execute Exvlan command on closing instance")
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -239,16 +239,16 @@ func (instance *Instance) execute(ctx context.Context, request command) error {
 		case err := <-request.response:
 			return err
 		case <-instance.done:
-			return instance.finishedError("execute EasyTier command")
+			return instance.finishedError("execute Exvlan command")
 		}
 	}
 	select {
 	case err := <-request.response:
 		return err
 	case <-instance.done:
-		return instance.finishedError("execute EasyTier command")
+		return instance.finishedError("execute Exvlan command")
 	case <-instance.closeRequested:
-		return fmt.Errorf("execute EasyTier command on closing instance")
+		return fmt.Errorf("execute Exvlan command on closing instance")
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -432,7 +432,7 @@ func (instance *Instance) handleCommand(request command) error {
 	case commandSendPacket:
 		return instance.core.SendPacket(instance.ctx, request.packet)
 	default:
-		return fmt.Errorf("unknown EasyTier command %d", request.kind)
+		return fmt.Errorf("unknown Exvlan command %d", request.kind)
 	}
 }
 

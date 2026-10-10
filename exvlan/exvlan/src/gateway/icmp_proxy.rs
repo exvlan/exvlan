@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use easytier_core::{
+use exvlan_core::{
     gateway::proxy::icmp_host::{IcmpProxyHost, IcmpProxySocket, ProxyRuntimeError},
     socket::SocketContext,
 };

@@ -28,7 +28,7 @@ pub const MAX_UDP_DATAGRAM_SIZE: usize = u16::MAX as usize;
 
 /// Largest datagram accepted by the UDP session/multiplexer data plane.
 ///
-/// EasyTier, WireGuard, and QUIC datagrams are bounded by their transport MTU.
+/// Exvlan, WireGuard, and QUIC datagrams are bounded by their transport MTU.
 /// Keeping this capacity explicit avoids allocating the theoretical UDP maximum
 /// for every packet on native hosts that can detect truncation.
 pub const MAX_UDP_SESSION_DATAGRAM_SIZE: usize = 8 * 1024;

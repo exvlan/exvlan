@@ -1,66 +1,66 @@
-export type EasyTierState =
+export type ExvlanState =
   | "created"
   | "starting"
   | "running"
   | "stopping"
   | "stopped";
 
-export interface EasyTierNetworkConfig {
+export interface ExvlanNetworkConfig {
   networkName: string;
   networkSecret: string;
   instanceName?: string;
   encryption?: boolean;
 }
 
-export interface EasyTierEvent {
+export interface ExvlanEvent {
   kind: string;
   message: string;
 }
 
-export interface EasyTierStatus {
-  state: EasyTierState;
+export interface ExvlanStatus {
+  state: ExvlanState;
   connections: number;
 }
 
-export interface EasyTierOperationOptions {
+export interface ExvlanOperationOptions {
   /** Timeout in milliseconds. Omit to wait indefinitely. */
   timeout?: number;
 }
 
-export interface EasyTierIpv4SocketAddress {
+export interface ExvlanIpv4SocketAddress {
   ipv4: string;
   port: number;
 }
 
-export interface EasyTierTcpReadResult {
+export interface ExvlanTcpReadResult {
   data: Uint8Array;
   eof: boolean;
 }
 
-export interface EasyTierTcpStream {
-  readonly localAddress: EasyTierIpv4SocketAddress;
-  readonly peerAddress: EasyTierIpv4SocketAddress;
-  read(maxLength?: number): Promise<EasyTierTcpReadResult>;
+export interface ExvlanTcpStream {
+  readonly localAddress: ExvlanIpv4SocketAddress;
+  readonly peerAddress: ExvlanIpv4SocketAddress;
+  read(maxLength?: number): Promise<ExvlanTcpReadResult>;
   write(data: Uint8Array): Promise<number>;
   shutdownWrite(): Promise<void>;
   close(): Promise<void>;
 }
 
-export interface EasyTierTcpListener {
-  readonly localAddress: EasyTierIpv4SocketAddress;
-  accept(options?: EasyTierOperationOptions): Promise<EasyTierTcpStream>;
+export interface ExvlanTcpListener {
+  readonly localAddress: ExvlanIpv4SocketAddress;
+  accept(options?: ExvlanOperationOptions): Promise<ExvlanTcpStream>;
   close(): Promise<void>;
 }
 
-export interface EasyTierInstance {
+export interface ExvlanInstance {
   connectTcp(
     address: string,
-    options?: EasyTierOperationOptions,
-  ): Promise<EasyTierTcpStream>;
+    options?: ExvlanOperationOptions,
+  ): Promise<ExvlanTcpStream>;
   listenTcp(
     port: number,
-    options?: EasyTierOperationOptions,
-  ): Promise<EasyTierTcpListener>;
-  status(): Promise<EasyTierStatus>;
+    options?: ExvlanOperationOptions,
+  ): Promise<ExvlanTcpListener>;
+  status(): Promise<ExvlanStatus>;
   close(): Promise<void>;
 }

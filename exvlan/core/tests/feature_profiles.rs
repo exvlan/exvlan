@@ -4,7 +4,7 @@
     not(feature = "wrapped-transport")
 ))]
 
-use easytier_core::{config::toml::TomlConfig, instance::CoreInstanceConfig};
+use exvlan_core::{config::toml::TomlConfig, instance::CoreInstanceConfig};
 
 #[test]
 fn manual_routes_require_cidr_monitor_not_wrapped_transport() {

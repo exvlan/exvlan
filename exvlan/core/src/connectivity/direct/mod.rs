@@ -564,7 +564,7 @@ where
             Some(SocketAddr::V6(socket_addr))
                 if self
                     .peer_manager
-                    .is_easytier_managed_ipv6(socket_addr.ip())
+                    .is_exvlan_managed_ipv6(socket_addr.ip())
                     .await =>
             {
                 tracing::debug!(?listener, "skip managed IPv6 direct target");
@@ -820,7 +820,7 @@ where
     }
 
     async fn is_usable_public_ipv6(&self, ip: &Ipv6Addr) -> bool {
-        !self.peer_manager.is_easytier_managed_ipv6(ip).await
+        !self.peer_manager.is_exvlan_managed_ipv6(ip).await
             && (self.options.testing
                 || (!ip.is_loopback()
                     && !ip.is_unspecified()
@@ -975,7 +975,7 @@ where
         let mut interface_ipv6s = Vec::with_capacity(response.interface_ipv6s.len());
         for ip in response.interface_ipv6s {
             if !peer_manager
-                .is_easytier_managed_ipv6(&Ipv6Addr::from(ip))
+                .is_exvlan_managed_ipv6(&Ipv6Addr::from(ip))
                 .await
             {
                 interface_ipv6s.push(ip);
@@ -983,7 +983,7 @@ where
         }
         response.interface_ipv6s = interface_ipv6s;
         if let Some(ip) = response.public_ipv6.map(Ipv6Addr::from)
-            && peer_manager.is_easytier_managed_ipv6(&ip).await
+            && peer_manager.is_exvlan_managed_ipv6(&ip).await
         {
             response.public_ipv6 = None;
         }
@@ -1080,7 +1080,7 @@ where
                         .preferred_foreign_ipv6_source(ip, self.socket_context.clone())
                         .await
                 } else if let Some(peer_manager) = peer_manager.as_deref()
-                    && peer_manager.is_easytier_managed_ipv6(&ip).await
+                    && peer_manager.is_exvlan_managed_ipv6(&ip).await
                 {
                     None
                 } else {

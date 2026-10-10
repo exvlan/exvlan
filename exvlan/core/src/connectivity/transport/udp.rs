@@ -38,7 +38,7 @@ impl ConnectedUdpSession {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UdpSessionMode {
-    EasyTierMux,
+    ExvlanMux,
     Classified(UdpSessionProtocol),
 }
 
@@ -93,7 +93,7 @@ where
     let socket = host.bind_udp(bind).await?;
     let layer = Arc::new(UdpSessionLayer::new_with_stun_responder(socket, host));
     let session = match mode {
-        UdpSessionMode::EasyTierMux => layer.connect(remote_addr).await?,
+        UdpSessionMode::ExvlanMux => layer.connect(remote_addr).await?,
         UdpSessionMode::Classified(protocol) => {
             layer.open_classified_session(protocol, remote_addr)?
         }

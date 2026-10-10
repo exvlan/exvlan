@@ -1076,7 +1076,7 @@ mod tests {
             remote: SocketAddr,
         ) -> anyhow::Result<UdpPunchSocket> {
             let session =
-                UdpSession::identity_standalone(socket, remote, UdpSessionKind::EasyTierMux)?;
+                UdpSession::identity_standalone(socket, remote, UdpSessionKind::ExvlanMux)?;
             Ok(UdpPunchSocket::new(session, remote, ()))
         }
     }
@@ -1209,7 +1209,7 @@ mod tests {
         });
         let remote_addr = SocketAddr::from(([127, 0, 0, 1], 20001));
         let session =
-            UdpSession::identity_standalone(socket, remote_addr, UdpSessionKind::EasyTierMux)
+            UdpSession::identity_standalone(socket, remote_addr, UdpSessionKind::ExvlanMux)
                 .unwrap();
         let punched_socket = UdpPunchSocket::new(session, remote_addr, ());
         let runtime = Arc::new(MockRuntime::new(vec![listener(

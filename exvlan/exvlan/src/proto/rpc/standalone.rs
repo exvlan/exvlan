@@ -1,4 +1,4 @@
-use easytier_core::{
+use exvlan_core::{
     connectivity::protocol::raw::{
         TcpTunnelDialer, TcpTunnelListener, TunnelDialer, UdpTunnelDialer, UdpTunnelListener,
     },
@@ -14,7 +14,7 @@ use crate::{
     tunnel::TunnelUrl,
 };
 
-pub use easytier_core::rpc::standalone::{RpcServerHook, StandAloneServer};
+pub use exvlan_core::rpc::standalone::{RpcServerHook, StandAloneServer};
 
 pub type RuntimeRpcDialer = TcpTunnelDialer<NativeHostRuntime>;
 pub type RuntimeRpcListener = TcpTunnelListener<NativeHostRuntime>;
@@ -57,7 +57,7 @@ pub fn runtime_udp_tunnel_listener(
 
 #[cfg(test)]
 mod tests {
-    use easytier_core::{
+    use exvlan_core::{
         connectivity::protocol::raw::TunnelDialer as _, socket::SocketListener as _,
     };
 

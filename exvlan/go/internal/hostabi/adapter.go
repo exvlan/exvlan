@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/easytier/easytier/easytier-go/internal/reactor"
+	"github.com/exvlan/exvlan/exvlan-go/internal/reactor"
 	"github.com/metacubex/wazero"
 )
 
-const importModule = "easytier_host"
+const importModule = "exvlan_host"
 
 type Adapter struct {
 	reactor *reactor.Reactor

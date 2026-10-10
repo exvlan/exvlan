@@ -1,4 +1,4 @@
-module github.com/easytier/easytier/easytier-go
+module github.com/exvlan/exvlan/exvlan-go
 
 go 1.20
 

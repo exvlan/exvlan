@@ -145,7 +145,7 @@ class VpnServicePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun consumeVpnTileAction(invoke: Invoke) {
         val ret = JSObject()
-        ret.put("action", EasyTierVpnTileService.consumePendingAction(activity))
+        ret.put("action", ExvlanVpnTileService.consumePendingAction(activity))
         invoke.resolve(ret)
     }
 }

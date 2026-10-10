@@ -7,7 +7,7 @@
 package peer_rpc
 
 import (
-	common "github.com/easytier/easytier/easytier-go/proto/common"
+	common "github.com/exvlan/exvlan/exvlan-go/proto/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -367,7 +367,7 @@ type RoutePeerInfo struct {
 	UdpNatType      common.NatType          `protobuf:"varint,7,opt,name=udp_nat_type,json=udpNatType,proto3,enum=common.NatType" json:"udp_nat_type,omitempty"`
 	LastUpdate      *timestamppb.Timestamp  `protobuf:"bytes,8,opt,name=last_update,json=lastUpdate,proto3" json:"last_update,omitempty"`
 	Version         uint32                  `protobuf:"varint,9,opt,name=version,proto3" json:"version,omitempty"`
-	EasytierVersion string                  `protobuf:"bytes,10,opt,name=easytier_version,json=easytierVersion,proto3" json:"easytier_version,omitempty"`
+	ExvlanVersion string                  `protobuf:"bytes,10,opt,name=exvlan_version,json=exvlanVersion,proto3" json:"exvlan_version,omitempty"`
 	FeatureFlag     *common.PeerFeatureFlag `protobuf:"bytes,11,opt,name=feature_flag,json=featureFlag,proto3" json:"feature_flag,omitempty"`
 	PeerRouteId     uint64                  `protobuf:"varint,12,opt,name=peer_route_id,json=peerRouteId,proto3" json:"peer_route_id,omitempty"`
 	NetworkLength   uint32                  `protobuf:"varint,13,opt,name=network_length,json=networkLength,proto3" json:"network_length,omitempty"`
@@ -478,9 +478,9 @@ func (x *RoutePeerInfo) GetVersion() uint32 {
 	return 0
 }
 
-func (x *RoutePeerInfo) GetEasytierVersion() string {
+func (x *RoutePeerInfo) GetExvlanVersion() string {
 	if x != nil {
-		return x.EasytierVersion
+		return x.ExvlanVersion
 	}
 	return ""
 }
@@ -3382,8 +3382,8 @@ const file_peer_rpc_proto_rawDesc = "" +
 	"\vlast_update\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"lastUpdate\x12\x18\n" +
 	"\aversion\x18\t \x01(\rR\aversion\x12)\n" +
-	"\x10easytier_version\x18\n" +
-	" \x01(\tR\x0feasytierVersion\x12:\n" +
+	"\x10exvlan_version\x18\n" +
+	" \x01(\tR\x0fexvlanVersion\x12:\n" +
 	"\ffeature_flag\x18\v \x01(\v2\x17.common.PeerFeatureFlagR\vfeatureFlag\x12\"\n" +
 	"\rpeer_route_id\x18\f \x01(\x04R\vpeerRouteId\x12%\n" +
 	"\x0enetwork_length\x18\r \x01(\rR\rnetworkLength\x12$\n" +

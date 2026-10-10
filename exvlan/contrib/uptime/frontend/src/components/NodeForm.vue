@@ -58,7 +58,7 @@
             </el-icon>
           </template>
         </el-input>
-        <div class="form-tip">与 EXVlan 的 network name 一致，用于后端探活</div>
+        <div class="form-tip">与 Exvlan 的 network name 一致，用于后端探活</div>
       </el-form-item>
 
       <el-form-item label="网络密码" prop="network_secret" required>
@@ -70,7 +70,7 @@
             </el-icon>
           </template>
         </el-input>
-        <div class="form-tip">与 EXVlan 的 network secret 一致</div>
+        <div class="form-tip">与 Exvlan 的 network secret 一致</div>
       </el-form-item>
 
       <el-form-item label="最大网络数" prop="max_connections" required>

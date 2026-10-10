@@ -1,14 +1,14 @@
 import { WasiClock } from "./wasi-clock.js";
 import { WasiPreview1 } from "./wasi-preview1.js";
 import {
-  EasyTierDataPlane,
+  ExvlanDataPlane,
   type DataPlaneExportName,
-  type EasyTierTcpListener,
-  type EasyTierTcpStream,
+  type ExvlanTcpListener,
+  type ExvlanTcpStream,
 } from "./data-plane.js";
 import {
   WebSocketHost,
-  type EasyTierCoreEvent,
+  type ExvlanCoreEvent,
   type RuntimeWebSocket,
   type WebSocketHostHealth,
 } from "./websocket-host.js";
@@ -38,38 +38,38 @@ type PromisingExport = (...parameters: WasmValue[]) => Promise<WasmValue>;
 interface CoreExports {
   memory: WebAssembly.Memory;
   _start: WasmCallable;
-  easytier_buffer_alloc: WasmCallable;
-  easytier_buffer_free: WasmCallable;
-  easytier_instance_create: WasmCallable;
-  easytier_instance_start: WasmCallable;
-  easytier_instance_stop: WasmCallable;
-  easytier_instance_drive: WasmCallable;
-  easytier_instance_notify_completions: WasmCallable;
-  easytier_instance_state: WasmCallable;
-  easytier_instance_next_deadline_millis: WasmCallable;
-  easytier_instance_error_len: WasmCallable;
-  easytier_instance_error_copy: WasmCallable;
-  easytier_instance_drop: WasmCallable;
-  easytier_host_tunnel_abi_version: WasmCallable;
-  easytier_instance_accept_tunnel: WasmCallable;
-  easytier_data_plane_abi_version?: WasmCallable;
-  easytier_data_plane_capabilities?: WasmCallable;
-  easytier_data_plane_tcp_connect_submit?: WasmCallable;
-  easytier_data_plane_tcp_bind_submit?: WasmCallable;
-  easytier_data_plane_tcp_accept_submit?: WasmCallable;
-  easytier_data_plane_tcp_read_submit?: WasmCallable;
-  easytier_data_plane_tcp_write_submit?: WasmCallable;
-  easytier_data_plane_tcp_shutdown_write_submit?: WasmCallable;
-  easytier_data_plane_completion_drain?: WasmCallable;
-  easytier_data_plane_result_size?: WasmCallable;
-  easytier_data_plane_tcp_connect_result_take?: WasmCallable;
-  easytier_data_plane_tcp_bind_result_take?: WasmCallable;
-  easytier_data_plane_tcp_accept_result_take?: WasmCallable;
-  easytier_data_plane_tcp_read_result_take?: WasmCallable;
-  easytier_data_plane_tcp_write_result_take?: WasmCallable;
-  easytier_data_plane_tcp_shutdown_write_result_take?: WasmCallable;
-  easytier_data_plane_operation_free?: WasmCallable;
-  easytier_data_plane_resource_close?: WasmCallable;
+  exvlan_buffer_alloc: WasmCallable;
+  exvlan_buffer_free: WasmCallable;
+  exvlan_instance_create: WasmCallable;
+  exvlan_instance_start: WasmCallable;
+  exvlan_instance_stop: WasmCallable;
+  exvlan_instance_drive: WasmCallable;
+  exvlan_instance_notify_completions: WasmCallable;
+  exvlan_instance_state: WasmCallable;
+  exvlan_instance_next_deadline_millis: WasmCallable;
+  exvlan_instance_error_len: WasmCallable;
+  exvlan_instance_error_copy: WasmCallable;
+  exvlan_instance_drop: WasmCallable;
+  exvlan_host_tunnel_abi_version: WasmCallable;
+  exvlan_instance_accept_tunnel: WasmCallable;
+  exvlan_data_plane_abi_version?: WasmCallable;
+  exvlan_data_plane_capabilities?: WasmCallable;
+  exvlan_data_plane_tcp_connect_submit?: WasmCallable;
+  exvlan_data_plane_tcp_bind_submit?: WasmCallable;
+  exvlan_data_plane_tcp_accept_submit?: WasmCallable;
+  exvlan_data_plane_tcp_read_submit?: WasmCallable;
+  exvlan_data_plane_tcp_write_submit?: WasmCallable;
+  exvlan_data_plane_tcp_shutdown_write_submit?: WasmCallable;
+  exvlan_data_plane_completion_drain?: WasmCallable;
+  exvlan_data_plane_result_size?: WasmCallable;
+  exvlan_data_plane_tcp_connect_result_take?: WasmCallable;
+  exvlan_data_plane_tcp_bind_result_take?: WasmCallable;
+  exvlan_data_plane_tcp_accept_result_take?: WasmCallable;
+  exvlan_data_plane_tcp_read_result_take?: WasmCallable;
+  exvlan_data_plane_tcp_write_result_take?: WasmCallable;
+  exvlan_data_plane_tcp_shutdown_write_result_take?: WasmCallable;
+  exvlan_data_plane_operation_free?: WasmCallable;
+  exvlan_data_plane_resource_close?: WasmCallable;
 }
 
 interface PromisingCoreExports {
@@ -113,7 +113,7 @@ export interface CoreHealth extends WebSocketHostHealth {
   tunnelAbiVersion: number;
 }
 
-export class EasyTierRuntime {
+export class ExvlanRuntime {
   private readonly host: WebSocketHost;
   readonly ready: Promise<void>;
 
@@ -129,7 +129,7 @@ export class EasyTierRuntime {
   private pumpQueued = false;
   private completionRequested = false;
   private lastError: unknown;
-  private dataPlane: EasyTierDataPlane | undefined;
+  private dataPlane: ExvlanDataPlane | undefined;
   private stopping = false;
   private stopPromise: Promise<void> | undefined;
 
@@ -137,7 +137,7 @@ export class EasyTierRuntime {
     private readonly module: WebAssembly.Module,
     private readonly config: string,
     outboundWebSocketFactory?: (url: string) => RuntimeWebSocket,
-    onEvent?: (event: EasyTierCoreEvent) => void,
+    onEvent?: (event: ExvlanCoreEvent) => void,
   ) {
     this.host = new WebSocketHost(outboundWebSocketFactory, onEvent);
     this.ready = this.enqueue(() => this.initialize());
@@ -218,7 +218,7 @@ export class EasyTierRuntime {
         this.armNextDrive();
       } catch (error) {
         if (transferred) {
-          this.host.abort(tunnelHandle, "EasyTier admission failed");
+          this.host.abort(tunnelHandle, "Exvlan admission failed");
         }
         throw error;
       }
@@ -240,11 +240,11 @@ export class EasyTierRuntime {
     ipv4: string,
     port: number,
     timeoutMilliseconds?: number,
-  ): Promise<EasyTierTcpStream> {
+  ): Promise<ExvlanTcpStream> {
     await this.ready;
     this.requireRunning();
     if (this.dataPlane === undefined) {
-      throw new Error("this EasyTier guest does not include the data plane");
+      throw new Error("this Exvlan guest does not include the data plane");
     }
     return this.dataPlane.connectTcp(ipv4, port, timeoutMilliseconds);
   }
@@ -252,11 +252,11 @@ export class EasyTierRuntime {
   async bindTcp(
     localPort: number,
     timeoutMilliseconds?: number,
-  ): Promise<EasyTierTcpListener> {
+  ): Promise<ExvlanTcpListener> {
     await this.ready;
     this.requireRunning();
     if (this.dataPlane === undefined) {
-      throw new Error("this EasyTier guest does not include the data plane");
+      throw new Error("this Exvlan guest does not include the data plane");
     }
     return this.dataPlane.bindTcp(localPort, timeoutMilliseconds);
   }
@@ -299,7 +299,7 @@ export class EasyTierRuntime {
 
     instance = new WebAssembly.Instance(this.module, {
       wasi_snapshot_preview1: wasi.imports,
-      easytier_host: this.host.imports,
+      exvlan_host: this.host.imports,
     });
     const raw = instance.exports as unknown as CoreExports;
     this.memory = raw.memory;
@@ -348,7 +348,7 @@ export class EasyTierRuntime {
       throw new Error(await this.instanceError("core instance creation"));
     }
     if (this.exports.dataPlaneAbiVersion !== undefined) {
-      this.dataPlane = new EasyTierDataPlane({
+      this.dataPlane = new ExvlanDataPlane({
         instanceHandle: this.instanceHandle,
         call: (name, parameters) => this.call(name, parameters),
         allocate: async (length) => {
@@ -389,7 +389,7 @@ export class EasyTierRuntime {
         this.armNextDrive();
         console.log(
           JSON.stringify({
-            event: "easytier_core_started",
+            event: "exvlan_core_started",
             tunnelAbiVersion: abiVersion,
             startupDrives: attempt + 1,
           }),
@@ -556,7 +556,7 @@ export class EasyTierRuntime {
         this.pumpQueued = false;
         console.error(
           JSON.stringify({
-            event: "easytier_core_pump_failed",
+            event: "exvlan_core_pump_failed",
             error: String(error),
           }),
         );
@@ -633,7 +633,7 @@ export class EasyTierRuntime {
       this.lastError = error;
       console.error(
         JSON.stringify({
-          event: "easytier_core_timer_failed",
+          event: "exvlan_core_timer_failed",
           error: String(error),
         }),
       );
@@ -649,69 +649,69 @@ export class EasyTierRuntime {
       callable === undefined ? undefined : wrap(callable);
     return {
       start: wrap(raw._start),
-      bufferAlloc: wrap(raw.easytier_buffer_alloc),
-      bufferFree: wrap(raw.easytier_buffer_free),
-      instanceCreate: wrap(raw.easytier_instance_create),
-      instanceStart: wrap(raw.easytier_instance_start),
-      instanceStop: wrap(raw.easytier_instance_stop),
-      instanceDrive: wrap(raw.easytier_instance_drive),
-      notifyCompletions: wrap(raw.easytier_instance_notify_completions),
-      instanceState: wrap(raw.easytier_instance_state),
-      nextDeadlineMillis: wrap(raw.easytier_instance_next_deadline_millis),
-      errorLength: wrap(raw.easytier_instance_error_len),
-      errorCopy: wrap(raw.easytier_instance_error_copy),
-      instanceDrop: wrap(raw.easytier_instance_drop),
-      tunnelAbiVersion: wrap(raw.easytier_host_tunnel_abi_version),
-      acceptTunnel: wrap(raw.easytier_instance_accept_tunnel),
-      dataPlaneAbiVersion: wrapOptional(raw.easytier_data_plane_abi_version),
+      bufferAlloc: wrap(raw.exvlan_buffer_alloc),
+      bufferFree: wrap(raw.exvlan_buffer_free),
+      instanceCreate: wrap(raw.exvlan_instance_create),
+      instanceStart: wrap(raw.exvlan_instance_start),
+      instanceStop: wrap(raw.exvlan_instance_stop),
+      instanceDrive: wrap(raw.exvlan_instance_drive),
+      notifyCompletions: wrap(raw.exvlan_instance_notify_completions),
+      instanceState: wrap(raw.exvlan_instance_state),
+      nextDeadlineMillis: wrap(raw.exvlan_instance_next_deadline_millis),
+      errorLength: wrap(raw.exvlan_instance_error_len),
+      errorCopy: wrap(raw.exvlan_instance_error_copy),
+      instanceDrop: wrap(raw.exvlan_instance_drop),
+      tunnelAbiVersion: wrap(raw.exvlan_host_tunnel_abi_version),
+      acceptTunnel: wrap(raw.exvlan_instance_accept_tunnel),
+      dataPlaneAbiVersion: wrapOptional(raw.exvlan_data_plane_abi_version),
       dataPlaneCapabilities: wrapOptional(
-        raw.easytier_data_plane_capabilities,
+        raw.exvlan_data_plane_capabilities,
       ),
       dataPlaneTcpConnectSubmit: wrapOptional(
-        raw.easytier_data_plane_tcp_connect_submit,
+        raw.exvlan_data_plane_tcp_connect_submit,
       ),
       dataPlaneTcpBindSubmit: wrapOptional(
-        raw.easytier_data_plane_tcp_bind_submit,
+        raw.exvlan_data_plane_tcp_bind_submit,
       ),
       dataPlaneTcpAcceptSubmit: wrapOptional(
-        raw.easytier_data_plane_tcp_accept_submit,
+        raw.exvlan_data_plane_tcp_accept_submit,
       ),
       dataPlaneTcpReadSubmit: wrapOptional(
-        raw.easytier_data_plane_tcp_read_submit,
+        raw.exvlan_data_plane_tcp_read_submit,
       ),
       dataPlaneTcpWriteSubmit: wrapOptional(
-        raw.easytier_data_plane_tcp_write_submit,
+        raw.exvlan_data_plane_tcp_write_submit,
       ),
       dataPlaneTcpShutdownWriteSubmit: wrapOptional(
-        raw.easytier_data_plane_tcp_shutdown_write_submit,
+        raw.exvlan_data_plane_tcp_shutdown_write_submit,
       ),
       dataPlaneCompletionDrain: wrapOptional(
-        raw.easytier_data_plane_completion_drain,
+        raw.exvlan_data_plane_completion_drain,
       ),
-      dataPlaneResultSize: wrapOptional(raw.easytier_data_plane_result_size),
+      dataPlaneResultSize: wrapOptional(raw.exvlan_data_plane_result_size),
       dataPlaneTcpConnectResultTake: wrapOptional(
-        raw.easytier_data_plane_tcp_connect_result_take,
+        raw.exvlan_data_plane_tcp_connect_result_take,
       ),
       dataPlaneTcpBindResultTake: wrapOptional(
-        raw.easytier_data_plane_tcp_bind_result_take,
+        raw.exvlan_data_plane_tcp_bind_result_take,
       ),
       dataPlaneTcpAcceptResultTake: wrapOptional(
-        raw.easytier_data_plane_tcp_accept_result_take,
+        raw.exvlan_data_plane_tcp_accept_result_take,
       ),
       dataPlaneTcpReadResultTake: wrapOptional(
-        raw.easytier_data_plane_tcp_read_result_take,
+        raw.exvlan_data_plane_tcp_read_result_take,
       ),
       dataPlaneTcpWriteResultTake: wrapOptional(
-        raw.easytier_data_plane_tcp_write_result_take,
+        raw.exvlan_data_plane_tcp_write_result_take,
       ),
       dataPlaneTcpShutdownWriteResultTake: wrapOptional(
-        raw.easytier_data_plane_tcp_shutdown_write_result_take,
+        raw.exvlan_data_plane_tcp_shutdown_write_result_take,
       ),
       dataPlaneOperationFree: wrapOptional(
-        raw.easytier_data_plane_operation_free,
+        raw.exvlan_data_plane_operation_free,
       ),
       dataPlaneResourceClose: wrapOptional(
-        raw.easytier_data_plane_resource_close,
+        raw.exvlan_data_plane_resource_close,
       ),
     };
   }
@@ -791,7 +791,7 @@ export class EasyTierRuntime {
 
   private requireRunning(): void {
     if (this.stopping) {
-      throw new Error("EasyTier runtime is stopped");
+      throw new Error("Exvlan runtime is stopped");
     }
   }
 

@@ -68,7 +68,7 @@ fn core_plans_transport_and_external_listener_capabilities() {
             "wg://127.0.0.1:4",
             "quic://127.0.0.1:5",
             "faketcp://127.0.0.1:6",
-            "unix:///tmp/easytier-test",
+            "unix:///tmp/exvlan-test",
             "http://127.0.0.1:7",
         ]
         .into_iter()
@@ -131,7 +131,7 @@ fn unsupported_protocol_listener_becomes_a_plan_failure() {
 #[test]
 fn raw_unix_listener_does_not_require_a_server_protocol() {
     let config = ListenerRuntimeConfig::new(
-        vec!["unix:///tmp/easytier-test".parse().unwrap()],
+        vec!["unix:///tmp/exvlan-test".parse().unwrap()],
         false,
         SocketContext::default(),
     );
@@ -673,7 +673,7 @@ mod portable_runtime {
             management::InstanceManagementRpc,
         };
         use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-        use easytier_proto::{
+        use exvlan_proto::{
             api::config::{ConfigRpc, GetConfigRequest, InstanceConfigPatch, PatchConfigRequest},
             api::instance::{
                 PeerManageRpc, ShowNodeInfoRequest,
@@ -699,7 +699,7 @@ mod portable_runtime {
                 let mut adapters = adapters(None, Arc::new(packet_sink));
                 adapters.config.force_exit_node = true;
                 adapters.config.public_ipv6_provider_supported = true;
-                adapters.config.easytier_version = "host-version".to_owned();
+                adapters.config.exvlan_version = "host-version".to_owned();
                 CoreInstance::from_toml(config, adapters)
             }
         }
@@ -724,7 +724,7 @@ network_secret = "network-secret"
             .show_node_info(
                 BaseController::default(),
                 ShowNodeInfoRequest {
-                    instance: Some(easytier_proto::api::instance::InstanceIdentifier {
+                    instance: Some(exvlan_proto::api::instance::InstanceIdentifier {
                         selector: Some(Selector::InstanceSelector(InstanceSelector {
                             name: Some("managed-by-name".to_owned()),
                         })),
@@ -738,7 +738,7 @@ network_secret = "network-secret"
         assert_eq!(node.hostname, "core-owned-config");
         assert!(node.config.contains("instance_name = \"managed-by-name\""));
 
-        let selector = || easytier_proto::api::instance::InstanceIdentifier {
+        let selector = || exvlan_proto::api::instance::InstanceIdentifier {
             selector: Some(Selector::InstanceSelector(InstanceSelector {
                 name: Some("managed-by-name".to_owned()),
             })),
@@ -811,7 +811,7 @@ network_secret = "network-secret"
         let runtime = instance.runtime_config.snapshot();
         assert!(runtime.services.proxy.enable_exit_node);
         assert!(runtime.services.public_ipv6_provider.provider_supported);
-        assert_eq!(runtime.peer.easytier_version, "host-version");
+        assert_eq!(runtime.peer.exvlan_version, "host-version");
     }
 
     #[cfg(feature = "management")]
@@ -821,7 +821,7 @@ network_secret = "network-secret"
 
         let error = crate::management::apply_config_patch(
             &instance,
-            easytier_proto::api::config::InstanceConfigPatch {
+            exvlan_proto::api::config::InstanceConfigPatch {
                 hostname: Some("too-early".to_owned()),
                 ..Default::default()
             },
@@ -837,7 +837,7 @@ network_secret = "network-secret"
     #[tokio::test]
     async fn managed_credential_patch_is_durable_atomic_and_does_not_restart() {
         use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-        use easytier_proto::api::{
+        use exvlan_proto::api::{
             config::InstanceConfigPatch,
             manage::{ManagedCredentialConfig, ManagedCredentialSet},
         };
@@ -931,7 +931,7 @@ source = "web"
     #[cfg(feature = "management")]
     #[tokio::test]
     async fn ordinary_config_patch_is_durable_before_commit() {
-        use easytier_proto::api::config::InstanceConfigPatch;
+        use exvlan_proto::api::config::InstanceConfigPatch;
 
         let (packet_sink, _packet_receiver) = tokio::sync::mpsc::channel(16);
         let config = TomlConfig::new_from_str(
@@ -988,7 +988,7 @@ source = "web"
     #[cfg(all(feature = "management", feature = "vpn-portal"))]
     #[tokio::test]
     async fn portal_client_patch_restores_durable_state_after_failures() {
-        use easytier_proto::api::{
+        use exvlan_proto::api::{
             config::{ConfigPatchAction, InstanceConfigPatch, VpnPortalClientPatch},
             manage::VpnPortalClientConfig,
         };
@@ -1123,7 +1123,7 @@ source = "web"
     #[cfg(all(feature = "management", not(feature = "proxy-smoltcp-stack")))]
     #[tokio::test]
     async fn unavailable_gateway_patch_does_not_commit_shared_toml() {
-        use easytier_proto::{
+        use exvlan_proto::{
             api::config::{ConfigPatchAction, InstanceConfigPatch, PortForwardPatch},
             common::{PortForwardConfigPb, SocketType},
         };
@@ -1194,7 +1194,7 @@ source = "web"
     #[cfg(all(feature = "management", feature = "vpn-portal"))]
     #[tokio::test]
     async fn rejected_portal_address_patch_does_not_commit_shared_toml() {
-        use easytier_proto::api::config::InstanceConfigPatch;
+        use exvlan_proto::api::config::InstanceConfigPatch;
 
         let (packet_sink, _packet_receiver) = tokio::sync::mpsc::channel(16);
         let instance = CoreInstance::from_toml(
@@ -1260,7 +1260,7 @@ virtual_ip = "10.82.0.2/24"
     #[cfg(feature = "web-client")]
     #[tokio::test]
     async fn ignored_gateway_patch_remains_in_toml_config() {
-        use easytier_proto::{
+        use exvlan_proto::{
             api::config::{ConfigPatchAction, InstanceConfigPatch, PortForwardPatch, UrlPatch},
             common::{PortForwardConfigPb, SocketType},
         };
@@ -1526,7 +1526,7 @@ virtual_ip = "10.82.0.2/24"
                 InstanceMutationHooks, ProcessManagementRpc,
             },
         };
-        use easytier_proto::{
+        use exvlan_proto::{
             api::manage::{DeleteNetworkInstanceRequest, WebClientService},
             rpc_types::controller::BaseController,
         };
@@ -1701,7 +1701,7 @@ virtual_ip = "10.82.0.2/24"
             },
             rpc::service_registry::ServiceRegistry,
         };
-        use easytier_proto::{
+        use exvlan_proto::{
             api::manage::{
                 DeleteNetworkInstanceRequest, ListNetworkInstanceRequest, NetworkConfig,
                 NetworkingMethod, RunNetworkInstanceRequest, WebClientService,
@@ -1817,7 +1817,7 @@ virtual_ip = "10.82.0.2/24"
             instance::manager::InstanceFactory,
             management::{InstanceManager, ProcessManagementRpc, UnsupportedConfigFileStorage},
         };
-        use easytier_proto::{
+        use exvlan_proto::{
             api::manage::{CollectNetworkInfoRequest, WebClientService},
             rpc_types::controller::BaseController,
         };
@@ -2122,7 +2122,7 @@ virtual_ip = "10.82.0.2/24"
                 InstanceMutationHooks, ProcessManagementRpc,
             },
         };
-        use easytier_proto::{
+        use exvlan_proto::{
             api::manage::{
                 NetworkConfig, NetworkingMethod, RunNetworkInstanceRequest, WebClientService,
             },
@@ -3168,7 +3168,7 @@ virtual_ip = "10.82.0.2/24"
         let state = Arc::new(BlockingListenerState::default());
         let mut config = test_config("pending-listener");
         config.connectivity.listeners = Some(ListenerRuntimeConfig::new(
-            vec!["unix:///tmp/easytier-pending-listener".parse().unwrap()],
+            vec!["unix:///tmp/exvlan-pending-listener".parse().unwrap()],
             false,
             SocketContext::default(),
         ));
@@ -3198,7 +3198,7 @@ virtual_ip = "10.82.0.2/24"
 
     #[tokio::test]
     async fn external_listener_uses_core_running_listener_registry() {
-        let external_url: Url = "unix:///tmp/easytier-external-listener-test"
+        let external_url: Url = "unix:///tmp/exvlan-external-listener-test"
             .parse()
             .unwrap();
         let mut config = test_config("external-listener-registry");
@@ -3227,7 +3227,7 @@ virtual_ip = "10.82.0.2/24"
 
     #[tokio::test]
     async fn inbound_only_uses_host_registered_listener_lifecycle() {
-        let external_url: Url = "unix:///tmp/easytier-host-listener-test".parse().unwrap();
+        let external_url: Url = "unix:///tmp/exvlan-host-listener-test".parse().unwrap();
         let mut config = test_config("host-listener");
         config.connectivity.startup_plan.connectivity = CoreConnectivityMode::InboundOnly;
         let (packet_sink, _packet_receiver) = tokio::sync::mpsc::channel(16);
@@ -3277,10 +3277,10 @@ virtual_ip = "10.82.0.2/24"
 
     #[tokio::test]
     async fn outbound_only_ignores_configured_and_host_registered_listeners() {
-        let configured_url: Url = "unix:///tmp/easytier-outbound-configured-listener"
+        let configured_url: Url = "unix:///tmp/exvlan-outbound-configured-listener"
             .parse()
             .unwrap();
-        let host_url: Url = "unix:///tmp/easytier-outbound-host-listener"
+        let host_url: Url = "unix:///tmp/exvlan-outbound-host-listener"
             .parse()
             .unwrap();
         let mut config = test_config("outbound-only-listeners");

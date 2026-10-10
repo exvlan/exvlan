@@ -1,7 +1,7 @@
 //! WASI TCP adapter behind the portable host socket seams.
 //!
 //! [`WasiHostTcpIo`] implements the TCP half of the host socket I/O traits on
-//! top of the `easytier_host` import module, and
+//! top of the `exvlan_host` import module, and
 //! [`backend::WasiHostSocketBackend`] composes the TCP, UDP, factory, and
 //! listener imports into one host socket backend. Shared status mapping and
 //! wire codecs live in [`crate::wasi::wire`].

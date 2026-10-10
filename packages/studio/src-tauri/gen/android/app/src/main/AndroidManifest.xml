@@ -39,7 +39,7 @@
             android:exported="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Maintains EasyTier background connectivity when no VPN service is active." />
+                android:value="Maintains Exvlan background connectivity when no VPN service is active." />
         </service>
 
         <provider
@@ -61,7 +61,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Maintains the user-initiated EasyTier VPN connection." />
+                android:value="Maintains the user-initiated Exvlan VPN connection." />
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>

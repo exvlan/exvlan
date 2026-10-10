@@ -25,7 +25,7 @@ fn with_web_client(operation: impl FnOnce(&WasiWebClientRuntime) -> i32) -> i32 
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_web_client_create(config_pointer: u32, config_length: u32) -> i32 {
+pub extern "C" fn exvlan_web_client_create(config_pointer: u32, config_length: u32) -> i32 {
     let encoded = match read_guest_buffer(config_pointer, config_length, MAX_CREATE_CONFIG_LEN) {
         Ok(encoded) => encoded,
         Err(error) => {
@@ -68,7 +68,7 @@ pub extern "C" fn easytier_web_client_create(config_pointer: u32, config_length:
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_web_client_drive() -> i32 {
+pub extern "C" fn exvlan_web_client_drive() -> i32 {
     with_web_client(|web_client| {
         web_client.drive();
         0
@@ -76,7 +76,7 @@ pub extern "C" fn easytier_web_client_drive() -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_web_client_notify_completions() -> i32 {
+pub extern "C" fn exvlan_web_client_notify_completions() -> i32 {
     with_web_client(|web_client| {
         web_client.notify_host_completions();
         0
@@ -84,7 +84,7 @@ pub extern "C" fn easytier_web_client_notify_completions() -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_web_client_next_deadline_millis() -> i64 {
+pub extern "C" fn exvlan_web_client_next_deadline_millis() -> i64 {
     let mut result = i64::from(INVALID_STATE);
     let status = with_web_client(|web_client| {
         result = web_client
@@ -101,12 +101,12 @@ pub extern "C" fn easytier_web_client_next_deadline_millis() -> i64 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_web_client_is_connected() -> i32 {
+pub extern "C" fn exvlan_web_client_is_connected() -> i32 {
     with_web_client(|web_client| i32::from(web_client.is_connected()))
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_web_client_drop() -> i32 {
+pub extern "C" fn exvlan_web_client_drop() -> i32 {
     let web_client = CONTEXT.with(|context| context.web_client.borrow_mut().take());
     let Some(web_client) = web_client else {
         set_abi_error("WebClient is not running");

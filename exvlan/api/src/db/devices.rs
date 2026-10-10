@@ -12,7 +12,7 @@ pub struct DeviceHeartbeatRecord {
     pub user_id: UserIdInDb,
     pub machine_id: Uuid,
     pub hostname: String,
-    pub easytier_version: String,
+    pub exvlan_version: String,
     pub device_os: String,
     pub client_url: String,
 }
@@ -29,7 +29,7 @@ impl Db {
             user_id: Set(record.user_id),
             machine_id: Set(record.machine_id.to_string()),
             hostname: Set(record.hostname),
-            easytier_version: Set(record.easytier_version),
+            exvlan_version: Set(record.exvlan_version),
             device_os: Set(record.device_os),
             client_url: Set(record.client_url),
             first_seen_time: Set(now),
@@ -40,7 +40,7 @@ impl Db {
             OnConflict::columns([d::Column::UserId, d::Column::MachineId])
                 .update_columns([
                     d::Column::Hostname,
-                    d::Column::EasytierVersion,
+                    d::Column::ExvlanVersion,
                     d::Column::DeviceOs,
                     d::Column::ClientUrl,
                     d::Column::LastSeenTime,
@@ -265,8 +265,8 @@ impl Db {
 
 #[cfg(test)]
 mod tests {
-    use easytier::common::config::{ConfigSource, NetworkConfig};
-    use easytier_core::management::remote_client::{ListNetworkProps, Storage};
+    use exvlan::common::config::{ConfigSource, NetworkConfig};
+    use exvlan_core::management::remote_client::{ListNetworkProps, Storage};
     use sea_orm::{EntityTrait, Set};
 
     use super::{Db, DeviceHeartbeatRecord, entity::blocked_devices};
@@ -300,7 +300,7 @@ mod tests {
             user_id: user_a,
             machine_id,
             hostname: "host-a".to_string(),
-            easytier_version: "a".to_string(),
+            exvlan_version: "a".to_string(),
             device_os: "{}".to_string(),
             client_url: "tcp://127.0.0.1:1001".to_string(),
         })
@@ -310,7 +310,7 @@ mod tests {
             user_id: user_b,
             machine_id,
             hostname: "host-b".to_string(),
-            easytier_version: "b".to_string(),
+            exvlan_version: "b".to_string(),
             device_os: "{}".to_string(),
             client_url: "tcp://127.0.0.1:1002".to_string(),
         })
@@ -347,7 +347,7 @@ mod tests {
             user_id,
             machine_id,
             hostname: "before".to_string(),
-            easytier_version: "1".to_string(),
+            exvlan_version: "1".to_string(),
             device_os: r#"{"os":"before"}"#.to_string(),
             client_url: "tcp://127.0.0.1:1001".to_string(),
         })
@@ -365,7 +365,7 @@ mod tests {
             user_id,
             machine_id,
             hostname: "after".to_string(),
-            easytier_version: "2".to_string(),
+            exvlan_version: "2".to_string(),
             device_os: r#"{"os":"after"}"#.to_string(),
             client_url: "tcp://127.0.0.1:1002".to_string(),
         })
@@ -377,7 +377,7 @@ mod tests {
         assert_eq!(after.first_seen_time, before.first_seen_time);
         assert!(after.last_seen_time > before.last_seen_time);
         assert_eq!(after.hostname, "after");
-        assert_eq!(after.easytier_version, "2");
+        assert_eq!(after.exvlan_version, "2");
         assert_eq!(after.device_os, r#"{"os":"after"}"#);
         assert_eq!(after.client_url, "tcp://127.0.0.1:1002");
     }
@@ -445,7 +445,7 @@ mod tests {
                 user_id,
                 machine_id,
                 hostname: hostname.to_string(),
-                easytier_version: "1".to_string(),
+                exvlan_version: "1".to_string(),
                 device_os: "{}".to_string(),
                 client_url: format!("tcp://127.0.0.1:{user_id}"),
             })

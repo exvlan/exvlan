@@ -1,6 +1,6 @@
-import type { Api } from 'easytier-frontend-lib'
+import type { Api } from '@exvlan/std'
 import type { VpnTileAction } from 'tauri-plugin-vpnservice-api'
-import { Utils } from 'easytier-frontend-lib'
+import { Utils } from '@exvlan/std'
 
 export interface VpnTileActionResult {
   action: VpnTileAction

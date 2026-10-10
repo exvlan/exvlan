@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
-use easytier_core::{
+use exvlan_core::{
     config::toml::ConfigLoader as _,
     connectivity::{manual::ManualTunnelConnector, protocol::raw::TunnelDialer},
     management::{ConfigServerEndpoint, WebClientConfig},
@@ -18,7 +18,7 @@ use crate::{
 };
 use crate::{
     common::{
-        MachineIdOptions, config::TomlConfigLoader, constants::EASYTIER_VERSION,
+        MachineIdOptions, config::TomlConfigLoader, constants::EXVLAN_VERSION,
         global_ctx::GlobalCtx, resolve_machine_id,
     },
     instance::{
@@ -29,10 +29,10 @@ use crate::{
     tunnel::TunnelScheme,
 };
 
-pub use easytier_core::management::InstanceMutationHooks as WebClientHooks;
+pub use exvlan_core::management::InstanceMutationHooks as WebClientHooks;
 
 pub struct WebClient {
-    inner: easytier_core::management::WebClient<NativeInstanceFactory>,
+    inner: exvlan_core::management::WebClient<NativeInstanceFactory>,
 }
 
 impl WebClient {
@@ -55,11 +55,11 @@ impl WebClient {
             machine_id,
             hostname: hostname.to_string(),
             device_os: web_client_device_os_info(),
-            easytier_version: EASYTIER_VERSION.to_owned(),
+            exvlan_version: EXVLAN_VERSION.to_owned(),
             secure_mode,
         };
         #[cfg(feature = "management")]
-        let inner = easytier_core::management::WebClient::new(
+        let inner = exvlan_core::management::WebClient::new(
             connector,
             config,
             manager,
@@ -68,12 +68,12 @@ impl WebClient {
             Arc::new(NativeLoggerControl),
         );
         #[cfg(not(feature = "management"))]
-        let inner = easytier_core::management::WebClient::new(
+        let inner = exvlan_core::management::WebClient::new(
             connector,
             config,
             manager,
             hooks.unwrap_or_else(|| Arc::new(DefaultHooks)),
-            Arc::new(easytier_core::management::UnsupportedConfigFileStorage),
+            Arc::new(exvlan_core::management::UnsupportedConfigFileStorage),
         );
         Self { inner }
     }
@@ -84,13 +84,13 @@ impl WebClient {
 }
 
 #[cfg(feature = "management")]
-fn web_client_device_os_info() -> easytier_proto::web::DeviceOsInfo {
+fn web_client_device_os_info() -> exvlan_proto::web::DeviceOsInfo {
     collect_device_os_info()
 }
 
 #[cfg(not(feature = "management"))]
-fn web_client_device_os_info() -> easytier_proto::web::DeviceOsInfo {
-    easytier_proto::web::DeviceOsInfo {
+fn web_client_device_os_info() -> exvlan_proto::web::DeviceOsInfo {
+    exvlan_proto::web::DeviceOsInfo {
         os_type: std::env::consts::OS.to_owned(),
         version: String::new(),
         distribution: String::new(),

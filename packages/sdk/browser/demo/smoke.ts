@@ -1,4 +1,4 @@
-import { createEasyTier } from "../src/index";
+import { createExvlan } from "../src/index";
 import {
   connectWithRetry,
   deadline,
@@ -45,7 +45,7 @@ async function run(): Promise<void> {
   const host = target.slice(0, separator);
   const port = Number(target.slice(separator + 1));
   let peerAdded = false;
-  const runtime = await createEasyTier(
+  const runtime = await createExvlan(
     {
       networkName: "browser-smoke",
       networkSecret: "browser-smoke-test",
@@ -56,7 +56,7 @@ async function run(): Promise<void> {
     },
     {
       onEvent: (event) => {
-        console.log(JSON.stringify({ event: "easytier_core_event", ...event }));
+        console.log(JSON.stringify({ event: "exvlan_core_event", ...event }));
         if (event.kind === "peer_added") {
           peerAdded = true;
         }
@@ -69,17 +69,17 @@ async function run(): Promise<void> {
   await waitForPeer(
     () => peerAdded,
     timeoutAt,
-    `EasyTier did not connect to ${relayUrl}`,
+    `Exvlan did not connect to ${relayUrl}`,
   );
   const stream = await connectWithRetry(
     () => runtime.connectTcp(`${host}:${port}`, { timeout: 1_000 }),
     timeoutAt,
   );
   await probeHttpMarker(stream, host, "browser-data-plane-ok");
-  setStatus("connected", `connected to ${target} through EasyTier`);
+  setStatus("connected", `connected to ${target} through Exvlan`);
 }
 
-setStatus("starting", "starting browser EasyTier runtime");
+setStatus("starting", "starting browser Exvlan runtime");
 void run().catch((error: unknown) => {
   setStatus("failed", String(error));
 });

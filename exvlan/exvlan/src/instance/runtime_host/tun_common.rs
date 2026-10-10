@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use easytier_core::host::packet::HostPacketReceiver;
+use exvlan_core::host::packet::HostPacketReceiver;
 use tokio::{sync::Mutex, task::JoinSet};
 
 use super::MagicDnsRuntime;

@@ -103,7 +103,7 @@ impl fmt::Debug for HostPacket {
     }
 }
 
-/// Receives owned IP packets leaving the EasyTier peer graph.
+/// Receives owned IP packets leaving the Exvlan peer graph.
 ///
 /// The host decides whether packets go to a TUN device, a Go callback, or a
 /// different packet backend. Core's internal packet headers remain hidden, and

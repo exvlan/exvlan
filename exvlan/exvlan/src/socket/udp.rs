@@ -5,11 +5,11 @@ use std::{
 
 use async_trait::async_trait;
 #[cfg(any(feature = "wireguard", test))]
-use easytier_core::socket::{
+use exvlan_core::socket::{
     NetNamespace,
     udp::{UdpSessionAcceptKind, UdpSessionListenRequest, UdpSessionSocketListener},
 };
-use easytier_core::socket::{
+use exvlan_core::socket::{
     SocketContext,
     udp::{
         MAX_UDP_DATAGRAM_SIZE, MAX_UDP_SESSION_DATAGRAM_SIZE, UdpBindOptions, UdpSocketDatagram,
@@ -204,7 +204,7 @@ impl VirtualUdpSocketFactory for RuntimeUdpSocketFactory {
 
 #[cfg(test)]
 mod tests {
-    use easytier_core::{
+    use exvlan_core::{
         socket::SocketListener,
         socket::udp::{
             UdpSessionListenRequest, send_v4_hole_punch_control_packet,
@@ -294,7 +294,7 @@ mod tests {
         let mut listener = new_runtime_udp_session_listener(
             "udp://0.0.0.0:0".parse().unwrap(),
             UdpSessionListenRequest::new(UdpBindOptions::port_bound_listener(local_addr)),
-            UdpSessionAcceptKind::EasyTierMux,
+            UdpSessionAcceptKind::ExvlanMux,
             NetNS::new(None),
         );
         listener.listen().await.unwrap();
@@ -329,7 +329,7 @@ mod tests {
         let mut listener = new_runtime_udp_session_listener(
             "udp://[::]:0".parse().unwrap(),
             UdpSessionListenRequest::new(UdpBindOptions::port_bound_listener(local_addr)),
-            UdpSessionAcceptKind::EasyTierMux,
+            UdpSessionAcceptKind::ExvlanMux,
             NetNS::new(None),
         );
         listener.listen().await.unwrap();

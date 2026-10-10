@@ -1,8 +1,8 @@
 use std::net::Ipv4Addr;
 
 use cidr::Ipv4Inet;
-use easytier_core::gateway::udp_broadcast::PhysicalInterface;
-use easytier_core::gateway::udp_broadcast::{
+use exvlan_core::gateway::udp_broadcast::PhysicalInterface;
+use exvlan_core::gateway::udp_broadcast::{
     BroadcastRelayConfig, NormalizedPacket, UdpBroadcastPacketRejection, UdpPacketSummary,
     normalize_udp_broadcast_packet,
 };
@@ -10,7 +10,7 @@ use easytier_core::gateway::udp_broadcast::{
 use {
     crate::common::global_ctx::{ArcGlobalCtx, GlobalCtxEvent},
     anyhow::Context,
-    easytier_core::{
+    exvlan_core::{
         gateway::udp_broadcast::UdpBroadcastRelayStats, host::packet::HostPacket,
         instance::CorePacketPlane,
     },

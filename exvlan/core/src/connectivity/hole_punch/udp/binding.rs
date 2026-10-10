@@ -86,11 +86,11 @@ where
 fn managed_local_addr_error(
     local_addr: SocketAddr,
     is_local_virtual_ipv4: bool,
-    is_easytier_managed_ipv6: bool,
+    is_exvlan_managed_ipv6: bool,
 ) -> Option<&'static str> {
     match local_addr.ip() {
         IpAddr::V4(_) if is_local_virtual_ipv4 => Some("local address is virtual ipv4"),
-        IpAddr::V6(_) if is_easytier_managed_ipv6 => Some("local address is easytier-managed ipv6"),
+        IpAddr::V6(_) if is_exvlan_managed_ipv6 => Some("local address is exvlan-managed ipv6"),
         _ => None,
     }
 }
@@ -375,12 +375,12 @@ where
             IpAddr::V4(ip) => self.peer_source.is_local_virtual_ip(&IpAddr::V4(ip)),
             IpAddr::V6(_) => false,
         };
-        let is_easytier_managed_ipv6 = match local_addr.ip() {
+        let is_exvlan_managed_ipv6 = match local_addr.ip() {
             IpAddr::V4(_) => false,
-            IpAddr::V6(ip) => self.peer_source.is_easytier_managed_ipv6(&ip).await,
+            IpAddr::V6(ip) => self.peer_source.is_exvlan_managed_ipv6(&ip).await,
         };
         if let Some(error) =
-            managed_local_addr_error(local_addr, is_local_virtual_ipv4, is_easytier_managed_ipv6)
+            managed_local_addr_error(local_addr, is_local_virtual_ipv4, is_exvlan_managed_ipv6)
         {
             anyhow::bail!(error);
         }
@@ -795,7 +795,7 @@ mod tests {
         ));
         assert_eq!(
             managed_local_addr_error(managed_ipv6, false, true),
-            Some("local address is easytier-managed ipv6")
+            Some("local address is exvlan-managed ipv6")
         );
         assert_eq!(managed_local_addr_error(managed_ipv6, false, false), None);
     }

@@ -12,7 +12,7 @@ use crate::igd_next::{
     search_gateway,
 };
 use anyhow::{Context, anyhow, bail};
-use easytier_core::{
+use exvlan_core::{
     connectivity::stun::{StunInfoProvider, StunSocketMapper},
     process_runtime::CoreProcessRuntime,
 };
@@ -34,7 +34,7 @@ use crate::{
     tunnel::common::tests::wait_for_condition,
 };
 
-const TEST_IGD_DESCRIPTION: &str = "EasyTier udp hole punch";
+const TEST_IGD_DESCRIPTION: &str = "Exvlan udp hole punch";
 
 const DUAL_NS_A: &str = "upnp2_a";
 const DUAL_NS_C: &str = "upnp2_c";
@@ -229,7 +229,7 @@ impl StunSocketMapper<crate::socket::udp::RuntimeUdpSocket> for GatewayBackedStu
         &self,
         udp: Arc<crate::socket::udp::RuntimeUdpSocket>,
     ) -> anyhow::Result<SocketAddr> {
-        use easytier_core::socket::udp::VirtualUdpSocket as _;
+        use exvlan_core::socket::udp::VirtualUdpSocket as _;
         Ok(query_udp_mapping(
             self.netns,
             self.external_ip,
@@ -258,8 +258,8 @@ secure_mode=no
 system_uptime=yes
 lease_file={}
 ext_ip={ext_ip}
-friendly_name=EasyTier Test IGD {name}
-model_name=EasyTier Test
+friendly_name=Exvlan Test IGD {name}
+model_name=Exvlan Test
 serial=12345678
 uuid={uuid}
 upnp_forward_chain={chain_name}

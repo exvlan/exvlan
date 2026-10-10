@@ -150,7 +150,7 @@ jobs:
       - name: Archive artifact
         uses: actions/upload-artifact@v7
         with:
-          name: exvlan-studio-${{ matrix.ARTIFACT_NAME }}
+          name: @exvlan/studio-${{ matrix.ARTIFACT_NAME }}
           path: |
             ./artifacts/*
           if-no-files-found: error

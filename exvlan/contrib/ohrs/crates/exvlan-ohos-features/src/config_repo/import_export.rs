@@ -1,12 +1,7 @@
 use crate::config::types::stored_config::{ExportTomlResult, StoredConfigRecord};
-<<<<<<<< HEAD:exvlan/contrib/ohrs/src/config_repo/import_export.rs
+use exvlan::common::config::NetworkConfigExt;
 use exvlan::common::config::{ConfigLoader, TomlConfigLoader};
 use exvlan::proto::api::manage::NetworkConfig;
-========
-use easytier::common::config::NetworkConfigExt;
-use easytier::common::config::{ConfigLoader, TomlConfigLoader};
-use easytier::proto::api::manage::NetworkConfig;
->>>>>>>> upstream/releases/v2.7.0:easytier-contrib/easytier-ohrs/crates/easytier-ohos-features/src/config_repo/import_export.rs
 
 pub(super) fn export_config_toml_from_record(
     record: &StoredConfigRecord,

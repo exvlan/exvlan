@@ -1,4 +1,4 @@
-name: EasyTier GUI
+name: Exvlan GUI
 
 on:
   push:
@@ -26,10 +26,10 @@ jobs:
     env:
       RELEVANT_PATHS: >-
         ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**",
-        "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "easytier/**",
-        "easytier-core/**", "easytier-proto/**", "easytier-rpc-build/**",
-        "easytier-gui/**", "tauri-plugin-vpnservice/**",
-        "easytier-web/frontend-lib/**", ".github/workflows/gui.yml",
+        "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "exvlan/**",
+        "exvlan-core/**", "exvlan-proto/**", "exvlan-rpc-build/**",
+        "@exvlan/studio/**", "tauri-plugin-vpnservice/**",
+        "exvlan-api/frontend-lib/**", ".github/workflows/gui.yml",
         ".github/actions/**"]
     outputs:
       # Release builds must run even if they only change release metadata.
@@ -100,7 +100,7 @@ jobs:
 
     runs-on: ${{ matrix.OS }}
     env:
-      NAME: easytier
+      NAME: exvlan
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
       GUI_TARGET: ${{ matrix.GUI_TARGET }}
@@ -140,7 +140,7 @@ jobs:
               aarch64*) ARCH_DIR=arm64 ;;
           esac
           if [[ -n "$ARCH_DIR" ]]; then
-              find "./easytier/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./easytier-gui/src-tauri/ \;
+              find "./exvlan/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./@exvlan/studio/src-tauri/ \;
           fi
 
       - name: Validate macOS signing secrets
@@ -168,7 +168,7 @@ jobs:
         if: ${{ matrix.GUI_TARGET != '' && (!contains(matrix.GUI_TARGET, 'darwin') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)) }}
         uses: tauri-apps/tauri-action@v0
         with:
-          projectPath: ./easytier-gui
+          projectPath: ./@exvlan/studio
           args: --verbose --target ${{ matrix.GUI_TARGET }}
 
       - name: Build GUI (signed and notarized)
@@ -183,7 +183,7 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          projectPath: ./easytier-gui
+          projectPath: ./@exvlan/studio
           args: --verbose --target ${{ matrix.GUI_TARGET }}
 
       - name: Notarize and staple macOS DMG
@@ -256,7 +256,7 @@ jobs:
       - name: Archive artifact
         uses: actions/upload-artifact@v5
         with:
-          name: easytier-gui-${{ matrix.ARTIFACT_NAME }}
+          name: @exvlan/studio-${{ matrix.ARTIFACT_NAME }}
           path: |
             ./artifacts/*
 

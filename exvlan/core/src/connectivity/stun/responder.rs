@@ -32,9 +32,9 @@ pub fn build_stun_response(addr: SocketAddr, req_buf: &[u8]) -> anyhow::Result<S
         .map_err(|e| anyhow::anyhow!("stun decode broken message error: {:?}", e))?;
 
     let tid = req_msg.transaction_id();
-    // we only respond easytier stun req, whose tid has 0xdeadbeef prefix
+    // we only respond exvlan stun req, whose tid has 0xdeadbeef prefix
     if tid.as_bytes()[0..4] != [0xde, 0xad, 0xbe, 0xef] {
-        anyhow::bail!("stun req tid not from easytier");
+        anyhow::bail!("stun req tid not from exvlan");
     }
 
     let mut resp_msg = Message::<Attribute>::new(
@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn build_stun_response_rejects_non_easytier_tid() {
+    fn build_stun_response_rejects_non_exvlan_tid() {
         let request =
             Message::<Attribute>::new(MessageClass::Request, BINDING, TransactionId::new([0; 12]));
         let mut encoder = MessageEncoder::new();

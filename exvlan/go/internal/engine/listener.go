@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/easytier/easytier/easytier-go/internal/coreabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/coreabi"
 )
 
 type streamListener struct {

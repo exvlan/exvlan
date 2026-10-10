@@ -71,7 +71,7 @@ fn submit_status(error: &RpcSubmitError) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_rpc_abi_version() -> u32 {
+pub extern "C" fn exvlan_rpc_abi_version() -> u32 {
     RPC_ABI_VERSION
 }
 
@@ -80,7 +80,7 @@ pub extern "C" fn easytier_rpc_abi_version() -> u32 {
 /// The full protobuf method name is mandatory. On success, writes the opaque
 /// operation ID as one big-endian `u64` to `output_operation`.
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_rpc_request_submit(
+pub extern "C" fn exvlan_rpc_request_submit(
     handle: u64,
     request_pointer: u32,
     request_length: u32,
@@ -124,7 +124,7 @@ pub extern "C" fn easytier_rpc_request_submit(
 /// returned and the response remains available. Otherwise the response is
 /// copied, consumed, and its byte length is returned.
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_rpc_response_take(
+pub extern "C" fn exvlan_rpc_response_take(
     handle: u64,
     operation: u64,
     output: u32,
@@ -196,7 +196,7 @@ pub extern "C" fn easytier_rpc_response_take(
 
 /// Cancels and discards a pending operation, or discards an untaken response.
 #[unsafe(no_mangle)]
-pub extern "C" fn easytier_rpc_operation_free(handle: u64, operation: u64) -> i32 {
+pub extern "C" fn exvlan_rpc_operation_free(handle: u64, operation: u64) -> i32 {
     with_instance(handle, |instance| {
         let operation = match operation_id(operation) {
             Ok(operation) => operation,

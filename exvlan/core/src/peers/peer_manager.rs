@@ -1270,7 +1270,7 @@ impl PeerManagerCore {
             stun_info: self.context.stun_info(),
             instance_id: self.context.instance_id(),
             listeners,
-            version: self.context.easytier_version(),
+            version: self.context.exvlan_version(),
             feature_flags: self.context.feature_flags(),
             ip_list: GetIpListResponse::default(),
             public_ipv6_addr: self.get_route().get_my_public_ipv6_addr().await,
@@ -1500,7 +1500,7 @@ impl PeerManagerCore {
         self.foreign_network_client.clone()
     }
 
-    pub async fn is_easytier_managed_ipv6(&self, ip: &std::net::Ipv6Addr) -> bool {
+    pub async fn is_exvlan_managed_ipv6(&self, ip: &std::net::Ipv6Addr) -> bool {
         if self.context.is_ip_local_ipv6(ip) {
             return true;
         }
@@ -2839,7 +2839,7 @@ impl PeerOutboundPacketRouter {
                 && !self.context.is_ip_local_virtual_ip(&ip_addr)
             {
                 // Keep the loop-prevention flags for proxy-induced self-delivery where
-                // the destination is not this node's own EasyTier-managed IP.
+                // the destination is not this node's own Exvlan-managed IP.
                 hdr.set_not_send_to_tun(true);
                 hdr.set_no_proxy(true);
             }
@@ -4288,7 +4288,7 @@ mod tests {
             Some("tcp://192.0.2.10:1234"),
             Some("tcp://example.test:1234"),
             Some("ring://peer"),
-            Some("unix:///tmp/easytier.sock"),
+            Some("unix:///tmp/exvlan.sock"),
             None,
         ] {
             assert!(

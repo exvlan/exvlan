@@ -8,7 +8,7 @@ import (
 
 func TestEmbeddedCoreMatchesProvenance(t *testing.T) {
 	if len(Commit) != 40 {
-		t.Fatalf("EasyTier commit = %q", Commit)
+		t.Fatalf("Exvlan commit = %q", Commit)
 	}
 	digest := sha256.Sum256(Core())
 	if got := hex.EncodeToString(digest[:]); got != SHA256 {

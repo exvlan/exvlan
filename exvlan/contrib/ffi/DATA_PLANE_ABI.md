@@ -48,7 +48,7 @@ typedef struct {
 
 ## Lifecycle
 
-One native session may be open for an EasyTier instance at a time:
+One native session may be open for an Exvlan instance at a time:
 
 ```text
 data_plane_session_open

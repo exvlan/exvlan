@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-use easytier_proto::common::{PortForwardConfigPb, SocketType};
+use exvlan_proto::common::{PortForwardConfigPb, SocketType};
 
 /// Runtime configuration for the core-owned SOCKS and port-forward gateway.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

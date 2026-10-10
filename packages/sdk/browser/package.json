@@ -1,16 +1,16 @@
 {
-  "name": "@easytier/browser",
+  "name": "@exvlan/browser",
   "version": "0.1.0",
-  "description": "Run an EasyTier TCP client in the browser",
+  "description": "Run an Exvlan TCP client in the browser",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EasyTier/EasyTier.git",
-    "directory": "easytier-js/browser"
+    "url": "git+https://github.com/exvlan/exvlan.git",
+    "directory": "exvlan-js/browser"
   },
-  "homepage": "https://github.com/EasyTier/EasyTier",
-  "bugs": "https://github.com/EasyTier/EasyTier/issues",
+  "homepage": "https://github.com/exvlan/exvlan",
+  "bugs": "https://github.com/exvlan/exvlan/issues",
   "sideEffects": false,
   "exports": {
     ".": {
@@ -24,17 +24,17 @@
     "README.md"
   ],
   "scripts": {
-    "build:dependencies": "pnpm --filter @easytier/runtime build",
-    "build:wasm": "node ../runtime/scripts/build-wasm.mjs browser src/generated/easytier_core.wasm && node ../runtime/scripts/validate-wasm.mjs browser src/generated/easytier_core.wasm",
-    "build": "pnpm build:wasm && pnpm build:dependencies && tsc -p tsconfig.build.json && esbuild src/index.ts --bundle --format=esm --platform=browser --loader:.wasm=binary --external:@easytier/runtime --external:@easytier/runtime/* --outfile=dist/index.js",
-    "build:demo": "pnpm build:dependencies && esbuild demo/smoke.ts --bundle --format=esm --loader:.wasm=binary --outfile=demo/smoke.js && node ../runtime/scripts/copy-artifact.mjs src/generated/easytier_core.wasm demo/generated/easytier_core.wasm",
+    "build:dependencies": "pnpm --filter @exvlan/runtime build",
+    "build:wasm": "node ../runtime/scripts/build-wasm.mjs browser src/generated/exvlan_core.wasm && node ../runtime/scripts/validate-wasm.mjs browser src/generated/exvlan_core.wasm",
+    "build": "pnpm build:wasm && pnpm build:dependencies && tsc -p tsconfig.build.json && esbuild src/index.ts --bundle --format=esm --platform=browser --loader:.wasm=binary --external:@exvlan/runtime --external:@exvlan/runtime/* --outfile=dist/index.js",
+    "build:demo": "pnpm build:dependencies && esbuild demo/smoke.ts --bundle --format=esm --loader:.wasm=binary --outfile=demo/smoke.js && node ../runtime/scripts/copy-artifact.mjs src/generated/exvlan_core.wasm demo/generated/exvlan_core.wasm",
     "smoke:node": "pnpm build:demo && esbuild demo/node-smoke.ts --bundle --platform=node --format=esm --outfile=demo/generated/node-smoke.js && node demo/generated/node-smoke.js",
     "check": "pnpm build && tsc --noEmit",
     "test": "pnpm build && vitest run",
     "prepack": "pnpm check"
   },
   "dependencies": {
-    "@easytier/runtime": "workspace:0.1.0"
+    "@exvlan/runtime": "workspace:0.1.0"
   },
   "devDependencies": {
     "@types/node": "22.18.1",

@@ -1,14 +1,14 @@
-package com.easytier.jni
+package com.exvlan.jni
 
 fun interface ConfigServerEventCallback {
     fun onEvent(eventJson: String)
 }
 
-/** EasyTier JNI 接口类 提供 Android 应用调用 EasyTier 核心网络功能的接口 */
-object EasyTierJNI {
+/** Exvlan JNI 接口类 提供 Android 应用调用 Exvlan 核心网络功能的接口 */
+object ExvlanJNI {
     init {
         // 加载本地库
-        System.loadLibrary("easytier_android_jni")
+        System.loadLibrary("exvlan_android_jni")
     }
 
     /**
@@ -98,7 +98,7 @@ object EasyTierJNI {
     @JvmStatic external fun listInstances(maxLength: Int): String?
 
     /**
-     * 调用暴露的 EasyTier RPC 方法，输入和输出均为 protobuf JSON 字符串。
+     * 调用暴露的 Exvlan RPC 方法，输入和输出均为 protobuf JSON 字符串。
      *
      * 不支持 api.manage.WebClientService；实例启动、保留、删除、信息收集请继续使用专用 JNI API。
      * payloadJson 需要包含目标 RPC 所需的 instance selector。
@@ -119,7 +119,7 @@ object EasyTierJNI {
     ): String?
 
     /**
-     * 调用不需要 domainName 的 EasyTier RPC 方法。
+     * 调用不需要 domainName 的 Exvlan RPC 方法。
      */
     @JvmStatic
     fun callJsonRpc(serviceName: String, methodName: String, payloadJson: String): String? {

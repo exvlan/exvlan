@@ -1,15 +1,15 @@
 import type {
-  EasyTierEvent,
-  EasyTierInstance,
-  EasyTierOperationOptions,
-  EasyTierState,
-  EasyTierStatus,
-  EasyTierTcpListener,
-  EasyTierTcpStream,
+  ExvlanEvent,
+  ExvlanInstance,
+  ExvlanOperationOptions,
+  ExvlanState,
+  ExvlanStatus,
+  ExvlanTcpListener,
+  ExvlanTcpStream,
 } from "./index.js";
 import { encodeRuntimeConfig, type RuntimeInstanceConfig } from "./config.js";
 import {
-  EasyTierRuntime,
+  ExvlanRuntime,
   type HostTunnelMetadata,
 } from "./runtime.js";
 import type { RuntimeWebSocket } from "./websocket-host.js";
@@ -20,7 +20,7 @@ export type {
   RuntimeWebSocket,
 };
 
-export interface RuntimeAdapter extends EasyTierInstance {
+export interface RuntimeAdapter extends ExvlanInstance {
   canAcceptWebSocket(): boolean;
   acceptWebSocket(
     socket: RuntimeWebSocket,
@@ -32,10 +32,10 @@ export interface CreateRuntimeOptions {
   module: WebAssembly.Module | (() => Promise<WebAssembly.Module>);
   config: RuntimeInstanceConfig;
   connectWebSocket?: (url: string) => RuntimeWebSocket;
-  onEvent?: (event: EasyTierEvent) => void;
+  onEvent?: (event: ExvlanEvent) => void;
 }
 
-export async function createEasyTierRuntime(
+export async function createExvlanRuntime(
   options: CreateRuntimeOptions,
 ): Promise<RuntimeAdapter> {
   const config = encodeRuntimeConfig(options.config);
@@ -43,7 +43,7 @@ export async function createEasyTierRuntime(
     typeof options.module === "function"
       ? await options.module()
       : options.module;
-  const runtime = new EasyTierRuntime(
+  const runtime = new ExvlanRuntime(
     module,
     config,
     options.connectWebSocket,
@@ -53,28 +53,28 @@ export async function createEasyTierRuntime(
     await runtime.ready;
   } catch (error) {
     await runtime.stop().catch(() => {});
-    throw new Error("failed to start EasyTier", { cause: error });
+    throw new Error("failed to start Exvlan", { cause: error });
   }
 
   return {
     connectTcp: (
       address: string,
-      operation?: EasyTierOperationOptions,
-    ): Promise<EasyTierTcpStream> => {
+      operation?: ExvlanOperationOptions,
+    ): Promise<ExvlanTcpStream> => {
       const target = parseTcpAddress(address);
       return runtime.connectTcp(target.ipv4, target.port, operation?.timeout);
     },
     listenTcp: (
       port: number,
-      operation?: EasyTierOperationOptions,
-    ): Promise<EasyTierTcpListener> =>
+      operation?: ExvlanOperationOptions,
+    ): Promise<ExvlanTcpListener> =>
       runtime.bindTcp(port, operation?.timeout).then((listener) => ({
         localAddress: listener.localAddress,
         accept: (acceptOptions) =>
           listener.accept(acceptOptions?.timeout),
         close: () => listener.close(),
       })),
-    status: async (): Promise<EasyTierStatus> => {
+    status: async (): Promise<ExvlanStatus> => {
       const health = await runtime.health();
       return {
         state: stateName(health.state),
@@ -101,7 +101,7 @@ function parseTcpAddress(address: string): { ipv4: string; port: number } {
   return { ipv4, port };
 }
 
-function stateName(state: number): EasyTierState {
+function stateName(state: number): ExvlanState {
   switch (state) {
     case 0:
       return "created";

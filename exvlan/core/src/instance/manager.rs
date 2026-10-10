@@ -1,4 +1,4 @@
-//! Canonical process-level ownership and lifecycle for EasyTier instances.
+//! Canonical process-level ownership and lifecycle for Exvlan instances.
 
 use std::{
     collections::{HashMap, hash_map::Entry},
@@ -23,7 +23,7 @@ use crate::{
     management::network_instance_running_info,
 };
 #[cfg(feature = "web-client")]
-use easytier_proto::api::manage::NetworkInstanceRunningInfo;
+use exvlan_proto::api::manage::NetworkInstanceRunningInfo;
 
 /// Stable identity required by the instance collection.
 pub trait ManagedInstance: Send + Sync + 'static {

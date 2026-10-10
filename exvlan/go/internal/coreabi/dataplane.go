@@ -8,7 +8,7 @@ import (
 	"math"
 	"net/netip"
 
-	"github.com/easytier/easytier/easytier-go/internal/contextutil"
+	"github.com/exvlan/exvlan/exvlan-go/internal/contextutil"
 )
 
 const (
@@ -100,24 +100,24 @@ type OperationResult struct {
 }
 
 func (core *Core) validateDataPlaneABI(ctx context.Context) error {
-	version, err := core.callOne(ctx, "easytier_data_plane_abi_version")
+	version, err := core.callOne(ctx, "exvlan_data_plane_abi_version")
 	if err != nil {
 		return err
 	}
 	if version != DataPlaneABIVersion {
 		return fmt.Errorf(
-			"unsupported EasyTier data plane ABI version %d, want %d",
+			"unsupported Exvlan data plane ABI version %d, want %d",
 			version,
 			DataPlaneABIVersion,
 		)
 	}
-	capabilities, err := core.callOne(ctx, "easytier_data_plane_capabilities")
+	capabilities, err := core.callOne(ctx, "exvlan_data_plane_capabilities")
 	if err != nil {
 		return err
 	}
 	if missing := requiredDataPlaneCapabilities &^ capabilities; missing != 0 {
 		return fmt.Errorf(
-			"EasyTier data plane capabilities %#x are missing %#x",
+			"Exvlan data plane capabilities %#x are missing %#x",
 			capabilities,
 			missing,
 		)
@@ -136,7 +136,7 @@ func (core *Core) SubmitTCPConnect(
 	}
 	return core.submitWithInput(
 		ctx,
-		"easytier_data_plane_tcp_connect_submit",
+		"exvlan_data_plane_tcp_connect_submit",
 		wire[:],
 		timeoutMillis,
 	)
@@ -149,7 +149,7 @@ func (core *Core) SubmitTCPBind(
 ) (OperationID, error) {
 	return core.submit(
 		ctx,
-		"easytier_data_plane_tcp_bind_submit",
+		"exvlan_data_plane_tcp_bind_submit",
 		uint64(port),
 		timeoutMillis,
 	)
@@ -162,7 +162,7 @@ func (core *Core) SubmitTCPAccept(
 ) (OperationID, error) {
 	return core.submit(
 		ctx,
-		"easytier_data_plane_tcp_accept_submit",
+		"exvlan_data_plane_tcp_accept_submit",
 		uint64(listener),
 		timeoutMillis,
 	)
@@ -175,7 +175,7 @@ func (core *Core) SubmitTCPRead(
 ) (OperationID, error) {
 	return core.submit(
 		ctx,
-		"easytier_data_plane_tcp_read_submit",
+		"exvlan_data_plane_tcp_read_submit",
 		uint64(stream),
 		uint64(maximum),
 	)
@@ -202,7 +202,7 @@ func (core *Core) SubmitTCPWrite(
 	}
 	return core.submit(
 		ctx,
-		"easytier_data_plane_tcp_write_submit",
+		"exvlan_data_plane_tcp_write_submit",
 		uint64(stream),
 		uint64(pointer),
 		uint64(len(data)),
@@ -216,7 +216,7 @@ func (core *Core) SubmitUDPBind(
 ) (OperationID, error) {
 	return core.submit(
 		ctx,
-		"easytier_data_plane_udp_bind_submit",
+		"exvlan_data_plane_udp_bind_submit",
 		uint64(port),
 		timeoutMillis,
 	)
@@ -229,7 +229,7 @@ func (core *Core) SubmitUDPReceive(
 ) (OperationID, error) {
 	return core.submit(
 		ctx,
-		"easytier_data_plane_udp_receive_submit",
+		"exvlan_data_plane_udp_receive_submit",
 		uint64(socket),
 		uint64(maximum),
 	)
@@ -271,7 +271,7 @@ func (core *Core) SubmitUDPSend(
 	}
 	return core.submit(
 		ctx,
-		"easytier_data_plane_udp_send_submit",
+		"exvlan_data_plane_udp_send_submit",
 		uint64(socket),
 		uint64(addressPointer),
 		uint64(dataPointer),
@@ -287,7 +287,7 @@ func (core *Core) SetResourceDeadline(
 ) error {
 	result, err := core.callOne(
 		ctx,
-		"easytier_data_plane_resource_deadline_set",
+		"exvlan_data_plane_resource_deadline_set",
 		core.handle,
 		uint64(resource),
 		uint64(direction),
@@ -368,7 +368,7 @@ func (core *Core) DrainCompletions(
 	}
 	result, err := core.callCached(
 		ctx,
-		"easytier_data_plane_completion_drain",
+		"exvlan_data_plane_completion_drain",
 		&core.completionFunction,
 		core.handle,
 		uint64(pointer),
@@ -421,7 +421,7 @@ func (core *Core) TakeResult(
 		result.Length, err = core.takeLengthResult(
 			ctx,
 			completion,
-			"easytier_data_plane_tcp_write_result_take",
+			"exvlan_data_plane_tcp_write_result_take",
 		)
 	case OperationUDPReceive:
 		result.Data, result.Peer, result.Truncated, err =
@@ -430,7 +430,7 @@ func (core *Core) TakeResult(
 		result.Length, err = core.takeLengthResult(
 			ctx,
 			completion,
-			"easytier_data_plane_udp_send_result_take",
+			"exvlan_data_plane_udp_send_result_take",
 		)
 	default:
 		return OperationResult{}, fmt.Errorf(
@@ -445,9 +445,9 @@ func (core *Core) takeStreamResult(
 	ctx context.Context,
 	completion Completion,
 ) (resource ResourceID, local, peer netip.AddrPort, err error) {
-	name := "easytier_data_plane_tcp_connect_result_take"
+	name := "exvlan_data_plane_tcp_connect_result_take"
 	if completion.Kind == OperationTCPAccept {
-		name = "easytier_data_plane_tcp_accept_result_take"
+		name = "exvlan_data_plane_tcp_accept_result_take"
 	}
 	wire, err := core.takeFixedResult(ctx, completion, name, streamResultLength)
 	if err != nil {
@@ -460,9 +460,9 @@ func (core *Core) takeBindResult(
 	ctx context.Context,
 	completion Completion,
 ) (resource ResourceID, local netip.AddrPort, err error) {
-	name := "easytier_data_plane_tcp_bind_result_take"
+	name := "exvlan_data_plane_tcp_bind_result_take"
 	if completion.Kind == OperationUDPBind {
-		name = "easytier_data_plane_udp_bind_result_take"
+		name = "exvlan_data_plane_udp_bind_result_take"
 	}
 	wire, err := core.takeFixedResult(ctx, completion, name, bindResultLength)
 	if err != nil {
@@ -508,7 +508,7 @@ func (core *Core) takeTCPReadResult(
 	data, metadata, err := core.takeVariableResult(
 		ctx,
 		completion,
-		"easytier_data_plane_tcp_read_result_take",
+		"exvlan_data_plane_tcp_read_result_take",
 		tcpReadMetadataLength,
 	)
 	if err != nil {
@@ -530,7 +530,7 @@ func (core *Core) takeUDPReceiveResult(
 	data, metadata, err := core.takeVariableResult(
 		ctx,
 		completion,
-		"easytier_data_plane_udp_receive_result_take",
+		"exvlan_data_plane_udp_receive_result_take",
 		udpReceiveMetadataLength,
 	)
 	if err != nil {
@@ -632,7 +632,7 @@ func (core *Core) CancelOperation(
 ) error {
 	return core.dataPlaneCallStatus(
 		ctx,
-		"easytier_data_plane_operation_cancel",
+		"exvlan_data_plane_operation_cancel",
 		uint64(operation),
 	)
 }
@@ -643,7 +643,7 @@ func (core *Core) FreeOperation(
 ) error {
 	return core.dataPlaneCallStatus(
 		ctx,
-		"easytier_data_plane_operation_free",
+		"exvlan_data_plane_operation_free",
 		uint64(operation),
 	)
 }
@@ -651,7 +651,7 @@ func (core *Core) FreeOperation(
 func (core *Core) CloseResource(ctx context.Context, resource ResourceID) error {
 	return core.dataPlaneCallStatus(
 		ctx,
-		"easytier_data_plane_resource_close",
+		"exvlan_data_plane_resource_close",
 		uint64(resource),
 	)
 }

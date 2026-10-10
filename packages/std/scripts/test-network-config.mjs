@@ -8,7 +8,7 @@ import ts from 'typescript'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '..')
 const generatedApiManagePath = path.join(projectRoot, 'src/generated/proto/api_manage.ts')
-const distPath = path.join(projectRoot, 'dist/easytier-frontend-lib.js')
+const distPath = path.join(projectRoot, 'dist/@exvlan/std.js')
 
 const { NetworkTypes } = await import(pathToFileURL(distPath))
 
@@ -235,7 +235,7 @@ function allFieldFixture() {
         ],
       },
     },
-    credential_file: '/tmp/easytier-credential.toml',
+    credential_file: '/tmp/exvlan-credential.toml',
     managed_credentials: [
       {
         credential_id: 'managed-credential',

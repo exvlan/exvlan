@@ -11,7 +11,7 @@ use std::{
 use arc_swap::ArcSwap;
 use cidr::{Ipv4Cidr, Ipv4Inet, Ipv6Cidr, Ipv6Inet};
 use dashmap::DashMap;
-use easytier_proto::{
+use exvlan_proto::{
     acl::Acl,
     common::{FlagsInConfig, PeerFeatureFlag, SecureModeConfig, StunInfo, TunnelInfo},
     peer_rpc::{PeerGroupInfo, TrustedCredentialPubkeyProof},
@@ -37,7 +37,7 @@ use crate::{
     },
 };
 
-pub(crate) const SECRET_PROOF_PREFIX: &[u8] = b"easytier secret proof";
+pub(crate) const SECRET_PROOF_PREFIX: &[u8] = b"exvlan secret proof";
 const PEER_EVENT_CAPACITY: usize = 100;
 
 #[derive(Debug, Clone)]
@@ -45,8 +45,8 @@ const PEER_EVENT_CAPACITY: usize = 100;
 pub(crate) enum PeerEvent {
     PeerAdded(PeerId),
     PeerRemoved(PeerId),
-    PeerConnAdded(easytier_proto::core_peer::peer::PeerConnInfo),
-    PeerConnRemoved(easytier_proto::core_peer::peer::PeerConnInfo),
+    PeerConnAdded(exvlan_proto::core_peer::peer::PeerConnInfo),
+    PeerConnRemoved(exvlan_proto::core_peer::peer::PeerConnInfo),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,7 +75,7 @@ pub struct PeerRuntimeSnapshotInput {
     pub secure_mode: Option<SecureModeConfig>,
     pub host_routing: HostRoutingPolicy,
     pub acl: Option<Acl>,
-    pub easytier_version: String,
+    pub exvlan_version: String,
     pub pinned_peers: Vec<(url::Url, Option<String>)>,
     pub ospf_update_my_foreign_network_interval_sec: u64,
     pub max_direct_conns_per_peer_in_foreign_network: usize,
@@ -124,7 +124,7 @@ impl PeerRuntimeSnapshot {
             secure_mode,
             host_routing,
             acl,
-            easytier_version,
+            exvlan_version,
             pinned_peers,
             ospf_update_my_foreign_network_interval_sec,
             max_direct_conns_per_peer_in_foreign_network,
@@ -178,7 +178,7 @@ impl PeerRuntimeSnapshot {
                 secure_mode,
                 host_routing,
             },
-            easytier_version,
+            exvlan_version,
             avoid_relay_data_preference,
             flags,
             pinned_peers,
@@ -514,7 +514,7 @@ impl Default for TrustedKeyMapManager {
 
 /// Runtime dependency interface for the peers module.
 ///
-/// `PeerContext` is intentionally scoped to `easytier-core::peers`; other core
+/// `PeerContext` is intentionally scoped to `exvlan-core::peers`; other core
 /// modules should depend on their own narrow DTOs or traits instead of treating
 /// this as a core-wide global context.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -621,7 +621,7 @@ pub(crate) trait PeerContext: Send + Sync {
         None
     }
 
-    fn easytier_version(&self) -> String {
+    fn exvlan_version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
     }
 
@@ -850,8 +850,8 @@ impl PeerContext for CorePeerContext {
         Some(self.config.subscribe_peer_runtime_changes())
     }
 
-    fn easytier_version(&self) -> String {
-        self.snapshot().easytier_version.clone()
+    fn exvlan_version(&self) -> String {
+        self.snapshot().exvlan_version.clone()
     }
 
     fn ospf_update_my_foreign_network_interval_sec(&self) -> u64 {
@@ -1123,7 +1123,7 @@ pub(crate) mod tests {
                 local_exit_node_fallback: true,
             },
             acl,
-            easytier_version: "host-version".to_owned(),
+            exvlan_version: "host-version".to_owned(),
             pinned_peers: vec![(
                 "tcp://192.0.2.10:11010".parse().unwrap(),
                 Some("peer-key".to_owned()),
@@ -1179,15 +1179,15 @@ pub(crate) mod tests {
     #[test]
     fn host_input_derives_acl_groups_and_preserves_explicit_inputs() {
         let acl = Acl {
-            acl_v1: Some(easytier_proto::acl::AclV1 {
+            acl_v1: Some(exvlan_proto::acl::AclV1 {
                 chains: Vec::new(),
-                group: Some(easytier_proto::acl::GroupInfo {
+                group: Some(exvlan_proto::acl::GroupInfo {
                     declares: vec![
-                        easytier_proto::acl::GroupIdentity {
+                        exvlan_proto::acl::GroupIdentity {
                             group_name: "ops".to_owned(),
                             group_secret: "ops-secret".to_owned(),
                         },
-                        easytier_proto::acl::GroupIdentity {
+                        exvlan_proto::acl::GroupIdentity {
                             group_name: "audit".to_owned(),
                             group_secret: "audit-secret".to_owned(),
                         },
@@ -1202,7 +1202,7 @@ pub(crate) mod tests {
         let snapshot = PeerRuntimeSnapshot::from_host_input(host_snapshot_input(flags, Some(acl)));
 
         assert!(snapshot.avoid_relay_data_preference);
-        assert_eq!(snapshot.easytier_version, "host-version");
+        assert_eq!(snapshot.exvlan_version, "host-version");
         assert_eq!(
             snapshot.pinned_peers,
             vec![(
@@ -1553,10 +1553,10 @@ pub(crate) mod tests {
         let mut flags = FlagsInConfig::default();
         flags.p2p_only = true;
         let acl = Acl {
-            acl_v1: Some(easytier_proto::acl::AclV1 {
+            acl_v1: Some(exvlan_proto::acl::AclV1 {
                 chains: Vec::new(),
-                group: Some(easytier_proto::acl::GroupInfo {
-                    declares: vec![easytier_proto::acl::GroupIdentity {
+                group: Some(exvlan_proto::acl::GroupInfo {
+                    declares: vec![exvlan_proto::acl::GroupIdentity {
                         group_name: "ops".to_string(),
                         group_secret: "group-secret".to_string(),
                     }],

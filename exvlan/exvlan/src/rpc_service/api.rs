@@ -3,8 +3,8 @@ use std::{net::SocketAddr, sync::Arc};
 use anyhow::Context;
 use cidr::IpCidr;
 #[cfg(feature = "management")]
-use easytier_core::management::ManagementServer;
-use easytier_core::{management::ReadOnlyManagementServer, socket::SocketListener, tunnel::Tunnel};
+use exvlan_core::management::ManagementServer;
+use exvlan_core::{management::ReadOnlyManagementServer, socket::SocketListener, tunnel::Tunnel};
 
 #[cfg(feature = "management")]
 use crate::{
@@ -157,7 +157,7 @@ fn select_proper_rpc_port(addr: &mut Option<SocketAddr>) -> anyhow::Result<()> {
 mod tests {
     use std::{fmt, sync::Arc, time::Duration};
 
-    use easytier_core::{
+    use exvlan_core::{
         rpc::bidirect::BidirectRpcManager,
         socket::SocketListener,
         tunnel::{Tunnel, ring::create_ring_tunnel_pair},

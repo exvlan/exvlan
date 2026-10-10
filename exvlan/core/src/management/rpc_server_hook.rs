@@ -1,7 +1,7 @@
 use std::{net::IpAddr, sync::Arc};
 
 use cidr::IpCidr;
-use easytier_proto::common::TunnelInfo;
+use exvlan_proto::common::TunnelInfo;
 
 use crate::rpc::standalone::RpcServerHook;
 

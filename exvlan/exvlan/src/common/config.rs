@@ -7,19 +7,19 @@ use strum::VariantArray as _;
 #[cfg(feature = "management")]
 use tokio::io::AsyncReadExt as _;
 
-use easytier_core::config::MappedListenerPolicy;
+use exvlan_core::config::MappedListenerPolicy;
 #[cfg(feature = "management")]
-pub use easytier_core::config::api_input::{
+pub use exvlan_core::config::api_input::{
     NetworkConfig, NetworkConfigExt, NetworkingMethod, add_proxy_network_to_config,
 };
-pub use easytier_core::config::toml::*;
+pub use exvlan_core::config::toml::*;
 
 #[cfg(feature = "management")]
 use crate::common::env_parser;
 use crate::tunnel::IpScheme;
 
 #[cfg(feature = "management")]
-pub use easytier_core::management::{config_source_from_rpc, config_source_to_rpc};
+pub use exvlan_core::management::{config_source_from_rpc, config_source_to_rpc};
 
 pub fn parse_mapped_listener_urls(
     mapped_listeners: &[String],
@@ -41,7 +41,7 @@ pub fn load_toml_config_from_path(path: &PathBuf) -> Result<TomlConfigLoader, an
 }
 
 #[cfg(feature = "management-rpc")]
-pub use easytier_core::management::{ConfigFileControl, ConfigFilePermission};
+pub use exvlan_core::management::{ConfigFileControl, ConfigFilePermission};
 
 #[cfg(feature = "management")]
 pub async fn config_file_control_from_path(path: PathBuf) -> ConfigFileControl {
@@ -222,7 +222,7 @@ network_secret = "${TEST_SECRET}"
     /// - 这需要测试 get_network_instance_config 拒绝返回只读配置
     ///
     /// 注：这个测试验证权限标记的正确设置，实际的 RPC API 保护已在
-    /// `easytier/src/rpc_service/instance_manage.rs` 中实现
+    /// `exvlan/src/rpc_service/instance_manage.rs` 中实现
     #[tokio::test]
     async fn test_readonly_config_api_protection() {
         set_env_var("API_TEST_SECRET", "secret-value");

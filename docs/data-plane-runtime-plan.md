@@ -4,18 +4,18 @@
 
 Accepted.
 
-This document is the implementation plan for restructuring the EasyTier data
-plane and exposing it through native FFI and the `easytier-go` module. It
+This document is the implementation plan for restructuring the Exvlan data
+plane and exposing it through native FFI and the `exvlan-go` module. It
 describes a target architecture, not the current implementation.
 
 The implementation scope is:
 
-- `easytier-core`;
-- the native `easytier` composition that injects the existing optional KCP
+- `exvlan-core`;
+- the native `exvlan` composition that injects the existing optional KCP
   backend;
-- `easytier-contrib/easytier-ffi`;
-- the WASI guest ABI implemented by `easytier-core`;
-- `easytier-go`;
+- `exvlan/contrib/exvlan-ffi`;
+- the WASI guest ABI implemented by `exvlan-core`;
+- `exvlan-go`;
 - TCP, UDP, and smoltcp data-plane paths;
 - moving KCP route selection and source-connection ownership below the
   `DataPlaneRuntime` Interface without making KCP portable.
@@ -151,14 +151,14 @@ There are two opposite-direction seams and they must remain separate:
 Guest data-plane resources must not be stored in the Go Host reactor, and
 underlay Host resources must not be exposed as public data-plane handles.
 
-## EasyTier core design
+## Exvlan core design
 
 ### Module layout
 
 The target layout is:
 
 ```text
-easytier-core/src/gateway/
+exvlan-core/src/gateway/
   dataplane/
     mod.rs
     runtime.rs
@@ -307,7 +307,7 @@ Packet classification behavior must remain compatible:
 
 - malformed or unmatched packets pass to the next pipeline;
 - exact TCP flows win over wildcard listeners;
-- only supported EasyTier data packet kinds are consumed;
+- only supported Exvlan data packet kinds are consumed;
 - modified-source packets that are not local loopback traffic pass through;
 - fragmented UDP response routing remains supported;
 - a packet is consumed only when the owning flow exists.
@@ -400,7 +400,7 @@ The runtime must:
 
 ## KCP backend boundary
 
-The existing concrete `KcpProxyService` remains in the native `easytier`
+The existing concrete `KcpProxyService` remains in the native `exvlan`
 composition and continues to use `kcp-sys`. It is injected through the
 existing wrapped-transport Interface.
 
@@ -413,7 +413,7 @@ accept smoltcp streams only. The WASI composition installs no KCP backend and
 the data-plane capability set contains no KCP bit. Consequently this plan does
 not require:
 
-- moving the concrete engine into `easytier-core`;
+- moving the concrete engine into `exvlan-core`;
 - compiling `kcp-sys` for WASI;
 - tracking KCP timers in the externally driven runtime;
 - delivering KCP streams to FFI or Go listeners;
@@ -568,7 +568,7 @@ fallback behavior is explicitly outside this plan.
 
 ### Direction
 
-Existing `easytier_host` imports remain guest-to-Host underlay operations.
+Existing `exvlan_host` imports remain guest-to-Host underlay operations.
 They are not reversed or reused for public data-plane sockets.
 
 New guest exports provide:
@@ -906,7 +906,7 @@ The existing distinction between graceful `Stop` and resource-reclaiming
 
 ### Phase 0: freeze semantics and define the ABI
 
-Repository: EasyTier.
+Repository: Exvlan.
 
 - Add golden tests for current route selection, Host direct calls, flow
   cleanup, listener/accepted-stream lifetime, stack lease release, stop, IP
@@ -916,7 +916,7 @@ Repository: EasyTier.
 
 ### Phase 1: move shared data-plane ownership
 
-Repository: EasyTier.
+Repository: Exvlan.
 
 - Move and rename the flow table and peer-packet classifier.
 - Move the smoltcp packet bridge out of `Socks5ServerNet`.
@@ -925,7 +925,7 @@ Repository: EasyTier.
 
 ### Phase 2: introduce `DataPlaneRuntime`
 
-Repository: EasyTier.
+Repository: Exvlan.
 
 - Add stack generations and runtime leases.
 - Make shutdown and final-lease release event driven.
@@ -935,7 +935,7 @@ Repository: EasyTier.
 
 ### Phase 3: route policy and gateway Adapters
 
-Repository: EasyTier.
+Repository: Exvlan.
 
 - Add `OverlayOnly` and `OverlayOrDirect`.
 - Move route selection into the data plane.
@@ -946,18 +946,18 @@ Repository: EasyTier.
 
 ### Phase 4: optional native KCP backend integration
 
-Repository: EasyTier.
+Repository: Exvlan.
 
 - Move KCP selection and source-connection ownership into
   `DataPlaneRuntime`.
-- Keep the existing concrete backend injected by native `easytier`.
+- Keep the existing concrete backend injected by native `exvlan`.
 - Make public FFI/WASI sessions explicitly request `SmoltcpOnly`.
 - Add selected-path diagnostics and route-selection tests without changing
   `kcp-sys` or the wrapped-transport destination.
 
 ### Phase 5: session and operation broker
 
-Repository: EasyTier.
+Repository: Exvlan.
 
 - Add the resource table, operation slots, completion queue, and notifier.
 - Implement operation limits, cancellation, close, stop, result ownership, and
@@ -966,7 +966,7 @@ Repository: EasyTier.
 
 ### Phase 6: native FFI
 
-Repository: EasyTier.
+Repository: Exvlan.
 
 - Add the new session Interface.
 - Remove the existing synchronous and per-operation asynchronous data-plane
@@ -976,7 +976,7 @@ Repository: EasyTier.
 
 ### Phase 7: WASI ABI
 
-Repository: EasyTier.
+Repository: Exvlan.
 
 - Add guest data-plane exports and canonical wire encoding.
 - Add ABI version and capabilities.
@@ -986,7 +986,7 @@ Repository: EasyTier.
 
 ### Phase 8: Go `coreabi` and engine
 
-Repository: EasyTier (`easytier-go`).
+Repository: Exvlan (`exvlan-go`).
 
 - Add typed data-plane guest calls and wire codecs.
 - Extend the single driver with submit, cancel, close, and completion drain.
@@ -995,11 +995,11 @@ Repository: EasyTier (`easytier-go`).
 
 ### Phase 9: Go standard network Adapters and artifact
 
-Repository: EasyTier (`easytier-go`).
+Repository: Exvlan (`exvlan-go`).
 
 - Add `Dial`, `Listen`, and `ListenPacket`.
 - Implement TCP, UDP, deadlines, cancellation, close, and error mapping.
-- Build the final WASM from the exact final EasyTier commit on
+- Build the final WASM from the exact final Exvlan commit on
   `codex/cfg-refactor-pr`.
 - Update embedded artifact provenance.
 - Run real two-instance TCP and UDP integration tests.
@@ -1012,7 +1012,7 @@ review because it contains concurrency logic.
 
 ## Validation plan
 
-### EasyTier core
+### Exvlan core
 
 Required focused tests:
 
@@ -1035,14 +1035,14 @@ Required focused tests:
 Feature and target profiles include:
 
 ```text
-cargo check -p easytier-core --no-default-features
-cargo check -p easytier-core --no-default-features \
+cargo check -p exvlan-core --no-default-features
+cargo check -p exvlan-core --no-default-features \
   --features proxy-smoltcp-stack
-cargo test -p easytier-core --no-default-features \
+cargo test -p exvlan-core --no-default-features \
   --features proxy-smoltcp-stack,test-utils
-cargo test -p easytier-core \
+cargo test -p exvlan-core \
   --features proxy-smoltcp-stack,test-utils
-cargo build -p easytier-core --release --target wasm32-wasip1 \
+cargo build -p exvlan-core --release --target wasm32-wasip1 \
   --features proxy-smoltcp-stack
 ```
 
@@ -1113,7 +1113,7 @@ go vet ./...
 
 The implementation is complete when:
 
-- EasyTier owns all data-plane route, smoltcp, flow, and resource policy;
+- Exvlan owns all data-plane route, smoltcp, flow, and resource policy;
 - optional native KCP selection and source-stream ownership are behind
   `DataPlaneRuntime`;
 - SOCKS5 and port forwarding use Data Plane through explicit Adapters;
@@ -1129,5 +1129,5 @@ The implementation is complete when:
   KCP;
 - the unused legacy data-plane FFI has been removed;
 - all focused, Docker, race, ABI, and embedded-WASM tests pass;
-- artifact provenance identifies the exact final EasyTier commit;
+- artifact provenance identifies the exact final Exvlan commit;
 - no consumer-specific code exists in either repository.

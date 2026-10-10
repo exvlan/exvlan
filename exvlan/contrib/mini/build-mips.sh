@@ -2,9 +2,9 @@
 set -eu
 
 # Cargo invokes this same file as a rustc wrapper during compact MIPS builds.
-# Applying immediate-abort here keeps the size policy scoped to easytier-mini;
+# Applying immediate-abort here keeps the size policy scoped to exvlan-mini;
 # normal MIPS builds elsewhere in the workspace retain their panic behavior.
-if [ "${EASYTIER_MINI_MIPS_RUSTC_WRAPPER:-}" = "1" ]; then
+if [ "${EXVLAN_MINI_MIPS_RUSTC_WRAPPER:-}" = "1" ]; then
     mini_rustc=$1
     shift
     for mini_rustc_arg in "$@"; do
@@ -28,7 +28,7 @@ build_mips_target() {
     mini_target=$1
     mini_toolchain=$2
     PATH="$mini_repo_dir/musl_gcc/$mini_toolchain/bin:$PATH" \
-        EASYTIER_MINI_MIPS_RUSTC_WRAPPER=1 \
+        EXVLAN_MINI_MIPS_RUSTC_WRAPPER=1 \
         RUSTC_BOOTSTRAP=1 \
         RUSTC_WRAPPER="$mini_script_dir/build-mips.sh" \
         cargo build \
@@ -37,7 +37,7 @@ build_mips_target() {
             --target "$mini_target" \
             -Z build-std=std \
             -Z build-std-features=optimize_for_size \
-            -p easytier-mini
+            -p exvlan-mini
 }
 
 case "$mini_requested_target" in

@@ -1,4 +1,4 @@
-# Copyright 2024-present EXVlan Programme within The Commons Conservancy
+# Copyright 2024-present Exvlan Programme within The Commons Conservancy
 # SPDX-License-Identifier: Apache-2.0
 
 name: 🐞 问题报告 / Bug Report
@@ -13,10 +13,10 @@ body:
         ## 在提交问题之前 / First of all
         1. 请先搜索有关此问题的 [现有问题](https://github.com/exvlan/exvlan/issues?q=is%3Aissue)。
         1. Please search for [existing issues](https://github.com/exvlan/exvlan/issues?q=is%3Aissue) about this problem first.
-        2. 请确保所使用的 EXVlan 版本都是最新的。
-        2. Make sure that all EXVlan versions are up-to-date.
-        3. 请确保这是 EXVlan 的问题，而不是你正在使用的其他内容引起的问题。
-        3. Make sure it's an issue with EXVlan and not something else you are using.
+        2. 请确保所使用的 Exvlan 版本都是最新的。
+        2. Make sure that all Exvlan versions are up-to-date.
+        3. 请确保这是 Exvlan 的问题，而不是你正在使用的其他内容引起的问题。
+        3. Make sure it's an issue with Exvlan and not something else you are using.
         4. 请记得遵守我们的社区准则并保持友好态度。
         4. Remember to follow our community guidelines and be friendly.
 
@@ -37,7 +37,7 @@ body:
       label: 环境信息 / Environment Information
       description: 请提供网络拓扑、节点信息和系统环境详情。 / Please provide network topology, node information and system environment details.
       placeholder: |
-        **EXVlan 版本（非常重要）/ EXVlan Version (Very Important):** v1.2.0
+        **Exvlan 版本（非常重要）/ Exvlan Version (Very Important):** v1.2.0
         
         **网络拓扑 / Network Topology:**
         - 节点 A (10.1.1.1): Windows 11 Pro 22H2, Wifi，有 IPV6 地址

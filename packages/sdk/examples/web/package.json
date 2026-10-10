@@ -1,10 +1,10 @@
 {
-  "name": "@easytier/web-example",
+  "name": "@exvlan/web-example",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build:packages": "pnpm --filter @easytier/browser build && pnpm --filter @easytier/cloudflare build",
+    "build:packages": "pnpm --filter @exvlan/browser build && pnpm --filter @exvlan/cloudflare build",
     "build:browser": "tsc --noEmit -p browser/tsconfig.json && vite build browser",
     "types:cloudflare": "wrangler types cloudflare/worker-configuration.d.ts --config cloudflare/wrangler.jsonc",
     "check:cloudflare": "pnpm types:cloudflare && tsc --noEmit -p cloudflare/tsconfig.json && wrangler deploy --dry-run --config cloudflare/wrangler.jsonc",
@@ -14,8 +14,8 @@
     "deploy:cloudflare": "pnpm types:cloudflare && wrangler deploy --config cloudflare/wrangler.jsonc"
   },
   "dependencies": {
-    "@easytier/browser": "workspace:0.1.0",
-    "@easytier/cloudflare": "workspace:0.1.0"
+    "@exvlan/browser": "workspace:0.1.0",
+    "@exvlan/cloudflare": "workspace:0.1.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260917.1",

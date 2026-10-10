@@ -1,6 +1,6 @@
 //! Portable conversion between the shared TOML model and management schema.
 
-use easytier_proto::api::manage::{
+use exvlan_proto::api::manage::{
     self, NetworkConfig, NetworkingMethod, PortForwardConfig as ApiPortForwardConfig,
 };
 

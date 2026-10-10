@@ -5,7 +5,7 @@ package netstd
 import (
 	"fmt"
 
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 	"golang.org/x/sys/unix"
 )
 

@@ -30,20 +30,20 @@ impl SmolTcpStack {
         tasks.lock().unwrap().spawn(async move {
             while let Some(packet) = ingress_rx.recv().await {
                 tracing::trace!(
-                    target: "easytier_core::gateway::stack",
+                    target: "exvlan_core::gateway::stack",
                     ?packet,
                     "receive from peer send to smoltcp packet"
                 );
                 if let Err(err) = stack_sink.send(Ok(packet.payload().to_vec())).await {
                     tracing::error!(
-                        target: "easytier_core::gateway::stack",
+                        target: "exvlan_core::gateway::stack",
                         ?err,
                         "send to smoltcp stack failed"
                     );
                 }
             }
             tracing::error!(
-                target: "easytier_core::gateway::stack",
+                target: "exvlan_core::gateway::stack",
                 "smoltcp stack sink exited"
             );
         });
@@ -106,7 +106,7 @@ impl SmolTcpStack {
             .await
             .map_err(|error| anyhow::anyhow!("smoltcp listener accept failed: {error}"))?;
         tracing::info!(
-            target: "easytier_core::gateway::stack",
+            target: "exvlan_core::gateway::stack",
             ?src,
             "smol tcp listener accepted"
         );

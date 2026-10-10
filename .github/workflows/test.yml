@@ -1,4 +1,4 @@
-name: EasyTier Test
+name: Exvlan Test
 
 on:
   push:
@@ -26,10 +26,10 @@ jobs:
     env:
       RELEVANT_PATHS: >-
         ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**",
-        "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "easytier/**",
-        "easytier-core/**", "easytier-proto/**", "easytier-rpc-build/**",
-        "easytier-web/**", "easytier-gui/src-tauri/**",
-        "tauri-plugin-vpnservice/**", "easytier-contrib/**",
+        "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "exvlan/**",
+        "exvlan-core/**", "exvlan-proto/**", "exvlan-rpc-build/**",
+        "exvlan-api/**", "@exvlan/studio/src-tauri/**",
+        "tauri-plugin-vpnservice/**", "exvlan/contrib/**",
         ".github/workflows/test.yml", ".github/actions/**"]
     outputs:
       should_skip: >-
@@ -90,12 +90,12 @@ jobs:
 
       - name: Check features
         if: ${{ !cancelled() }}
-        run: cargo hack check --package easytier --each-feature --exclude-features macos-ne --verbose
+        run: cargo hack check --package exvlan --each-feature --exclude-features macos-ne --verbose
 
       - name: Check WASI
         if: ${{ !cancelled() }}
         run: >-
-          cargo check --package easytier-core --lib --target wasm32-wasip1
+          cargo check --package exvlan-core --lib --target wasm32-wasip1
           --features management-rpc,proxy-smoltcp-stack,ring-crypto,wasi-crypto-offload
 
       - name: Check Cargo.lock is up to date
@@ -128,7 +128,7 @@ jobs:
       - name: Archive test
         run: >-
           cargo nextest archive --archive-file tests.tar.zst
-          --package easytier --package easytier-core --features full
+          --package exvlan --package exvlan-core --features full
 
       - uses: actions/upload-artifact@v5
         with:
@@ -145,7 +145,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: "easytier"
+          - name: "exvlan"
             opts: "-E 'not test(tests::three_node)' --test-threads 1 --no-fail-fast"
 
           - name: "three_node"
@@ -186,7 +186,7 @@ jobs:
       - name: Run tests
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
-          sudo -E env "PATH=$PATH" EASYTIER_LINUX_BPF_INTEGRATION=required \
+          sudo -E env "PATH=$PATH" EXVLAN_LINUX_BPF_INTEGRATION=required \
             cargo nextest run --archive-file tests.tar.zst ${{ matrix.opts }}
 
   test:

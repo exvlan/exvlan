@@ -1,9 +1,9 @@
 interface Env {
-  EASYTIER_CORE: DurableObjectNamespace<
-    import("./worker").EasyTierCoreObject
+  EXVLAN_CORE: DurableObjectNamespace<
+    import("./worker").ExvlanCoreObject
   >;
-  EASYTIER_NETWORK_NAME: string;
-  EASYTIER_NETWORK_SECRET: string;
-  EASYTIER_ENABLE_ENCRYPTION?: string;
-  EASYTIER_OBJECT_NAME?: string;
+  EXVLAN_NETWORK_NAME: string;
+  EXVLAN_NETWORK_SECRET: string;
+  EXVLAN_ENABLE_ENCRYPTION?: string;
+  EXVLAN_OBJECT_NAME?: string;
 }

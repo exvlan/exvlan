@@ -467,22 +467,22 @@ mod tests {
     fn additional_default_console_targets_are_scoped() {
         let _env = EnvVarGuard::set(None);
         let filter =
-            TargetFilter::console_with_default_targets(None, &[LOG_TARGET, "easytier_web"])
+            TargetFilter::console_with_default_targets(None, &[LOG_TARGET, "exvlan_web"])
                 .unwrap();
 
         assert!(filter.enabled("CORE::peer", Level::Info));
-        assert!(filter.enabled("easytier_web::client_manager", Level::Info));
-        assert!(!filter.enabled("easytier_web", Level::Debug));
+        assert!(filter.enabled("exvlan_web::client_manager", Level::Info));
+        assert!(!filter.enabled("exvlan_web", Level::Debug));
         assert!(!filter.enabled("other", Level::Error));
     }
 
     #[test]
     fn rust_log_supports_global_and_target_levels() {
-        let filter = TargetFilter::parse("warn,easytier_core=debug,hyper=off")
+        let filter = TargetFilter::parse("warn,exvlan_core=debug,hyper=off")
             .unwrap()
             .unwrap();
 
-        assert!(filter.enabled("easytier_core::peers", Level::Debug));
+        assert!(filter.enabled("exvlan_core::peers", Level::Debug));
         assert!(!filter.enabled("hyper::client", Level::Error));
         assert!(!filter.enabled("other", Level::Info));
         assert!(filter.enabled("other", Level::Warn));
@@ -490,9 +490,9 @@ mod tests {
 
     #[test]
     fn rust_log_target_without_level_enables_trace() {
-        let filter = TargetFilter::parse("easytier_core").unwrap().unwrap();
+        let filter = TargetFilter::parse("exvlan_core").unwrap().unwrap();
 
-        assert!(filter.enabled("easytier_core::peer", Level::Trace));
+        assert!(filter.enabled("exvlan_core::peer", Level::Trace));
         assert!(!filter.enabled("other", Level::Error));
     }
 

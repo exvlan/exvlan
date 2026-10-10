@@ -36,7 +36,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   addPluginListener: mocks.addPluginListener,
 }))
 
-vi.mock('easytier-frontend-lib', () => ({
+vi.mock('@exvlan/std', () => ({
   Utils: {
     UuidToStr: (value: unknown) => String(value),
     ipv4ToString: (address: { addr: string }) => address.addr,

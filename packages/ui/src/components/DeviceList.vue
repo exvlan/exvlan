@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Button, Checkbox, Column, DataTable, Dialog, Drawer, InputText, SelectButton, Skeleton, useToast } from 'primevue';
 import Tooltip from 'primevue/tooltip';
 import { useRoute, useRouter } from 'vue-router';
-import { Utils } from 'easytier-frontend-lib';
+import { Utils } from '@exvlan/std';
 import DeviceDetails from './DeviceDetails.vue';
 import { useI18n } from 'vue-i18n'
 import ApiClient from '../modules/api';
@@ -45,7 +45,7 @@ const enrollCommand = computed(() => {
     if (!enrollInfo.value) return '';
     const host = window.location.hostname;
     const { config_server_protocol: proto, config_server_port: port, username } = enrollInfo.value;
-    return `easytier-core --config-server ${proto}://${host}:${port}/${username}`;
+    return `exvlan-core --config-server ${proto}://${host}:${port}/${username}`;
 });
 
 const copyEnrollCommand = async () => {
@@ -255,8 +255,8 @@ const locationText = (device: Utils.DeviceInfo) => {
                         <template #body="{ data }">{{ locationText(data) }}</template>
                     </Column>
                     <Column field="running_network_count" :header="t('web.device.networks')" sortable style="width: 7rem" />
-                    <Column field="easytier_version" :header="t('web.device.version')" sortable style="width: 7rem">
-                        <template #body="{ data }"><span class="mono-value muted">v{{ (data.easytier_version || '?').split('-')[0] }}</span></template>
+                    <Column field="exvlan_version" :header="t('web.device.version')" sortable style="width: 7rem">
+                        <template #body="{ data }"><span class="mono-value muted">v{{ (data.exvlan_version || '?').split('-')[0] }}</span></template>
                     </Column>
                     <Column :header="t('web.device.last_seen')" style="width: 10rem">
                         <template #body="{ data }"><span v-if="!data.online && data.last_seen" class="muted">{{ data.last_seen.replace('T', ' ').slice(5, 16) }}</span><span v-else class="muted">—</span></template>
@@ -289,7 +289,7 @@ const locationText = (device: Utils.DeviceInfo) => {
                                     <span v-if="device.alias && device.hostname" class="preview-secondary mono-value">{{ device.hostname }}</span>
                                 </span>
                             </button>
-                            <span class="mono-value muted shrink-0">v{{ (device.easytier_version || '?').split('-')[0] }}</span>
+                            <span class="mono-value muted shrink-0">v{{ (device.exvlan_version || '?').split('-')[0] }}</span>
                         </div>
                         <p class="preview-secondary">{{ locationText(device) }}</p>
                         <div class="device-card-actions">
@@ -313,7 +313,7 @@ const locationText = (device: Utils.DeviceInfo) => {
                                 <span class="status-dot" :class="device.online ? 'online' : 'offline'"></span>
                                 <span class="preview-name">{{ deviceName(device) }}</span>
                             </button>
-                            <span class="mono-value muted">v{{ (device.easytier_version || '?').split('-')[0] }}</span>
+                            <span class="mono-value muted">v{{ (device.exvlan_version || '?').split('-')[0] }}</span>
                         </div>
                         <p class="preview-secondary">{{ locationText(device) }} · {{ device.running_network_count }} {{ t('web.console.instances') }}</p>
                         <details>

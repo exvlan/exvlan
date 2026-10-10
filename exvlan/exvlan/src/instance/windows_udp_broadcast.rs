@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-use easytier_core::gateway::udp_broadcast::PhysicalInterface;
+use exvlan_core::gateway::udp_broadcast::PhysicalInterface;
 
 #[cfg(all(windows, feature = "tun"))]
 mod runtime;

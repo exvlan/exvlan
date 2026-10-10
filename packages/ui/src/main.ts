@@ -1,14 +1,14 @@
 import { createApp } from 'vue'
-import 'easytier-frontend-lib/style.css'
+import '@exvlan/std/style.css'
 import './style.css'
 import './console.css'
 import App from './App.vue'
-import EasytierFrontendLib from 'easytier-frontend-lib'
+import ExvlanFrontendLib from '@exvlan/std'
 import PrimeVue from 'primevue/config'
 import ConsoleTheme from './theme';
 import { initThemeMode } from './modules/theme';
 import ConfirmationService from 'primevue/confirmationservice';
-import { I18nUtils } from 'easytier-frontend-lib'
+import { I18nUtils } from '@exvlan/std'
 
 import { createRouter, createWebHashHistory } from 'vue-router'
 import MainPage from './components/MainPage.vue'
@@ -104,7 +104,7 @@ app.use(PrimeVue,
     }
 ).use(ToastService as any).use(DialogService as any).use(router).use(ConfirmationService as any)
 
-app.use(EasytierFrontendLib, { skipPrimeVue: true })
+app.use(ExvlanFrontendLib, { skipPrimeVue: true })
 
 initThemeMode()
 app.mount('#app')

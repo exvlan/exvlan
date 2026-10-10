@@ -13,7 +13,7 @@ onMounted(async () => {
 <template>
   <Card>
     <template #title>
-      EXVlan - {{ t('about.version') }}: {{ etVersion }}
+      Exvlan - {{ t('about.version') }}: {{ etVersion }}
     </template>
     <template #content>
       <p class="mb-1">

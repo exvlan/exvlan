@@ -63,7 +63,7 @@ impl DataPlaneTcpRouteInput {
         }
         Err(DataPlaneError::new(
             DataPlaneErrorKind::NoOverlayRoute,
-            "destination has no EasyTier overlay route",
+            "destination has no Exvlan overlay route",
         ))
     }
 }
@@ -71,7 +71,7 @@ impl DataPlaneTcpRouteInput {
 fn path_not_ready() -> DataPlaneError {
     DataPlaneError::new(
         DataPlaneErrorKind::PathNotReady,
-        "selected EasyTier data-plane path is not ready",
+        "selected Exvlan data-plane path is not ready",
     )
 }
 

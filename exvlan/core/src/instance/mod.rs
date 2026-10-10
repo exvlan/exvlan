@@ -1,4 +1,4 @@
-//! Lifecycle owner for the portable EasyTier runtime.
+//! Lifecycle owner for the portable Exvlan runtime.
 
 mod build_capabilities;
 mod config;
@@ -389,7 +389,7 @@ impl PeerStunInfoSource for CoreStunPeerInfoSource {
     }
 }
 
-/// Owns the portable peer and connectivity runtime for one EasyTier instance.
+/// Owns the portable peer and connectivity runtime for one Exvlan instance.
 ///
 /// An instance is intentionally one-shot: after it is stopped, construct a new
 /// instance rather than trying to rebuild partially consumed peer-manager state.
@@ -468,7 +468,7 @@ where
         ))
     }
 
-    /// Constructs the complete portable runtime for one EasyTier instance.
+    /// Constructs the complete portable runtime for one Exvlan instance.
     ///
     /// This is the only instance construction entry. The normalized config is
     /// authoritative after creation; all platform behavior enters through the

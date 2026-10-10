@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	corehost "github.com/easytier/easytier/easytier-go"
-	"github.com/easytier/easytier/easytier-go/platform"
-	"github.com/easytier/easytier/easytier-go/platform/netstd"
-	hostproto "github.com/easytier/easytier/easytier-go/proto"
+	corehost "github.com/exvlan/exvlan/exvlan-go"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform/netstd"
+	hostproto "github.com/exvlan/exvlan/exvlan-go/proto"
 )
 
 func TestPublicLifecycleDoesNotExposeWazero(t *testing.T) {
@@ -527,17 +527,17 @@ func TestPublicEventStreamClosesWithInstance(t *testing.T) {
 
 func TestEmbeddedCoreInfoIsPublicWithoutArtifactBytes(t *testing.T) {
 	info := corehost.CoreInfo()
-	if len(info.EasyTierCommit) != 40 {
-		t.Fatalf("EasyTier commit = %q", info.EasyTierCommit)
+	if len(info.ExvlanCommit) != 40 {
+		t.Fatalf("Exvlan commit = %q", info.ExvlanCommit)
 	}
 	if len(info.SHA256) != 64 {
-		t.Fatalf("EasyTier SHA-256 = %q", info.SHA256)
+		t.Fatalf("Exvlan SHA-256 = %q", info.SHA256)
 	}
-	if info.EasyTierCommit != hostproto.EasyTierCommit {
+	if info.ExvlanCommit != hostproto.ExvlanCommit {
 		t.Fatalf(
-			"EasyTier artifact commit %q != protobuf commit %q",
-			info.EasyTierCommit,
-			hostproto.EasyTierCommit,
+			"Exvlan artifact commit %q != protobuf commit %q",
+			info.ExvlanCommit,
+			hostproto.ExvlanCommit,
 		)
 	}
 	if len(hostproto.SchemaSHA256) != 64 {
@@ -662,7 +662,7 @@ func (factory *recordingSocketFactory) listenerPort(t *testing.T) int {
 	factory.mu.Lock()
 	defer factory.mu.Unlock()
 	if factory.port == 0 {
-		t.Fatal("EasyTier did not create a TCP listener")
+		t.Fatal("Exvlan did not create a TCP listener")
 	}
 	return factory.port
 }

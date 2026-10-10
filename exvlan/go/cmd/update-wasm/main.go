@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	coreArtifact        = "wasm32-wasip1/release/easytier_core_go_host.wasm"
+	coreArtifact        = "wasm32-wasip1/release/exvlan_core_go_host.wasm"
 	coreBuildScript     = "script/build-wasi-core.sh"
 	protoGenerateScript = "script/generate-proto.sh"
 )
@@ -31,7 +31,7 @@ var managementProtoFiles = []string{
 
 func main() {
 	var source string
-	flag.StringVar(&source, "easytier", os.Getenv("EASYTIER_SOURCE"), "path to a clean EasyTier checkout")
+	flag.StringVar(&source, "exvlan", os.Getenv("EXVLAN_SOURCE"), "path to a clean Exvlan checkout")
 	flag.Parse()
 
 	if err := update(source); err != nil {
@@ -58,10 +58,10 @@ func update(source string) error {
 	}
 	source, err = filepath.Abs(source)
 	if err != nil {
-		return fmt.Errorf("resolve EasyTier source: %w", err)
+		return fmt.Errorf("resolve Exvlan source: %w", err)
 	}
 	if _, err := os.Stat(filepath.Join(source, "Cargo.toml")); err != nil {
-		return fmt.Errorf("validate EasyTier source %s: %w", source, err)
+		return fmt.Errorf("validate Exvlan source %s: %w", source, err)
 	}
 	if err := requireCleanCheckout(source); err != nil {
 		return err
@@ -88,7 +88,7 @@ func update(source string) error {
 
 	coreDigest, err := copyArtifact(
 		coreArtifactPath(source, os.Getenv("CARGO_TARGET_DIR")),
-		filepath.Join(repositoryRoot, "internal", "artifact", "easytier_core.wasm"),
+		filepath.Join(repositoryRoot, "internal", "artifact", "exvlan_core.wasm"),
 	)
 	if err != nil {
 		return err
@@ -99,7 +99,7 @@ func update(source string) error {
 	if err := writeProtoProvenance(repositoryRoot, commit, protoDigest); err != nil {
 		return err
 	}
-	fmt.Printf("embedded EasyTier %s (sha256 %s)\n", commit, coreDigest)
+	fmt.Printf("embedded Exvlan %s (sha256 %s)\n", commit, coreDigest)
 	return nil
 }
 
@@ -119,7 +119,7 @@ func requireCleanCheckout(source string) error {
 		return err
 	}
 	if status != "" {
-		return fmt.Errorf("EasyTier checkout is dirty:\n%s", status)
+		return fmt.Errorf("Exvlan checkout is dirty:\n%s", status)
 	}
 	return nil
 }
@@ -141,7 +141,7 @@ func buildCore(source, sourceDateEpoch string) error {
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("run EasyTier WASI build script: %w", err)
+		return fmt.Errorf("run Exvlan WASI build script: %w", err)
 	}
 	return nil
 }
@@ -156,18 +156,18 @@ func generateProto(repositoryRoot, source string) error {
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("generate EasyTier Go protobuf bindings: %w", err)
+		return fmt.Errorf("generate Exvlan Go protobuf bindings: %w", err)
 	}
 	return nil
 }
 
 func protoSchemaDigest(source string) (string, error) {
 	digest := sha256.New()
-	protoRoot := filepath.Join(source, "easytier-proto", "proto")
+	protoRoot := filepath.Join(source, "exvlan-proto", "proto")
 	for _, name := range managementProtoFiles {
 		contents, err := os.ReadFile(filepath.Join(protoRoot, name))
 		if err != nil {
-			return "", fmt.Errorf("read EasyTier protobuf source %s: %w", name, err)
+			return "", fmt.Errorf("read Exvlan protobuf source %s: %w", name, err)
 		}
 		digest.Write([]byte(name))
 		digest.Write([]byte{0})
@@ -187,7 +187,7 @@ func reproducibleBuildEnvironment(source, sourceDateEpoch string) []string {
 		}
 		environment = append(environment, entry)
 	}
-	remap := "--remap-path-prefix=" + source + "=/workspace/EasyTier"
+	remap := "--remap-path-prefix=" + source + "=/workspace/Exvlan"
 	return append(
 		environment,
 		"RUSTFLAGS=",
@@ -238,7 +238,7 @@ func writeProtoProvenance(repositoryRoot, commit, digest string) error {
 package proto
 
 const (
-	EasyTierCommit = %q
+	ExvlanCommit = %q
 	SchemaSHA256 = %q
 )
 `, commit, digest)

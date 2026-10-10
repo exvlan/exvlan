@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/easytier/easytier/easytier-go/internal/contextutil"
-	"github.com/easytier/easytier/easytier-go/internal/coreabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/contextutil"
+	"github.com/exvlan/exvlan/exvlan-go/internal/coreabi"
 )
 
 type WebClientOptions struct {
@@ -41,10 +41,10 @@ func (host *Host) CreateWebClient(
 	options WebClientOptions,
 ) (*WebClient, error) {
 	if host == nil {
-		return nil, fmt.Errorf("create WebClient with nil EasyTier engine host")
+		return nil, fmt.Errorf("create WebClient with nil Exvlan engine host")
 	}
 	if ctx == nil {
-		return nil, fmt.Errorf("create EasyTier WebClient with nil context")
+		return nil, fmt.Errorf("create Exvlan WebClient with nil context")
 	}
 	envelope, err := encodeWebClientEnvelope(options, host.options.Services.Snapshot)
 	if err != nil {
@@ -54,10 +54,10 @@ func (host *Host) CreateWebClient(
 	host.mu.Lock()
 	defer host.mu.Unlock()
 	if host.closed {
-		return nil, fmt.Errorf("create WebClient with closed EasyTier engine host")
+		return nil, fmt.Errorf("create WebClient with closed Exvlan engine host")
 	}
 	if host.webClient != nil {
-		return nil, fmt.Errorf("EasyTier WebClient is already running")
+		return nil, fmt.Errorf("Exvlan WebClient is already running")
 	}
 	host.guestMu.Lock()
 	core, err := coreabi.NewWebClient(host.module)
@@ -93,7 +93,7 @@ func (client *WebClient) Close(ctx context.Context) error {
 		return nil
 	}
 	if ctx == nil {
-		return fmt.Errorf("close EasyTier WebClient with nil context")
+		return fmt.Errorf("close Exvlan WebClient with nil context")
 	}
 	client.closeOnce.Do(func() { close(client.closeRequested) })
 	select {

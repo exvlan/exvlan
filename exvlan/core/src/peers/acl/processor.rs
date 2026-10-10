@@ -10,7 +10,7 @@ use quanta::Instant;
 
 use crate::foundation::token_bucket::TokenBucket;
 use dashmap::DashMap;
-use easytier_proto::acl::*;
+use exvlan_proto::acl::*;
 use tokio::task::JoinSet;
 
 // Performance-optimized key for rate limiting to avoid string allocations

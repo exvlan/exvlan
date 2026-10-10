@@ -32,15 +32,6 @@ use tokio::{
 };
 
 use crate::{
-<<<<<<<< HEAD:exvlan/core/src/peers/peer_ospf_route.rs
-    common::{
-        PeerId,
-        config::NetworkIdentity,
-        constants::EXVLAN_VERSION,
-        global_ctx::{ArcGlobalCtx, GlobalCtxEvent},
-        shrink_dashmap,
-        stun::StunInfoCollectorTrait,
-========
     config::PeerId,
     config::peers::PeerGroupIdentity,
     peers::{
@@ -55,7 +46,6 @@ use crate::{
             PublicIpv6SyncTrigger,
         },
         util::shrink_dashmap,
->>>>>>>> upstream/releases/v2.7.0:easytier-core/src/peers/route/peer_ospf_route.rs
     },
     proto::{
         common::{NatType, RuntimeTimestamp as Timestamp, TimestampExt},
@@ -153,221 +143,6 @@ pub struct OspfPeerInfo {
     pub info: RoutePeerInfo,
 }
 
-<<<<<<<< HEAD:exvlan/core/src/peers/peer_ospf_route.rs
-impl RoutePeerInfo {
-    #[allow(deprecated)]
-    pub fn new() -> Self {
-        Self {
-            peer_id: 0,
-            inst_id: Some(uuid::Uuid::nil().into()),
-            cost: 0,
-            ipv4_addr: None,
-            proxy_cidrs: Vec::new(),
-            hostname: None,
-            udp_nat_type: 0,
-            tcp_nat_type: 0,
-            // ensure this is updated when the peer_infos/conn_info/foreign_network lock is acquired.
-            // else we may assign a older timestamp than iterate time.
-            last_update: None,
-            version: 0,
-            exvlan_version: EXVLAN_VERSION.to_string(),
-            feature_flag: None,
-            peer_route_id: 0,
-            network_length: 24,
-            ipv6_addr: None,
-            groups: Vec::new(),
-
-            quic_port: None,
-            noise_static_pubkey: Vec::new(),
-            trusted_credential_pubkeys: Vec::new(),
-            ipv6_public_addr_prefix: None,
-            ipv6_public_addr_lease: None,
-        }
-    }
-
-    /// Creates a new `RoutePeerInfo` instance with updated information from the given context.
-    ///
-    /// # Parameters
-    /// - `my_peer_id`: The unique identifier for the peer.
-    /// - `peer_route_id`: The route identifier associated with the peer.
-    /// - `global_ctx`: Reference to the global context containing configuration and state.
-    ///
-    /// # Returns
-    /// A new `RoutePeerInfo` instance initialized with values from the provided context and parameters.
-    pub fn new_updated_self(
-        my_peer_id: PeerId,
-        peer_route_id: u64,
-        global_ctx: &ArcGlobalCtx,
-        public_ipv6_addr_lease: Option<Ipv6Inet>,
-    ) -> Self {
-        let stun_info = global_ctx.get_stun_info_collector().get_stun_info();
-        let noise_static_pubkey = global_ctx
-            .config
-            .get_secure_mode()
-            .and_then(|cfg| cfg.public_key().ok())
-            .map(|pk| pk.as_bytes().to_vec())
-            .unwrap_or_default();
-        Self {
-            peer_id: my_peer_id,
-            inst_id: Some(global_ctx.get_id().into()),
-            cost: 0,
-            ipv4_addr: global_ctx.get_ipv4().map(|x| x.address().into()),
-            proxy_cidrs: global_ctx
-                .config
-                .get_proxy_cidrs()
-                .iter()
-                .map(|x| x.mapped_cidr.unwrap_or(x.cidr))
-                .chain(global_ctx.get_vpn_portal_cidr())
-                .map(|x| x.to_string())
-                .collect(),
-            hostname: Some(global_ctx.get_hostname()),
-            udp_nat_type: stun_info.udp_nat_type,
-            tcp_nat_type: stun_info.tcp_nat_type,
-
-            // these two fields should not participate in comparison.
-            last_update: None,
-            version: 0,
-
-            exvlan_version: EXVLAN_VERSION.to_string(),
-            feature_flag: Some(global_ctx.get_feature_flags()),
-            peer_route_id,
-            network_length: global_ctx
-                .get_ipv4()
-                .map(|x| x.network_length() as u32)
-                .unwrap_or(24),
-
-            ipv6_addr: global_ctx.get_ipv6().map(|x| x.into()),
-            ipv6_public_addr_prefix: global_ctx.get_advertised_ipv6_public_addr_prefix().map(
-                |prefix| {
-                    Ipv6Inet::new(prefix.first_address(), prefix.network_length())
-                        .unwrap()
-                        .into()
-                },
-            ),
-            ipv6_public_addr_lease: public_ipv6_addr_lease.map(Into::into),
-
-            groups: global_ctx.get_acl_groups(my_peer_id),
-
-            noise_static_pubkey,
-
-            // Only admin nodes (holding network_secret) publish trusted credential pubkeys
-            trusted_credential_pubkeys: if let Some(network_secret) =
-                global_ctx.get_network_identity().network_secret
-            {
-                global_ctx
-                    .get_credential_manager()
-                    .get_trusted_pubkeys(&network_secret)
-            } else {
-                Vec::new()
-            },
-
-            ..Default::default()
-        }
-    }
-
-    /// Attempts to update the `new` RoutePeerInfo based on the `old` RoutePeerInfo.
-    ///
-    /// An update is triggered if any fields in `new` differ from `old`, or if the time since
-    /// `old.last_update` exceeds the `UPDATE_PEER_INFO_PERIOD`.
-    ///
-    /// If an update occurs, `new.last_update` is set to the current time and `new.version` is incremented.
-    /// Otherwise, `new.last_update` and `new.version` are copied from `old` without modification.
-    ///
-    /// Returns `true` if an update was performed (fields changed or periodic update required),
-    /// or `false` if no update was necessary.
-    pub fn try_update_new_peer_info(old: &RoutePeerInfo, new: &mut RoutePeerInfo) -> bool {
-        let need_update_periodically = if let Ok(Ok(d)) =
-            SystemTime::try_from(old.last_update.unwrap_or_default()).map(|x| x.elapsed())
-        {
-            d > UPDATE_PEER_INFO_PERIOD
-        } else {
-            true
-        };
-
-        // these two fields should not participate in comparison.
-        new.version = old.version;
-        new.last_update = old.last_update;
-
-        if *new != *old || need_update_periodically {
-            new.version += 1;
-            true
-        } else {
-            false
-        }
-    }
-}
-
-impl From<RoutePeerInfo> for crate::proto::api::instance::Route {
-    fn from(val: RoutePeerInfo) -> Self {
-        let network_length = if val.network_length == 0 {
-            24
-        } else {
-            val.network_length
-        };
-
-        crate::proto::api::instance::Route {
-            peer_id: val.peer_id,
-            ipv4_addr: val.ipv4_addr.map(|ipv4_addr| Ipv4Inet {
-                address: Some(ipv4_addr),
-                network_length,
-            }),
-            next_hop_peer_id: 0, // next_hop_peer_id is calculated in RouteTable.
-            cost: 0,             // cost is calculated in RouteTable.
-            path_latency: 0,     // path_latency is calculated in RouteTable.
-            proxy_cidrs: val.proxy_cidrs.clone(),
-            hostname: val.hostname.unwrap_or_default(),
-            stun_info: {
-                let mut stun_info = StunInfo::default();
-                if let Ok(udp_nat_type) = NatType::try_from(val.udp_nat_type) {
-                    stun_info.set_udp_nat_type(udp_nat_type);
-                }
-                if let Ok(tcp_nat_type) = NatType::try_from(val.tcp_nat_type) {
-                    stun_info.set_tcp_nat_type(tcp_nat_type);
-                }
-                Some(stun_info)
-            },
-            inst_id: val.inst_id.map(|x| x.to_string()).unwrap_or_default(),
-            version: val.exvlan_version,
-            feature_flag: val.feature_flag,
-
-            next_hop_peer_id_latency_first: None,
-            cost_latency_first: None,
-            path_latency_latency_first: None,
-
-            ipv6_addr: val.ipv6_addr,
-            public_ipv6_addr: val.ipv6_public_addr_lease,
-            ipv6_public_addr_prefix: val.ipv6_public_addr_prefix,
-        }
-    }
-}
-
-type RouteConnBitmap = crate::proto::peer_rpc::RouteConnBitmap;
-type RouteConnPeerList = crate::proto::peer_rpc::RouteConnPeerList;
-type PeerConnInfo = crate::proto::peer_rpc::route_conn_peer_list::PeerConnInfo;
-
-impl RouteConnBitmap {
-    fn get_bit(&self, idx: usize) -> bool {
-        let byte_idx = idx / 8;
-        let bit_idx = idx % 8;
-        let byte = self.bitmap[byte_idx];
-        (byte >> bit_idx) & 1 == 1
-    }
-
-    fn get_connected_peers(&self, peer_idx: usize) -> BTreeSet<PeerId> {
-        let mut connected_peers = BTreeSet::new();
-        for (idx, peer_id_version) in self.peer_ids.iter().enumerate() {
-            if self.get_bit(peer_idx * self.peer_ids.len() + idx) {
-                connected_peers.insert(peer_id_version.peer_id);
-            }
-        }
-        connected_peers
-    }
-}
-
-type Error = SyncRouteInfoError;
-
-========
->>>>>>>> upstream/releases/v2.7.0:easytier-core/src/peers/route/peer_ospf_route.rs
 #[derive(Debug, Clone)]
 pub struct OspfPeerConnInfo {
     pub peer_id: PeerId,
@@ -966,7 +741,7 @@ fn is_foreign_network_info_newer(
 }
 
 #[allow(deprecated)]
-fn new_route_peer_info_with_version(easytier_version: String) -> RoutePeerInfo {
+fn new_route_peer_info_with_version(exvlan_version: String) -> RoutePeerInfo {
     RoutePeerInfo {
         peer_id: 0,
         inst_id: Some(uuid::Uuid::nil().into()),
@@ -980,7 +755,7 @@ fn new_route_peer_info_with_version(easytier_version: String) -> RoutePeerInfo {
         // else we may assign a older timestamp than iterate time.
         last_update: None,
         version: 0,
-        easytier_version,
+        exvlan_version,
         feature_flag: None,
         peer_route_id: 0,
         network_length: 24,
@@ -1028,7 +803,7 @@ pub fn new_updated_self_route_peer_info(
         last_update: None,
         version: 0,
 
-        easytier_version: context.easytier_version(),
+        exvlan_version: context.exvlan_version(),
         feature_flag: Some(context.feature_flags()),
         peer_route_id,
         network_length: ipv4
@@ -1116,7 +891,7 @@ struct InterfacePeerSnapshot {
 
 // constructed with all infos synced from all peers.
 struct SyncedRouteInfo {
-    default_easytier_version: String,
+    default_exvlan_version: String,
     peer_infos: RwLock<OrderedHashMap<PeerId, RoutePeerInfo>>,
     // Keep the original protobuf bytes so unknown fields survive multi-hop propagation.
     raw_peer_infos: DashMap<PeerId, RawRoutePeerInfo>,
@@ -1144,7 +919,7 @@ struct SyncedRouteInfo {
 impl Debug for SyncedRouteInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SyncedRouteInfo")
-            .field("default_easytier_version", &self.default_easytier_version)
+            .field("default_exvlan_version", &self.default_exvlan_version)
             .field("peer_infos", &self.peer_infos)
             .field("conn_map", &self.conn_map)
             .field("foreign_network", &self.foreign_network)
@@ -1511,7 +1286,7 @@ impl SyncedRouteInfo {
             let guard = self.peer_infos.upgradable_read();
             if !guard.contains_key(peer_id) {
                 let mut peer_info =
-                    new_route_peer_info_with_version(self.default_easytier_version.clone());
+                    new_route_peer_info_with_version(self.default_exvlan_version.clone());
                 let mut guard = RwLockUpgradableReadGuard::upgrade(guard);
                 peer_info.last_update = Some(Timestamp::now());
                 guard.insert(*peer_id, peer_info);
@@ -2651,7 +2426,7 @@ impl PeerRouteServiceImpl {
             foreign_network_my_peer_id_map: DashMap::new(),
 
             synced_route_info: SyncedRouteInfo {
-                default_easytier_version: context.easytier_version(),
+                default_exvlan_version: context.exvlan_version(),
                 peer_infos: RwLock::new(OrderedHashMap::new()),
                 raw_peer_infos: DashMap::new(),
                 conn_map: RwLock::new(OrderedHashMap::new()),

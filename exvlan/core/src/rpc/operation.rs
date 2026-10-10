@@ -228,7 +228,7 @@ mod tests {
     use std::any::TypeId;
 
     use bytes::Bytes;
-    use easytier_proto::rpc_types::{
+    use exvlan_proto::rpc_types::{
         controller::BaseController,
         descriptor::{MethodDescriptor, ServiceDescriptor},
         handler::Handler,

@@ -443,7 +443,7 @@ export class ApiClient {
         await this.client.delete(`/networks/${network_id}/members/${device_id}/config`);
     }
 
-    /// Full TOML config of the member's instance (what `easytier-cli node
+    /// Full TOML config of the member's instance (what `exvlan-cli node
     /// config` prints), via proxy-rpc.
     public async get_node_toml_config(machine_id: string, inst_id: string): Promise<string> {
         const response = await this.client.post<any, { node_info?: { config?: string } }>(`/machines/${machine_id}/proxy-rpc`, {

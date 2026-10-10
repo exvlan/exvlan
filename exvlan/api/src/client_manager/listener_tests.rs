@@ -1,9 +1,9 @@
 use super::*;
 
-use easytier::proto::rpc::standalone::{
+use exvlan::proto::rpc::standalone::{
     RuntimeRpcListener, runtime_rpc_dialer, runtime_rpc_listener,
 };
-use easytier_core::connectivity::protocol::raw::TunnelDialer;
+use exvlan_core::connectivity::protocol::raw::TunnelDialer;
 use std::sync::atomic::AtomicUsize;
 use tokio::{io::AsyncReadExt, net::TcpStream, sync::Notify, time::timeout};
 

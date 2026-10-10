@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use easytier_core::{
+use exvlan_core::{
     socket::tcp::{
         TcpBindOptions, TcpConnectOptions, TcpListenOptions, TcpListenPurpose, TcpSocketPurpose,
         VirtualTcpListener, VirtualTcpSocket, VirtualTcpSplit,

@@ -5,13 +5,13 @@ use axum::http::StatusCode;
 use axum::routing::{delete, post, put};
 use axum::{Extension, Json, Router, extract::State, routing::get};
 use axum_login::AuthUser;
-use easytier::common::config::{
+use exvlan::common::config::{
     ConfigSource as RuntimeConfigSource, NetworkConfig, config_source_from_rpc,
 };
-use easytier::proto::api::config::VpnPortalClientPatch;
-use easytier::proto::common::Void;
-use easytier::proto::{api::manage::*, web::*};
-use easytier_core::management::remote_client::{
+use exvlan::proto::api::config::VpnPortalClientPatch;
+use exvlan::proto::common::Void;
+use exvlan::proto::{api::manage::*, web::*};
+use exvlan_core::management::remote_client::{
     GetNetworkMetasResponse, ListNetworkInstanceIdsJsonResp, RemoteClientError, RemoteClientManager,
 };
 use sea_orm::DbErr;
@@ -523,7 +523,7 @@ impl NetworkApi {
                     machine_id: Some(machine_id.into()),
                     inst_id: None,
                     user_token: String::new(),
-                    easytier_version: device.easytier_version.clone(),
+                    exvlan_version: device.exvlan_version.clone(),
                     report_time: device.last_seen_time.to_rfc3339(),
                     hostname: device.hostname.clone(),
                     running_network_instances: Vec::new(),
@@ -884,11 +884,11 @@ mod tests {
     async fn internal_runtime_only_write_reconciles_the_already_applied_revision() {
         use std::{future::Future, time::Duration};
 
-        use easytier::{
+        use exvlan::{
             common::config::NetworkConfigExt as _, instance::factory::native_instance_manager,
             web_client::WebClient,
         };
-        use easytier_core::{
+        use exvlan_core::{
             connectivity::protocol::raw::TunnelDialer,
             socket::SocketListener,
             tunnel::{
@@ -934,7 +934,7 @@ mod tests {
                 let (server, client) = create_ring_socket_pair(RING_TUNNEL_CAP);
                 let server = Box::new(RingTunnel::new(
                     server,
-                    Some(easytier::proto::common::TunnelInfo {
+                    Some(exvlan::proto::common::TunnelInfo {
                         tunnel_type: "ring".to_owned(),
                         local_addr: Some("ring://server".parse::<url::Url>().unwrap().into()),
                         remote_addr: Some(

@@ -1,4 +1,4 @@
-//! EasyTier message tunnel over a host-owned transport.
+//! Exvlan message tunnel over a host-owned transport.
 
 use std::{io, sync::Arc};
 
@@ -27,7 +27,7 @@ impl Drop for HostTunnelResource {
     }
 }
 
-/// Builds a message-preserving EasyTier tunnel around a host-owned transport.
+/// Builds a message-preserving Exvlan tunnel around a host-owned transport.
 pub fn new_host_tunnel(
     runtime: HostSocketRuntime,
     io: Arc<dyn HostTunnelIo>,

@@ -9,11 +9,11 @@ use std::sync::Arc;
 use central_network::gateway;
 
 use clap::Parser;
-use easytier::tunnel::websocket::WsTunnelListener;
-use easytier::{
+use exvlan::tunnel::websocket::WsTunnelListener;
+use exvlan::{
     common::{
         config::{ConsoleLoggerConfig, FileLoggerConfig, LoggingConfigLoader},
-        constants::EASYTIER_VERSION,
+        constants::EXVLAN_VERSION,
         error::Error,
         log,
         network::{local_ipv4, local_ipv6},
@@ -21,9 +21,9 @@ use easytier::{
     proto::rpc::standalone::{runtime_rpc_listener, runtime_udp_tunnel_listener},
     utils::panic::setup_panic_handler,
 };
-use easytier_core::{socket::SocketListener, tunnel::Tunnel};
+use exvlan_core::{socket::SocketListener, tunnel::Tunnel};
 
-use easytier::tunnel::IpScheme;
+use exvlan::tunnel::IpScheme;
 use mimalloc::MiMalloc;
 
 mod central_network;
@@ -42,7 +42,7 @@ static GLOBAL_MIMALLOC: MiMalloc = MiMalloc;
 rust_i18n::i18n!("locales", fallback = "en");
 
 #[derive(Parser, Debug)]
-#[command(name = "easytier-web", author, version = EASYTIER_VERSION , about, long_about = None)]
+#[command(name = "exvlan-api", author, version = EXVLAN_VERSION , about, long_about = None)]
 struct Cli {
     #[arg(
         short,
@@ -199,11 +199,11 @@ pub struct WebhookOptions {
     #[arg(long, env = "ET_INTERNAL_AUTH_TOKEN", hide_env_values = true)]
     pub internal_auth_token: Option<String>,
 
-    /// Stable identifier for this easytier-web instance when routing webhook callbacks.
+    /// Stable identifier for this exvlan-api instance when routing webhook callbacks.
     #[arg(long, env = "ET_WEB_INSTANCE_ID")]
     pub web_instance_id: Option<String>,
 
-    /// Reachable base URL for this easytier-web instance's internal REST API.
+    /// Reachable base URL for this exvlan-api instance's internal REST API.
     #[arg(long, env = "ET_WEB_INSTANCE_API_BASE_URL")]
     pub web_instance_api_base_url: Option<String>,
 }
@@ -305,9 +305,9 @@ async fn main() {
     setup_panic_handler();
 
     let cli = Cli::parse();
-    log::init_with_default_console_targets(&cli, false, &["CORE", "easytier_web"]).unwrap();
+    log::init_with_default_console_targets(&cli, false, &["CORE", "exvlan_web"]).unwrap();
     tracing::info!(
-        version = EASYTIER_VERSION,
+        version = EXVLAN_VERSION,
         web_instance_id = ?cli.webhook.web_instance_id,
         api_address = %cli.api_server_addr,
         api_port = cli.api_server_port,
@@ -318,7 +318,7 @@ async fn main() {
         webhook_enabled = cli.webhook.webhook_url.as_deref().is_some_and(|url| !url.trim().is_empty()),
         rust_log_override = std::env::var_os("RUST_LOG").is_some(),
         console_log_override = cli.console_log_level.is_some(),
-        "easytier-web starting"
+        "exvlan-api starting"
     );
 
     // Validate OIDC configuration: check split-deploy specific requirements

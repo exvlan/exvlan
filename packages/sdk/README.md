@@ -1,12 +1,12 @@
-# EasyTier JavaScript
+# Exvlan JavaScript
 
-The EasyTier JavaScript packages run the same EasyTier WASM core across web
+The Exvlan JavaScript packages run the same Exvlan WASM core across web
 runtimes while keeping application-facing APIs small:
 
-- [`@easytier/browser`](./browser) provides a browser TCP client.
-- [`@easytier/cloudflare`](./cloudflare) provides a Cloudflare Durable Object
+- [`@exvlan/browser`](./browser) provides a browser TCP client.
+- [`@exvlan/cloudflare`](./cloudflare) provides a Cloudflare Durable Object
   relay.
-- [`@easytier/runtime`](./runtime) contains their shared runtime and adapter
+- [`@exvlan/runtime`](./runtime) contains their shared runtime and adapter
   implementation. Most applications should use one of the two public host
   packages instead of depending on it directly.
 
@@ -21,11 +21,11 @@ rustup target add wasm32-wasip1
 ```
 
 The JavaScript hosts use their own workspace so their Cloudflare development
-toolchain does not affect EasyTier's existing GUI and web workspace. From a
+toolchain does not affect Exvlan's existing GUI and web workspace. From a
 clean repository checkout, run:
 
 ```sh
-cd easytier-js
+cd exvlan-js
 pnpm install
 pnpm check
 ```

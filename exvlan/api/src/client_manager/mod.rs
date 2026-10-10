@@ -15,12 +15,12 @@ use std::{
 };
 
 use dashmap::DashMap;
-use easytier::proto::{
+use exvlan::proto::{
     api::{config::ConfigRpc, manage::WebClientService},
     rpc_types::controller::BaseController,
     web::{HeartbeatRequest, HeartbeatResponse},
 };
-use easytier_core::{
+use exvlan_core::{
     management::remote_client::{self, RemoteClientManager},
     socket::SocketListener,
     tunnel::{Tunnel, web_security},
@@ -580,7 +580,7 @@ mod tests {
     };
 
     use axum::{Json, Router, extract::State, routing::post};
-    use easytier::{
+    use exvlan::{
         common::{
             MachineIdOptions,
             config::{ConfigSource, NetworkConfigExt},
@@ -596,7 +596,7 @@ mod tests {
         },
         web_client::{WebClient, run_web_client},
     };
-    use easytier_core::management::remote_client::{
+    use exvlan_core::management::remote_client::{
         RemoteClientManager as _, Storage as RemoteStorage,
     };
     use serde_json::json;
@@ -1423,7 +1423,7 @@ mod tests {
 
         assert_eq!(
             core_manager.config_source(instance_id),
-            Some(easytier::common::config::ConfigSource::Web)
+            Some(exvlan::common::config::ConfigSource::Web)
         );
         assert_eq!(
             mgr.db()
@@ -1487,7 +1487,7 @@ mod tests {
         assert_eq!(redelivered.instance_recv_bps_limit, Some(654321));
         assert_eq!(
             core_manager.config_source(instance_id),
-            Some(easytier::common::config::ConfigSource::Web)
+            Some(exvlan::common::config::ConfigSource::Web)
         );
         assert_eq!(
             mgr.db()

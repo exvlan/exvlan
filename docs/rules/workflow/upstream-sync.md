@@ -12,7 +12,7 @@
 
 ## 1. 目的与适用范围
 
-- 记录 EXVlan 从外部上游 **EasyTier/EasyTier** 同步代码的历史做法与现行规范。
+- 记录 Exvlan 从外部上游 **exvlan/exvlan** 同步代码的历史做法与现行规范。
 - 约束对象：`develop`、`feature` 两条长期分支，以及四个远程 `upstream` / `origin` / `cloud` / `std-v`。
 - 适用动作：上游 release 合并、develop 与 feature 互同步、feature squash 进 develop、版本对齐、冲突处理。
 - 不适用：本地特性分支的日常开发（按 `CONTRIBUTING.md` 从 develop 切 feature/* 即可）。
@@ -23,7 +23,7 @@
 
 | 远程       | 仓库                                   | 角色                                      |
 | ---------- | -------------------------------------- | ----------------------------------------- |
-| `upstream` | `git@github.com:EasyTier/EasyTier.git` | 外部上游（只读来源，禁止向 develop 直连） |
+| `upstream` | `git@github.com:exvlan/exvlan.git` | 外部上游（只读来源，禁止向 develop 直连） |
 | `origin`   | `git@github.com:exvlan/exvlan.git`     | 主公库                                    |
 | `cloud`    | `git@github.com:era-cloud/exvlan.git`  | 发布/签名 fork                            |
 | `std-v`    | `git@github.com:std-v/exvlan.git`      | 发布/签名 fork                            |
@@ -35,7 +35,7 @@
 | `develop` | **稳定主干 / 独立历史** | 线性，**0 个 merge 提交**；基点 `9779923b`(2024) → `382534d0`(2026) → 各 squash 批次 |
 | `feature` | **整合中枢**            | 含 merge 提交；承载上游 release、develop 同步与本地特性                              |
 
-**核心不变量**：`develop` 不得混入任何上游链（EasyTier 等外部仓库）。判定 `upstream/*` 是否为 `develop` 祖先必须为假。
+**核心不变量**：`develop` 不得混入任何上游链（Exvlan 等外部仓库）。判定 `upstream/*` 是否为 `develop` 祖先必须为假。
 
 ### 2.3 路径映射与可复用工具
 
@@ -88,9 +88,9 @@ refs/original/refs/remotes/ci-test/feature/ci
 
 **结论**：`upstream/releases/v2.6.0`~`v2.7.0` 均为 `feature` 祖先；`upstream/main` **不是** `feature`/`develop` 的祖先——即只取**打了标签的 release**，不追 `main`。
 
-> **v2.7.0 特别说明**：上游 v2.7.0 为**大规模 workspace 重构**（新增 `easytier-core`(wasi)/`easytier-proto`/`easytier-go`/`easytier-js`，删除 `easytier-rpc-build`，`easytier-web` 拆为前后端多包）。本次同步采用
+> **v2.7.0 特别说明**：上游 v2.7.0 为**大规模 workspace 重构**（新增 `exvlan-core`(wasi)/`exvlan-proto`/`exvlan-go`/`exvlan-js`，删除 `exvlan-rpc-build`，`exvlan-api` 拆为前后端多包）。本次同步采用
 > 「**单个 merge 提交 + merge 消解内完成布局搬迁/删除/重命名**」：
-> `git mv exvlan/core exvlan/exvlan`、`git rm exvlan/build`、`git rm exvlan/rpc`、`git mv easytier-proto exvlan/proto`；
+> `git mv exvlan/core exvlan/exvlan`、`git rm exvlan/build`、`git rm exvlan/rpc`、`git mv exvlan-proto exvlan/proto`；
 > 依赖链对齐为 `exvlan/exvlan → exvlan-core → exvlan-proto`。详见 [`upstream-path-map.yaml`](./upstream-path-map.yaml)。
 
 ## 5. 标准操作流程（命令级）
@@ -99,7 +99,7 @@ refs/original/refs/remotes/ci-test/feature/ci
 
 ```bash
 # 一次性：配置上游远程
-git remote add upstream git@github.com:EasyTier/EasyTier.git
+git remote add upstream git@github.com:exvlan/exvlan.git
 
 # 拉取上游标签与分支
 git fetch upstream --tags --prune

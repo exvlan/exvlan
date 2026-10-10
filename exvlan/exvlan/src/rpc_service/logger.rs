@@ -1,4 +1,4 @@
-use easytier_core::management::LoggerControl;
+use exvlan_core::management::LoggerControl;
 
 #[derive(Clone, Default)]
 pub struct NativeLoggerControl;

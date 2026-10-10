@@ -172,14 +172,14 @@ where
                         Ok(Ok(_)) => {}
                         Ok(Err(task_ret)) => {
                             tracing::error!(
-                                target: "easytier_core::peers::peer_task",
+                                target: "exvlan_core::peers::peer_task",
                                 ?task_ret,
                                 "hole punching task failed"
                             );
                         }
                         Err(e) => {
                             tracing::error!(
-                                target: "easytier_core::peers::peer_task",
+                                target: "exvlan_core::peers::peer_task",
                                 ?e,
                                 "hole punching task aborted"
                             );
@@ -196,7 +196,7 @@ where
                     }
 
                     tracing::debug!(
-                        target: "easytier_core::peers::peer_task",
+                        target: "exvlan_core::peers::peer_task",
                         ?item,
                         "launch hole punching task"
                     );

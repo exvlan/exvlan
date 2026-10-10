@@ -14,17 +14,17 @@ import (
 	"testing"
 	"time"
 
-	corehost "github.com/easytier/easytier/easytier-go"
+	corehost "github.com/exvlan/exvlan/exvlan-go"
 )
 
 func TestWebClientEndToEnd(t *testing.T) {
-	endpoint := os.Getenv("EASYTIER_WEB_E2E_ENDPOINT")
-	apiURL := os.Getenv("EASYTIER_WEB_E2E_API")
-	authToken := os.Getenv("EASYTIER_WEB_E2E_AUTH")
+	endpoint := os.Getenv("EXVLAN_WEB_E2E_ENDPOINT")
+	apiURL := os.Getenv("EXVLAN_WEB_E2E_API")
+	authToken := os.Getenv("EXVLAN_WEB_E2E_AUTH")
 	if endpoint == "" || apiURL == "" || authToken == "" {
-		t.Skip("EasyTier WebClient E2E environment is not configured")
+		t.Skip("Exvlan WebClient E2E environment is not configured")
 	}
-	userID, err := strconv.Atoi(os.Getenv("EASYTIER_WEB_E2E_USER_ID"))
+	userID, err := strconv.Atoi(os.Getenv("EXVLAN_WEB_E2E_USER_ID"))
 	if err != nil || userID == 0 {
 		userID = 1
 	}

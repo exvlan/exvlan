@@ -1,7 +1,7 @@
 # OpenHarmonyOS 项目构建说明
 
 本项目需要 OpenHarmonyOS SDK 和多个基础库支持才能成功编译。请按照以下步骤准备构建环境。
-如存在任何编译问题，请前往[EXVlan for OHOS](https://github.com/FrankHan052176/EXVlan)
+如存在任何编译问题，请前往[Exvlan for OHOS](https://github.com/FrankHan052176/Exvlan)
 
 ## 前置要求
 

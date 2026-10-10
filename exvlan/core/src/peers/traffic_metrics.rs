@@ -381,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn data_packet_payload_len_uses_easytier_payload() {
+    fn data_packet_payload_len_uses_exvlan_payload() {
         let mut data_packet = packet_with_type(PacketType::Data, 1_024);
         data_packet.mut_peer_manager_header().unwrap().len.set(0);
         assert_eq!(data_packet_payload_len(&data_packet), Some(1_024));

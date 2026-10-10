@@ -5,7 +5,7 @@ use crate::{
     state::{ffi_context, find_instance_id_by_name},
     *,
 };
-use easytier::{
+use exvlan::{
     common::config::{ConfigFileControl, ConfigLoader as _, TomlConfigLoader},
     web_client::WebClientHooks,
 };
@@ -709,7 +709,7 @@ fn config_server_callback_context_rejects_nested_blocking_ffi_calls() {
         let mut session = 0;
         assert_eq!(
             unsafe { data_plane_session_open(std::ptr::null(), &mut session) },
-            -(easytier_core::gateway::DataPlaneErrorKind::Io as c_int)
+            -(exvlan_core::gateway::DataPlaneErrorKind::Io as c_int)
         );
         assert_eq!(session, 0);
     }
@@ -724,7 +724,7 @@ fn active_config_server_rejects_data_plane() {
     let mut session = 0;
     assert_eq!(
         unsafe { data_plane_session_open(name.as_ptr(), &mut session) },
-        -(easytier_core::gateway::DataPlaneErrorKind::Io as c_int)
+        -(exvlan_core::gateway::DataPlaneErrorKind::Io as c_int)
     );
     assert_eq!(session, 0);
 
@@ -734,7 +734,7 @@ fn active_config_server_rejects_data_plane() {
 #[cfg(feature = "ffi-dataplane")]
 #[test]
 fn data_plane_invalid_handle_errors_are_stable() {
-    let closed = -(easytier_core::gateway::DataPlaneErrorKind::HandleClosed as c_int);
+    let closed = -(exvlan_core::gateway::DataPlaneErrorKind::HandleClosed as c_int);
     assert_eq!(data_plane_completion_wait(u64::MAX, 0), closed);
     assert_eq!(data_plane_operation_cancel(u64::MAX, 1), closed);
     assert_eq!(data_plane_operation_free(u64::MAX, 1), closed);

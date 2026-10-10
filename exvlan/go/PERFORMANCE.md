@@ -1,6 +1,6 @@
 # Performance log
 
-This file records reproducible `easytier-go` data-plane optimizations.
+This file records reproducible `exvlan-go` data-plane optimizations.
 Each round must describe the change, the benchmark conditions, the before and
 after result, and any profile evidence used to choose the next change.
 
@@ -21,16 +21,16 @@ after result, and any profile evidence used to choose the next change.
 - UDP tests use 1200-byte datagrams.
 - Reported results exclude the first two seconds of each iperf run.
 
-The native comparison uses EasyTier's built-in port forward on the same
+The native comparison uses Exvlan's built-in port forward on the same
 machine, CPU groups, peer, network, and iperf server. It isolates the overhead
-of the Go/WASM data-plane interface from EasyTier's virtual TCP/UDP stack and
+of the Go/WASM data-plane interface from Exvlan's virtual TCP/UDP stack and
 transport.
 
 ## Round 0: Dial baseline
 
 Go host commit: `a73f2bac`
 
-EasyTier commit: `30764897`
+Exvlan commit: `30764897`
 
 ### Throughput
 
@@ -73,13 +73,13 @@ The Go `streamConn.Write` waits for every guest TCP-write operation. The guest
 operation currently calls `AsyncWriteExt::write`, which may complete after a
 partial write. Each partial result therefore incurs another complete
 submit/drive/complete/take host-to-WASM cycle. The native port-forward result
-shows that EasyTier's underlying data plane is not the limiting component.
+shows that Exvlan's underlying data plane is not the limiting component.
 
 ## Round 1: finish each guest TCP write
 
 Go host commit: `a73f2bac`
 
-EasyTier commit: `73612470`
+Exvlan commit: `73612470`
 
 The guest TCP operation now uses `write_all` semantics instead of completing
 after the first partial virtual-socket write.
@@ -94,7 +94,7 @@ was not the main serialization point.
 
 ## Round 2: repoll immediately when smoltcp has ready egress
 
-EasyTier commit: `824e01a3`
+Exvlan commit: `824e01a3`
 
 The smoltcp reactor reported a zero poll delay when more egress was ready, but
 the portable runtime crossed the host timer boundary before polling again.
@@ -106,7 +106,7 @@ The reactor now polls again in the same drive turn for a zero delay.
 | Median packet gap | 891 us | 8.41 us | -99.1% |
 
 The packet-gap distribution was captured in
-`/tmp/easytier-dial-forward-immediate-repoll.pcap`. Extending every WASI drive
+`/tmp/exvlan-dial-forward-immediate-repoll.pcap`. Extending every WASI drive
 turn by a fixed 50 us did not improve throughput and was later reverted; the
 zero-delay signal was the correct condition for immediate work.
 
@@ -159,7 +159,7 @@ the variation of the 688 Mbit/s retained baseline.
 ### Profile evidence
 
 The final-stage profile is stored at
-`/tmp/easytier-dial-udp-zero-budget.perf.data`. Approximately 49% of samples
+`/tmp/exvlan-dial-udp-zero-budget.perf.data`. Approximately 49% of samples
 were in the WASM JIT and 31% in the Go executable, with the remainder
 primarily in the kernel. Before function caching, `NextDeadline` accounted
 for 2.25% and Go map hashing for 1.48%. After removing these lookup costs, no
@@ -169,7 +169,7 @@ crossings dominate.
 
 ## Round 5: enlarge data-plane UDP receive queues
 
-EasyTier commit: `1df439d`
+Exvlan commit: `1df439d`
 
 The data-plane TCP buffers were already 128 KiB, while UDP inherited the
 smoltcp default receive queue of about 8 KiB, enough for only a few 1200-byte
@@ -206,7 +206,7 @@ it regressed throughput and imposed scheduling policy on applications.
 
 ## Round 6: preserve TCP write progress across cancellation
 
-EasyTier commits: `6b55489`, `4d270f3`
+Exvlan commits: `6b55489`, `4d270f3`
 
 `write_all` kept the TCP fast path inside the guest, but it could lose the
 already-written prefix when a deadline update cancelled the future. The host
@@ -231,7 +231,7 @@ intervals, so the change has no measurable systematic throughput cost.
 
 ## Round 7: store deadlines on guest resources
 
-EasyTier commits: `05ba813`, `66252ed`
+Exvlan commits: `05ba813`, `66252ed`
 
 Go host commits: `200f32c`, `59d6e5a`
 
@@ -264,7 +264,7 @@ per-operation timer construction without a measurable deadline penalty.
 
 ## Round 8: batch host TCP underlay writes
 
-EasyTier commit: `cf26d50`
+Exvlan commit: `cf26d50`
 
 Go host commits: `8d010e0`, `4197f0d`
 
@@ -278,7 +278,7 @@ The TCP host imports still used wazero's reflection-based `WithFunc` path.
 Changing the four stream read and write imports to typed module functions
 removed reflection and signature decoding from every host operation.
 
-EasyTier's `FramedWriter` already queues up to 64 frames and exposes them as
+Exvlan's `FramedWriter` already queues up to 64 frames and exposes them as
 vectored slices. `HostTcpStream` did not advertise vectored-write support, so
 `poll_write_buf` submitted only the first roughly 1.4 KB frame. Each VPN
 packet therefore required a separate asynchronous host operation and guest
@@ -305,7 +305,7 @@ was 7.7%, rather than the original threefold forward gap.
 
 ## Round 9: batch host TCP underlay reads
 
-EasyTier commit: `398b699`
+Exvlan commit: `398b699`
 
 The forward write batching left the opposite direction asymmetric.
 `FramedReader` normally supplied only 2-4 KiB of spare capacity, so each host
@@ -339,7 +339,7 @@ conditions without enlarging the public ABI or adding concurrent reads.
 ## Intel N100 comparison
 
 The N100 has four physical E-cores with no SMT. The Go host was pinned to
-CPUs `0-2`, while iperf used CPU `3`. The native EasyTier peer and iperf
+CPUs `0-2`, while iperf used CPU `3`. The native Exvlan peer and iperf
 server remained on the i7-14700KF host.
 
 Raw TCP between the machines reached 2.30 Gbit/s forward and 2.35 Gbit/s
@@ -362,7 +362,7 @@ consistent with the one-operation-per-datagram ABI and scheduling cost.
 
 Final Go host commit under test: `47949b5`
 
-Embedded EasyTier commit: `4d270f3`
+Embedded Exvlan commit: `4d270f3`
 
 | Path | Direction | Offered load | Final result |
 | --- | --- | ---: | ---: |

@@ -1,6 +1,6 @@
 use std::ptr;
 
-use easytier_ffi::{
+use exvlan_ffi::{
     in_config_server_callback, is_config_server_client_connected, start_config_server_client,
     stop_config_server_client,
 };

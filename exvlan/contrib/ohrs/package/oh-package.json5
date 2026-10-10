@@ -1,8 +1,8 @@
 {
   "license": "LGPL-3.0",
-  "author": "EXVlan",
+  "author": "Exvlan",
   "name": "exvlan-ohrs",
-  "description": "EXVlan for OpenHarmonyOS",
+  "description": "Exvlan for OpenHarmonyOS",
   "main": "index.ets",
   "version": "26.308.20604",
   "types": "libs/index.d.ts",

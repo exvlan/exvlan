@@ -1,7 +1,7 @@
 //! Data-plane access built on top of the core gateway smoltcp stack.
 //!
 //! This module exposes TCP streams and UDP sockets (mainly for FFI callers that
-//! send traffic through EasyTier without creating OS-level proxy listeners).
+//! send traffic through Exvlan without creating OS-level proxy listeners).
 //!
 //! Typical usage:
 //!
@@ -569,7 +569,7 @@ where
         let IpAddr::V4(dst_ip) = dst_addr.ip() else {
             return Err(DataPlaneError::new(
                 DataPlaneErrorKind::AddressFamilyUnsupported,
-                "the EasyTier data plane currently supports IPv4 destinations only",
+                "the Exvlan data plane currently supports IPv4 destinations only",
             ));
         };
         self.runtime_guard.ensure_open()?;

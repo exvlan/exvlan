@@ -7,7 +7,7 @@ use axum::{
     routing::post,
 };
 use axum_login::AuthUser as _;
-use easytier::proto::{
+use exvlan::proto::{
     api::{
         config::{ConfigRpc, GetConfigRequest, PatchConfigRequest},
         instance::{
@@ -65,37 +65,37 @@ async fn handle_proxy_rpc_by_session(
 
     let resp = match service_name.as_str() {
         "api.manage.WebClientService" => match_service!(
-            easytier::proto::api::manage::WebClientServiceClientFactory<BaseController>,
+            exvlan::proto::api::manage::WebClientServiceClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.instance.PeerManageRpcService" => match_service!(
-            easytier::proto::api::instance::PeerManageRpcClientFactory<BaseController>,
+            exvlan::proto::api::instance::PeerManageRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.instance.PeerCenterManageRpcService" => match_service!(
-            easytier::proto::peer_rpc::PeerCenterRpcClientFactory<BaseController>,
+            exvlan::proto::peer_rpc::PeerCenterRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.instance.ConnectorManageRpcService" => match_service!(
-            easytier::proto::api::instance::ConnectorManageRpcClientFactory<BaseController>,
+            exvlan::proto::api::instance::ConnectorManageRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.instance.MappedListenerManageRpcService" => match_service!(
-            easytier::proto::api::instance::MappedListenerManageRpcClientFactory<BaseController>,
+            exvlan::proto::api::instance::MappedListenerManageRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.instance.VpnPortalRpcService" => match_service!(
-            easytier::proto::api::instance::VpnPortalRpcClientFactory<BaseController>,
+            exvlan::proto::api::instance::VpnPortalRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
@@ -103,11 +103,11 @@ async fn handle_proxy_rpc_by_session(
         "api.instance.TcpProxyRpcService" => {
             let client = if let Some(ref domain) = scope {
                 session.scoped_client_with_domain::<
-                    easytier::proto::api::instance::TcpProxyRpcClientFactory<BaseController>,
+                    exvlan::proto::api::instance::TcpProxyRpcClientFactory<BaseController>,
                 >(domain.clone())
             } else {
                 session.scoped_client::<
-                    easytier::proto::api::instance::TcpProxyRpcClientFactory<BaseController>,
+                    exvlan::proto::api::instance::TcpProxyRpcClientFactory<BaseController>,
                 >()
             };
             client
@@ -115,37 +115,37 @@ async fn handle_proxy_rpc_by_session(
                 .await
         }
         "api.instance.AclManageRpcService" => match_service!(
-            easytier::proto::api::instance::AclManageRpcClientFactory<BaseController>,
+            exvlan::proto::api::instance::AclManageRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.instance.PortForwardManageRpcService" => match_service!(
-            easytier::proto::api::instance::PortForwardManageRpcClientFactory<BaseController>,
+            exvlan::proto::api::instance::PortForwardManageRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.instance.StatsRpcService" => match_service!(
-            easytier::proto::api::instance::StatsRpcClientFactory<BaseController>,
+            exvlan::proto::api::instance::StatsRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.instance.CredentialManageRpcService" => match_service!(
-            easytier::proto::api::instance::CredentialManageRpcClientFactory<BaseController>,
+            exvlan::proto::api::instance::CredentialManageRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.logger.LoggerRpcService" => match_service!(
-            easytier::proto::api::logger::LoggerRpcClientFactory<BaseController>,
+            exvlan::proto::api::logger::LoggerRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
         ),
         "api.config.ConfigRpcService" => match_service!(
-            easytier::proto::api::config::ConfigRpcClientFactory<BaseController>,
+            exvlan::proto::api::config::ConfigRpcClientFactory<BaseController>,
             method_name,
             payload,
             session
@@ -415,7 +415,7 @@ pub fn router_internal() -> Router<super::AppStateInner> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easytier::proto::api::config::{GetConfigResponse, PatchConfigResponse};
+    use exvlan::proto::api::config::{GetConfigResponse, PatchConfigResponse};
 
     #[derive(Default)]
     struct ConfigClient {
@@ -431,7 +431,7 @@ mod tests {
             &self,
             _: BaseController,
             request: GetConfigRequest,
-        ) -> easytier::proto::rpc_types::error::Result<GetConfigResponse> {
+        ) -> exvlan::proto::rpc_types::error::Result<GetConfigResponse> {
             let instance = request.instance.unwrap();
             self.requests.lock().unwrap().push(instance.clone());
             let Some(instance_identifier::Selector::InstanceSelector(selector)) = instance.selector
@@ -445,7 +445,7 @@ mod tests {
                 .map(|(_, id)| *id)
                 .ok_or_else(|| anyhow::anyhow!("No instance matches the selector"))?;
             Ok(GetConfigResponse {
-                config: Some(easytier::proto::api::manage::NetworkConfig {
+                config: Some(exvlan::proto::api::manage::NetworkConfig {
                     instance_id: Some(id.to_string()),
                     // Instance selectors resolve instance_name, not network_name.
                     network_name: Some("different-network-name".into()),
@@ -459,7 +459,7 @@ mod tests {
             &self,
             _: BaseController,
             _: PatchConfigRequest,
-        ) -> easytier::proto::rpc_types::error::Result<PatchConfigResponse> {
+        ) -> exvlan::proto::rpc_types::error::Result<PatchConfigResponse> {
             unreachable!()
         }
     }
@@ -485,7 +485,7 @@ mod tests {
             (
                 "RunNetworkInstance",
                 serde_json::to_value(RunNetworkInstanceRequest {
-                    config: Some(easytier::proto::api::manage::NetworkConfig {
+                    config: Some(exvlan::proto::api::manage::NetworkConfig {
                         instance_id: Some(other_id.to_string()),
                         network_name: Some("central-network".into()),
                         ..Default::default()

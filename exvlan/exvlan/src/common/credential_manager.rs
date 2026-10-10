@@ -1,7 +1,7 @@
 use std::{io::Write, path::PathBuf, sync::Arc};
 
 use atomic_write_file::{AtomicWriteFile, OpenOptions};
-use easytier_core::peers::credential_manager::CredentialStorage;
+use exvlan_core::peers::credential_manager::CredentialStorage;
 
 struct FileCredentialStorage {
     path: PathBuf,

@@ -6,9 +6,9 @@ usage() {
     cat <<'EOF'
 Usage: benchmark-two-node.sh BINARY {udp|tcp} [OUTPUT_DIR] [REPEATS] [SECONDS]
 
-Runs two EasyTier cores in separate network namespaces and measures a
+Runs two Exvlan cores in separate network namespaces and measures a
 single iperf3 TCP flow in both directions. The underlay transport between
-the EasyTier peers is selected by the second argument.
+the Exvlan peers is selected by the second argument.
 
 Environment:
   CORE_A_CPU          CPU for the listener core (default: 8)
@@ -38,13 +38,13 @@ duration=${5:-10}
 case "$protocol" in
     udp | tcp) ;;
     *)
-        echo "unsupported EasyTier transport: $protocol" >&2
+        echo "unsupported Exvlan transport: $protocol" >&2
         exit 2
         ;;
 esac
 
 if [[ ! -x "$binary" ]]; then
-    echo "EasyTier binary is not executable: $binary" >&2
+    echo "Exvlan binary is not executable: $binary" >&2
     exit 1
 fi
 
@@ -56,7 +56,7 @@ for command in ip iperf3 jq taskset; do
 done
 
 if [[ -z "$output_dir" ]]; then
-    output_dir=$(mktemp -d "/tmp/easytier-two-node-${protocol}.XXXXXX")
+    output_dir=$(mktemp -d "/tmp/exvlan-two-node-${protocol}.XXXXXX")
 elif [[ -e "$output_dir" ]]; then
     echo "output directory already exists: $output_dir" >&2
     exit 1
@@ -147,14 +147,14 @@ for _ in $(seq 1 100); do
     fi
     if ! kill -0 "$core_a_pid" 2>/dev/null ||
         ! kill -0 "$core_b_pid" 2>/dev/null; then
-        echo "an EasyTier core exited before connectivity was established" >&2
+        echo "an Exvlan core exited before connectivity was established" >&2
         exit 1
     fi
     sleep 0.2
 done
 
 if [[ "$connected" != true ]]; then
-    echo "EasyTier peers did not become reachable" >&2
+    echo "Exvlan peers did not become reachable" >&2
     exit 1
 fi
 

@@ -8,16 +8,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/easytier/easytier/easytier-go/proto/common"
+	"github.com/exvlan/exvlan/exvlan-go/proto/common"
 
-	"github.com/easytier/easytier/easytier-go/internal/artifact"
-	"github.com/easytier/easytier/easytier-go/internal/contextutil"
-	"github.com/easytier/easytier/easytier-go/internal/coreabi"
-	"github.com/easytier/easytier/easytier-go/internal/engine"
-	"github.com/easytier/easytier/easytier-go/platform"
-	"github.com/easytier/easytier/easytier-go/platform/netstd"
-	hostproto "github.com/easytier/easytier/easytier-go/proto"
-	"github.com/easytier/easytier/easytier-go/proto/api/manage"
+	"github.com/exvlan/exvlan/exvlan-go/internal/artifact"
+	"github.com/exvlan/exvlan/exvlan-go/internal/contextutil"
+	"github.com/exvlan/exvlan/exvlan-go/internal/coreabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/engine"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform/netstd"
+	hostproto "github.com/exvlan/exvlan/exvlan-go/proto"
+	"github.com/exvlan/exvlan/exvlan-go/proto/api/manage"
 )
 
 type State int32
@@ -36,11 +36,11 @@ type Options struct {
 }
 
 type EmbeddedCoreInfo struct {
-	EasyTierCommit string
+	ExvlanCommit string
 	SHA256         string
 }
 
-// Event is one best-effort notification emitted by an EasyTier instance.
+// Event is one best-effort notification emitted by an Exvlan instance.
 type Event = engine.Event
 
 type Host struct {
@@ -56,13 +56,13 @@ type Instance struct {
 
 func New(ctx context.Context, options Options) (*Host, error) {
 	if ctx == nil {
-		return nil, fmt.Errorf("create EasyTier host with nil context")
+		return nil, fmt.Errorf("create Exvlan host with nil context")
 	}
-	if artifact.Commit != hostproto.EasyTierCommit {
+	if artifact.Commit != hostproto.ExvlanCommit {
 		return nil, fmt.Errorf(
-			"embedded EasyTier commit %s does not match protobuf commit %s",
+			"embedded Exvlan commit %s does not match protobuf commit %s",
 			artifact.Commit,
-			hostproto.EasyTierCommit,
+			hostproto.ExvlanCommit,
 		)
 	}
 	select {
@@ -89,18 +89,18 @@ func New(ctx context.Context, options Options) (*Host, error) {
 
 func CoreInfo() EmbeddedCoreInfo {
 	return EmbeddedCoreInfo{
-		EasyTierCommit: artifact.Commit,
+		ExvlanCommit: artifact.Commit,
 		SHA256:         artifact.SHA256,
 	}
 }
 
-// CreateInstance creates an EasyTier instance from a built configuration.
+// CreateInstance creates an Exvlan instance from a built configuration.
 func (host *Host) CreateInstance(
 	ctx context.Context,
 	config InstanceConfig,
 ) (*Instance, error) {
 	if host == nil {
-		return nil, fmt.Errorf("create instance with nil EasyTier host")
+		return nil, fmt.Errorf("create instance with nil Exvlan host")
 	}
 	configTOML, err := encodeInstanceConfig(config)
 	if err != nil {
@@ -135,7 +135,7 @@ func (host *Host) CreateInstance(
 	return instance, nil
 }
 
-// CreateInstanceTOML creates an EasyTier instance from a TOML configuration.
+// CreateInstanceTOML creates an Exvlan instance from a TOML configuration.
 // instanceName is used as the instance_name field. If instanceID is empty, a
 // new UUID is generated. Existing instance_id and instance_name keys in the
 // TOML are replaced by bindInstanceIdentity.
@@ -146,16 +146,16 @@ func (host *Host) CreateInstanceTOML(
 	configTOML string,
 ) (*Instance, error) {
 	if host == nil {
-		return nil, fmt.Errorf("create instance with nil EasyTier host")
+		return nil, fmt.Errorf("create instance with nil Exvlan host")
 	}
 	if ctx == nil {
-		return nil, fmt.Errorf("create EasyTier instance with nil context")
+		return nil, fmt.Errorf("create Exvlan instance with nil context")
 	}
 	if strings.TrimSpace(configTOML) == "" {
-		return nil, fmt.Errorf("EasyTier TOML configuration is empty")
+		return nil, fmt.Errorf("Exvlan TOML configuration is empty")
 	}
 	if instanceName == "" {
-		instanceName = "easytier"
+		instanceName = "exvlan"
 	}
 	var (
 		id       *common.UUID
@@ -213,7 +213,7 @@ func (host *Host) Close(ctx context.Context) error {
 		return nil
 	}
 	if ctx == nil {
-		return fmt.Errorf("close EasyTier host with nil context")
+		return fmt.Errorf("close Exvlan host with nil context")
 	}
 	err := host.engine.Close(ctx)
 	if ctx.Err() == nil {
@@ -224,28 +224,28 @@ func (host *Host) Close(ctx context.Context) error {
 
 func (instance *Instance) Start(ctx context.Context) error {
 	if instance == nil || instance.engine == nil {
-		return fmt.Errorf("start nil EasyTier instance")
+		return fmt.Errorf("start nil Exvlan instance")
 	}
 	return instance.engine.Start(ctx)
 }
 
 func (instance *Instance) Stop(ctx context.Context) error {
 	if instance == nil || instance.engine == nil {
-		return fmt.Errorf("stop nil EasyTier instance")
+		return fmt.Errorf("stop nil Exvlan instance")
 	}
 	return instance.engine.Stop(ctx)
 }
 
 func (instance *Instance) SendPacket(ctx context.Context, packet []byte) error {
 	if instance == nil || instance.engine == nil {
-		return fmt.Errorf("send packet through nil EasyTier instance")
+		return fmt.Errorf("send packet through nil Exvlan instance")
 	}
 	return instance.engine.SendPacket(ctx, packet)
 }
 
 func (instance *Instance) ReceivePacket(ctx context.Context) ([]byte, error) {
 	if instance == nil || instance.engine == nil {
-		return nil, fmt.Errorf("receive packet from nil EasyTier instance")
+		return nil, fmt.Errorf("receive packet from nil Exvlan instance")
 	}
 	return instance.engine.ReceivePacket(ctx)
 }
@@ -266,10 +266,10 @@ func (instance *Instance) Dial(
 	address string,
 ) (net.Conn, error) {
 	if instance == nil || instance.engine == nil {
-		return nil, fmt.Errorf("dial through nil EasyTier instance")
+		return nil, fmt.Errorf("dial through nil Exvlan instance")
 	}
 	if ctx == nil {
-		return nil, fmt.Errorf("dial through EasyTier with nil context")
+		return nil, fmt.Errorf("dial through Exvlan with nil context")
 	}
 	switch network {
 	case "tcp", "tcp4", "udp", "udp4":
@@ -307,7 +307,7 @@ func (instance *Instance) Listen(
 	address string,
 ) (net.Listener, error) {
 	if instance == nil || instance.engine == nil {
-		return nil, fmt.Errorf("listen through nil EasyTier instance")
+		return nil, fmt.Errorf("listen through nil Exvlan instance")
 	}
 	if err := requireNetwork(network, "tcp"); err != nil {
 		return nil, err
@@ -336,7 +336,7 @@ func (instance *Instance) ListenPacket(
 	address string,
 ) (net.PacketConn, error) {
 	if instance == nil || instance.engine == nil {
-		return nil, fmt.Errorf("listen for packets through nil EasyTier instance")
+		return nil, fmt.Errorf("listen for packets through nil Exvlan instance")
 	}
 	if err := requireNetwork(network, "udp"); err != nil {
 		return nil, err
@@ -362,7 +362,7 @@ func (instance *Instance) ListenPacket(
 
 func (instance *Instance) Wait(ctx context.Context) error {
 	if instance == nil || instance.engine == nil {
-		return fmt.Errorf("wait for nil EasyTier instance")
+		return fmt.Errorf("wait for nil Exvlan instance")
 	}
 	return instance.engine.Wait(ctx)
 }
@@ -440,7 +440,7 @@ func parseDialAddress(address string) (netip.AddrPort, error) {
 	ip, err := netip.ParseAddr(host)
 	if err != nil || !ip.Is4() {
 		return netip.AddrPort{}, &net.AddrError{
-			Err:  "EasyTier data plane requires an IPv4 literal",
+			Err:  "Exvlan data plane requires an IPv4 literal",
 			Addr: address,
 		}
 	}
@@ -456,7 +456,7 @@ func parseBindPort(address string) (uint16, error) {
 		ip, parseErr := netip.ParseAddr(host)
 		if parseErr != nil || !ip.Is4() || !ip.IsUnspecified() {
 			return 0, &net.AddrError{
-				Err:  "EasyTier listeners bind all overlay IPv4 addresses",
+				Err:  "Exvlan listeners bind all overlay IPv4 addresses",
 				Addr: address,
 			}
 		}

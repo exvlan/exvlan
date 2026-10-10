@@ -3,7 +3,7 @@ use network_interface::NetworkInterfaceConfig as _;
 use std::net::{IpAddr, SocketAddr};
 
 use crate::common::netns::NetNS;
-use easytier_core::tunnel::TunnelError;
+use exvlan_core::tunnel::TunnelError;
 use tokio::net::{TcpListener, TcpSocket, UdpSocket};
 
 pub(crate) fn get_interface_name_by_ip(local_ip: &IpAddr) -> Option<String> {
@@ -255,7 +255,7 @@ pub(crate) mod tests {
     use futures::{Future, SinkExt, StreamExt};
     use tokio_util::bytes::{BufMut, Bytes, BytesMut};
 
-    use easytier_core::{
+    use exvlan_core::{
         connectivity::protocol::raw::TunnelDialer, packet::ZCPacket, socket::SocketListener,
         tunnel::Tunnel,
     };

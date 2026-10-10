@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
-import { Api, NetworkTypes } from 'easytier-frontend-lib'
-import { GetNetworkMetasResponse } from 'node_modules/easytier-frontend-lib/dist/modules/api'
+import { Api, NetworkTypes } from '@exvlan/std'
+import { GetNetworkMetasResponse } from 'node_modules/@exvlan/std/dist/modules/api'
 import { type ConfigSource, normalizeConfigSource } from './config_source'
 
 type NetworkConfig = NetworkTypes.NetworkConfig
@@ -91,8 +91,8 @@ export async function setTunFd(fd: number) {
   return await invoke('set_tun_fd', { fd })
 }
 
-export async function getEasytierVersion() {
-  return await invoke<string>('easytier_version')
+export async function getExvlanVersion() {
+  return await invoke<string>('exvlan_version')
 }
 
 export async function listNetworkInstanceIds() {

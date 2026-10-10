@@ -1,6 +1,6 @@
-import type { NetworkTypes } from 'easytier-frontend-lib'
+import type { NetworkTypes } from '@exvlan/std'
 import { addPluginListener } from '@tauri-apps/api/core'
-import { Utils } from 'easytier-frontend-lib'
+import { Utils } from '@exvlan/std'
 import {
   consume_vpn_tile_action,
   get_vpn_status,
@@ -221,7 +221,7 @@ async function doStartVpn(instanceId: string, ipv4Addr: string, cidr: number, ro
     ipv4Addr: `${ipv4Addr}/${cidr}`,
     routes,
     dns,
-    disallowedApplications: ['com.kkrainbow.easytier'],
+    disallowedApplications: ['com.kkrainbow.exvlan'],
     mtu: 1300,
   }
 

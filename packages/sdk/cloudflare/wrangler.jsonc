@@ -12,15 +12,15 @@
     }
   ],
   "vars": {
-    "EASYTIER_OBJECT_NAME": "primary",
-    "EASYTIER_NETWORK_NAME": "cf-wasi",
-    "EASYTIER_NETWORK_SECRET": "cf-wasi-test",
-    "EASYTIER_ENABLE_ENCRYPTION": "false"
+    "EXVLAN_OBJECT_NAME": "primary",
+    "EXVLAN_NETWORK_NAME": "cf-wasi",
+    "EXVLAN_NETWORK_SECRET": "cf-wasi-test",
+    "EXVLAN_ENABLE_ENCRYPTION": "false"
   },
   "durable_objects": {
     "bindings": [
       {
-        "name": "EASYTIER_CORE",
+        "name": "EXVLAN_CORE",
         "class_name": "EasyTierCoreObject"
       }
     ]

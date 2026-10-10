@@ -1,7 +1,7 @@
 use std::{ffi::CStr, ptr};
 
-use easytier::proto::api::manage::{NetworkInstanceRunningInfo, NetworkInstanceRunningInfoMap};
-use easytier_ffi::{
+use exvlan::proto::api::manage::{NetworkInstanceRunningInfo, NetworkInstanceRunningInfoMap};
+use exvlan_ffi::{
     KeyValuePair, collect_network_infos, delete_network_instance, free_string, list_instance,
     parse_config, retain_network_instance, run_network_instance, set_tun_fd,
 };

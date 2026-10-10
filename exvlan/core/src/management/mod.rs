@@ -16,8 +16,8 @@ use crate::{
     rpc::service_registry::ServiceRegistry,
 };
 #[cfg(all(feature = "management", target_os = "wasi"))]
-use easytier_proto::api::config::ConfigRpcServer;
-use easytier_proto::api::instance::{ConnectorManageRpcServer, PeerManageRpcServer};
+use exvlan_proto::api::config::ConfigRpcServer;
+use exvlan_proto::api::instance::{ConnectorManageRpcServer, PeerManageRpcServer};
 
 pub use crate::instance::manager::{
     ConfigFileControl, ConfigFilePermission, DaemonGuard, InstanceManager, ProcessRuntimeProvider,

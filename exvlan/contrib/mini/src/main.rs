@@ -1,8 +1,8 @@
 use std::{ffi::OsString, path::PathBuf, sync::Arc};
 
 use anyhow::Context as _;
-use easytier::common::MachineIdOptions;
-use easytier::{
+use exvlan::common::MachineIdOptions;
+use exvlan::{
     common::config::{ConfigFileControl, load_toml_config_from_path},
     instance::factory::native_compact_instance_manager_with_runtime,
     rpc_service::ReadOnlyApiRpcServer,
@@ -23,7 +23,7 @@ struct RunOptions {
     secure_mode: bool,
 }
 
-const USAGE: &str = "usage: easytier-mini [--config <FILE>] [--config-server <URL>] \
+const USAGE: &str = "usage: exvlan-mini [--config <FILE>] [--config-server <URL>] \
                      [--machine-id <ID>] [--hostname <NAME>] [--secure-mode]";
 
 fn required_value(
@@ -39,13 +39,13 @@ fn parse_args(mut args: impl Iterator<Item = OsString>) -> anyhow::Result<Comman
     while let Some(arg) = args.next() {
         if arg == "-h" || arg == "--help" {
             println!(
-                "easytier-mini {}\n\nUsage: {USAGE}",
+                "exvlan-mini {}\n\nUsage: {USAGE}",
                 env!("CARGO_PKG_VERSION")
             );
             return Ok(Command::Exit);
         }
         if arg == "-V" || arg == "--version" {
-            println!("easytier-mini {}", env!("CARGO_PKG_VERSION"));
+            println!("exvlan-mini {}", env!("CARGO_PKG_VERSION"));
             return Ok(Command::Exit);
         }
         if arg == "-c" || arg == "--config" {
@@ -98,7 +98,7 @@ fn require_tcp_or_udp(scheme: &str, source: &str) -> anyhow::Result<()> {
     match scheme {
         "tcp" | "udp" => Ok(()),
         scheme => anyhow::bail!(
-            "{source} uses unsupported tunnel scheme {scheme:?}; easytier-mini supports only tcp:// and udp://"
+            "{source} uses unsupported tunnel scheme {scheme:?}; exvlan-mini supports only tcp:// and udp://"
         ),
     }
 }
@@ -121,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
     let Command::Run(options) = parse_args(std::env::args_os().skip(1))? else {
         return Ok(());
     };
-    easytier::common::log::init_console()?;
+    exvlan::common::log::init_console()?;
     let local_config = options
         .config
         .as_ref()
@@ -163,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
             .serve()
             .await?;
     eprintln!(
-        "easytier-mini started: local={local_instance_id:?}, web={}; RPC: 127.0.0.1:15888",
+        "exvlan-mini started: local={local_instance_id:?}, web={}; RPC: 127.0.0.1:15888",
         options.config_server.is_some()
     );
 
@@ -179,7 +179,7 @@ async fn main() -> anyhow::Result<()> {
         instance.stop().await;
     }
     if stopped_unexpectedly {
-        anyhow::bail!("EasyTier instance stopped unexpectedly");
+        anyhow::bail!("Exvlan instance stopped unexpectedly");
     }
     Ok(())
 }
@@ -187,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easytier::common::config::{ConfigLoader as _, TomlConfigLoader};
+    use exvlan::common::config::{ConfigLoader as _, TomlConfigLoader};
 
     #[test]
     fn parses_minimal_config_argument() {

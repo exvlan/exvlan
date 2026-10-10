@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/easytier/easytier/easytier-go/internal/contextutil"
+	"github.com/exvlan/exvlan/exvlan-go/internal/contextutil"
 	"github.com/metacubex/wazero/api"
 )
 
@@ -50,10 +50,10 @@ func New(module api.Module) (*Core, error) {
 		functions: make(map[string]guestFunction),
 	}
 	if err := core.validateDataPlaneABI(context.Background()); err != nil {
-		return nil, fmt.Errorf("validate EasyTier data plane ABI: %w", err)
+		return nil, fmt.Errorf("validate Exvlan data plane ABI: %w", err)
 	}
 	if err := core.validateRPCABI(context.Background()); err != nil {
-		return nil, fmt.Errorf("validate EasyTier RPC ABI: %w", err)
+		return nil, fmt.Errorf("validate Exvlan RPC ABI: %w", err)
 	}
 	return core, nil
 }
@@ -65,7 +65,7 @@ func (core *Core) Create(
 	eventSink uint64,
 ) (err error) {
 	if core.handle != 0 || core.dropped {
-		return fmt.Errorf("create EasyTier instance in used guest module")
+		return fmt.Errorf("create Exvlan instance in used guest module")
 	}
 	pointer, err := core.allocate(ctx, uint32(len(configEnvelope)))
 	if err != nil {
@@ -73,11 +73,11 @@ func (core *Core) Create(
 	}
 	defer core.cleanupBuffer(ctx, pointer, &err)
 	if !core.module.Memory().Write(pointer, configEnvelope) {
-		return fmt.Errorf("write EasyTier config to guest memory")
+		return fmt.Errorf("write Exvlan config to guest memory")
 	}
 	result, err := core.callOne(
 		ctx,
-		"easytier_instance_create",
+		"exvlan_instance_create",
 		uint64(pointer),
 		uint64(len(configEnvelope)),
 		packetSink,
@@ -89,26 +89,26 @@ func (core *Core) Create(
 	if result == 0 {
 		message, readErr := core.errorMessage(ctx, 0)
 		if readErr != nil {
-			return fmt.Errorf("create EasyTier instance: %w", readErr)
+			return fmt.Errorf("create Exvlan instance: %w", readErr)
 		}
-		return fmt.Errorf("create EasyTier instance: %s", message)
+		return fmt.Errorf("create Exvlan instance: %s", message)
 	}
 	core.handle = result
 	return nil
 }
 
 func (core *Core) Start(ctx context.Context) error {
-	return core.callStatus(ctx, "easytier_instance_start")
+	return core.callStatus(ctx, "exvlan_instance_start")
 }
 
 func (core *Core) Stop(ctx context.Context) error {
-	return core.callStatus(ctx, "easytier_instance_stop")
+	return core.callStatus(ctx, "exvlan_instance_stop")
 }
 
 func (core *Core) Drive(ctx context.Context) (State, error) {
 	result, err := core.callCached(
 		ctx,
-		"easytier_instance_drive",
+		"exvlan_instance_drive",
 		&core.driveFunction,
 		core.handle,
 	)
@@ -117,23 +117,23 @@ func (core *Core) Drive(ctx context.Context) (State, error) {
 	}
 	state := State(int32(result))
 	if state < 0 {
-		return 0, core.statusError(ctx, "drive EasyTier instance", int32(state))
+		return 0, core.statusError(ctx, "drive Exvlan instance", int32(state))
 	}
 	return state, nil
 }
 
 func (core *Core) NotifyCompletions(ctx context.Context) error {
-	return core.callStatus(ctx, "easytier_instance_notify_completions")
+	return core.callStatus(ctx, "exvlan_instance_notify_completions")
 }
 
 func (core *Core) State(ctx context.Context) (State, error) {
-	result, err := core.callOne(ctx, "easytier_instance_state", core.handle)
+	result, err := core.callOne(ctx, "exvlan_instance_state", core.handle)
 	if err != nil {
 		return 0, err
 	}
 	state := State(int32(result))
 	if state < 0 {
-		return 0, core.statusError(ctx, "query EasyTier state", int32(state))
+		return 0, core.statusError(ctx, "query Exvlan state", int32(state))
 	}
 	return state, nil
 }
@@ -141,7 +141,7 @@ func (core *Core) State(ctx context.Context) (State, error) {
 func (core *Core) NextDeadline(ctx context.Context) (int64, error) {
 	result, err := core.callCached(
 		ctx,
-		"easytier_instance_next_deadline_millis",
+		"exvlan_instance_next_deadline_millis",
 		&core.deadlineFunction,
 		core.handle,
 	)
@@ -150,14 +150,14 @@ func (core *Core) NextDeadline(ctx context.Context) (int64, error) {
 	}
 	deadline := int64(result)
 	if deadline < 0 {
-		return 0, core.statusError(ctx, "query EasyTier deadline", int32(deadline))
+		return 0, core.statusError(ctx, "query Exvlan deadline", int32(deadline))
 	}
 	return deadline, nil
 }
 
 func (core *Core) SendPacket(ctx context.Context, packet []byte) (err error) {
 	if len(packet) == 0 {
-		return fmt.Errorf("send empty packet to EasyTier instance")
+		return fmt.Errorf("send empty packet to Exvlan instance")
 	}
 	pointer, err := core.ensurePacketBuffer(ctx, uint32(len(packet)))
 	if err != nil {
@@ -168,7 +168,7 @@ func (core *Core) SendPacket(ctx context.Context, packet []byte) (err error) {
 	}
 	result, err := core.callOne(
 		ctx,
-		"easytier_instance_send_packet",
+		"exvlan_instance_send_packet",
 		core.handle,
 		uint64(pointer),
 		uint64(len(packet)),
@@ -177,7 +177,7 @@ func (core *Core) SendPacket(ctx context.Context, packet []byte) (err error) {
 		return err
 	}
 	if status := int32(result); status != 0 {
-		return core.statusError(ctx, "send packet to EasyTier instance", status)
+		return core.statusError(ctx, "send packet to Exvlan instance", status)
 	}
 	return nil
 }
@@ -186,7 +186,7 @@ func (core *Core) Drop(ctx context.Context) error {
 	if core.dropped || core.handle == 0 {
 		return nil
 	}
-	if err := core.callStatus(ctx, "easytier_instance_drop"); err != nil {
+	if err := core.callStatus(ctx, "exvlan_instance_drop"); err != nil {
 		return err
 	}
 	core.dropped = true
@@ -199,7 +199,7 @@ func (core *Core) Drop(ctx context.Context) error {
 		if err != nil {
 			releaseErr = errors.Join(
 				releaseErr,
-				fmt.Errorf("release EasyTier packet buffer: %w", err),
+				fmt.Errorf("release Exvlan packet buffer: %w", err),
 			)
 		}
 	}
@@ -210,7 +210,7 @@ func (core *Core) Drop(ctx context.Context) error {
 		if err != nil {
 			releaseErr = errors.Join(
 				releaseErr,
-				fmt.Errorf("release EasyTier data plane input buffer: %w", err),
+				fmt.Errorf("release Exvlan data plane input buffer: %w", err),
 			)
 		}
 	}
@@ -220,7 +220,7 @@ func (core *Core) Drop(ctx context.Context) error {
 		if err != nil {
 			releaseErr = errors.Join(
 				releaseErr,
-				fmt.Errorf("release EasyTier data plane address buffer: %w", err),
+				fmt.Errorf("release Exvlan data plane address buffer: %w", err),
 			)
 		}
 	}
@@ -231,7 +231,7 @@ func (core *Core) Drop(ctx context.Context) error {
 		if err != nil {
 			releaseErr = errors.Join(
 				releaseErr,
-				fmt.Errorf("release EasyTier data plane output buffer: %w", err),
+				fmt.Errorf("release Exvlan data plane output buffer: %w", err),
 			)
 		}
 	}
@@ -240,7 +240,7 @@ func (core *Core) Drop(ctx context.Context) error {
 
 func (core *Core) callStatus(ctx context.Context, name string) error {
 	if core.dropped || core.handle == 0 {
-		return fmt.Errorf("%s on unavailable EasyTier instance", name)
+		return fmt.Errorf("%s on unavailable Exvlan instance", name)
 	}
 	result, err := core.callOne(ctx, name, core.handle)
 	if err != nil {
@@ -268,7 +268,7 @@ func (core *Core) errorMessage(
 	ctx context.Context,
 	handle uint64,
 ) (message string, err error) {
-	length, err := core.callOne(ctx, "easytier_instance_error_len", handle)
+	length, err := core.callOne(ctx, "exvlan_instance_error_len", handle)
 	if err != nil {
 		return "", err
 	}
@@ -282,7 +282,7 @@ func (core *Core) errorMessage(
 	defer core.cleanupBuffer(ctx, pointer, &err)
 	result, err := core.callOne(
 		ctx,
-		"easytier_instance_error_copy",
+		"exvlan_instance_error_copy",
 		handle,
 		uint64(pointer),
 		length,
@@ -291,17 +291,17 @@ func (core *Core) errorMessage(
 		return "", err
 	}
 	if status := int32(result); status < 0 {
-		return "", fmt.Errorf("copy EasyTier error: status=%d", status)
+		return "", fmt.Errorf("copy Exvlan error: status=%d", status)
 	}
 	encoded, ok := core.module.Memory().Read(pointer, uint32(length))
 	if !ok {
-		return "", fmt.Errorf("read EasyTier error from guest memory")
+		return "", fmt.Errorf("read Exvlan error from guest memory")
 	}
 	return string(encoded), nil
 }
 
 func (core *Core) allocate(ctx context.Context, length uint32) (uint32, error) {
-	result, err := core.callOne(ctx, "easytier_buffer_alloc", uint64(length))
+	result, err := core.callOne(ctx, "exvlan_buffer_alloc", uint64(length))
 	if err != nil {
 		return 0, err
 	}
@@ -312,7 +312,7 @@ func (core *Core) allocate(ctx context.Context, length uint32) (uint32, error) {
 }
 
 func (core *Core) free(ctx context.Context, pointer uint32) error {
-	result, err := core.callOne(ctx, "easytier_buffer_free", uint64(pointer))
+	result, err := core.callOne(ctx, "exvlan_buffer_free", uint64(pointer))
 	if err != nil {
 		return err
 	}
@@ -331,7 +331,7 @@ func (core *Core) ensurePacketBuffer(
 	}
 	if core.packetBuffer != 0 {
 		if err := core.free(ctx, core.packetBuffer); err != nil {
-			return 0, fmt.Errorf("grow EasyTier packet buffer: %w", err)
+			return 0, fmt.Errorf("grow Exvlan packet buffer: %w", err)
 		}
 		core.packetBuffer = 0
 		core.packetBufferCapacity = 0
@@ -354,7 +354,7 @@ func (core *Core) ensureDataPlaneInput(
 	}
 	if core.dataPlaneInput != 0 {
 		if err := core.free(ctx, core.dataPlaneInput); err != nil {
-			return 0, fmt.Errorf("grow EasyTier data plane input buffer: %w", err)
+			return 0, fmt.Errorf("grow Exvlan data plane input buffer: %w", err)
 		}
 		core.dataPlaneInput = 0
 		core.dataPlaneInputSize = 0
@@ -389,7 +389,7 @@ func (core *Core) ensureDataPlaneOutput(
 	}
 	if core.dataPlaneOutput != 0 {
 		if err := core.free(ctx, core.dataPlaneOutput); err != nil {
-			return 0, fmt.Errorf("grow EasyTier data plane output buffer: %w", err)
+			return 0, fmt.Errorf("grow Exvlan data plane output buffer: %w", err)
 		}
 		core.dataPlaneOutput = 0
 		core.dataPlaneOutputSize = 0
@@ -448,7 +448,7 @@ func (core *Core) resolveFunction(name string) (guestFunction, error) {
 		call := core.module.ExportedFunction(name)
 		if call == nil {
 			return guestFunction{}, fmt.Errorf(
-				"EasyTier guest does not export %s",
+				"Exvlan guest does not export %s",
 				name,
 			)
 		}

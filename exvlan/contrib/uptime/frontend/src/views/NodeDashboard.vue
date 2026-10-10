@@ -2,7 +2,7 @@
   <div class="node-dashboard">
     <!-- 页面头部 -->
     <div class="dashboard-header">
-      <h1>EXVlan 节点状态监控</h1>
+      <h1>Exvlan 节点状态监控</h1>
       <p class="subtitle">实时监控所有共享节点的健康状态和连接信息</p>
     </div>
 

@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	corehost "github.com/easytier/easytier/easytier-go"
-	"github.com/easytier/easytier/easytier-go/internal/contextutil"
+	corehost "github.com/exvlan/exvlan/exvlan-go"
+	"github.com/exvlan/exvlan/exvlan-go/internal/contextutil"
 )
 
 const maxUDPPayload = 65507
@@ -63,7 +63,7 @@ func main() {
 	)
 	defer stop()
 	if err := run(ctx, options, os.Stdin, os.Stdout); err != nil {
-		log.Printf("EasyTier dial failed: %v", err)
+		log.Printf("Exvlan dial failed: %v", err)
 		os.Exit(1)
 	}
 }
@@ -71,10 +71,10 @@ func main() {
 func parseOptions(arguments []string) (options, error) {
 	flags := flag.NewFlagSet("dial", flag.ContinueOnError)
 	var options options
-	flags.Var(&options.peers, "p", "EasyTier peer URI; may be repeated")
-	flags.StringVar(&options.networkName, "network-name", "", "EasyTier network name")
-	flags.StringVar(&options.networkSecret, "network-secret", "", "EasyTier network secret")
-	flags.StringVar(&options.ipv4, "ipv4", "", "fixed EasyTier IPv4 address and prefix")
+	flags.Var(&options.peers, "p", "Exvlan peer URI; may be repeated")
+	flags.StringVar(&options.networkName, "network-name", "", "Exvlan network name")
+	flags.StringVar(&options.networkSecret, "network-secret", "", "Exvlan network secret")
+	flags.StringVar(&options.ipv4, "ipv4", "", "fixed Exvlan IPv4 address and prefix")
 	flags.StringVar(&options.network, "network", "tcp4", "overlay network: tcp4 or udp4")
 	flags.StringVar(&options.address, "address", "", "overlay IPv4 destination")
 	flags.DurationVar(
@@ -141,21 +141,21 @@ func run(
 		AddPeers([]string(options.peers)...).
 		Build()
 	if err != nil {
-		return fmt.Errorf("build EasyTier instance config: %w", err)
+		return fmt.Errorf("build Exvlan instance config: %w", err)
 	}
 
 	host, err := corehost.New(ctx, corehost.Options{})
 	if err != nil {
-		return fmt.Errorf("create EasyTier host: %w", err)
+		return fmt.Errorf("create Exvlan host: %w", err)
 	}
 	defer host.Close(context.Background())
 	instance, err := host.CreateInstance(ctx, config)
 	if err != nil {
-		return fmt.Errorf("create EasyTier instance: %w", err)
+		return fmt.Errorf("create Exvlan instance: %w", err)
 	}
 	defer instance.Close(context.Background())
 	if err := instance.Start(ctx); err != nil {
-		return fmt.Errorf("start EasyTier instance: %w", err)
+		return fmt.Errorf("start Exvlan instance: %w", err)
 	}
 
 	target := netip.MustParseAddrPort(options.address)
@@ -180,7 +180,7 @@ func run(
 	})
 	defer stopClose()
 
-	log.Printf("connected %s to %s through EasyTier", options.network, options.address)
+	log.Printf("connected %s to %s through Exvlan", options.network, options.address)
 	switch options.network {
 	case "tcp4":
 		err = relayTCP(connection, input, output)

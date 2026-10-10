@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use easytier_proto::acl::{ChainType, Protocol};
+use exvlan_proto::acl::{ChainType, Protocol};
 use smoltcp::wire::{IpProtocol, Ipv4Packet, TcpPacket};
 
 use crate::{

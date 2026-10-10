@@ -6,7 +6,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 )
 
 func TestSocketFactoryUsesNativeTCPReuseAddrDefault(t *testing.T) {

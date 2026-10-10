@@ -6,11 +6,11 @@ use std::{
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use easytier_core::connectivity::composite::ConnectorRuntime as _;
-use easytier_core::peers::public_ipv6::PublicIpv6Host;
-use easytier_core::socket::{NetNamespace, SocketContext};
-use easytier_core::tunnel::effective_encryption_uses_xor;
-use easytier_core::{
+use exvlan_core::connectivity::composite::ConnectorRuntime as _;
+use exvlan_core::peers::public_ipv6::PublicIpv6Host;
+use exvlan_core::socket::{NetNamespace, SocketContext};
+use exvlan_core::tunnel::effective_encryption_uses_xor;
+use exvlan_core::{
     config::{PeerId, peers::PeerRuntimeSnapshot, runtime::CoreInstanceRuntimeConfig},
     instance::{CoreInstanceConfig, CoreInstanceHostConfig},
 };
@@ -401,14 +401,14 @@ pub mod tests {
 
         let mut subscriber = global_ctx.subscribe();
 
-        global_ctx.set_tun_device_ready("easytier0".to_string());
+        global_ctx.set_tun_device_ready("exvlan0".to_string());
         assert_eq!(
             global_ctx.get_tun_device_name(),
-            Some("easytier0".to_string())
+            Some("exvlan0".to_string())
         );
         assert_eq!(
             subscriber.recv().await.unwrap(),
-            GlobalCtxEvent::TunDeviceReady("easytier0".to_string())
+            GlobalCtxEvent::TunDeviceReady("exvlan0".to_string())
         );
 
         global_ctx.set_tun_device_error("closed".to_string());
@@ -472,7 +472,7 @@ pub mod tests {
         ]));
         let host = crate::instance::config::compact_runtime_core_host_config();
         let normalized =
-            easytier_core::instance::CoreInstanceConfig::from_toml_with_host(&config, &host)
+            exvlan_core::instance::CoreInstanceConfig::from_toml_with_host(&config, &host)
                 .unwrap();
 
         let global_ctx = GlobalCtx::new_with_runtime_config(config.clone(), &normalized, &host);

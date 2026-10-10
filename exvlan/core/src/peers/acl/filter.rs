@@ -7,7 +7,7 @@ use std::{
 
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
-use easytier_proto::acl::{Acl, AclStats, Action, ChainType, Protocol};
+use exvlan_proto::acl::{Acl, AclStats, Action, ChainType, Protocol};
 use quanta::Instant;
 use tokio_util::task::AbortOnDropHandle;
 
@@ -566,7 +566,7 @@ mod tests {
 
     use quanta::Instant;
 
-    use easytier_proto::acl::{Acl, AclV1, Action, Chain, ChainType, Protocol, Rule};
+    use exvlan_proto::acl::{Acl, AclV1, Action, Chain, ChainType, Protocol, Rule};
 
     use crate::peers::acl::processor::PacketInfo;
 

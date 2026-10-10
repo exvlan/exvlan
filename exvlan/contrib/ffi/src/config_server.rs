@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use easytier::{
+use exvlan::{
     common::{
         MachineIdOptions,
         config::{ConfigLoader as _, TomlConfigLoader},

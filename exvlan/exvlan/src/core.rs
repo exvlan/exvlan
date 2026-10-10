@@ -19,7 +19,7 @@ use crate::{
 use anyhow::Context;
 use cidr::IpCidr;
 use clap::{CommandFactory, Parser};
-use easytier_core::config::normalize_secure_mode_config;
+use exvlan_core::config::normalize_secure_mode_config;
 use guarden::defer;
 use rust_i18n::t;
 use std::{
@@ -2136,7 +2136,7 @@ virtual_ip = "10.144.144.9/24"
     #[test]
     fn vpn_portal_cli_repeat_flags_use_singular_names() {
         let cli = Cli::try_parse_from([
-            "easytier-core",
+            "exvlan-core",
             "--vpn-portal",
             "wg://0.0.0.0:51820",
             "--vpn-portal-private-key",

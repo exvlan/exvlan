@@ -5,7 +5,7 @@ use std::sync::{
 };
 
 use async_trait::async_trait;
-use easytier_proto::{
+use exvlan_proto::{
     rpc_types::controller::BaseController,
     web::{
         DeviceOsInfo, GetFeatureRequest, GetFeatureResponse, HeartbeatRequest, HeartbeatResponse,
@@ -150,7 +150,7 @@ pub struct WebClientConfig {
     pub machine_id: uuid::Uuid,
     pub hostname: String,
     pub device_os: DeviceOsInfo,
-    pub easytier_version: String,
+    pub exvlan_version: String,
     pub secure_mode: bool,
 }
 
@@ -421,7 +421,7 @@ fn build_heartbeat_request(
         machine_id: Some(config.machine_id.into()),
         inst_id: Some(runtime_id.into()),
         user_token: config.token.clone(),
-        easytier_version: config.easytier_version.clone(),
+        exvlan_version: config.exvlan_version.clone(),
         hostname: config.hostname.clone(),
         report_time: chrono::Local::now().to_rfc3339(),
         device_os: Some(config.device_os.clone()),
@@ -558,7 +558,7 @@ impl WebClientSession {
 
     async fn get_feature(
         &self,
-    ) -> Result<GetFeatureResponse, easytier_proto::rpc_types::error::Error> {
+    ) -> Result<GetFeatureResponse, exvlan_proto::rpc_types::error::Error> {
         let client = self
             .rpc
             .rpc_client()
@@ -722,7 +722,7 @@ mod tests {
                 machine_id: uuid::Uuid::new_v4(),
                 hostname: "host".to_owned(),
                 device_os: DeviceOsInfo::default(),
-                easytier_version: "test-version".to_owned(),
+                exvlan_version: "test-version".to_owned(),
                 secure_mode: false,
             },
             runtime_id,

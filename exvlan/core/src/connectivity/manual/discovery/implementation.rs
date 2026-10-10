@@ -397,7 +397,7 @@ fn srv_record_url(protocol: &str, record: DnsSrvRecord) -> anyhow::Result<(Url, 
         anyhow::bail!("SRV port must be non-zero");
     }
     let url = format!("{protocol}://{}:{}", record.target, record.port);
-    // Preserve the existing EasyTier selection rule, which treats SRV priority
+    // Preserve the existing Exvlan selection rule, which treats SRV priority
     // as the candidate weight.
     Ok((Url::parse(&url)?, u64::from(record.priority)))
 }
@@ -419,7 +419,7 @@ pub(crate) async fn resolve_srv_endpoint(
     let lookups = supported_protocols.iter().map(|protocol| {
         let protocol = protocol.clone();
         let query = DnsQuery::new(
-            format!("_easytier._{protocol}.{domain_name}"),
+            format!("_exvlan._{protocol}.{domain_name}"),
             context.clone(),
         );
         async move { (protocol, resolver.resolve_srv(query).await) }
@@ -436,7 +436,7 @@ pub(crate) async fn resolve_srv_endpoint(
                 Err(error) => {
                     tracing::warn!(
                         ?error,
-                        srv_domain = %format!("_easytier._{protocol}.{domain_name}"),
+                        srv_domain = %format!("_exvlan._{protocol}.{domain_name}"),
                         "ignore invalid SRV endpoint record"
                     );
                     None
@@ -576,7 +576,7 @@ mod tests {
             let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
             assert!(request.starts_with("get /lookup?kind=peer http/1.1\r\n"));
             assert!(request.contains("host: discovery.example:18080\r\n"));
-            assert!(request.contains("user-agent: easytier/test\r\n"));
+            assert!(request.contains("user-agent: exvlan/test\r\n"));
             assert!(request.contains("x-network-name: test-network\r\n"));
             assert!(request.contains("connection: close\r\n"));
 
@@ -596,7 +596,7 @@ mod tests {
                 url: "http://discovery.example:18080/lookup?kind=peer"
                     .parse()
                     .unwrap(),
-                user_agent: "easytier/test".to_owned(),
+                user_agent: "exvlan/test".to_owned(),
                 network_name: "test-network".to_owned(),
                 timeout: Duration::from_secs(1),
                 ip_version: IpVersion::V4,
@@ -747,7 +747,7 @@ mod tests {
             dns,
             records.clone(),
             ManualEndpointDiscoveryConfig {
-                user_agent: "easytier/test".to_owned(),
+                user_agent: "exvlan/test".to_owned(),
                 network_name: "test-network".to_owned(),
                 http_timeout: Duration::from_secs(1),
                 http_ip_version: IpVersion::Both,
@@ -772,7 +772,7 @@ mod tests {
             *records.queries.lock().unwrap(),
             [
                 DnsQuery::new("discovery.example", record_context.clone()),
-                DnsQuery::new("_easytier._quic.discovery.example", record_context)
+                DnsQuery::new("_exvlan._quic.discovery.example", record_context)
             ]
         );
     }
@@ -804,7 +804,7 @@ mod tests {
                 }
             }
             let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
-            assert!(request.contains("user-agent: easytier/facade-test\r\n"));
+            assert!(request.contains("user-agent: exvlan/facade-test\r\n"));
             assert!(request.contains("x-network-name: facade-network\r\n"));
             server
                 .write_all(
@@ -819,7 +819,7 @@ mod tests {
             dns.clone(),
             records,
             ManualEndpointDiscoveryConfig {
-                user_agent: "easytier/facade-test".to_owned(),
+                user_agent: "exvlan/facade-test".to_owned(),
                 network_name: "facade-network".to_owned(),
                 http_timeout: Duration::from_secs(1),
                 http_ip_version: IpVersion::V4,
@@ -902,7 +902,7 @@ mod tests {
         assert_eq!(
             *resolver.queries.lock().unwrap(),
             [DnsQuery::new(
-                "_easytier._quic.discovery.example",
+                "_exvlan._quic.discovery.example",
                 SocketContext::default()
             )]
         );

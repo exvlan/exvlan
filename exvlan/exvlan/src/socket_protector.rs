@@ -78,7 +78,7 @@ pub(crate) async fn protect_native_socket(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use easytier_core::socket::{
+    use exvlan_core::socket::{
         SocketListener,
         tcp::{TcpBindOptions, TcpConnectOptions, TcpListenOptions, VirtualTcpListener},
         udp::UdpBindOptions,

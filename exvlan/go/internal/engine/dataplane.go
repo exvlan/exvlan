@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/easytier/easytier/easytier-go/internal/coreabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/coreabi"
 )
 
 const dataPlaneCompletionBatch = 64
@@ -122,7 +122,7 @@ func (instance *Instance) performOperation(
 ) (coreabi.OperationResult, error) {
 	if ctx == nil {
 		return coreabi.OperationResult{}, fmt.Errorf(
-			"submit EasyTier data plane operation with nil context",
+			"submit Exvlan data plane operation with nil context",
 		)
 	}
 	response := make(chan dataPlaneCommandResponse, 1)
@@ -368,13 +368,13 @@ func (instance *Instance) drainDataPlaneCompletions() (bool, error) {
 		pending := instance.pendingOperations[completion.Operation]
 		if pending == nil {
 			return false, fmt.Errorf(
-				"EasyTier completed unknown data plane operation %d",
+				"Exvlan completed unknown data plane operation %d",
 				completion.Operation,
 			)
 		}
 		if pending.kind != completion.Kind {
 			return false, fmt.Errorf(
-				"EasyTier completed operation %d as kind %d, want %d",
+				"Exvlan completed operation %d as kind %d, want %d",
 				completion.Operation,
 				completion.Kind,
 				pending.kind,

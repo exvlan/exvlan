@@ -16,7 +16,7 @@ use tokio::{
     net::TcpStream,
 };
 
-use easytier_core::{
+use exvlan_core::{
     socket::tcp::VirtualTcpSocket,
     tunnel::{IpVersion, TunnelError},
 };
@@ -391,7 +391,7 @@ impl FakeTcpSocketListener {
 }
 
 #[async_trait::async_trait]
-impl easytier_core::socket::SocketListener for FakeTcpSocketListener {
+impl exvlan_core::socket::SocketListener for FakeTcpSocketListener {
     type Accepted = FakeTcpSocket;
 
     async fn listen(&mut self) -> anyhow::Result<()> {
@@ -496,7 +496,7 @@ pub(crate) async fn connect_socket(
 
 #[cfg(test)]
 mod tests {
-    use easytier_core::socket::SocketListener;
+    use exvlan_core::socket::SocketListener;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;

@@ -4,7 +4,7 @@ use crate::{proto::common::TunnelInfo, socket::tcp::RuntimeTcpSocket};
 use anyhow::Context as _;
 use bytes::BytesMut;
 use cidr::IpCidr;
-use easytier_core::{
+use exvlan_core::{
     packet::{ZCPacket, ZCPacketType},
     socket::tcp::VirtualTcpSocket,
     tunnel::{IpVersion, Tunnel, TunnelError, wrapper::TunnelWrapper},
@@ -346,7 +346,7 @@ impl WsTunnelListener {
 }
 
 #[async_trait::async_trait]
-impl easytier_core::socket::SocketListener for WsTunnelListener {
+impl exvlan_core::socket::SocketListener for WsTunnelListener {
     type Accepted = Box<dyn Tunnel>;
 
     async fn listen(&mut self) -> anyhow::Result<()> {
@@ -412,7 +412,7 @@ where
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use easytier_core::socket::SocketListener;
+    use exvlan_core::socket::SocketListener;
     use futures::SinkExt;
     use std::io;
     use tokio::{

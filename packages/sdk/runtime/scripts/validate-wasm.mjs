@@ -15,21 +15,21 @@ const artifact = path.resolve(process.cwd(), artifactArgument);
 const module = new WebAssembly.Module(await readFile(artifact));
 const imports = new Set(
   WebAssembly.Module.imports(module)
-    .filter((entry) => entry.module === "easytier_host")
+    .filter((entry) => entry.module === "exvlan_host")
     .map((entry) => entry.name),
 );
 const exports = new Set(
   WebAssembly.Module.exports(module).map((entry) => entry.name),
 );
 
-requireSymbol(exports, "easytier_host_tunnel_abi_version", "export");
-requireSymbol(exports, "easytier_instance_accept_tunnel", "export");
+requireSymbol(exports, "exvlan_host_tunnel_abi_version", "export");
+requireSymbol(exports, "exvlan_instance_accept_tunnel", "export");
 if (profile === "browser") {
   requireSymbol(imports, "start_tunnel_connect", "import");
-  requireSymbol(exports, "easytier_data_plane_tcp_connect_submit", "export");
+  requireSymbol(exports, "exvlan_data_plane_tcp_connect_submit", "export");
 } else {
   rejectSymbol(imports, "start_tunnel_connect", "import");
-  rejectSymbol(exports, "easytier_data_plane_tcp_connect_submit", "export");
+  rejectSymbol(exports, "exvlan_data_plane_tcp_connect_submit", "export");
 }
 
 function requireSymbol(symbols, name, kind) {

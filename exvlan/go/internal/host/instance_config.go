@@ -40,14 +40,14 @@ const (
 	PortForwardUDP PortForwardProtocol = "udp"
 )
 
-// PortForwardConfig exposes a host socket through the EasyTier data plane.
+// PortForwardConfig exposes a host socket through the Exvlan data plane.
 type PortForwardConfig struct {
 	Protocol    PortForwardProtocol
 	Bind        netip.AddrPort
 	Destination netip.AddrPort
 }
 
-// InstanceConfig is an immutable EasyTier instance configuration.
+// InstanceConfig is an immutable Exvlan instance configuration.
 //
 // Its zero value is invalid. Construct one with InstanceConfigBuilder.
 type InstanceConfig struct {
@@ -187,7 +187,7 @@ func (builder *InstanceConfigBuilder) HolePunching(
 	return builder
 }
 
-// Encryption explicitly enables or disables EasyTier data encryption.
+// Encryption explicitly enables or disables Exvlan data encryption.
 func (builder *InstanceConfigBuilder) Encryption(
 	enabled bool,
 ) *InstanceConfigBuilder {
@@ -560,9 +560,9 @@ func validateSTUNAddressFamily(address netip.Addr, ipv6 bool) error {
 
 func invalidInstanceConfig(field string, message string) error {
 	if field == "" {
-		return fmt.Errorf("invalid EasyTier instance config: %s", message)
+		return fmt.Errorf("invalid Exvlan instance config: %s", message)
 	}
-	return fmt.Errorf("invalid EasyTier instance config %s: %s", field, message)
+	return fmt.Errorf("invalid Exvlan instance config %s: %s", field, message)
 }
 
 func (document instanceConfigDocument) clone() instanceConfigDocument {

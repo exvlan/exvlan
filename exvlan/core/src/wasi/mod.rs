@@ -1,7 +1,7 @@
-//! WASI runtime integration for EasyTier core.
+//! WASI runtime integration for Exvlan core.
 //!
 //! Portable Host capability seams live in [`crate::host`]. This module owns
-//! the concrete WASI adapters, the `easytier_host` import contract, and the
+//! the concrete WASI adapters, the `exvlan_host` import contract, and the
 //! guest lifecycle ABI used by an externally driven WASI runtime.
 
 pub mod abi;

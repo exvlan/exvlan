@@ -1,9 +1,9 @@
 use dashmap::DashMap;
-use easytier::proto::{
+use exvlan::proto::{
     rpc::standalone::{runtime_udp_tunnel_dialer, runtime_udp_tunnel_listener},
     web::{GetFeatureRequest, WebServerServiceClientFactory},
 };
-use easytier_core::{
+use exvlan_core::{
     connectivity::protocol::raw::TunnelDialer as _, tunnel::ring::create_ring_tunnel_pair,
 };
 

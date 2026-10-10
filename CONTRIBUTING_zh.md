@@ -1,12 +1,12 @@
-# EXVlan 贡献指南
+# Exvlan 贡献指南
 
 [English Version](CONTRIBUTING.md)
 
-感谢您对 EXVlan 项目的关注！本文档提供了参与项目贡献的指南和说明。
+感谢您对 Exvlan 项目的关注！本文档提供了参与项目贡献的指南和说明。
 
 ## 目录
 
-- [EXVlan 贡献指南](#exvlan-贡献指南)
+- [Exvlan 贡献指南](#exvlan-贡献指南)
   - [目录](#目录)
   - [开发环境配置](#开发环境配置)
     - [前置要求](#前置要求)
@@ -81,7 +81,7 @@ sudo apt install -y bridge-utils
 1. 克隆仓库：
    ```bash
    git clone https://github.com/exvlan/exvlan.git
-   cd EXVlan
+   cd Exvlan
    ```
 
 2. 安装依赖：
@@ -230,4 +230,4 @@ cargo test --no-default-features --features=full --verbose
 - 参与社区讨论
 - 联系维护者
 
-感谢您为 EXVlan 做出贡献！ 
+感谢您为 Exvlan 做出贡献！ 

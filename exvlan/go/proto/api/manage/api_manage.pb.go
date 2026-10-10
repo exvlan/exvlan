@@ -7,10 +7,10 @@
 package manage
 
 import (
-	acl "github.com/easytier/easytier/easytier-go/proto/acl"
-	instance "github.com/easytier/easytier/easytier-go/proto/api/instance"
-	common "github.com/easytier/easytier/easytier-go/proto/common"
-	peer_rpc "github.com/easytier/easytier/easytier-go/proto/peer_rpc"
+	acl "github.com/exvlan/exvlan/exvlan-go/proto/acl"
+	instance "github.com/exvlan/exvlan/exvlan-go/proto/api/instance"
+	common "github.com/exvlan/exvlan/exvlan-go/proto/common"
+	peer_rpc "github.com/exvlan/exvlan/exvlan-go/proto/peer_rpc"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"

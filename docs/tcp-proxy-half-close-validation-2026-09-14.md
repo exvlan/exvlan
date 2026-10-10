@@ -7,14 +7,14 @@
 
 ## 版本与根因
 
-- EasyTier 基线：`24572b49`；生产修复：`03fa375e`、`fd6e2a3e`。
+- Exvlan 基线：`24572b49`；生产修复：`03fa375e`、`fd6e2a3e`。
 - kcp-sys 基线：`d7427c22d764deb1860a7d37acc446ed5033464c`。
 - 最终依赖：`b37ee660fb70bb6d816fb8bbc08b140e55e7218b`，
   `Cargo.toml` 和 `Cargo.lock` 均锁定此 Git revision。
   已发布到 kcp-sys 的 `fix/accept-half-close-20260914` 专用分支，
   便于其他机器获取锁定的依赖；未合并主分支。
 - 旧版真实流量对照：`eb836559`，已包含 flow-key 修复，尚无本次修复。
-- 最终流量二进制：`delivery-easytier-core`，SHA-256：
+- 最终流量二进制：`delivery-exvlan-core`，SHA-256：
   `4635810ac9a536258f9b7ff606e5e1a5eb0243cb0f187825ba6f721d92dfc4fe`。
   构建内容与最终生产代码一致；构建发生在依赖 pin 提交前，内嵌版本号
   不用于区分本次产物，以 SHA-256 和依赖 revision 为准。
@@ -43,7 +43,7 @@
 | Linux、macOS arm64、Windows x64 原生网关测试 | 各 200/200 |
 | 最终 kcp-sys 三平台原生测试 | 各 10/10，两个 example target 通过 |
 | 最终完整三节点矩阵及补充集成测试 | 276/276，848.628 秒 |
-| EasyTier 格式检查、Linux 严格 Clippy | 通过 |
+| Exvlan 格式检查、Linux 严格 Clippy | 通过 |
 | kcp-sys Linux/macOS 格式检查、严格 Clippy | 通过 |
 
 网关新增两个测试，分别从两端先关闭写方向；使用空请求、32 KiB 请求
@@ -65,13 +65,13 @@ EOF/响应；双向关闭后跨越清理周期再读数据；半关闭心跳；R
 主要命令（Linux 容器内，Rust 1.95）：
 
 ```sh
-cargo +1.95 test --locked -p easytier-core \
+cargo +1.95 test --locked -p exvlan-core \
   --features proxy-smoltcp-stack --lib gateway::
-cargo +1.95 nextest run --locked -p easytier --features full --lib \
+cargo +1.95 nextest run --locked -p exvlan --features full --lib \
   -E 'test(subnet_proxy_three_node_test) | test(subnet_proxy_half_close_test) | test(acl_rule_test_inbound) | test(acl_rule_test_subnet_proxy) | test(proxy_three_node_disconnect_test) | test(config_patch_test) | test(port_forward_with_inbound_default_drop_acl_test)' \
   --test-threads 1 --no-fail-fast
 cargo fmt --all -- --check
-cargo +1.95 clippy --locked -p easytier --features full \
+cargo +1.95 clippy --locked -p exvlan --features full \
   --lib --tests -- -D warnings
 ```
 

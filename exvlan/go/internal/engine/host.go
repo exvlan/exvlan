@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/easytier/easytier/easytier-go/internal/artifact"
-	"github.com/easytier/easytier/easytier-go/internal/contextutil"
-	"github.com/easytier/easytier/easytier-go/internal/coreabi"
-	"github.com/easytier/easytier/easytier-go/internal/hostabi"
-	"github.com/easytier/easytier/easytier-go/internal/reactor"
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/internal/artifact"
+	"github.com/exvlan/exvlan/exvlan-go/internal/contextutil"
+	"github.com/exvlan/exvlan/exvlan-go/internal/coreabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/hostabi"
+	"github.com/exvlan/exvlan/exvlan-go/internal/reactor"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 	"github.com/metacubex/wazero"
 	"github.com/metacubex/wazero/api"
 	"github.com/metacubex/wazero/imports/wasi_snapshot_preview1"
@@ -51,7 +51,7 @@ type Host struct {
 
 func NewHost(ctx context.Context, options Options) (_ *Host, err error) {
 	if ctx == nil {
-		return nil, fmt.Errorf("create EasyTier engine host with nil context")
+		return nil, fmt.Errorf("create Exvlan engine host with nil context")
 	}
 	select {
 	case <-ctx.Done():
@@ -95,16 +95,16 @@ func NewHost(ctx context.Context, options Options) (_ *Host, err error) {
 		return nil, err
 	}
 	if err = adapter.Instantiate(ctx, runtime); err != nil {
-		return nil, fmt.Errorf("instantiate EasyTier host ABI: %w", err)
+		return nil, fmt.Errorf("instantiate Exvlan host ABI: %w", err)
 	}
 	compiled, err := runtime.CompileModule(ctx, artifact.Core())
 	if err != nil {
-		return nil, fmt.Errorf("compile embedded EasyTier core: %w", err)
+		return nil, fmt.Errorf("compile embedded Exvlan core: %w", err)
 	}
 	defer compiled.Close(contextutil.WithoutCancel(ctx))
 	module, err = runtime.InstantiateModule(ctx, compiled, newModuleConfig())
 	if err != nil {
-		return nil, fmt.Errorf("instantiate embedded EasyTier core: %w", err)
+		return nil, fmt.Errorf("instantiate embedded Exvlan core: %w", err)
 	}
 	// Compiling the core allocates ~100MB of throwaway compiler state on the
 	// Go heap. The Go runtime does not return it to the OS on its own after
@@ -140,10 +140,10 @@ func (host *Host) CreateInstance(
 	configTOML string,
 ) (*Instance, error) {
 	if host == nil {
-		return nil, fmt.Errorf("create instance with nil EasyTier engine host")
+		return nil, fmt.Errorf("create instance with nil Exvlan engine host")
 	}
 	if ctx == nil {
-		return nil, fmt.Errorf("create EasyTier instance with nil context")
+		return nil, fmt.Errorf("create Exvlan instance with nil context")
 	}
 	envelope, err := encodeCreateEnvelope(configTOML, host.options.Services.Snapshot)
 	if err != nil {
@@ -153,11 +153,11 @@ func (host *Host) CreateInstance(
 	host.mu.Lock()
 	defer host.mu.Unlock()
 	if host.closed {
-		return nil, fmt.Errorf("create instance with closed EasyTier engine host")
+		return nil, fmt.Errorf("create instance with closed Exvlan engine host")
 	}
 	packetSink, err := host.reactor.RegisterPacketSink(host.options.PacketQueueCapacity)
 	if err != nil {
-		return nil, fmt.Errorf("register EasyTier packet sink: %w", err)
+		return nil, fmt.Errorf("register Exvlan packet sink: %w", err)
 	}
 	events := make(chan Event, instanceEventQueueCapacity)
 	journal := newEventJournal()
@@ -173,7 +173,7 @@ func (host *Host) CreateInstance(
 	if err != nil {
 		host.reactor.UnregisterPacketSink(packetSink)
 		close(events)
-		return nil, fmt.Errorf("register EasyTier event sink: %w", err)
+		return nil, fmt.Errorf("register Exvlan event sink: %w", err)
 	}
 	host.guestMu.Lock()
 	core, err := coreabi.New(host.module)
@@ -227,7 +227,7 @@ func (host *Host) Close(ctx context.Context) error {
 		return nil
 	}
 	if ctx == nil {
-		return fmt.Errorf("close EasyTier engine host with nil context")
+		return fmt.Errorf("close Exvlan engine host with nil context")
 	}
 	host.closeOnce.Do(func() {
 		host.mu.Lock()

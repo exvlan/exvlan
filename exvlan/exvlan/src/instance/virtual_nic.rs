@@ -13,7 +13,7 @@ use crate::common::{
     ifcfg::{IfConfiger, IfConfiguerTrait},
 };
 
-use easytier_core::{
+use exvlan_core::{
     host::packet::{HostPacket, HostPacketReceiver},
     instance::CorePacketPlane,
     packet::{TAIL_RESERVED_SIZE, ZCPacket, ZCPacketType},
@@ -348,7 +348,7 @@ impl VirtualNic {
     fn print_troubleshooting_info() {
         tracing::info!(
             "Possible solutions:\
-            \n\t1. Run with root privileges: sudo ./easytier-core [options]\
+            \n\t1. Run with root privileges: sudo ./exvlan-core [options]\
             \n\t2. Manually create TUN device: sudo mkdir -p /dev/net && sudo mknod /dev/net/tun c 10 200\
             \n\t3. Load TUN kernel module: sudo modprobe tun\
             \n\t4. Use --no-tun flag if TUN functionality is not needed\
@@ -526,7 +526,7 @@ impl VirtualNic {
             match crate::arch::windows::add_self_to_firewall_allowlist() {
                 Ok(_) => tracing::info!("add_self_to_firewall_allowlist successful!"),
                 Err(error) => {
-                    tracing::warn!(%error, "Failed to add Easytier to firewall allowlist, Subnet proxy and KCP proxy may not work properly.");
+                    tracing::warn!(%error, "Failed to add Exvlan to firewall allowlist, Subnet proxy and KCP proxy may not work properly.");
                     tracing::warn!(
                         "You can add firewall rules manually, or use --use-smoltcp to run with user-space TCP/IP stack."
                     );

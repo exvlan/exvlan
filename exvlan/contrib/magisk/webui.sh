@@ -6,7 +6,7 @@ MODDIR=$(CDPATH= cd "${0%/*}" 2>/dev/null && pwd -P) || {
 }
 CONFIG_FILE="${MODDIR}/config/config.toml"
 COMMAND_ARGS="${MODDIR}/config/command_args"
-EASYTIER="${MODDIR}/easytier-core"
+EXVLAN="${MODDIR}/exvlan-core"
 
 fail() {
     echo "$1" >&2
@@ -15,7 +15,7 @@ fail() {
 
 running_pids() {
     for process_dir in /proc/[0-9]*; do
-        [ "$(readlink "${process_dir}/exe" 2>/dev/null)" = "${EASYTIER}" ] || continue
+        [ "$(readlink "${process_dir}/exe" 2>/dev/null)" = "${EXVLAN}" ] || continue
         printf '%s\n' "${process_dir#/proc/}"
     done
 }
@@ -46,7 +46,7 @@ case "$1" in
     save-and-restart)
         [ -f "${COMMAND_ARGS}" ] && fail "command_args is active; config.toml would be ignored"
         [ -n "$2" ] || fail "Missing base64-encoded configuration"
-        [ -x "${EASYTIER}" ] || fail "easytier-core is not executable"
+        [ -x "${EXVLAN}" ] || fail "exvlan-core is not executable"
 
         TEMP_FILE="${CONFIG_FILE}.webui.$$"
         trap 'rm -f "${TEMP_FILE}"' EXIT HUP INT TERM
@@ -55,7 +55,7 @@ case "$1" in
         printf '%s' "$2" | base64 -d > "${TEMP_FILE}" \
             || fail "Failed to decode configuration"
 
-        VALIDATION_OUTPUT=$("${EASYTIER}" --check-config -c "${TEMP_FILE}" 2>&1)
+        VALIDATION_OUTPUT=$("${EXVLAN}" --check-config -c "${TEMP_FILE}" 2>&1)
         if [ $? -ne 0 ]; then
             fail "${VALIDATION_OUTPUT:-Configuration validation failed}"
         fi
@@ -67,7 +67,7 @@ case "$1" in
 
         RUNNING_PIDS=$(running_pids)
         for pid in ${RUNNING_PIDS}; do
-            kill "${pid}" || fail "Failed to restart EasyTier"
+            kill "${pid}" || fail "Failed to restart Exvlan"
         done
         echo "saved"
         ;;

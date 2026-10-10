@@ -110,7 +110,7 @@ describe("WebSocketHost", () => {
       ),
     ).toBe(0);
     expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("easytier_event_handler_failed"),
+      expect.stringContaining("exvlan_event_handler_failed"),
     );
     log.mockRestore();
   });
@@ -135,7 +135,7 @@ describe("WebSocketHost", () => {
       pendingOperations: 0,
     });
     expect(socket.closes).toEqual([
-      { code: 1000, reason: "EasyTier runtime stopped" },
+      { code: 1000, reason: "Exvlan runtime stopped" },
     ]);
   });
 

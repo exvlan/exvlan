@@ -6,7 +6,7 @@ import (
 	"net"
 	"unicode/utf8"
 
-	"github.com/easytier/easytier/easytier-go/platform"
+	"github.com/exvlan/exvlan/exvlan-go/platform"
 	"github.com/metacubex/wazero/api"
 )
 
@@ -29,7 +29,7 @@ func readOwnedOptions(module api.Module, pointer, length uint32) ([]byte, bool) 
 }
 
 // optionsWireVersion matches OPTIONS_VERSION in
-// easytier-core/src/wasi/wire/options.rs. Version 3 appends a need_protect
+// exvlan-core/src/wasi/wire/options.rs. Version 3 appends a need_protect
 // byte after the purpose byte in every socket options document. The byte
 // requests VPN socket protection, which only Android-style VPN hosts can
 // honor; every other platform treats sockets as already protected, so the

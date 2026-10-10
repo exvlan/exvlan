@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Button, Column, DataTable, Dialog, InputSwitch, InputText, Message, Skeleton, Tag, useToast } from 'primevue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { UrlListInput, Utils } from 'easytier-frontend-lib';
+import { UrlListInput, Utils } from '@exvlan/std';
 import ApiClient, { type CentralNetworkSettings, type CentralNetworkSummary, type GatewayInfo } from '../modules/api';
 
 const { t } = useI18n()

@@ -300,7 +300,7 @@ pub trait UdpHolePunchPeerSource: Send + Sync {
 
     fn is_local_virtual_ip(&self, ip: &IpAddr) -> bool;
 
-    async fn is_easytier_managed_ipv6(&self, ip: &Ipv6Addr) -> bool;
+    async fn is_exvlan_managed_ipv6(&self, ip: &Ipv6Addr) -> bool;
 }
 
 #[async_trait]
@@ -461,7 +461,7 @@ mod tests {
                 local_addr: SocketAddr::from(([127, 0, 0, 1], local_port)),
             }),
             remote_addr,
-            UdpSessionKind::EasyTierMux,
+            UdpSessionKind::ExvlanMux,
         )
         .unwrap();
         UdpPunchSocket::new(session, remote_addr, ())
@@ -492,7 +492,7 @@ mod tests {
         let session = UdpSession::identity_standalone(
             Arc::new(MockSocket { local_addr }),
             resolved_remote_addr,
-            UdpSessionKind::EasyTierMux,
+            UdpSessionKind::ExvlanMux,
         )
         .unwrap();
         let guard_dropped = Arc::new(AtomicBool::new(false));

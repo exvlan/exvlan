@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use base64::Engine as _;
-use easytier::proto::api::instance::PeerManageRpc as _;
-use easytier::proto::rpc_types::controller::BaseController;
+use exvlan::proto::api::instance::PeerManageRpc as _;
+use exvlan::proto::rpc_types::controller::BaseController;
 use futures::StreamExt as _;
 use sha2::Digest as _;
 use uuid::Uuid;
@@ -54,7 +54,7 @@ pub(crate) trait ConnFacts {
     fn is_credential_identity(&self) -> bool;
 }
 
-impl ConnFacts for easytier_proto::core_peer::peer::PeerConnInfo {
+impl ConnFacts for exvlan_proto::core_peer::peer::PeerConnInfo {
     fn peer_id(&self) -> u32 {
         self.peer_id
     }
@@ -68,11 +68,11 @@ impl ConnFacts for easytier_proto::core_peer::peer::PeerConnInfo {
     }
 
     fn is_credential_identity(&self) -> bool {
-        self.peer_identity_type == easytier_proto::peer_rpc::PeerIdentityType::Credential as i32
+        self.peer_identity_type == exvlan_proto::peer_rpc::PeerIdentityType::Credential as i32
     }
 }
 
-impl ConnFacts for easytier_proto::api::instance::PeerConnInfo {
+impl ConnFacts for exvlan_proto::api::instance::PeerConnInfo {
     fn peer_id(&self) -> u32 {
         self.peer_id
     }
@@ -86,7 +86,7 @@ impl ConnFacts for easytier_proto::api::instance::PeerConnInfo {
     }
 
     fn is_credential_identity(&self) -> bool {
-        self.peer_identity_type == easytier_proto::peer_rpc::PeerIdentityType::Credential as i32
+        self.peer_identity_type == exvlan_proto::peer_rpc::PeerIdentityType::Credential as i32
     }
 }
 
@@ -106,8 +106,8 @@ pub(crate) fn conn_observation(
     })
 }
 
-impl From<&easytier_proto::core_peer::peer::Route> for RouteObservation {
-    fn from(route: &easytier_proto::core_peer::peer::Route) -> Self {
+impl From<&exvlan_proto::core_peer::peer::Route> for RouteObservation {
+    fn from(route: &exvlan_proto::core_peer::peer::Route) -> Self {
         Self {
             peer_id: route.peer_id,
             hostname: route.hostname.clone(),
@@ -117,8 +117,8 @@ impl From<&easytier_proto::core_peer::peer::Route> for RouteObservation {
     }
 }
 
-impl From<&easytier_proto::api::instance::Route> for RouteObservation {
-    fn from(route: &easytier_proto::api::instance::Route) -> Self {
+impl From<&exvlan_proto::api::instance::Route> for RouteObservation {
+    fn from(route: &exvlan_proto::api::instance::Route) -> Self {
         Self {
             peer_id: route.peer_id,
             hostname: route.hostname.clone(),
@@ -128,7 +128,7 @@ impl From<&easytier_proto::api::instance::Route> for RouteObservation {
     }
 }
 
-fn ipv4_to_string(inet: &easytier_proto::common::Ipv4Inet) -> String {
+fn ipv4_to_string(inet: &exvlan_proto::common::Ipv4Inet) -> String {
     format!(
         "{}/{}",
         std::net::Ipv4Addr::from(inet.address.unwrap_or_default().addr),
@@ -279,11 +279,11 @@ async fn collect_from_members(
                 let session =
                     client_manager.get_session_by_machine_id(intent.user_id, &device_id)?;
                 let client = session.scoped_client::<
-            easytier::proto::api::instance::PeerManageRpcClientFactory<BaseController>,
+            exvlan::proto::api::instance::PeerManageRpcClientFactory<BaseController>,
         >();
-                let instance = easytier::proto::api::instance::InstanceIdentifier {
+                let instance = exvlan::proto::api::instance::InstanceIdentifier {
                     selector: Some(
-                        easytier::proto::api::instance::instance_identifier::Selector::Id(
+                        exvlan::proto::api::instance::instance_identifier::Selector::Id(
                             intent.id.into(),
                         ),
                     ),
@@ -291,7 +291,7 @@ async fn collect_from_members(
                 let peers = client
                     .list_peer(
                         BaseController::default(),
-                        easytier::proto::api::instance::ListPeerRequest {
+                        exvlan::proto::api::instance::ListPeerRequest {
                             instance: Some(instance.clone()),
                         },
                     )
@@ -299,7 +299,7 @@ async fn collect_from_members(
                 let routes = client
                     .list_route(
                         BaseController::default(),
-                        easytier::proto::api::instance::ListRouteRequest {
+                        exvlan::proto::api::instance::ListRouteRequest {
                             instance: Some(instance),
                         },
                     )
@@ -356,10 +356,10 @@ mod tests {
     #[test]
     fn connection_filter_requires_the_network_and_credential_identity() {
         let (_, public, _) = credential();
-        let credential_identity = easytier_proto::peer_rpc::PeerIdentityType::Credential as i32;
-        let admin_identity = easytier_proto::peer_rpc::PeerIdentityType::Admin as i32;
+        let credential_identity = exvlan_proto::peer_rpc::PeerIdentityType::Credential as i32;
+        let admin_identity = exvlan_proto::peer_rpc::PeerIdentityType::Admin as i32;
         let api_conn = |network_name: &str, identity, public: Vec<u8>| {
-            easytier_proto::api::instance::PeerConnInfo {
+            exvlan_proto::api::instance::PeerConnInfo {
                 peer_id: 42,
                 network_name: network_name.to_owned(),
                 peer_identity_type: identity,
@@ -367,7 +367,7 @@ mod tests {
                 ..Default::default()
             }
         };
-        let core_conn = easytier_proto::core_peer::peer::PeerConnInfo {
+        let core_conn = exvlan_proto::core_peer::peer::PeerConnInfo {
             peer_id: 42,
             network_name: "mesh".to_owned(),
             peer_identity_type: credential_identity,

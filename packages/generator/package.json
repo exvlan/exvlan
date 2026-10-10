@@ -1,17 +1,17 @@
 {
-  "name": "easytier-config-generator",
+  "name": "@exvlan/generator",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build:config-wasm": "wasm-pack build ../../easytier-core --target web --out-dir ../easytier-web/config-generator/src/generated/config-wasm --out-name easytier_config --release --no-pack -- --no-default-features --features browser-config",
+    "build:config-wasm": "wasm-pack build ../../exvlan-core --target web --out-dir ../exvlan-api/config-generator/src/generated/config-wasm --out-name exvlan_config --release --no-pack -- --no-default-features --features browser-config",
     "dev": "pnpm build:config-wasm && pnpm --dir ../frontend-lib build && vite",
     "build": "pnpm build:config-wasm && pnpm --dir ../frontend-lib build && vue-tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@primeuix/themes": "^1.2.3",
-    "easytier-frontend-lib": "workspace:*",
+    "@exvlan/std": "workspace:*",
     "kernelsu": "3.0.2",
     "primevue": "^4.3.9",
     "vue": "^3.5.12"

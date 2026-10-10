@@ -9,12 +9,12 @@ use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use base64::Engine as _;
-use easytier::{
+use exvlan::{
     common::config::{ConfigLoader as _, NetworkIdentity, TomlConfigLoader},
     instance::factory::{NativeCoreInstance, create_native_instance},
     tunnel::IpScheme,
 };
-use easytier_core::{
+use exvlan_core::{
     config::toml::ManagedCredentialConfig,
     peers::{error::Error as PeerError, peer_manager::PeerManagerCore},
     tunnel::Tunnel,
@@ -155,7 +155,7 @@ impl GatewayRuntimeFactory for NativeGatewayRuntimeFactory {
     fn build(&self, spec: &GatewayRuntimeSpec) -> anyhow::Result<Arc<dyn GatewayRuntime>> {
         let config = TomlConfigLoader::default();
         config.set_inst_name(format!(
-            "easytier-web-gw-{}-{}",
+            "exvlan-api-gw-{}-{}",
             spec.user_id, spec.network_id
         ));
         config.set_hostname(Some(hostname_or_default()));
@@ -175,7 +175,7 @@ impl GatewayRuntimeFactory for NativeGatewayRuntimeFactory {
         if spec.secure_mode {
             let private = x25519_dalek::StaticSecret::random_from_rng(rand::rngs::OsRng);
             let public = x25519_dalek::PublicKey::from(&private);
-            config.set_secure_mode(Some(easytier::proto::common::SecureModeConfig {
+            config.set_secure_mode(Some(exvlan::proto::common::SecureModeConfig {
                 enabled: true,
                 local_private_key: Some(
                     base64::engine::general_purpose::STANDARD.encode(private.as_bytes()),
@@ -207,8 +207,8 @@ struct State {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct GatewayNetworkObservation {
-    pub connections: Vec<easytier_proto::core_peer::peer::PeerConnInfo>,
-    pub routes: Vec<easytier_proto::core_peer::peer::Route>,
+    pub connections: Vec<exvlan_proto::core_peer::peer::PeerConnInfo>,
+    pub routes: Vec<exvlan_proto::core_peer::peer::Route>,
 }
 
 pub struct NetworkInstanceManager {
@@ -455,7 +455,7 @@ fn hostname_or_default() -> String {
         .ok()
         .map(|hostname| hostname.trim().to_owned())
         .filter(|hostname| !hostname.is_empty())
-        .unwrap_or_else(|| "easytier-web-gateway".to_owned())
+        .unwrap_or_else(|| "exvlan-api-gateway".to_owned())
 }
 
 #[cfg(test)]
@@ -498,7 +498,7 @@ mod tests {
             self.stopped.lock().unwrap().push(self.id);
         }
 
-        fn peer_manager(&self) -> Option<Arc<easytier_core::peers::peer_manager::PeerManagerCore>> {
+        fn peer_manager(&self) -> Option<Arc<exvlan_core::peers::peer_manager::PeerManagerCore>> {
             None
         }
 
@@ -551,7 +551,7 @@ mod tests {
 
     #[tokio::test]
     async fn stalled_admission_does_not_block_reconcile_and_is_cancelled_on_removal() {
-        use easytier_core::tunnel::ring::create_ring_tunnel_pair;
+        use exvlan_core::tunnel::ring::create_ring_tunnel_pair;
         use std::time::Duration;
         let manager = Arc::new(NetworkInstanceManager::new(GatewayConfig {
             peer_url: "tcp://localhost:22020".into(),

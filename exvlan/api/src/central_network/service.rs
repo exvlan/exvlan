@@ -8,11 +8,11 @@ use std::{
 };
 
 use base64::Engine as _;
-use easytier::{
+use exvlan::{
     common::config::{ConfigLoader as _, NetworkConfig, TomlConfigLoader},
     proto::api::manage::CollectNetworkInfoResponse,
 };
-use easytier_core::management::remote_client::{RemoteClientError, RemoteClientManager as _};
+use exvlan_core::management::remote_client::{RemoteClientError, RemoteClientManager as _};
 use futures::{StreamExt as _, TryStreamExt as _};
 use rand::{RngCore as _, rngs::OsRng};
 use sea_orm::{ColumnTrait as _, EntityTrait as _, QueryFilter as _, QueryOrder as _};
@@ -501,8 +501,8 @@ impl CentralNetworkService {
                                 .get_rpc_client((user_id, machine_id))
                                 .ok_or_else(|| CentralNetworkServiceError::Conflict("device disconnected".into()))?
                                 .list_network_instance(
-                                    easytier::proto::rpc_types::controller::BaseController::default(),
-                                    easytier::proto::api::manage::ListNetworkInstanceRequest::default(),
+                                    exvlan::proto::rpc_types::controller::BaseController::default(),
+                                    exvlan::proto::api::manage::ListNetworkInstanceRequest::default(),
                                 ).await
                                 .map_err(|error| {
                                     CentralNetworkServiceError::Conflict(error.to_string())
@@ -961,7 +961,7 @@ impl CentralNetworkService {
             online,
             running,
             runtime_virtual_ipv4,
-            version: device.map(|device| device.easytier_version.clone()),
+            version: device.map(|device| device.exvlan_version.clone()),
             error_msg,
             has_override: member.config_override.is_some(),
             proxy_cidrs: member
@@ -1166,7 +1166,7 @@ fn sync_member_credential_proxy_cidrs(
         .unwrap_or_default();
     let config = TomlConfigLoader::default();
     for cidr in &proxy_cidrs {
-        easytier_core::config::api_input::add_proxy_network_to_config(cidr, &config)
+        exvlan_core::config::api_input::add_proxy_network_to_config(cidr, &config)
             .map_err(|error| CentralNetworkServiceError::Invalid(error.to_string()))?;
     }
     let credential = intent
@@ -1266,7 +1266,7 @@ fn member_runtime_fields(
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
-    use easytier::proto::{
+    use exvlan::proto::{
         api::manage::{MyNodeInfo, NetworkInstanceRunningInfo, NetworkInstanceRunningInfoMap},
         common::Ipv4Inet,
     };
@@ -1336,7 +1336,7 @@ mod tests {
 
         async fn stop(&self) {}
 
-        fn peer_manager(&self) -> Option<Arc<easytier_core::peers::peer_manager::PeerManagerCore>> {
+        fn peer_manager(&self) -> Option<Arc<exvlan_core::peers::peer_manager::PeerManagerCore>> {
             None
         }
     }
@@ -1370,7 +1370,7 @@ mod tests {
 
         async fn stop(&self) {}
 
-        fn peer_manager(&self) -> Option<Arc<easytier_core::peers::peer_manager::PeerManagerCore>> {
+        fn peer_manager(&self) -> Option<Arc<exvlan_core::peers::peer_manager::PeerManagerCore>> {
             None
         }
     }
@@ -1403,7 +1403,7 @@ mod tests {
 
         async fn stop(&self) {}
 
-        fn peer_manager(&self) -> Option<Arc<easytier_core::peers::peer_manager::PeerManagerCore>> {
+        fn peer_manager(&self) -> Option<Arc<exvlan_core::peers::peer_manager::PeerManagerCore>> {
             None
         }
 
@@ -1531,7 +1531,7 @@ mod tests {
                 user_id,
                 machine_id: device_id,
                 hostname: format!("device-{device_id}"),
-                easytier_version: "test".to_owned(),
+                exvlan_version: "test".to_owned(),
                 device_os: "{}".to_owned(),
                 client_url: format!("tcp://{device_id}"),
             })
@@ -1561,8 +1561,8 @@ mod tests {
 
     #[tokio::test]
     async fn central_publication_preserves_direct_configs_and_removes_only_old_members() {
-        use easytier::common::config::ConfigSource;
-        use easytier_core::management::remote_client::Storage as _;
+        use exvlan::common::config::ConfigSource;
+        use exvlan_core::management::remote_client::Storage as _;
         let (service, user_id, _) = service().await;
         let device = Uuid::new_v4();
         register_device(&service, user_id, device).await;
@@ -1598,7 +1598,7 @@ mod tests {
             .db
             .list_network_configs(
                 (user_id, device),
-                easytier_core::management::remote_client::ListNetworkProps::All,
+                exvlan_core::management::remote_client::ListNetworkProps::All,
             )
             .await
             .unwrap();
@@ -1811,7 +1811,7 @@ mod tests {
 
     #[tokio::test]
     async fn device_delete_waits_for_core_shutdown_and_restores_intent_on_failure() {
-        use easytier::{
+        use exvlan::{
             instance::factory::native_instance_manager,
             proto::rpc::standalone::{runtime_udp_tunnel_dialer, runtime_udp_tunnel_listener},
             web_client::WebClient,
@@ -2596,14 +2596,14 @@ mod tests {
             .unwrap();
         let public = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(private));
         *observation.lock().unwrap() = crate::central_network::gateway::GatewayNetworkObservation {
-            connections: vec![easytier_proto::core_peer::peer::PeerConnInfo {
+            connections: vec![exvlan_proto::core_peer::peer::PeerConnInfo {
                 peer_id: 42,
                 network_name: intent.network_name,
-                peer_identity_type: easytier_proto::peer_rpc::PeerIdentityType::Credential as i32,
+                peer_identity_type: exvlan_proto::peer_rpc::PeerIdentityType::Credential as i32,
                 noise_remote_static_pubkey: public.as_bytes().to_vec(),
                 ..Default::default()
             }],
-            routes: vec![easytier_proto::core_peer::peer::Route {
+            routes: vec![exvlan_proto::core_peer::peer::Route {
                 peer_id: 42,
                 hostname: "registered-temporary-device".to_owned(),
                 version: "2.7.0".to_owned(),
@@ -2759,7 +2759,7 @@ mod tests {
 
     #[tokio::test]
     async fn full_publish_aggregates_networks_and_retries_deletion_after_restart() {
-        use easytier_core::management::remote_client::{ListNetworkProps, Storage as _};
+        use exvlan_core::management::remote_client::{ListNetworkProps, Storage as _};
         let (service, user_id, _) = service().await;
         let device_id = Uuid::new_v4();
         register_device(&service, user_id, device_id).await;
@@ -2885,7 +2885,7 @@ mod tests {
 
     #[tokio::test]
     async fn removing_member_revokes_published_credentials_and_clears_its_configs() {
-        use easytier_core::management::remote_client::{
+        use exvlan_core::management::remote_client::{
             ListNetworkProps, PersistentConfig as _, Storage as _,
         };
         let (service, user_id, _) = service().await;

@@ -5,21 +5,21 @@ mod elevate;
 
 use anyhow::Context;
 #[cfg(target_os = "android")]
-use easytier::instance::factory::subscribe_native_instance_event;
-use easytier::proto::api::config::{
+use exvlan::instance::factory::subscribe_native_instance_event;
+use exvlan::proto::api::config::{
     ConfigPatchAction, ConfigRpc, ConfigRpcClientFactory, VpnPortalClientPatch,
 };
-use easytier::proto::api::instance::{
+use exvlan::proto::api::instance::{
     GetVpnPortalInfoRequest, InstanceIdentifier, VpnPortalInfo, VpnPortalRpc,
     VpnPortalRpcClientFactory, instance_identifier,
 };
-use easytier::proto::api::manage::{
+use exvlan::proto::api::manage::{
     CollectNetworkInfoResponse, ValidateConfigResponse, VpnPortalClientConfig, WebClientService,
     WebClientServiceClientFactory,
 };
-use easytier::proto::rpc_types::controller::BaseController;
-use easytier::web_client::{self, WebClient};
-use easytier::{
+use exvlan::proto::rpc_types::controller::BaseController;
+use exvlan::web_client::{self, WebClient};
+use exvlan::{
     common::config::{NetworkConfig, NetworkConfigExt},
     common::{
         config::{ConfigLoader, ConfigSource, FileLoggerConfig, LoggingConfig, TomlConfigLoader},
@@ -30,12 +30,12 @@ use easytier::{
     rpc_service::ApiRpcServer,
     utils::panic::setup_panic_handler,
 };
-use easytier_core::management::config_source_to_rpc;
-use easytier_core::management::remote_client::{
+use exvlan_core::management::config_source_to_rpc;
+use exvlan_core::management::remote_client::{
     GetNetworkMetasResponse, ListNetworkInstanceIdsJsonResp, ListNetworkProps, RemoteClientManager,
     Storage,
 };
-use easytier_core::{
+use exvlan_core::{
     connectivity::protocol::raw::TunnelDialer as _, process_runtime::CoreProcessRuntime,
     socket::SocketListener, tunnel::Tunnel,
 };
@@ -88,8 +88,8 @@ macro_rules! get_client_manager {
 }
 
 #[tauri::command]
-fn easytier_version() -> Result<String, String> {
-    Ok(easytier::VERSION.to_string())
+fn exvlan_version() -> Result<String, String> {
+    Ok(exvlan::VERSION.to_string())
 }
 
 #[tauri::command]
@@ -430,7 +430,7 @@ fn set_service_status(_enable: bool) -> Result<(), String> {
 fn get_service_status() -> Result<&'static str, String> {
     #[cfg(not(target_os = "android"))]
     {
-        use easytier::service_manager::ServiceStatus;
+        use exvlan::service_manager::ServiceStatus;
         let status = service::status().map_err(|e| format!("{:#}", e))?;
         match status {
             ServiceStatus::NotInstalled => Ok("NotInstalled"),
@@ -603,7 +603,7 @@ async fn init_web_client(app: AppHandle, url: Option<String>) -> Result<(), Stri
 
     let web_client = web_client::run_web_client(
         url.as_str(),
-        easytier::common::MachineIdOptions {
+        exvlan::common::MachineIdOptions {
             explicit_machine_id: None,
             state_dir: Some(machine_id_state_dir),
         },
@@ -705,13 +705,13 @@ mod manager {
     use super::*;
     use async_trait::async_trait;
     use dashmap::{DashMap, DashSet};
-    use easytier::common::config::{NetworkConfig, NetworkConfigExt};
-    use easytier::proto::api::logger::{LoggerRpc, LoggerRpcClientFactory, SetLoggerConfigRequest};
-    use easytier::proto::api::manage::RunNetworkInstanceRequest;
-    use easytier::proto::rpc::bidirect::BidirectRpcManager;
-    use easytier::proto::rpc_types::controller::BaseController;
-    use easytier::web_client::WebClientHooks;
-    use easytier_core::management::remote_client::PersistentConfig;
+    use exvlan::common::config::{NetworkConfig, NetworkConfigExt};
+    use exvlan::proto::api::logger::{LoggerRpc, LoggerRpcClientFactory, SetLoggerConfigRequest};
+    use exvlan::proto::api::manage::RunNetworkInstanceRequest;
+    use exvlan::proto::rpc::bidirect::BidirectRpcManager;
+    use exvlan::proto::rpc_types::controller::BaseController;
+    use exvlan::web_client::WebClientHooks;
+    use exvlan_core::management::remote_client::PersistentConfig;
 
     pub(super) struct GuiHooks {
         pub(super) app: AppHandle,
@@ -721,7 +721,7 @@ mod manager {
     impl WebClientHooks for GuiHooks {
         async fn pre_run_network_instance(
             &self,
-            cfg: &easytier::common::config::TomlConfigLoader,
+            cfg: &exvlan::common::config::TomlConfigLoader,
         ) -> Result<(), String> {
             let client_manager = get_client_manager!()?;
             client_manager
@@ -1026,7 +1026,7 @@ mod manager {
             &self,
             app: &AppHandle,
             web_only: bool,
-        ) -> Result<(), easytier_core::management::remote_client::RemoteClientError<anyhow::Error>>
+        ) -> Result<(), exvlan_core::management::remote_client::RemoteClientError<anyhow::Error>>
         {
             let inst_ids: Vec<uuid::Uuid> = if web_only {
                 self.get_enabled_instances_with_web_like_tun_ids().collect()
@@ -1052,7 +1052,7 @@ mod manager {
         pub(super) async fn pre_run_network_instance_hook(
             &self,
             app: &AppHandle,
-            cfg: &easytier::common::config::TomlConfigLoader,
+            cfg: &exvlan::common::config::TomlConfigLoader,
             source: PersistedConfigSource,
         ) -> Result<(), String> {
             let instance_id = cfg.get_id();
@@ -1109,10 +1109,10 @@ mod manager {
                             let instance_id_str = instance_id_clone.to_string();
                             loop {
                                 match event_receiver.recv().await {
-                                    Ok(easytier::common::global_ctx::GlobalCtxEvent::DhcpIpv4Changed(_, _)) => {
+                                    Ok(exvlan::common::global_ctx::GlobalCtxEvent::DhcpIpv4Changed(_, _)) => {
                                         let _ = app_clone.emit("dhcp_ip_changed", &instance_id_str);
                                     }
-                                    Ok(easytier::common::global_ctx::GlobalCtxEvent::ProxyCidrsUpdated(_, _)) => {
+                                    Ok(exvlan::common::global_ctx::GlobalCtxEvent::ProxyCidrsUpdated(_, _)) => {
                                         let _ = app_clone.emit("proxy_cidrs_updated", &instance_id_str);
                                     }
                                     Ok(_) => {}
@@ -1177,7 +1177,7 @@ mod manager {
                 .set_logger_config(
                     BaseController::default(),
                     SetLoggerConfigRequest {
-                        level: easytier_core::management::parse_log_level(&level).into(),
+                        level: exvlan_core::management::parse_log_level(&level).into(),
                     },
                 )
                 .await?;
@@ -1273,7 +1273,7 @@ mod manager {
     #[cfg(test)]
     mod tests {
         use super::{PersistedConfigSource, StoredGuiConfig};
-        use easytier::proto::api::manage::NetworkConfig;
+        use exvlan::proto::api::manage::NetworkConfig;
 
         #[test]
         fn stored_gui_config_defaults_missing_source_to_legacy() {
@@ -1376,15 +1376,15 @@ mod service {
     }
 
     pub fn install(opts: ServiceOptions) -> anyhow::Result<()> {
-        let service = easytier::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
-        let options = easytier::service_manager::ServiceInstallOptions {
+        let service = exvlan::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let options = exvlan::service_manager::ServiceInstallOptions {
             program: super::get_exe_path().into(),
             args: opts.to_args_vec(),
             work_directory: std::env::current_dir()?,
             environment: service_environment(),
             disable_autostart: false,
-            description: Some("EasyTier Gui Service".to_string()),
-            display_name: Some("EasyTier Gui Service".to_string()),
+            description: Some("Exvlan Gui Service".to_string()),
+            display_name: Some("Exvlan Gui Service".to_string()),
             disable_restart_on_failure: false,
         };
         service
@@ -1394,13 +1394,13 @@ mod service {
     }
 
     pub fn uninstall() -> anyhow::Result<()> {
-        let service = easytier::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let service = exvlan::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
         service.uninstall()?;
         Ok(())
     }
 
     pub fn set_status(enable: bool) -> anyhow::Result<()> {
-        use easytier::service_manager::*;
+        use exvlan::service_manager::*;
         let service = Service::new(env!("CARGO_PKG_NAME").to_string())?;
         let status = service.status()?;
         if enable && status != ServiceStatus::Running {
@@ -1413,8 +1413,8 @@ mod service {
         Ok(())
     }
 
-    pub fn status() -> anyhow::Result<easytier::service_manager::ServiceStatus> {
-        let service = easytier::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+    pub fn status() -> anyhow::Result<exvlan::service_manager::ServiceStatus> {
+        let service = exvlan::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
         service.status()
     }
 
@@ -1516,7 +1516,7 @@ pub fn run_gui() -> std::process::ExitCode {
             patch_vpn_portal_clients,
             set_logging_level,
             set_tun_fd,
-            easytier_version,
+            exvlan_version,
             set_dock_visibility,
             list_network_instance_ids,
             remove_network_instance,
@@ -1557,5 +1557,5 @@ pub fn run_cli() -> std::process::ExitCode {
         .enable_all()
         .build()
         .unwrap()
-        .block_on(async { easytier::core::main().await })
+        .block_on(async { exvlan::core::main().await })
 }

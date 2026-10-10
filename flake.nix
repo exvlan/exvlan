@@ -1,5 +1,5 @@
 {
-  description = "EXVlan development environment";
+  description = "Exvlan development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

@@ -1,4 +1,4 @@
-name: EasyTier JavaScript Hosts
+name: Exvlan JavaScript Hosts
 
 on:
   push:
@@ -6,9 +6,9 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
-      - "easytier-core/**"
-      - "easytier-proto/**"
-      - "easytier-js/**"
+      - "exvlan-core/**"
+      - "exvlan-proto/**"
+      - "exvlan-js/**"
       - ".github/workflows/js.yml"
   pull_request:
     branches: ["develop", "main"]
@@ -16,9 +16,9 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
-      - "easytier-core/**"
-      - "easytier-proto/**"
-      - "easytier-js/**"
+      - "exvlan-core/**"
+      - "exvlan-proto/**"
+      - "exvlan-js/**"
       - ".github/workflows/js.yml"
 
 concurrency:
@@ -56,7 +56,7 @@ jobs:
           run_install: false
 
       - name: Install dependencies
-        run: pnpm --dir easytier-js install --frozen-lockfile
+        run: pnpm --dir exvlan-js install --frozen-lockfile
 
       - name: Build and test
-        run: pnpm --dir easytier-js check
+        run: pnpm --dir exvlan-js check

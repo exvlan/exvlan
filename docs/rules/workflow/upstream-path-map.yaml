@@ -1,8 +1,8 @@
 # 上游路径拆分映射（单一事实源）
-# 用途：upstream (EasyTier) → EXVlan 布局映射；供 skill 脚本与文档引用，避免漂移。
+# 用途：upstream (Exvlan) → Exvlan 布局映射；供 skill 脚本与文档引用，避免漂移。
 # 参考：docs/rules/workflow/upstream-sync.md
 version: v2.7.0
-upstream_remote: git@github.com:EasyTier/EasyTier.git
+upstream_remote: git@github.com:exvlan/exvlan.git
 upstream_ref: upstream/releases/v2.7.0
 
 # 忽略（本仓库不跟踪，见 .gitignore）
@@ -46,31 +46,31 @@ local_only:
   - Dockerfile.mobile
   - Dockerfile.test
   - vite.config.ts
-  - exvlan.code-workspace # ← 由上游 EasyTier.code-workspace 改名
+  - exvlan.code-workspace # ← 由上游 Exvlan.code-workspace 改名
 
 # 重命名 / 拆分映射
 map:
   # --- 主 crate 与拆分出的 crate ---
-  - { upstream: easytier, target: exvlan/exvlan, note: 主 native crate（bin exvlan/exvlan-cli） }
-  - { upstream: easytier-core, target: exvlan/core, note: wasi 可移植核心 }
-  - { upstream: easytier-proto, target: exvlan/proto, note: proto+rpc（自带 build/ 生成器） }
-  - { upstream: easytier-rpc-build, target: exvlan/proto/build, note: 上游删除，折入 proto }
-  - { upstream: easytier-go, target: exvlan/go, module: github.com/exvlan/exvlan/exvlan-go }
+  - { upstream: exvlan, target: exvlan/exvlan, note: 主 native crate（bin exvlan/exvlan-cli） }
+  - { upstream: exvlan-core, target: exvlan/core, note: wasi 可移植核心 }
+  - { upstream: exvlan-proto, target: exvlan/proto, note: proto+rpc（自带 build/ 生成器） }
+  - { upstream: exvlan-rpc-build, target: exvlan/proto/build, note: 上游删除，折入 proto }
+  - { upstream: exvlan-go, target: exvlan/go, module: github.com/exvlan/exvlan/exvlan-go }
 
   # --- web 四向拆分 ---
-  - { upstream: easytier-web/src, target: exvlan/api, note: 后端 config server }
-  - { upstream: easytier-web/frontend-lib, target: packages/std, package: "@exvlan/std" }
-  - { upstream: easytier-web/frontend, target: packages/ui, package: "@exvlan/ui" }
+  - { upstream: exvlan-api/src, target: exvlan/api, note: 后端 config server }
+  - { upstream: exvlan-api/frontend-lib, target: packages/std, package: "@exvlan/std" }
+  - { upstream: exvlan-api/frontend, target: packages/ui, package: "@exvlan/ui" }
   - {
-      upstream: easytier-web/config-generator,
+      upstream: exvlan-api/config-generator,
       target: packages/generator,
       package: "@exvlan/generator",
     }
 
   # --- 桌面 / JS ---
-  - { upstream: easytier-gui, target: packages/studio }
+  - { upstream: @exvlan/studio, target: packages/studio }
   - {
-      upstream: easytier-js,
+      upstream: exvlan-js,
       target: packages/sdk,
       package: "@exvlan/sdk",
       note: 保留嵌套 pnpm-workspace,
@@ -78,27 +78,27 @@ map:
 
   # --- contrib ---
   - {
-      upstream: easytier-contrib/easytier-android-jni,
+      upstream: exvlan/contrib/exvlan-android-jni,
       target: exvlan/contrib/android-jni,
       crate: exvlan-android-jni,
     }
-  - { upstream: easytier-contrib/easytier-ffi, target: exvlan/contrib/ffi, crate: exvlan-ffi }
+  - { upstream: exvlan/contrib/exvlan-ffi, target: exvlan/contrib/ffi, crate: exvlan-ffi }
   - {
-      upstream: easytier-contrib/easytier-ios,
+      upstream: exvlan/contrib/exvlan-ios,
       target: exvlan/contrib/ios,
       crate: exvlan-ios,
       new: true,
     }
-  - { upstream: easytier-contrib/easytier-magisk, target: exvlan/contrib/magisk }
+  - { upstream: exvlan/contrib/exvlan-magisk, target: exvlan/contrib/magisk }
   - {
-      upstream: easytier-contrib/easytier-mini,
+      upstream: exvlan/contrib/exvlan-mini,
       target: exvlan/contrib/mini,
       crate: exvlan-mini,
       new: true,
     }
-  - { upstream: easytier-contrib/easytier-ohrs, target: exvlan/contrib/ohrs, crate: exvlan-ohrs }
+  - { upstream: exvlan/contrib/exvlan-ohrs, target: exvlan/contrib/ohrs, crate: exvlan-ohrs }
   - {
-      upstream: easytier-contrib/easytier-uptime,
+      upstream: exvlan/contrib/exvlan-uptime,
       target: exvlan/contrib/uptime,
       crate: exvlan-uptime,
     }
@@ -106,7 +106,7 @@ map:
   # --- 插件 / 顶层配置 ---
   - { upstream: tauri-plugin-vpnservice, target: exvlan/plugin/vpnservice }
   - { upstream: .github, target: .github, note: 全面吸收 + 改品牌（保留我方 runner/docker 标签） }
-  - { upstream: EasyTier.code-workspace, target: exvlan.code-workspace }
+  - { upstream: Exvlan.code-workspace, target: exvlan.code-workspace }
   - { upstream: CONTEXT.md, target: CONTEXT.md, note: 品牌化 }
   - { upstream: docs, target: docs, note: 归仓库根 docs/，品牌化 }
 
