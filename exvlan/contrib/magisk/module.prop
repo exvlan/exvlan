@@ -1,7 +1,7 @@
-id=exvlan_magisk
-name=ExVLAN_Magisk
-version=v26.308.20604
-versionCode=2620617020604
-author=exvlan
-description=exvlan magisk module @exvlan(https://github.com/exvlan/exvlan)
-updateJson=https://raw.githubusercontent.com/exvlan/exvlan/refs/heads/main/exvlan/contrib/magisk/magisk_update.json
+id=easytier_magisk
+name=EasyTier_Magisk
+version=v2.7.0
+versionCode=1
+author=EasyTier
+description=easytier magisk module @EasyTier(https://github.com/EasyTier/EasyTier)
+updateJson=https://raw.githubusercontent.com/EasyTier/EasyTier/refs/heads/main/easytier-contrib/easytier-magisk/magisk_update.json

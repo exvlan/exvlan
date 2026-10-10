@@ -1,21 +1,19 @@
 [workspace]
 resolver = "2"
 members = [
-    "easytier-core",
-    "easytier-proto",
-    "easytier",
-    "easytier-web",
-    "easytier-gui/src-tauri",
-    "easytier-contrib/easytier-mini",
-    "easytier-contrib/easytier-ffi",
-    "easytier-contrib/easytier-uptime",
-    "easytier-contrib/easytier-android-jni",
-    "easytier-contrib/easytier-ios",
-    "easytier-contrib/easytier-ohrs", # it needs ohrs sdk
-    "easytier-contrib/easytier-ohrs/crates/*",
+    "exvlan/exvlan",
+    "exvlan/core",
+    "exvlan/proto",
+    "exvlan/api",
+    "packages/studio/src-tauri",
+    "exvlan/contrib/ffi",
+    "exvlan/contrib/uptime",
+    "exvlan/contrib/android-jni",
+    "exvlan/contrib/ios",
+    "exvlan/contrib/mini",
 ]
-default-members = ["easytier", "easytier-web"]
-exclude = []
+default-members = ["exvlan/exvlan", "exvlan/api"]
+exclude = ["exvlan/contrib/ohrs"] # it needs ohrs sdk
 
 [workspace.package]
 edition = "2024"
