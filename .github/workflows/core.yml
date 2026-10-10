@@ -28,8 +28,8 @@ jobs:
       RELEVANT_PATHS: >-
         ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**",
         "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "exvlan/**",
-        "exvlan-core/**", "exvlan-proto/**", "exvlan-rpc-build/**",
-        "exvlan-api/**", "exvlan/contrib/exvlan-magisk/**",
+        "exvlan/core/**", "exvlan/proto/**", "exvlan/proto/build/**",
+        "exvlan/api/**", "exvlan/contrib/magisk/**",
         ".github/workflows/core.yml", ".github/actions/**"]
     outputs:
       # Release builds must run even if they only change release metadata.
@@ -72,14 +72,14 @@ jobs:
         uses: ./.github/actions/prepare-pnpm
         with:
           token: ${{ github.token }}
-          build-filter: './exvlan-api/*'
+          build-filter: './exvlan/api/*'
 
       - name: Archive artifact
         uses: actions/upload-artifact@v5
         with:
           name: exvlan-api-dashboard
           path: |
-            exvlan-api/frontend/dist/*
+            packages/ui/dist/*
   build:
     strategy:
       fail-fast: true
@@ -162,7 +162,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: exvlan-api-dashboard
-          path: exvlan-api/frontend/dist/
+          path: packages/ui/dist/
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
@@ -290,7 +290,7 @@ jobs:
         run: |
           mkdir -p ./signpath-artifacts
           cp \
-            ./artifacts/exvlan-core.exe \
+            ./artifacts/exvlan.exe \
             ./artifacts/exvlan-cli.exe \
             ./artifacts/exvlan-api.exe \
             ./artifacts/exvlan-api-embed.exe \
@@ -350,9 +350,9 @@ jobs:
       # 将二进制文件和 WebUI 复制到 Magisk 模块目录
       - name: Prepare Magisk module
         run: |
-          module_dir=./exvlan/contrib/exvlan-magisk
+          module_dir=./exvlan/contrib/magisk
           mkdir -p "$module_dir/webroot"
-          cp ./downloaded-binaries/exvlan-core "$module_dir/"
+          cp ./downloaded-binaries/exvlan "$module_dir/"
           cp ./downloaded-binaries/exvlan-cli "$module_dir/"
           cp ./downloaded-binaries/exvlan-api "$module_dir/"
           cp -R ./downloaded-webui/config-generator/. "$module_dir/webroot/"
@@ -364,9 +364,9 @@ jobs:
         with:
           name: Exvlan-Magisk
           path: |
-            ./exvlan/contrib/exvlan-magisk
-            !./exvlan/contrib/exvlan-magisk/build.sh
-            !./exvlan/contrib/exvlan-magisk/magisk_update.json
+            ./exvlan/contrib/magisk
+            !./exvlan/contrib/magisk/build.sh
+            !./exvlan/contrib/magisk/magisk_update.json
           if-no-files-found: error
 
   core-result:

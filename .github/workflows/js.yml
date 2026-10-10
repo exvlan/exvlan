@@ -6,9 +6,9 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
-      - "exvlan-core/**"
-      - "exvlan-proto/**"
-      - "exvlan-js/**"
+      - "exvlan/core/**"
+      - "exvlan/proto/**"
+      - "packages/sdk/**"
       - ".github/workflows/js.yml"
   pull_request:
     branches: ["develop", "main"]
@@ -16,9 +16,9 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
-      - "exvlan-core/**"
-      - "exvlan-proto/**"
-      - "exvlan-js/**"
+      - "exvlan/core/**"
+      - "exvlan/proto/**"
+      - "packages/sdk/**"
       - ".github/workflows/js.yml"
 
 concurrency:
@@ -56,7 +56,7 @@ jobs:
           run_install: false
 
       - name: Install dependencies
-        run: pnpm --dir exvlan-js install --frozen-lockfile
+        run: pnpm --dir packages/sdk install --frozen-lockfile
 
       - name: Build and test
-        run: pnpm --dir exvlan-js check
+        run: pnpm --dir packages/sdk check

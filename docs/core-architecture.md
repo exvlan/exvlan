@@ -20,7 +20,7 @@ The refactor has three principal crate roles:
 
 `exvlan-core` is designed to compile without direct operating-system network
 access. It supports native hosts through Rust traits and has a target-only WASI
-adapter and ABI implementation under `exvlan-core/src/wasi`.
+adapter and ABI implementation under `exvlan/core/src/wasi`.
 
 This architecture does not require compatibility with old internal module
 paths. Wire compatibility, configuration compatibility, management semantics,

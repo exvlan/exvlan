@@ -18,7 +18,7 @@ cd ../tauri-plugin-vpnservice
 pnpm install
 pnpm build
 
-cd ../exvlan-web/frontend-lib
+cd ../std
 pnpm install
 pnpm build
 

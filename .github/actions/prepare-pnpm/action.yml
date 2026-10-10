@@ -78,7 +78,7 @@ runs:
     - name: Bundle config generator with web frontend
       shell: bash
       run: |
-        if [ -f exvlan-api/frontend/dist/index.html ] && [ -f exvlan-api/config-generator/dist/index.html ]; then
-          mkdir -p exvlan-api/frontend/dist/config-generator
-          cp -R exvlan-api/config-generator/dist/. exvlan-api/frontend/dist/config-generator/
+        if [ -f packages/ui/dist/index.html ] && [ -f packages/generator/dist/index.html ]; then
+          mkdir -p packages/ui/dist/config-generator
+          cp -R packages/generator/dist/. packages/ui/dist/config-generator/
         fi

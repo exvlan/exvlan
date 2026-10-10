@@ -67,7 +67,7 @@ cargo clippy -p exvlan-core \
 
 ## 新增回归测试
 
-测试位于 `exvlan-core/src/gateway/proxy/tcp_proxy_engine.rs`：
+测试位于 `exvlan/core/src/gateway/proxy/tcp_proxy_engine.rs`：
 
 1. SYN 在 accept 前后重传，均保留转换端口，且不会重复 accept。
 2. 旧连接处于 ClosingSrc、ClosingDst、Closed 时，被同一流的新连接

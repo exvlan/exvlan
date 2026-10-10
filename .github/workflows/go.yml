@@ -4,13 +4,13 @@ on:
   push:
     branches: ["develop", "main", "releases/**"]
     paths:
-      - "exvlan-go/**"
+      - "exvlan/go/**"
       - ".github/workflows/go.yml"
   pull_request:
     branches: ["develop", "main"]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - "exvlan-go/**"
+      - "exvlan/go/**"
       - ".github/workflows/go.yml"
 
 concurrency:
@@ -32,13 +32,13 @@ jobs:
         with:
           go-version: "1.25.x"
           cache-dependency-path: |
-            exvlan-go/go.sum
-            exvlan-go/examples/tun/go.sum
+            exvlan/go/go.sum
+            exvlan/go/examples/tun/go.sum
 
       - name: Test main module
-        working-directory: exvlan-go
+        working-directory: exvlan/go
         run: go test ./...
 
       - name: Test TUN example module
-        working-directory: exvlan-go/examples/tun
+        working-directory: exvlan/go/examples/tun
         run: go test ./...

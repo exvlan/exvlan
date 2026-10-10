@@ -54,7 +54,7 @@
 
 1. **克隆项目并进入目录**
    ```bash
-   cd /path/to/Exvlan/exvlan-contrib/exvlan-android-jni
+   cd /path/to/Exvlan/exvlan/contrib/android-jni
    ```
 
 2. **运行构建脚本**

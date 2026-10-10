@@ -58,11 +58,11 @@ map:
   - { upstream: exvlan-go, target: exvlan/go, module: github.com/exvlan/exvlan/exvlan-go }
 
   # --- web 四向拆分 ---
-  - { upstream: exvlan-api/src, target: exvlan/api, note: 后端 config server }
-  - { upstream: exvlan-api/frontend-lib, target: packages/std, package: "@exvlan/std" }
-  - { upstream: exvlan-api/frontend, target: packages/ui, package: "@exvlan/ui" }
+  - { upstream: exvlan/api/src, target: exvlan/api, note: 后端 config server }
+  - { upstream: packages/std, target: packages/std, package: "@exvlan/std" }
+  - { upstream: packages/ui, target: packages/ui, package: "@exvlan/ui" }
   - {
-      upstream: exvlan-api/config-generator,
+      upstream: packages/generator,
       target: packages/generator,
       package: "@exvlan/generator",
     }
@@ -78,27 +78,27 @@ map:
 
   # --- contrib ---
   - {
-      upstream: exvlan/contrib/exvlan-android-jni,
+      upstream: exvlan/contrib/android-jni,
       target: exvlan/contrib/android-jni,
       crate: exvlan-android-jni,
     }
-  - { upstream: exvlan/contrib/exvlan-ffi, target: exvlan/contrib/ffi, crate: exvlan-ffi }
+  - { upstream: exvlan/contrib/ffi, target: exvlan/contrib/ffi, crate: exvlan-ffi }
   - {
-      upstream: exvlan/contrib/exvlan-ios,
+      upstream: exvlan/contrib/ios,
       target: exvlan/contrib/ios,
       crate: exvlan-ios,
       new: true,
     }
-  - { upstream: exvlan/contrib/exvlan-magisk, target: exvlan/contrib/magisk }
+  - { upstream: exvlan/contrib/magisk, target: exvlan/contrib/magisk }
   - {
-      upstream: exvlan/contrib/exvlan-mini,
+      upstream: exvlan/contrib/mini,
       target: exvlan/contrib/mini,
       crate: exvlan-mini,
       new: true,
     }
-  - { upstream: exvlan/contrib/exvlan-ohrs, target: exvlan/contrib/ohrs, crate: exvlan-ohrs }
+  - { upstream: exvlan/contrib/ohrs, target: exvlan/contrib/ohrs, crate: exvlan-ohrs }
   - {
-      upstream: exvlan/contrib/exvlan-uptime,
+      upstream: exvlan/contrib/uptime,
       target: exvlan/contrib/uptime,
       crate: exvlan-uptime,
     }

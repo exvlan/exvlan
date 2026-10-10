@@ -1,4 +1,4 @@
-// sea-orm-cli generate entity -u sqlite:./et.db -o exvlan-api/src/db/entity/ --with-serde both --with-copy-enums
+// sea-orm-cli generate entity -u sqlite:./et.db -o exvlan/api/src/db/entity/ --with-serde both --with-copy-enums
 mod central_intent;
 mod devices;
 #[allow(unused_imports)]

@@ -7,7 +7,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/exvlan/exvlan.git",
-    "directory": "exvlan-js/cloudflare"
+    "directory": "packages/sdk/cloudflare"
   },
   "homepage": "https://github.com/exvlan/exvlan",
   "bugs": "https://github.com/exvlan/exvlan/issues",

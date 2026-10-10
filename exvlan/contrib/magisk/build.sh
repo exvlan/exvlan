@@ -1,12 +1,12 @@
 #!/bin/sh
-WEBUI_SOURCE="../../exvlan-api/config-generator/dist"
+WEBUI_SOURCE="../../packages/generator/dist"
 
 if [ -f "${WEBUI_SOURCE}/index.html" ]; then
     rm -rf ./webroot
     mkdir -p ./webroot
     cp -R "${WEBUI_SOURCE}/." ./webroot/
 elif [ ! -f "./webroot/index.html" ]; then
-    echo "Error: WebUI 构建产物不存在，请先运行 pnpm --dir ../../exvlan-api/config-generator build."
+    echo "Error: WebUI 构建产物不存在，请先运行 pnpm --dir ../../packages/generator build."
     exit 1
 fi
 

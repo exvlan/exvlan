@@ -561,10 +561,10 @@ snapshot ID、staging rows、expiry、finalize 和 atomic swap 的协议。在�
 
 主要涉及：
 
-- `exvlan-api/src/restful/network.rs`
-- `exvlan-api/src/client_manager/mod.rs`
-- `exvlan-api/src/client_manager/managed_config.rs`
-- `exvlan-api/src/db/mod.rs`
+- `exvlan/api/src/restful/network.rs`
+- `exvlan/api/src/client_manager/mod.rs`
+- `exvlan/api/src/client_manager/managed_config.rs`
+- `exvlan/api/src/db/mod.rs`
 - 对应 contract、database 和 managed-config tests
 
 完成条件：

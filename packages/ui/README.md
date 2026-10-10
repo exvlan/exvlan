@@ -9,7 +9,7 @@ From the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --dir exvlan-api/frontend dev
+pnpm --dir packages/ui dev
 ```
 
 The development proxy defaults to `http://localhost:11211`. Set
@@ -25,10 +25,10 @@ styles are not imported by the GUI or config generator.
 ## Verification
 
 ```sh
-pnpm --dir exvlan-api/frontend exec playwright install chromium
-pnpm --dir exvlan-api/frontend test:browser
-pnpm --dir exvlan-api/frontend-lib test:config-ui
-pnpm --dir exvlan-api/frontend-lib test:network-config
+pnpm --dir packages/ui exec playwright install chromium
+pnpm --dir packages/ui test:browser
+pnpm --dir packages/std test:config-ui
+pnpm --dir packages/std test:network-config
 ```
 
 The browser command builds the application, starts a local preview on
@@ -42,7 +42,7 @@ The layout checks cover English and Chinese, light and dark themes, and
 
 ```sh
 WEB_SCREENSHOT_DIR=/tmp/exvlan-api-redesign \
-  pnpm --dir exvlan-api/frontend test:browser
+  pnpm --dir packages/ui test:browser
 ```
 
 Set `WEB_TEST_URL` to test an already running frontend instead of starting
@@ -59,7 +59,7 @@ for the host-side Web build:
 ```sh
 docker exec rust bash -lc "cd \"$PWD\" && cargo build -p exvlan --bin exvlan-core"
 sudo chown -R "$(id -u):$(id -g)" target
-pnpm --dir exvlan-api/frontend test:e2e
+pnpm --dir packages/ui test:e2e
 ```
 
 This test uses a fresh SQLite database, a real Web server, a Chromium browser,

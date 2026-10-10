@@ -90,8 +90,8 @@ sudo apt install -y bridge-utils
 
 ```
 exvlan/          # Core functionality and libraries
-exvlan-web/      # Web dashboard and frontend
-exvlan-gui/      # Desktop GUI application
+exvlan/api/      # Web dashboard and frontend
+packages/studio/      # Desktop GUI application
 .github/workflows/ # CI/CD configuration files
 ```
 
@@ -120,7 +120,7 @@ Build artifacts: `target/[target-triple]/release/`
 pnpm -r build
 
 # 2. Build GUI application
-cd exvlan-gui
+cd packages/studio
 
 # Linux
 pnpm tauri build --target x86_64-unknown-linux-gnu
@@ -133,7 +133,7 @@ pnpm tauri build --target aarch64-apple-darwin     # Apple Silicon
 pnpm tauri build --target x86_64-pc-windows-msvc   # x64
 ```
 
-Build artifacts: `exvlan-gui/src-tauri/target/release/bundle/`
+Build artifacts: `packages/studio/src-tauri/target/release/bundle/`
 
 ### Building Mobile
 
@@ -145,11 +145,11 @@ rustup target add i686-linux-android
 rustup target add x86_64-linux-android
 
 # 2. Build Android application
-cd exvlan-gui
+cd packages/studio
 pnpm tauri android build
 ```
 
-Build artifacts: `exvlan-gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/`
+Build artifacts: `packages/studio/src-tauri/gen/android/app/build/outputs/apk/universal/release/`
 
 ### Build Notes
 

@@ -10,9 +10,9 @@ inputs:
     required: true
     default: 'true'
   pnpm-build-filter:
-    description: 'The filter argument for pnpm build (e.g. ./exvlan-api/*)'
+    description: 'The filter argument for pnpm build (e.g. ./exvlan/api/*)'
     required: false
-    default: './exvlan-api/*'
+    default: './exvlan/api/*'
   gui:
     description: 'Whether to prepare the GUI build environment'
     required: true

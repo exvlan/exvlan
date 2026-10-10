@@ -98,8 +98,8 @@ sudo apt install -y bridge-utils
 
 ```
 exvlan/          # 核心功能和库
-exvlan-web/      # Web 仪表盘和前端
-exvlan-gui/      # 桌面 GUI 应用
+exvlan/api/      # Web 仪表盘和前端
+packages/studio/      # 桌面 GUI 应用
 .github/workflows/ # CI/CD 配置文件
 ```
 
@@ -128,7 +128,7 @@ cargo build --release --target x86_64-pc-windows-msvc        # Windows x86_64
 pnpm -r build
 
 # 2. 构建 GUI 应用
-cd exvlan-gui
+cd packages/studio
 
 # Linux
 pnpm tauri build --target x86_64-unknown-linux-gnu
@@ -141,7 +141,7 @@ pnpm tauri build --target aarch64-apple-darwin     # Apple Silicon
 pnpm tauri build --target x86_64-pc-windows-msvc   # x64
 ```
 
-构建产物位置：`exvlan-gui/src-tauri/target/release/bundle/`
+构建产物位置：`packages/studio/src-tauri/target/release/bundle/`
 
 ### 构建移动应用
 
@@ -153,11 +153,11 @@ rustup target add i686-linux-android
 rustup target add x86_64-linux-android
 
 # 2. 构建 Android 应用
-cd exvlan-gui
+cd packages/studio
 pnpm tauri android build
 ```
 
-构建产物位置：`exvlan-gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/`
+构建产物位置：`packages/studio/src-tauri/gen/android/app/build/outputs/apk/universal/release/`
 
 ### 构建注意事项
 

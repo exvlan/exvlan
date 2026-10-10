@@ -15,10 +15,10 @@ on:
       - "rust-toolchain.toml"
       - ".cargo/**"
       - "exvlan/**"
-      - "exvlan-core/**"
-      - "exvlan-proto/**"
-      - "exvlan-rpc-build/**"
-      - "exvlan/contrib/exvlan-ohrs/**"
+      - "exvlan/core/**"
+      - "exvlan/proto/**"
+      - "exvlan/proto/build/**"
+      - "exvlan/contrib/ohrs/**"
       - ".github/workflows/ohos.yml"
       - ".github/actions/**"
   workflow_dispatch:
@@ -54,7 +54,7 @@ jobs:
           concurrent_skipping: 'same_content_newer'
           skip_after_successful_duplicate: 'true'
           cancel_others: 'true'
-          paths: '["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**", "exvlan/**", "exvlan-core/**", "exvlan-proto/**", "exvlan/contrib/exvlan-ohrs/**", ".github/workflows/ohos.yml", ".github/actions/**"]'
+          paths: '["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**", "exvlan/**", "exvlan/core/**", "exvlan/proto/**", "exvlan/contrib/ohrs/**", ".github/workflows/ohos.yml", ".github/actions/**"]'
 
   ohos:
     name: ohos
@@ -94,13 +94,13 @@ jobs:
             pkg-config curl libgl1-mesa-dev expect llvm clang lldb lld
           rustup component add rustfmt
           cargo fmt --all --manifest-path \
-            exvlan/contrib/exvlan-ohrs/Cargo.toml -- --check
+            exvlan/contrib/ohrs/Cargo.toml -- --check
           cargo test --locked --manifest-path \
-            exvlan/contrib/exvlan-ohrs/Cargo.toml \
+            exvlan/contrib/ohrs/Cargo.toml \
             -p exvlan-ohos-core -p exvlan-ohos-features \
             --lib -- --test-threads=1
           cargo check --locked --manifest-path \
-            exvlan/contrib/exvlan-ohrs/Cargo.toml \
+            exvlan/contrib/ohrs/Cargo.toml \
             -p exvlan-ohrs --tests
 
           cargo_version=$(cargo metadata --format-version 1 --no-deps \
@@ -135,7 +135,7 @@ jobs:
           echo "EXVLAN_PACKAGE_NAME=$package_name" >> "$GITHUB_ENV"
           echo "EXVLAN_VERSION=$package_version" >> "$GITHUB_ENV"
 
-          package_dir=exvlan/contrib/exvlan-ohrs/package
+          package_dir=exvlan/contrib/ohrs/package
           jq --arg name "$package_name" --arg version "$package_version" \
             '.name = $name | .version = $version' \
             "$package_dir/oh-package.json5" > "$package_dir/oh-package.tmp.json5"
@@ -160,7 +160,7 @@ jobs:
           sudo chmod +x \
             "$OHOS_NDK_HOME/native/llvm/aarch64-unknown-linux-ohos-clang.sh"
 
-          cd exvlan/contrib/exvlan-ohrs
+          cd exvlan/contrib/ohrs
           source env.sh
           ohrs build --release --arch aarch
           ohrs artifact
@@ -170,7 +170,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: ${{ steps.package.outputs.name }}
-          path: exvlan/contrib/exvlan-ohrs/${{ steps.package.outputs.name }}.har
+          path: exvlan/contrib/ohrs/${{ steps.package.outputs.name }}.har
           retention-days: 5
           if-no-files-found: error
 
@@ -183,7 +183,7 @@ jobs:
           (github.event_name == 'workflow_dispatch' &&
            github.ref_type == 'branch' &&
            (github.ref_name == 'main' || inputs.publish))
-        working-directory: exvlan/contrib/exvlan-ohrs
+        working-directory: exvlan/contrib/ohrs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CODEARTS_PRIVATE_OHPM: ${{ secrets.CODEARTS_PRIVATE_OHPM }}

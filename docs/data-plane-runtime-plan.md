@@ -13,7 +13,7 @@ The implementation scope is:
 - `exvlan-core`;
 - the native `exvlan` composition that injects the existing optional KCP
   backend;
-- `exvlan/contrib/exvlan-ffi`;
+- `exvlan/contrib/ffi`;
 - the WASI guest ABI implemented by `exvlan-core`;
 - `exvlan-go`;
 - TCP, UDP, and smoltcp data-plane paths;
@@ -158,7 +158,7 @@ underlay Host resources must not be exposed as public data-plane handles.
 The target layout is:
 
 ```text
-exvlan-core/src/gateway/
+exvlan/core/src/gateway/
   dataplane/
     mod.rs
     runtime.rs
