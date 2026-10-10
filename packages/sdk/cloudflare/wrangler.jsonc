@@ -21,12 +21,12 @@
     "bindings": [
       {
         "name": "EXVLAN_CORE",
-        "class_name": "EasyTierCoreObject"
+        "class_name": "ExvlanCoreObject"
       }
     ]
   },
   "exports": {
-    "EasyTierCoreObject": {
+    "ExvlanCoreObject": {
       "type": "durable-object",
       "storage": "sqlite"
     }
