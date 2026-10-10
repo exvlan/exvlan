@@ -65,6 +65,7 @@ bash .agents/skills/upstream-fork-sync/scripts/check_invariants.sh
 ## 工具脚本
 
 - `scripts/map_paths.py --tag <upstream-tag>`：读取 manifest，列出上游路径 → 目标映射，并标记未映射项（`❓`）。
+- `scripts/reconcile_paths.py [--upstream <ref>] [--ours <ref>]`：逐文件核对上游 release 与当前分支，报告遗漏（MISSING）/多余（EXTRA）文件（按 rebrand+重定位映射）。
 - `scripts/check_invariants.sh`：校验分支不变量。
 - `scripts/plan_renames.sh --tag <upstream-tag>`：依据 manifest 生成 merge 期的 `git mv`/搬迁计划。
 
