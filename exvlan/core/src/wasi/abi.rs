@@ -13,7 +13,7 @@
 //! or the runtime receives the `cancel_operation` import.
 
 /// WebAssembly import module a WASI runtime must implement.
-pub const HOST_IMPORT_MODULE: &str = "exvlan_host";
+pub const HOST_IMPORT_MODULE: &str = "easytier_host";
 
 /// AEAD algorithm identifiers accepted by the optional crypto imports.
 pub const AEAD_AES_128_GCM: u32 = 1;
@@ -68,32 +68,32 @@ pub const GUEST_EXPORTS: &[&str] = &[
     // still starts through the instance exports below.
     "_start",
     // Guest-memory buffers.
-    "exvlan_buffer_alloc",
-    "exvlan_buffer_free",
+    "easytier_buffer_alloc",
+    "easytier_buffer_free",
     // Instance lifecycle and external runtime driving.
-    "exvlan_instance_create",
-    "exvlan_instance_start",
-    "exvlan_instance_stop",
-    "exvlan_instance_drive",
-    "exvlan_instance_notify_completions",
-    "exvlan_instance_state",
-    "exvlan_instance_next_deadline_millis",
+    "easytier_instance_create",
+    "easytier_instance_start",
+    "easytier_instance_stop",
+    "easytier_instance_drive",
+    "easytier_instance_notify_completions",
+    "easytier_instance_state",
+    "easytier_instance_next_deadline_millis",
     // Raw IP packet ingress and error retrieval.
-    "exvlan_instance_send_packet",
-    "exvlan_instance_drop",
-    "exvlan_instance_error_len",
-    "exvlan_instance_error_copy",
+    "easytier_instance_send_packet",
+    "easytier_instance_drop",
+    "easytier_instance_error_len",
+    "easytier_instance_error_copy",
 ];
 
 /// Guest exports present when process-level WebClient management is enabled.
 #[cfg(feature = "management")]
 pub const WEB_CLIENT_GUEST_EXPORTS: &[&str] = &[
-    "exvlan_web_client_create",
-    "exvlan_web_client_drive",
-    "exvlan_web_client_notify_completions",
-    "exvlan_web_client_next_deadline_millis",
-    "exvlan_web_client_is_connected",
-    "exvlan_web_client_drop",
+    "easytier_web_client_create",
+    "easytier_web_client_drive",
+    "easytier_web_client_notify_completions",
+    "easytier_web_client_next_deadline_millis",
+    "easytier_web_client_is_connected",
+    "easytier_web_client_drop",
 ];
 
 /// Guest exports present when protobuf management RPC is enabled.
@@ -111,49 +111,49 @@ pub const WEB_CLIENT_GUEST_EXPORTS: &[&str] = &[
 /// any retained result.
 #[cfg(feature = "management-rpc")]
 pub const RPC_GUEST_EXPORTS: &[&str] = &[
-    "exvlan_rpc_abi_version",
-    "exvlan_rpc_request_submit",
-    "exvlan_rpc_response_take",
-    "exvlan_rpc_operation_free",
+    "easytier_rpc_abi_version",
+    "easytier_rpc_request_submit",
+    "easytier_rpc_response_take",
+    "easytier_rpc_operation_free",
 ];
 
 /// Guest exports present with the host tunnel feature.
 #[cfg(feature = "wasm-host-tunnel")]
 pub const HOST_TUNNEL_GUEST_EXPORTS: &[&str] = &[
-    "exvlan_host_tunnel_abi_version",
-    "exvlan_instance_accept_tunnel",
+    "easytier_host_tunnel_abi_version",
+    "easytier_instance_accept_tunnel",
 ];
 
 /// Guest exports present when the core is built with the smoltcp data plane.
 #[cfg(feature = "proxy-smoltcp-stack")]
 pub const DATA_PLANE_GUEST_EXPORTS: &[&str] = &[
     // ABI discovery.
-    "exvlan_data_plane_abi_version",
-    "exvlan_data_plane_capabilities",
+    "easytier_data_plane_abi_version",
+    "easytier_data_plane_capabilities",
     // Data-plane operation submission.
-    "exvlan_data_plane_tcp_connect_submit",
-    "exvlan_data_plane_tcp_bind_submit",
-    "exvlan_data_plane_tcp_accept_submit",
-    "exvlan_data_plane_tcp_read_submit",
-    "exvlan_data_plane_tcp_write_submit",
-    "exvlan_data_plane_tcp_shutdown_write_submit",
-    "exvlan_data_plane_udp_bind_submit",
-    "exvlan_data_plane_udp_receive_submit",
-    "exvlan_data_plane_udp_send_submit",
-    "exvlan_data_plane_resource_deadline_set",
+    "easytier_data_plane_tcp_connect_submit",
+    "easytier_data_plane_tcp_bind_submit",
+    "easytier_data_plane_tcp_accept_submit",
+    "easytier_data_plane_tcp_read_submit",
+    "easytier_data_plane_tcp_write_submit",
+    "easytier_data_plane_tcp_shutdown_write_submit",
+    "easytier_data_plane_udp_bind_submit",
+    "easytier_data_plane_udp_receive_submit",
+    "easytier_data_plane_udp_send_submit",
+    "easytier_data_plane_resource_deadline_set",
     // Completion, result, and resource lifecycle.
-    "exvlan_data_plane_completion_drain",
-    "exvlan_data_plane_result_size",
-    "exvlan_data_plane_tcp_connect_result_take",
-    "exvlan_data_plane_tcp_bind_result_take",
-    "exvlan_data_plane_tcp_accept_result_take",
-    "exvlan_data_plane_tcp_read_result_take",
-    "exvlan_data_plane_tcp_write_result_take",
-    "exvlan_data_plane_tcp_shutdown_write_result_take",
-    "exvlan_data_plane_udp_bind_result_take",
-    "exvlan_data_plane_udp_receive_result_take",
-    "exvlan_data_plane_udp_send_result_take",
-    "exvlan_data_plane_operation_cancel",
-    "exvlan_data_plane_operation_free",
-    "exvlan_data_plane_resource_close",
+    "easytier_data_plane_completion_drain",
+    "easytier_data_plane_result_size",
+    "easytier_data_plane_tcp_connect_result_take",
+    "easytier_data_plane_tcp_bind_result_take",
+    "easytier_data_plane_tcp_accept_result_take",
+    "easytier_data_plane_tcp_read_result_take",
+    "easytier_data_plane_tcp_write_result_take",
+    "easytier_data_plane_tcp_shutdown_write_result_take",
+    "easytier_data_plane_udp_bind_result_take",
+    "easytier_data_plane_udp_receive_result_take",
+    "easytier_data_plane_udp_send_result_take",
+    "easytier_data_plane_operation_cancel",
+    "easytier_data_plane_operation_free",
+    "easytier_data_plane_resource_close",
 ];

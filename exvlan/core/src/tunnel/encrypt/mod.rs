@@ -72,7 +72,7 @@ pub fn derive_key_256(secret: &str) -> [u8; 32] {
     let mut key = [0u8; 32];
     let mut hasher = DefaultHasher::new();
     hasher.write(secret.as_bytes());
-    hasher.write(b"exvlan-256bit-key");
+    hasher.write(b"easytier-256bit-key");
     for i in 0..4 {
         let chunk_start = i * 8;
         let chunk_end = chunk_start + 8;
