@@ -7,6 +7,27 @@
 - **develop 保持独立**：develop 不允许混入任何上游链（上游 = EasyTier 等外部仓库），其历史应始终为：本地基点（如 `382534d0` / `9779923b`）→ 单个 squash 提交。
 - 禁止对 develop 直接 merge 上游分支。
 
+**历史背景**：早期为 `dev/feature` + `dev/squash` 双分支互 merge 并直连上游 release（旧引用保留于 `refs/original/`）；
+`b2c96192` 定格现行「develop 独立 + 上游只进 feature」模型。
+
+**操作命令**（完整流程与冲突策略见 [`docs/rules/workflow/upstream-sync.md`](./docs/rules/workflow/upstream-sync.md)）：
+
+```bash
+# A. 上游 release → feature（merge，非 rebase）
+git fetch upstream --tags --prune && git checkout feature && git merge --no-ff upstream/releases/vX.Y.Z
+
+# B. develop → feature；内容一致时用 -s ours 仅建立祖先关系
+git fetch origin && git merge origin/develop
+git merge -s ours origin/develop --no-edit   # 需要时
+
+# C. feature →（squash）develop
+git checkout develop && git merge --squash feature
+git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
+```
+
+**不变量校验**：`git rev-list --merges --count develop` 必须为 `0`；
+`git merge-base --is-ancestor upstream/main develop` 必须非祖先。
+
 <!--VITE PLUS START-->
 
 # Using Vite+, the Unified Toolchain for the Web
