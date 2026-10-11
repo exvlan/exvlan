@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
 import { Api, NetworkTypes } from '@exvlan/std'
-import { GetNetworkMetasResponse } from 'node_modules/@exvlan/std/dist/modules/api'
 import { type ConfigSource, normalizeConfigSource } from './config_source'
 
 type NetworkConfig = NetworkTypes.NetworkConfig
@@ -132,7 +131,7 @@ export async function sendConfigs(enabledNetworks: string[]) {
 }
 
 export async function getNetworkMetas(instanceIds: string[]) {
-  return await invoke<GetNetworkMetasResponse>('get_network_metas', { instanceIds })
+  return await invoke<Api.GetNetworkMetasResponse>('get_network_metas', { instanceIds })
 }
 
 export async function initService(opts?: ServiceOptions) {
