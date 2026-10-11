@@ -4,7 +4,7 @@
   "version": "26.410.20700",
   "type": "module",
   "scripts": {
-    "build:config-wasm": "wasm-pack build ../../exvlan-core --target web --out-dir ../packages/generator/src/generated/config-wasm --out-name exvlan_config --release --no-pack -- --no-default-features --features browser-config",
+    "build:config-wasm": "wasm-pack build ../../exvlan/core --target web --out-dir ../packages/generator/src/generated/config-wasm --out-name exvlan_config --release --no-pack -- --no-default-features --features browser-config",
     "dev": "pnpm build:config-wasm && pnpm --dir ../frontend-lib build && vite",
     "build": "pnpm build:config-wasm && pnpm --dir ../frontend-lib build && vue-tsc --noEmit && vite build",
     "preview": "vite preview"
