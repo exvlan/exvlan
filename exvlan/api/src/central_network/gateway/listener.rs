@@ -144,13 +144,11 @@ fn peer_first_packet_network_name(packet: &ZCPacket) -> Result<String, TunnelErr
                 "noise msg1 has no handshake payload".to_string(),
             ));
         }
-        exvlan_proto::peer_rpc::PeerConnNoiseMsg1Pb::decode(
-            &payload[NOISE_XX_MSG1_EPHEMERAL_LEN..],
-        )
-        .map_err(|error| {
-            TunnelError::InvalidPacket(format!("invalid noise msg1 handshake payload: {error}"))
-        })?
-        .a_network_name
+        exvlan_proto::peer_rpc::PeerConnNoiseMsg1Pb::decode(&payload[NOISE_XX_MSG1_EPHEMERAL_LEN..])
+            .map_err(|error| {
+                TunnelError::InvalidPacket(format!("invalid noise msg1 handshake payload: {error}"))
+            })?
+            .a_network_name
     } else if header.packet_type == PacketType::HandShake as u8 {
         exvlan_proto::peer_rpc::HandshakeRequest::decode(packet.payload())
             .map_err(|error| {

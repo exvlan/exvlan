@@ -732,12 +732,8 @@ mod tests {
 
     #[test]
     fn install_core_args_support_equals_form() {
-        let args = parse_install_core_args(&[
-            "exvlan-cli",
-            "service",
-            "install",
-            "--core-args=--daemon",
-        ]);
+        let args =
+            parse_install_core_args(&["exvlan-cli", "service", "install", "--core-args=--daemon"]);
         assert_eq!(args, vec!["--daemon"]);
     }
 

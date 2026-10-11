@@ -235,9 +235,7 @@ where
             .await
             .map_err(RemoteClientError::PersistentError)?
             .iter()
-            .map(|x| {
-                Into::<exvlan_proto::common::Uuid>::into(x.get_network_inst_id().to_string())
-            })
+            .map(|x| Into::<exvlan_proto::common::Uuid>::into(x.get_network_inst_id().to_string()))
             .filter(|id| !ret.inst_ids.contains(id))
             .collect::<Vec<_>>();
 

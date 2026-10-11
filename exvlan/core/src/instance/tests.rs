@@ -3198,9 +3198,7 @@ virtual_ip = "10.82.0.2/24"
 
     #[tokio::test]
     async fn external_listener_uses_core_running_listener_registry() {
-        let external_url: Url = "unix:///tmp/exvlan-external-listener-test"
-            .parse()
-            .unwrap();
+        let external_url: Url = "unix:///tmp/exvlan-external-listener-test".parse().unwrap();
         let mut config = test_config("external-listener-registry");
         config.connectivity.listeners = Some(ListenerRuntimeConfig::new(
             vec![external_url.clone()],
@@ -3280,9 +3278,7 @@ virtual_ip = "10.82.0.2/24"
         let configured_url: Url = "unix:///tmp/exvlan-outbound-configured-listener"
             .parse()
             .unwrap();
-        let host_url: Url = "unix:///tmp/exvlan-outbound-host-listener"
-            .parse()
-            .unwrap();
+        let host_url: Url = "unix:///tmp/exvlan-outbound-host-listener".parse().unwrap();
         let mut config = test_config("outbound-only-listeners");
         config.connectivity.startup_plan.connectivity = CoreConnectivityMode::OutboundOnly;
         config.connectivity.listeners = Some(ListenerRuntimeConfig::new(

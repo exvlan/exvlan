@@ -497,21 +497,27 @@ impl CentralNetworkService {
                             ));
                         }
                         if session.applied_config_revision().await.as_deref() == Some(&revision) {
-                            let running = self.client_manager
+                            let running = self
+                                .client_manager
                                 .get_rpc_client((user_id, machine_id))
-                                .ok_or_else(|| CentralNetworkServiceError::Conflict("device disconnected".into()))?
+                                .ok_or_else(|| {
+                                    CentralNetworkServiceError::Conflict(
+                                        "device disconnected".into(),
+                                    )
+                                })?
                                 .list_network_instance(
                                     exvlan::proto::rpc_types::controller::BaseController::default(),
-                                    exvlan::proto::api::manage::ListNetworkInstanceRequest::default(),
-                                ).await
+                                    exvlan::proto::api::manage::ListNetworkInstanceRequest::default(
+                                    ),
+                                )
+                                .await
                                 .map_err(|error| {
                                     CentralNetworkServiceError::Conflict(error.to_string())
                                 })?;
-                            if owned.iter().any(|config| {
-                                running
-                                    .inst_ids
-                                    .contains(&config.instance_id.into())
-                            }) {
+                            if owned
+                                .iter()
+                                .any(|config| running.inst_ids.contains(&config.instance_id.into()))
+                            {
                                 return Err(CentralNetworkServiceError::Conflict(
                                     "device still has running managed instances".into(),
                                 ));

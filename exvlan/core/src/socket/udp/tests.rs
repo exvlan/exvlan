@@ -2184,10 +2184,7 @@ fn inspects_exvlan_udp_datagram_without_owning_buffer() {
         &[],
     )
     .into_bytes();
-    assert_eq!(
-        inspect_exvlan_udp_datagram(&unknown_packet).unwrap(),
-        None
-    );
+    assert_eq!(inspect_exvlan_udp_datagram(&unknown_packet).unwrap(), None);
 
     let mut bad_packet = packet.to_vec();
     bad_packet.pop();

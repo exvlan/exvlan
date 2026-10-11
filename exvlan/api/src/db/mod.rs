@@ -7,9 +7,9 @@ pub mod entity;
 pub(crate) use central_intent::{CentralIntentError, CentralOwnedRuntimeConfig};
 pub use devices::DeviceHeartbeatRecord;
 
+use entity::user_running_network_configs;
 use exvlan::common::config::{ConfigSource, NetworkConfig};
 use exvlan_core::management::remote_client::{ListNetworkProps, Storage};
-use entity::user_running_network_configs;
 use sea_orm::{
     ColumnTrait as _, DatabaseConnection, DbErr, EntityTrait, QueryFilter as _, Set,
     SqlxSqliteConnector, TransactionTrait as _, sea_query::OnConflict,

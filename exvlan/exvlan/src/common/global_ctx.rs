@@ -472,8 +472,7 @@ pub mod tests {
         ]));
         let host = crate::instance::config::compact_runtime_core_host_config();
         let normalized =
-            exvlan_core::instance::CoreInstanceConfig::from_toml_with_host(&config, &host)
-                .unwrap();
+            exvlan_core::instance::CoreInstanceConfig::from_toml_with_host(&config, &host).unwrap();
 
         let global_ctx = GlobalCtx::new_with_runtime_config(config.clone(), &normalized, &host);
 

@@ -44,9 +44,7 @@ impl TestInstance {
         config: TomlConfig,
         process_runtime: Arc<CoreProcessRuntime>,
         customize: impl FnOnce(
-            &mut exvlan_core::instance::CoreHostAdapters<
-                crate::instance::host::NativeInstanceHost,
-            >,
+            &mut exvlan_core::instance::CoreHostAdapters<crate::instance::host::NativeInstanceHost>,
         ),
     ) -> Self {
         let global_ctx = Arc::new(GlobalCtx::new(config.clone()));

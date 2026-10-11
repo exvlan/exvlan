@@ -467,8 +467,7 @@ mod tests {
     fn additional_default_console_targets_are_scoped() {
         let _env = EnvVarGuard::set(None);
         let filter =
-            TargetFilter::console_with_default_targets(None, &[LOG_TARGET, "exvlan_web"])
-                .unwrap();
+            TargetFilter::console_with_default_targets(None, &[LOG_TARGET, "exvlan_web"]).unwrap();
 
         assert!(filter.enabled("CORE::peer", Level::Info));
         assert!(filter.enabled("exvlan_web::client_manager", Level::Info));

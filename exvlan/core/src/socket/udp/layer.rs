@@ -599,9 +599,7 @@ where
         ExvlanUdpPacketKind::Sack => {
             dispatch_sack_packet(sessions, pending_connects, remote_addr, conn_id, &packet)
         }
-        ExvlanUdpPacketKind::HolePunch => {
-            dispatch_hole_punch_packet(pending_connects, remote_addr)
-        }
+        ExvlanUdpPacketKind::HolePunch => dispatch_hole_punch_packet(pending_connects, remote_addr),
         ExvlanUdpPacketKind::V4HolePunch => dispatch_v4_hole_punch_control(
             socket.clone(),
             control_permits.clone(),
