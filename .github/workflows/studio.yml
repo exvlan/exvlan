@@ -118,7 +118,7 @@ jobs:
               aarch64*) ARCH_DIR=arm64 ;;
           esac
           if [[ -n "$ARCH_DIR" ]]; then
-              find "./exvlan/core/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" -o -name "*.lib" \) -exec cp {} ./packages/studio/src-tauri/ \;
+              find "./exvlan/exvlan/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" -o -name "*.lib" \) -exec cp {} ./packages/studio/src-tauri/ \;
           fi
 
       - name: Build GUI (Tauri)
@@ -150,7 +150,7 @@ jobs:
       - name: Archive artifact
         uses: actions/upload-artifact@v7
         with:
-          name: @exvlan/studio-${{ matrix.ARTIFACT_NAME }}
+          name: exvlan-studio-${{ matrix.ARTIFACT_NAME }}
           path: |
             ./artifacts/*
           if-no-files-found: error

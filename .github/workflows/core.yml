@@ -72,7 +72,7 @@ jobs:
         uses: ./.github/actions/prepare-pnpm
         with:
           token: ${{ github.token }}
-          build-filter: './exvlan/api/*'
+          build-filter: './packages/*'
 
       - name: Archive artifact
         uses: actions/upload-artifact@v5
@@ -240,7 +240,7 @@ jobs:
                   aarch64*) ARCH_DIR=arm64 ;;
               esac
               if [[ -n "$ARCH_DIR" ]]; then
-                  find "exvlan/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./artifacts/objects/ \;
+                  find "exvlan/exvlan/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./artifacts/objects/ \;
               fi
           fi
 

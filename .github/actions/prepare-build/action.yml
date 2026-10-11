@@ -10,9 +10,9 @@ inputs:
     required: true
     default: 'true'
   pnpm-build-filter:
-    description: 'The filter argument for pnpm build (e.g. ./exvlan/api/*)'
+    description: 'The filter argument for pnpm build (e.g. ./packages/*)'
     required: false
-    default: './exvlan/api/*'
+    default: './packages/*'
   gui:
     description: 'Whether to prepare the GUI build environment'
     required: true
@@ -23,7 +23,7 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - run: mkdir -p @exvlan/studio/dist
+    - run: mkdir -p packages/studio/dist
       shell: bash
 
     - name: Install dependencies

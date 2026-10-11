@@ -28,7 +28,7 @@ jobs:
         ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**",
         "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "exvlan/**",
         "exvlan/core/**", "exvlan/proto/**", "exvlan/proto/build/**",
-        "@exvlan/studio/**", "tauri-plugin-vpnservice/**",
+        "packages/studio/**", "tauri-plugin-vpnservice/**",
         "packages/std/**", ".github/workflows/mobile.yml",
         ".github/actions/**"]
     outputs:
@@ -126,13 +126,13 @@ jobs:
 
       - name: Build
         run: |
-          cd @exvlan/studio
+          cd packages/studio
           pnpm tauri android build --apk --target "$ARCH" --split-per-abi
 
       - name: Collect artifact
         run: |
           mkdir -p ./artifacts/objects/
-          mv @exvlan/studio/src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk ./artifacts/objects/
+          mv packages/studio/src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk ./artifacts/objects/
           
           if [[ $GITHUB_REF_TYPE =~ ^tag$ ]]; then
             TAG=$GITHUB_REF_NAME

@@ -7,7 +7,7 @@ inputs:
     description: 'GitHub token, used by setup-protoc action'
     required: false
   build-filter:
-    description: 'The filter argument for pnpm build (e.g. @exvlan/studio)'
+    description: 'The filter argument for pnpm build (e.g. packages/studio)'
     required: false
     default: ''
 
