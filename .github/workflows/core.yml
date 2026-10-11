@@ -306,7 +306,7 @@ jobs:
         uses: ./.github/actions/prepare-pnpm
         with:
           token: ${{ github.token }}
-          build-filter: './packages/ui'
+          build-filter: './packages/*'
 
       - name: Restore Linux aarch64 binaries
         uses: actions/cache/restore@v4
