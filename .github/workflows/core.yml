@@ -62,25 +62,6 @@ jobs:
         with:
           filters: |
             relevant: ${{ env.RELEVANT_PATHS }}
-  build_web:
-    runs-on: ubuntu-latest
-    needs: pre_job
-    if: needs.pre_job.outputs.should_skip != 'true'
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Frontend Environment
-        uses: ./.github/actions/prepare-pnpm
-        with:
-          token: ${{ github.token }}
-          build-filter: './packages/*'
-
-      - name: Archive artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: exvlan-api-dashboard
-          path: |
-            packages/ui/dist/*
   build:
     strategy:
       fail-fast: true
@@ -150,7 +131,6 @@ jobs:
       OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
     needs:
       - pre_job
-      - build_web
     if: needs.pre_job.outputs.should_skip != 'true'
     steps:
       - uses: actions/checkout@v5
@@ -158,12 +138,6 @@ jobs:
       - name: Set current ref as env variable
         run: |
           echo "GIT_DESC=$(git log -1 --format=%cd.%h --date=format:%Y-%m-%d_%H:%M:%S)" >> $GITHUB_ENV
-
-      - name: Download web artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: exvlan-api-dashboard
-          path: packages/ui/dist/
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
@@ -266,7 +240,8 @@ jobs:
             UPX_BIN=./upx
           fi
 
-          for BIN in ./target/$TARGET/release/exvlan-{core,cli,web,web-embed}"$SUFFIX"; do
+          for BIN_NAME in exvlan exvlan-cli exvlan-api exvlan-api-embed; do
+            BIN="./target/$TARGET/release/${BIN_NAME}${SUFFIX}"
             if [[ -f "$BIN" ]]; then
               if [[ -n "$UPX_BIN" ]]; then
                 $UPX_BIN --lzma --best "$BIN" || true
@@ -279,12 +254,11 @@ jobs:
           mv ./artifacts/objects/* ./artifacts/
           rm -rf ./artifacts/objects/
 
-      - name: Archive artifact
-        uses: actions/upload-artifact@v5
+      - name: Cache core binaries
+        uses: actions/cache/save@v4
         with:
-          name: exvlan-${{ matrix.ARTIFACT_NAME }}
-          path: |
-            ./artifacts/*
+          key: core-${{ github.sha }}-${{ matrix.ARTIFACT_NAME }}
+          path: ./artifacts
 
       - name: Prepare SignPath test artifact
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
@@ -329,24 +303,24 @@ jobs:
 
   build_magisk:
     runs-on: ubuntu-latest
-    needs: [ pre_job, build_web, build ]
+    needs: [ pre_job, build ]
     if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5  # 必须先检出代码才能获取模块配置
 
-      # 下载二进制文件到独立目录
-      - name: Download Linux aarch64 binaries
-        uses: actions/download-artifact@v4
+      - name: Setup Frontend Environment
+        uses: ./.github/actions/prepare-pnpm
         with:
-          name: exvlan-linux-aarch64
-          path: ./downloaded-binaries/  # 独立目录避免冲突
+          token: ${{ github.token }}
+          build-filter: './packages/ui'
 
-      - name: Download Magisk WebUI
-        uses: actions/download-artifact@v4
+      - name: Restore Linux aarch64 binaries
+        uses: actions/cache/restore@v4
         with:
-          name: exvlan-api-dashboard
-          path: ./downloaded-webui/
+          key: core-${{ github.sha }}-linux-aarch64
+          path: ./downloaded-binaries
+          fail-on-cache-miss: true
 
       # 将二进制文件和 WebUI 复制到 Magisk 模块目录
       - name: Prepare Magisk module
@@ -356,23 +330,19 @@ jobs:
           cp ./downloaded-binaries/exvlan "$module_dir/"
           cp ./downloaded-binaries/exvlan-cli "$module_dir/"
           cp ./downloaded-binaries/exvlan-api "$module_dir/"
-          cp -R ./downloaded-webui/config-generator/. "$module_dir/webroot/"
+          cp -R ./packages/ui/dist/config-generator/. "$module_dir/webroot/"
           test -f "$module_dir/webroot/index.html"
 
-      # 上传生成的模块
-      - name: Upload Magisk Module
-        uses: actions/upload-artifact@v5
+      # 缓存生成的模块
+      - name: Cache Magisk Module
+        uses: actions/cache/save@v4
         with:
-          name: Exvlan-Magisk
-          path: |
-            ./exvlan/contrib/magisk
-            !./exvlan/contrib/magisk/build.sh
-            !./exvlan/contrib/magisk/magisk_update.json
-          if-no-files-found: error
+          key: magisk-${{ github.sha }}
+          path: ./exvlan/contrib/magisk
 
   core-result:
     runs-on: ubuntu-latest
-    needs: [ pre_job, build_web, build, build_magisk ]
+    needs: [ pre_job, build, build_magisk ]
     if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
       - name: Mark result as failed
