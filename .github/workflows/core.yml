@@ -64,7 +64,7 @@ jobs:
             relevant: ${{ env.RELEVANT_PATHS }}
   build:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - TARGET: x86_64-unknown-linux-musl
@@ -93,13 +93,6 @@ jobs:
           - TARGET: arm-unknown-linux-musleabi # raspberry pi 0-1, not tested
             OS: ubuntu-24.04
             ARTIFACT_NAME: linux-arm
-
-          - TARGET: mips-unknown-linux-musl
-            OS: ubuntu-24.04
-            ARTIFACT_NAME: linux-mips
-          - TARGET: mipsel-unknown-linux-musl
-            OS: ubuntu-24.04
-            ARTIFACT_NAME: linux-mipsel
 
           - TARGET: x86_64-unknown-freebsd
             OS: ubuntu-24.04
@@ -304,7 +297,7 @@ jobs:
   build_magisk:
     runs-on: ubuntu-latest
     needs: [ pre_job, build ]
-    if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
+    if: needs.pre_job.result == 'success' && needs.build.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5  # 必须先检出代码才能获取模块配置
