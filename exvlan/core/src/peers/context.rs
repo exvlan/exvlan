@@ -37,7 +37,7 @@ use crate::{
     },
 };
 
-pub(crate) const SECRET_PROOF_PREFIX: &[u8] = b"easytier secret proof";
+pub(crate) const SECRET_PROOF_PREFIX: &[u8] = b"exvlan secret proof";
 const PEER_EVENT_CAPACITY: usize = 100;
 
 #[derive(Debug, Clone)]

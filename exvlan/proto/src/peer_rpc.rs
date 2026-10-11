@@ -51,7 +51,7 @@ impl TrustedCredentialPubkeyProof {
     ) -> Vec<u8> {
         let mut mac = Hmac::<Sha256>::new_from_slice(network_secret.as_bytes())
             .expect("HMAC can take key of any size");
-        mac.update(b"easytier credential proof");
+        mac.update(b"exvlan credential proof");
         mac.update(credential_bytes);
         mac.finalize().into_bytes().to_vec()
     }
@@ -89,7 +89,7 @@ impl TrustedCredentialPubkeyProof {
 
         let mut mac = Hmac::<Sha256>::new_from_slice(network_secret.as_bytes())
             .expect("HMAC can take key of any size");
-        mac.update(b"easytier credential proof");
+        mac.update(b"exvlan credential proof");
         mac.update(credential_bytes);
         mac.verify_slice(&self.credential_hmac).is_ok()
     }

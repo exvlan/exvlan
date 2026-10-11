@@ -15,7 +15,7 @@ use crate::{
 };
 
 const NOISE_MAGIC: &[u8] = b"ET_WEB_NOISE_V1:";
-const NOISE_PROLOGUE: &[u8] = b"easytier-webclient-noise-v1";
+const NOISE_PROLOGUE: &[u8] = b"exvlan-webclient-noise-v1";
 const NOISE_PATTERN: &str = "Noise_NN_25519_ChaChaPoly_SHA256";
 const WEB_SECURE_CIPHER_ALGORITHM: &str = "aes-gcm";
 const WEB_SESSION_GENERATION: u32 = 1;

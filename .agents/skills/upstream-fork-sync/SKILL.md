@@ -66,8 +66,22 @@ bash .agents/skills/upstream-fork-sync/scripts/check_invariants.sh
 
 - `scripts/map_paths.py --tag <upstream-tag>`：读取 manifest，列出上游路径 → 目标映射，并标记未映射项（`❓`）。
 - `scripts/reconcile_paths.py [--upstream <ref>] [--ours <ref>]`：逐文件核对上游 release 与当前分支，报告遗漏（MISSING）/多余（EXTRA）文件（按 rebrand+重定位映射）。
+- `scripts/check_fork_consistency.py [--upstream <ref>]`：Fork 一致性守卫——WASI ABI 六面一致 + features 功能对齐。
 - `scripts/check_invariants.sh`：校验分支不变量。
 - `scripts/plan_renames.sh --tag <upstream-tag>`：依据 manifest 生成 merge 期的 `git mv`/搬迁计划。
+
+## 常量分类（防误伤）—— 来自 v2.7.0 的教训
+
+大面积 rebrand 会误伤「协议/ ABI 契约」类字符串。必须分类处理：
+
+| 类别 | 例子 | 处理 |
+| --- | --- | --- |
+| **C. 网络 wire 常量** | KDF 域分隔 `*-bit-key`、Noise prologue、`secret/credential proof`、WireGuard-portal HKDF | fork 自洽即可 → **`exvlan`**（本 fork 不与上游互通；需同步更新断言测试） |
+| **B. 宿主 ABI 名** | WASI `exvlan_host` / `exvlan_buffer_alloc` / `exvlan_instance_*` | fork 内部（guest wasm ↔ native/JS/Go 宿主），**六面必须同向**；不上网 |
+| **A. 品牌/本地名** | 日志文件、socket、CLI、`user_agent`、tracing target | `exvlan` |
+| 外部依赖 | `tun-easytier`、`github.com/EasyTier/*` | **保留原名** |
+
+**原则**：不要求与上游节点互通，但**功能必须与上游一致**（加密/协议机制不变；`check_fork_consistency.py` 做 features 对齐抽查）。WASI ABI 改动后必须**重建 wasm**（`script/build-wasi-core.sh`）并更新 `exvlan/go/internal/artifact/*.wasm`。
 
 ## 红线
 

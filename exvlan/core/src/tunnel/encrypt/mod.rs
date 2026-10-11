@@ -72,7 +72,7 @@ pub fn derive_key_256(secret: &str) -> [u8; 32] {
     let mut key = [0u8; 32];
     let mut hasher = DefaultHasher::new();
     hasher.write(secret.as_bytes());
-    hasher.write(b"easytier-256bit-key");
+    hasher.write(b"exvlan-256bit-key");
     for i in 0..4 {
         let chunk_start = i * 8;
         let chunk_end = chunk_start + 8;
@@ -348,8 +348,8 @@ mod tests {
         assert_eq!(
             derive_key_256("secret"),
             [
-                199, 205, 248, 94, 194, 101, 97, 138, 79, 69, 167, 248, 140, 5, 165, 163, 192, 139,
-                166, 217, 166, 152, 28, 230, 146, 109, 150, 196, 66, 242, 231, 140,
+                187, 39, 82, 4, 204, 27, 239, 177, 230, 106, 0, 103, 192, 104, 122, 162, 241, 58,
+                251, 141, 162, 96, 180, 128, 180, 66, 143, 143, 51, 179, 172, 200,
             ]
         );
     }

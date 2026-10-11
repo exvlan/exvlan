@@ -364,7 +364,7 @@ fn derive_named_key(master: &[u8; 32], domain: &[u8], name: &str) -> anyhow::Res
     let mut context = Vec::new();
     append_label(&mut context, domain);
     append_label(&mut context, name.as_bytes());
-    let hkdf = Hkdf::<Sha256>::new(Some(b"easytier/wireguard-portal/v1"), master);
+    let hkdf = Hkdf::<Sha256>::new(Some(b"exvlan/wireguard-portal/v1"), master);
     let mut output = [0u8; 32];
     hkdf.expand(&context, &mut output)
         .map_err(|_| anyhow::anyhow!("failed to derive portal client key"))?;

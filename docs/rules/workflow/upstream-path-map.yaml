@@ -5,6 +5,13 @@ version: v2.7.0
 upstream_remote: git@github.com:EasyTier/EasyTier.git
 upstream_ref: upstream/releases/v2.7.0
 
+# rebrand 分类（防误伤；详见 SKILL.md）
+# - wire 常量（KDF/Noise/proof/HKDF）: 改为 exvlan（fork 自洽；不再与上游互通；需同步测试断言）
+# - WASI 宿主 ABI 名（exvlan_host/exvlan_buffer_*/…）: 六面必须同向；改动后重建 wasm
+# - 品牌/本地名（日志/socket/CLI）: exvlan
+# - 外部依赖（tun-easytier、github.com/EasyTier/*）: 保留原名
+rebrand_taxonomy: { wire: exvlan, wasi_abi: exvlan, brand: exvlan, external: keep }
+
 # 忽略（本仓库不跟踪，见 .gitignore）
 ignore:
   - Cargo.lock
