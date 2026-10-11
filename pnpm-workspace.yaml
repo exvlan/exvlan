@@ -20,7 +20,6 @@ minimumReleaseAgeExclude:
   - tsdown@0.22.3
 overrides:
   minimatch: ^10.2.6
-  typescript: npm:typescript@6.0.3
   vite: 'catalog:'
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.8
