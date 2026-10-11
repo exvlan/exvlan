@@ -16,7 +16,7 @@
     ],
     "createUpdaterArtifacts": false
   },
-  "productName": "@exvlan/studio",
+  "productName": "EXVlan",
   "version": "2.7.0",
   "identifier": "com.kkrainbow.exvlan",
   "plugins": {
@@ -27,7 +27,7 @@
   "app": {
     "windows": [
       {
-        "title": "@exvlan/studio",
+        "title": "EXVlan",
         "width": 800,
         "height": 600
       }
