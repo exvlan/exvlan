@@ -1,6 +1,11 @@
 name: Exvlan Docker
 
 on:
+  workflow_call:
+    inputs:
+      mark_latest: { description: 'Mark as latest', type: boolean, default: false, required: false }
+      mark_unstable: { description: 'Mark as unstable', type: boolean, default: false, required: false }
+      is_alpha: { description: 'Is alpha', type: boolean, default: false, required: false }
   workflow_dispatch:
     inputs:
       run_id:

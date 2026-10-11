@@ -1,6 +1,11 @@
 name: Exvlan Release
 
 on:
+  workflow_call:
+    inputs:
+      version: { description: 'Version', type: string, required: false }
+      mark_latest: { description: 'Mark as latest', type: boolean, default: true, required: false }
+      is_alpha: { description: 'Is alpha', type: boolean, default: false, required: false }
   workflow_dispatch:
     inputs:
       core_run_id:

@@ -1,6 +1,7 @@
 name: Exvlan Core
 
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches: [ "develop", "main", "releases/**" ]
