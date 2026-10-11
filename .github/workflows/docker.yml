@@ -64,34 +64,24 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Restore core binaries (x86_64)
         uses: actions/cache/restore@v4
-        with:
-          key: core-${{ github.sha }}-linux-x86_64
-          path: docker_context/exvlan-linux-x86_64
-          fail-on-cache-miss: true
+        with: { key: 'core-${{ github.sha }}-linux-x86_64', path: ./artifacts, fail-on-cache-miss: true }
+      - run: mkdir -p docker_context/exvlan-linux-x86_64 && mv ./artifacts/* docker_context/exvlan-linux-x86_64/ && rm -rf ./artifacts
       - name: Restore core binaries (armhf)
         uses: actions/cache/restore@v4
-        with:
-          key: core-${{ github.sha }}-linux-armhf
-          path: docker_context/exvlan-linux-armhf
-          fail-on-cache-miss: true
+        with: { key: 'core-${{ github.sha }}-linux-armhf', path: ./artifacts, fail-on-cache-miss: true }
+      - run: mkdir -p docker_context/exvlan-linux-armhf && mv ./artifacts/* docker_context/exvlan-linux-armhf/ && rm -rf ./artifacts
       - name: Restore core binaries (armv7hf)
         uses: actions/cache/restore@v4
-        with:
-          key: core-${{ github.sha }}-linux-armv7hf
-          path: docker_context/exvlan-linux-armv7hf
-          fail-on-cache-miss: true
+        with: { key: 'core-${{ github.sha }}-linux-armv7hf', path: ./artifacts, fail-on-cache-miss: true }
+      - run: mkdir -p docker_context/exvlan-linux-armv7hf && mv ./artifacts/* docker_context/exvlan-linux-armv7hf/ && rm -rf ./artifacts
       - name: Restore core binaries (aarch64)
         uses: actions/cache/restore@v4
-        with:
-          key: core-${{ github.sha }}-linux-aarch64
-          path: docker_context/exvlan-linux-aarch64
-          fail-on-cache-miss: true
+        with: { key: 'core-${{ github.sha }}-linux-aarch64', path: ./artifacts, fail-on-cache-miss: true }
+      - run: mkdir -p docker_context/exvlan-linux-aarch64 && mv ./artifacts/* docker_context/exvlan-linux-aarch64/ && rm -rf ./artifacts
       - name: Restore core binaries (riscv64)
         uses: actions/cache/restore@v4
-        with:
-          key: core-${{ github.sha }}-linux-riscv64
-          path: docker_context/exvlan-linux-riscv64
-          fail-on-cache-miss: true
+        with: { key: 'core-${{ github.sha }}-linux-riscv64', path: ./artifacts, fail-on-cache-miss: true }
+      - run: mkdir -p docker_context/exvlan-linux-riscv64 && mv ./artifacts/* docker_context/exvlan-linux-riscv64/ && rm -rf ./artifacts
       - name: List files
         run: |
           ls -l -R .

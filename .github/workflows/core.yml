@@ -312,7 +312,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           key: core-${{ github.sha }}-linux-aarch64
-          path: ./downloaded-binaries
+          path: ./artifacts
           fail-on-cache-miss: true
 
       # 将二进制文件和 WebUI 复制到 Magisk 模块目录
@@ -320,9 +320,9 @@ jobs:
         run: |
           module_dir=./exvlan/contrib/magisk
           mkdir -p "$module_dir/webroot"
-          cp ./downloaded-binaries/exvlan "$module_dir/"
-          cp ./downloaded-binaries/exvlan-cli "$module_dir/"
-          cp ./downloaded-binaries/exvlan-api "$module_dir/"
+          cp ./artifacts/exvlan "$module_dir/"
+          cp ./artifacts/exvlan-cli "$module_dir/"
+          cp ./artifacts/exvlan-api "$module_dir/"
           cp -R ./packages/ui/dist/config-generator/. "$module_dir/webroot/"
           test -f "$module_dir/webroot/index.html"
 
