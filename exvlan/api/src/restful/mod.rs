@@ -39,7 +39,7 @@ use crate::webhook::SharedWebhookConfig;
 /// Embed assets for web dashboard, build frontend first
 #[cfg(feature = "embed")]
 #[derive(rust_embed::RustEmbed, Clone)]
-#[folder = "frontend/dist/"]
+#[folder = "../../packages/ui/dist/"]
 struct Assets;
 
 pub struct RestfulServer {
