@@ -62,14 +62,36 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download artifact
-        id: download-artifact
-        uses: dawidd6/action-download-artifact@v11
+      - name: Restore core binaries (x86_64)
+        uses: actions/cache/restore@v4
         with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          run_id: ${{ inputs.run_id }}
-          repo: exvlan/exvlan
-          path: docker_context
+          key: core-${{ github.sha }}-linux-x86_64
+          path: docker_context/exvlan-linux-x86_64
+          fail-on-cache-miss: true
+      - name: Restore core binaries (armhf)
+        uses: actions/cache/restore@v4
+        with:
+          key: core-${{ github.sha }}-linux-armhf
+          path: docker_context/exvlan-linux-armhf
+          fail-on-cache-miss: true
+      - name: Restore core binaries (armv7hf)
+        uses: actions/cache/restore@v4
+        with:
+          key: core-${{ github.sha }}-linux-armv7hf
+          path: docker_context/exvlan-linux-armv7hf
+          fail-on-cache-miss: true
+      - name: Restore core binaries (aarch64)
+        uses: actions/cache/restore@v4
+        with:
+          key: core-${{ github.sha }}-linux-aarch64
+          path: docker_context/exvlan-linux-aarch64
+          fail-on-cache-miss: true
+      - name: Restore core binaries (riscv64)
+        uses: actions/cache/restore@v4
+        with:
+          key: core-${{ github.sha }}-linux-riscv64
+          path: docker_context/exvlan-linux-riscv64
+          fail-on-cache-miss: true
       - name: List files
         run: |
           ls -l -R .

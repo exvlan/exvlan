@@ -144,12 +144,11 @@ jobs:
           mv ./artifacts/objects/* ./artifacts/
           rm -rf ./artifacts/objects/
 
-      - name: Archive artifact
-        uses: actions/upload-artifact@v5
+      - name: Cache artifact
+        uses: actions/cache/save@v4
         with:
-          name: exvlan-mobile-android-${{ matrix.ARCH }}
-          path: |
-            ./artifacts/*
+          key: mobile-${{ github.sha }}-${{ matrix.ARCH }}
+          path: ./artifacts
 
   mobile-result:
     runs-on: ubuntu-latest

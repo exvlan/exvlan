@@ -147,11 +147,9 @@ jobs:
           echo "Collected artifacts:"
           ls -F ./artifacts/
 
-      - name: Archive artifact
-        uses: actions/upload-artifact@v7
+      - name: Cache artifact
+        uses: actions/cache/save@v4
         with:
-          name: exvlan-studio-${{ matrix.ARTIFACT_NAME }}
-          path: |
-            ./artifacts/*
-          if-no-files-found: error
+          key: studio-${{ github.sha }}-${{ matrix.ARTIFACT_NAME }}
+          path: ./artifacts
           retention-days: 7
