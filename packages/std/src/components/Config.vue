@@ -107,7 +107,7 @@ function searchInetSuggestions(e: { query: string }) {
   if (e.query.search('/') >= 0) {
     inetSuggestions.value = [e.query]
   } else {
-    const ret = []
+    const ret: string[] = []
     for (let i = 0; i < 32; i++) {
       ret.push(`${e.query}/${i}`)
     }
@@ -118,7 +118,7 @@ function searchInetSuggestions(e: { query: string }) {
 const exitNodesSuggestions = ref([''])
 
 function searchExitNodesSuggestions(e: { query: string }) {
-  const ret = []
+  const ret: string[] = []
   ret.push(e.query)
   exitNodesSuggestions.value = ret
 }
@@ -126,7 +126,7 @@ function searchExitNodesSuggestions(e: { query: string }) {
 const whitelistSuggestions = ref([''])
 
 function searchWhitelistSuggestions(e: { query: string }) {
-  const ret = []
+  const ret: string[] = []
   ret.push(e.query)
   whitelistSuggestions.value = ret
 }
