@@ -102,7 +102,25 @@ android {
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
                     .toList().toTypedArray()
             )
-            signingConfig = signingConfigs.getByName("release")
+            // 仅当 release keystore 实际可加载时使用它（真实发布流水线通过 KEYSTORE_* 提供）；
+            // 否则回退到 debug 签名，保证 CI 能产出可安装 APK 而不因 keystore 密码不匹配而失败。
+            val releaseSigning = signingConfigs.getByName("release")
+            val hasUsableKeystore = run {
+                val store = releaseSigning.storeFile
+                val pw = releaseSigning.storePassword
+                if (store != null && store.exists() && !pw.isNullOrEmpty()) {
+                    try {
+                        java.security.KeyStore.getInstance(store, pw.toCharArray()).load(null, null)
+                        true
+                    } catch (e: Throwable) {
+                        logger.warn("Release keystore unusable (${store.path}): ${e.message}; falling back to debug signing")
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            signingConfig = if (hasUsableKeystore) releaseSigning else signingConfigs.getByName("debug")
         }
     }
     compileOptions {
