@@ -36,7 +36,7 @@
 
 > **MSI 专用版本**：Windows MSI 打包要求版本三段每段 ≤ 255/255/65535，标准版本
 > `YY.QMM.Mmpp` 的中段（QMM）超过 255 限制，故 Windows 构建单独使用 MSI 专用版本
-> `YY.MMQ.mmmm-pp`（如 `26.83.206-4`）：
+> `YY.MMQ.mmmm-pp`（如 `26.104.207-0`）：
 > YY=年、MMQ=月份(2位)+季度(1位)（整体为无前导零整数）、mmmm=主版本+次版本(2位)、pp=修订版本(2位)。
 > 该版本通过 `packages/studio/src-tauri/tauri.windows.conf.json` 仅对 Windows 生效，其他平台保持标准版本。
 

@@ -17,7 +17,7 @@
     "createUpdaterArtifacts": false
   },
   "productName": "EXVlan",
-  "version": "2.7.0",
+  "version": "26.410.20700",
   "identifier": "era.exvlan.studio",
   "plugins": {
     "shell": {
