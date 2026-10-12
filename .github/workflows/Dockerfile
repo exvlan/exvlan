@@ -22,7 +22,8 @@ RUN ARTIFACT_ARCH=""; \
     fi; \
     cp /tmp/artifacts/exvlan-linux-${ARTIFACT_ARCH}/* /tmp/output;
 
-FROM base
+# 主镜像：exvlan 守护进程
+FROM base AS exvlan
 
 RUN apk add --no-cache tzdata tini
 WORKDIR /app
@@ -42,7 +43,14 @@ EXPOSE 11011/tcp
 # wss
 EXPOSE 11012/tcp
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
-    CMD ["/usr/local/bin/exvlan-cli", "--rpc-portal", "127.0.0.1:15888", "--output", "json", "node", "info"]
-
 ENTRYPOINT ["/sbin/tini", "--", "exvlan"]
+
+# registry 镜像：exvlan-api-embed（注册表/API 服务）
+FROM exvlan AS registry
+
+RUN mkdir -p /data
+VOLUME ["/data"]
+# config-server / REST API
+EXPOSE 22020/tcp
+
+ENTRYPOINT ["/sbin/tini", "--", "exvlan-api-embed", "--db=/data/exvlan.db", "--console-log-level", "warn", "--file-log-level", "warn"]

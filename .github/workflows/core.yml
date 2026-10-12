@@ -43,7 +43,8 @@ jobs:
               steps.path_filter.outputs.relevant != 'true'
             )
           ) &&
-          !startsWith(github.ref_name, 'releases/')
+          !startsWith(github.ref_name, 'releases/') &&
+          github.ref_type != 'tag'
         }}
     steps:
       - id: skip_check

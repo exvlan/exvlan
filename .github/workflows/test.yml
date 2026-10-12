@@ -35,11 +35,14 @@ jobs:
     outputs:
       should_skip: >-
         ${{
-          steps.skip_check.outputs.should_skip == 'true' ||
           (
-            github.event_name == 'pull_request' &&
-            steps.path_filter.outputs.relevant != 'true'
-          )
+            steps.skip_check.outputs.should_skip == 'true' ||
+            (
+              github.event_name == 'pull_request' &&
+              steps.path_filter.outputs.relevant != 'true'
+            )
+          ) &&
+          github.ref_type != 'tag'
         }}
     steps:
       - id: skip_check
