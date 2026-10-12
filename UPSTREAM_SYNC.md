@@ -6,7 +6,7 @@
 ## 分支模型
 
 ```
-upstream (Exvlan)  ──releases/v*──►  feature  ──squash──►  develop
+upstream (EasyTier)  ──releases/v*──►  feature  ──squash──►  develop
                                         ▲                      │
                                         └──── merge ───────────┘
                                         (develop 同步进 feature)
@@ -47,5 +47,5 @@ git merge-base --is-ancestor upstream/releases/vX.Y.Z feature # 期望 0（是�
 
 ## 版本对齐
 
-- 标准：`YY.QMM.Mmpp`，如 `26.410.20700` = 2026 年 Q3 8 月，对齐上游 `v2.6.4`。
+- 标准：`YY.QMM.Mmpp`，如 `26.308.20604` = 2026 年 Q3 8 月，对齐上游 `v2.6.4`。
 - Windows MSI：`YY.MMQ.mmmm-pp`（仅 `tauri.windows.conf.json` 生效）。
