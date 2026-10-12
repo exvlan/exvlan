@@ -8,22 +8,10 @@ on:
       is_alpha: { description: 'Is alpha', type: boolean, default: false, required: false }
   workflow_dispatch:
     inputs:
-      core_run_id:
-        description: 'The run id of Exvlan-Core Action in Exvlan repo'
-        type: number
-        required: true
-      gui_run_id:
-        description: 'The run id of Exvlan-GUI Action in Exvlan repo'
-        type: number
-        required: true
-      mobile_run_id:
-        description: 'The run id of Exvlan-Mobile Action in Exvlan repo'
-        type: number
-        required: true
       version:
         description: 'Version for this release'
         type: string
-        default: 'v2.7.0'
+        default: 'v26.410.20700'
         required: true
       make_latest:
         description: 'Mark this release as latest'
@@ -38,39 +26,87 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Download Core Artifact
-        uses: dawidd6/action-download-artifact@v11
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          run_id: ${{ inputs.core_run_id }}
-          repo: ${{ github.repository }}
-          path: release_assets
+      # 产物由 Build Core / Studio / Mobile 写入 actions/cache（artifact 存储配额已超限，不再上传/下载 artifact）。
+      # 键名含 github.sha；tag 推送时三者同一 run，故与 release job 的 github.sha 一致。
+      # --- core 二进制（14 平台） ---
+      - name: Restore core (linux-x86_64)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-linux-x86_64', path: release_assets/linux-x86_64, fail-on-cache-miss: true }
+      - name: Restore core (linux-aarch64)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-linux-aarch64', path: release_assets/linux-aarch64, fail-on-cache-miss: true }
+      - name: Restore core (linux-riscv64)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-linux-riscv64', path: release_assets/linux-riscv64, fail-on-cache-miss: true }
+      - name: Restore core (linux-loongarch64)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-linux-loongarch64', path: release_assets/linux-loongarch64, fail-on-cache-miss: true }
+      - name: Restore core (linux-armv7hf)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-linux-armv7hf', path: release_assets/linux-armv7hf, fail-on-cache-miss: true }
+      - name: Restore core (linux-armv7)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-linux-armv7', path: release_assets/linux-armv7, fail-on-cache-miss: true }
+      - name: Restore core (linux-armhf)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-linux-armhf', path: release_assets/linux-armhf, fail-on-cache-miss: true }
+      - name: Restore core (linux-arm)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-linux-arm', path: release_assets/linux-arm, fail-on-cache-miss: true }
+      - name: Restore core (freebsd-13.2-x86_64)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-freebsd-13.2-x86_64', path: release_assets/freebsd-13.2-x86_64, fail-on-cache-miss: true }
+      - name: Restore core (macos-x86_64)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-macos-x86_64', path: release_assets/macos-x86_64, fail-on-cache-miss: true }
+      - name: Restore core (macos-aarch64)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-macos-aarch64', path: release_assets/macos-aarch64, fail-on-cache-miss: true }
+      - name: Restore core (windows-x86_64)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-windows-x86_64', path: release_assets/windows-x86_64, fail-on-cache-miss: true }
+      - name: Restore core (windows-i686)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-windows-i686', path: release_assets/windows-i686, fail-on-cache-miss: true }
+      - name: Restore core (windows-arm64)
+        uses: actions/cache/restore@v4
+        with: { key: 'core-${{ github.sha }}-windows-arm64', path: release_assets/windows-arm64, fail-on-cache-miss: true }
 
-      - name: Download GUI Artifact
-        uses: dawidd6/action-download-artifact@v11
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          run_id: ${{ inputs.gui_run_id }}
-          repo: ${{ github.repository }}
-          path: release_assets_nozip
+      # --- magisk 模块 ---
+      - name: Restore magisk
+        uses: actions/cache/restore@v4
+        with: { key: 'magisk-${{ github.sha }}', path: release_assets/Exvlan-Magisk, fail-on-cache-miss: true }
 
-      - name: Download Mobile Artifact
-        uses: dawidd6/action-download-artifact@v11
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          run_id: ${{ inputs.mobile_run_id }}
-          repo: ${{ github.repository }}
-          path: release_assets_nozip
+      # --- Desktop GUI 安装包 ---
+      - name: Restore studio (macos-x86_64)
+        uses: actions/cache/restore@v4
+        with: { key: 'studio-${{ github.sha }}-macos-x86_64', path: release_assets_nozip/macos-x86_64, fail-on-cache-miss: true }
+      - name: Restore studio (windows-x86_64)
+        uses: actions/cache/restore@v4
+        with: { key: 'studio-${{ github.sha }}-windows-x86_64', path: release_assets_nozip/windows-x86_64, fail-on-cache-miss: true }
+
+      # --- Mobile APK ---
+      - name: Restore mobile (aarch64)
+        uses: actions/cache/restore@v4
+        with: { key: 'mobile-${{ github.sha }}-aarch64', path: release_assets_nozip/android-aarch64, fail-on-cache-miss: true }
+      - name: Restore mobile (armv7)
+        uses: actions/cache/restore@v4
+        with: { key: 'mobile-${{ github.sha }}-armv7', path: release_assets_nozip/android-armv7, fail-on-cache-miss: true }
+      - name: Restore mobile (i686)
+        uses: actions/cache/restore@v4
+        with: { key: 'mobile-${{ github.sha }}-i686', path: release_assets_nozip/android-i686, fail-on-cache-miss: true }
+      - name: Restore mobile (x86_64)
+        uses: actions/cache/restore@v4
+        with: { key: 'mobile-${{ github.sha }}-x86_64', path: release_assets_nozip/android-x86_64, fail-on-cache-miss: true }
 
       - name: Zip release assets
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          mkdir zipped_assets
+          mkdir -p zipped_assets
 
           find release_assets_nozip -type f -exec mv {} zipped_assets \;
           ls -l -R ./zipped_assets
@@ -93,7 +129,26 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ inputs.version }}
-          draft: true
+          draft: false
+          make_latest: true
+          generate_release_notes: false
+          body: |
+            ## Exvlan ${{ inputs.version }}
+
+            对应上游 EasyTier `v2.7.0`。
+
+            ### 平台矩阵
+
+            | 组件 | 平台 | 产物 |
+            | --- | --- | --- |
+            | Core | Windows x86_64 / i686 / arm64 | `exvlan`, `exvlan-cli`, `exvlan-api`, `exvlan-api-embed`（.exe） |
+            | Core | macOS x86_64 / aarch64 | 同上 |
+            | Core | Linux x86_64 / aarch64 / arm / armhf / armv7 / armv7hf / riscv64 / loongarch64 | 同上 |
+            | Core | FreeBSD 13.2 x86_64 | 同上 |
+            | Desktop GUI | macOS x86_64 | `.dmg` |
+            | Desktop GUI | Windows x86_64 | `.msi` / `.exe` |
+            | Mobile | Android arm64-v8a / armeabi-v7a / x86 / x86_64 | `.apk`（split-per-abi） |
+            | Magisk | Android | `Exvlan-Magisk-*.zip` |
           files: |
             ./zipped_assets/*
           token: ${{ secrets.GITHUB_TOKEN }}
