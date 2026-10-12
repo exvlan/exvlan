@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import java.security.KeyStore
 import groovy.json.JsonSlurper
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -110,7 +111,7 @@ android {
                 val pw = releaseSigning.storePassword
                 if (store != null && store.exists() && !pw.isNullOrEmpty()) {
                     try {
-                        java.security.KeyStore.getInstance(store, pw.toCharArray()).load(null, null)
+                        KeyStore.getInstance(store, pw.toCharArray()).load(null, null)
                         true
                     } catch (e: Throwable) {
                         logger.warn("Release keystore unusable (${store.path}): ${e.message}; falling back to debug signing")
