@@ -1,4 +1,4 @@
-package com.kkrainbow.exvlan
+package era.exvlan.studio
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
