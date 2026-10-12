@@ -18,7 +18,7 @@
   },
   "productName": "EXVlan",
   "version": "2.7.0",
-  "identifier": "com.kkrainbow.exvlan",
+  "identifier": "era.exvlan.studio",
   "plugins": {
     "shell": {
       "open": "^.+"
