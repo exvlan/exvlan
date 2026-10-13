@@ -2,10 +2,7 @@ name: Exvlan Test
 
 on:
   workflow_call:
-  push:
-    branches: [ "develop", "main" ]
-  pull_request:
-    branches: [ "develop", "main" ]
+  workflow_dispatch:
 
 concurrency:
   group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
