@@ -29,101 +29,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # 产物由 Build Core / Studio / Mobile 写入 actions/cache（artifact 存储配额已超限，不再上传/下载 artifact）。
-      # 键名含 github.sha；tag 推送时三者同一 run，故与 release job 的 github.sha 一致。
-      # --- core 二进制（14 平台） ---
-      - name: Restore core (linux-x86_64)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-linux-x86_64', path: release_assets/linux-x86_64, fail-on-cache-miss: true }
-      - name: Restore core (linux-aarch64)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-linux-aarch64', path: release_assets/linux-aarch64, fail-on-cache-miss: true }
-      - name: Restore core (linux-riscv64)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-linux-riscv64', path: release_assets/linux-riscv64, fail-on-cache-miss: true }
-      - name: Restore core (linux-loongarch64)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-linux-loongarch64', path: release_assets/linux-loongarch64, fail-on-cache-miss: true }
-      - name: Restore core (linux-armv7hf)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-linux-armv7hf', path: release_assets/linux-armv7hf, fail-on-cache-miss: true }
-      - name: Restore core (linux-armv7)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-linux-armv7', path: release_assets/linux-armv7, fail-on-cache-miss: true }
-      - name: Restore core (linux-armhf)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-linux-armhf', path: release_assets/linux-armhf, fail-on-cache-miss: true }
-      - name: Restore core (linux-arm)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-linux-arm', path: release_assets/linux-arm, fail-on-cache-miss: true }
-      - name: Restore core (freebsd-13.2-x86_64)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-freebsd-13.2-x86_64', path: release_assets/freebsd-13.2-x86_64, fail-on-cache-miss: true }
-      - name: Restore core (macos-x86_64)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-macos-x86_64', path: release_assets/macos-x86_64, fail-on-cache-miss: true }
-      - name: Restore core (macos-aarch64)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-macos-aarch64', path: release_assets/macos-aarch64, fail-on-cache-miss: true }
-      - name: Restore core (windows-x86_64)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-windows-x86_64', path: release_assets/windows-x86_64, fail-on-cache-miss: true }
-      - name: Restore core (windows-i686)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-windows-i686', path: release_assets/windows-i686, fail-on-cache-miss: true }
-      - name: Restore core (windows-arm64)
-        uses: actions/cache/restore@v4
-        with: { key: 'core-${{ github.sha }}-windows-arm64', path: release_assets/windows-arm64, fail-on-cache-miss: true }
+      # 产物由 Build Core / Studio / Mobile 以 Actions artifact 上传
+      # （core-<platform> / studio-<name> / mobile-<arch> / magisk）；
+      # 一次拉取本轮 run 的全部产物，避免 cache 10GB 配额 LRU 驱逐导致取不到。
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets
 
-      # --- magisk 模块 ---
-      - name: Restore magisk
-        uses: actions/cache/restore@v4
-        with: { key: 'magisk-${{ github.sha }}', path: release_assets/Exvlan-Magisk, fail-on-cache-miss: true }
-
-      # --- Desktop GUI 安装包 ---
-      - name: Restore studio (macos-x86_64)
-        uses: actions/cache/restore@v4
-        with: { key: 'studio-${{ github.sha }}-macos-x86_64', path: release_assets_nozip/macos-x86_64, fail-on-cache-miss: true }
-      - name: Restore studio (windows-x86_64)
-        uses: actions/cache/restore@v4
-        with: { key: 'studio-${{ github.sha }}-windows-x86_64', path: release_assets_nozip/windows-x86_64, fail-on-cache-miss: true }
-
-      # --- Mobile APK ---
-      - name: Restore mobile (aarch64)
-        uses: actions/cache/restore@v4
-        with: { key: 'mobile-${{ github.sha }}-aarch64', path: release_assets_nozip/android-aarch64, fail-on-cache-miss: true }
-      - name: Restore mobile (armv7)
-        uses: actions/cache/restore@v4
-        with: { key: 'mobile-${{ github.sha }}-armv7', path: release_assets_nozip/android-armv7, fail-on-cache-miss: true }
-      - name: Restore mobile (i686)
-        uses: actions/cache/restore@v4
-        with: { key: 'mobile-${{ github.sha }}-i686', path: release_assets_nozip/android-i686, fail-on-cache-miss: true }
-      - name: Restore mobile (x86_64)
-        uses: actions/cache/restore@v4
-        with: { key: 'mobile-${{ github.sha }}-x86_64', path: release_assets_nozip/android-x86_64, fail-on-cache-miss: true }
-
-      - name: Zip release assets
+      - name: Package release assets
         env:
           VERSION: ${{ inputs.version }}
         run: |
+          set -euo pipefail
           mkdir -p zipped_assets
-
-          find release_assets_nozip -type f -exec mv {} zipped_assets \;
-          ls -l -R ./zipped_assets
-
           cd release_assets
-          ls -l -R ./
-          chmod -R 755 .
-          for x in `ls`; do
-            if [ "$x" = "Exvlan-Magisk" ]; then
-              # for Exvlan-Magisk, make sure files are in the root of the zip
-              cd $x;
-              zip -r ../../zipped_assets/$x-${VERSION}.zip .;
-              cd ..;
-            else
-              zip -r ../zipped_assets/$x-${VERSION}.zip $x;
-            fi
+          shopt -s nullglob
+
+          # core-<platform> -> <platform>-<version>.zip（二进制置于 zip 根）
+          for d in core-*; do
+            name="${d#core-}"
+            ( cd "$d" && zip -r "../../zipped_assets/${name}-${VERSION}.zip" . )
           done
+
+          # magisk -> Exvlan-Magisk-<version>.zip（根）
+          if [ -d magisk ]; then
+            ( cd magisk && zip -r "../../zipped_assets/Exvlan-Magisk-${VERSION}.zip" . )
+          fi
+
+          # studio / mobile 安装包与 APK：摊平后原样上传
+          for d in studio-* mobile-*; do
+            find "$d" -type f -exec mv {} ../zipped_assets/ \;
+          done
+
+          cd ..
+          echo "=== zipped_assets ==="
+          ls -lR zipped_assets
 
       - name: Release
         uses: softprops/action-gh-release@v2

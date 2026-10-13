@@ -152,4 +152,11 @@ jobs:
         with:
           key: studio-${{ github.sha }}-${{ matrix.ARTIFACT_NAME }}
           path: ./artifacts
-          retention-days: 7
+
+      - name: Upload studio artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-${{ matrix.ARTIFACT_NAME }}
+          path: ./artifacts
+          if-no-files-found: error
+          retention-days: 14
