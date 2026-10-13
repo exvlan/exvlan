@@ -6,7 +6,7 @@ import path from "node:path";
 const packageDirectory = path.dirname(
   path.dirname(fileURLToPath(import.meta.url)),
 );
-const repositoryRoot = path.resolve(packageDirectory, "../..");
+const repositoryRoot = path.resolve(packageDirectory, "../../..");
 const [profile, outputArgument] = process.argv.slice(2);
 if (profile !== "browser" && profile !== "cloudflare") {
   throw new Error(

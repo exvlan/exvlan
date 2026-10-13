@@ -46,18 +46,12 @@ jobs:
         "exvlan/api/**", "exvlan/contrib/magisk/**",
         ".github/workflows/core.yml", ".github/actions/**"]
     outputs:
-      # Release builds must run even if they only change release metadata.
+      # 仅 PR 按路径门控跳过；push/tag/dispatch 一律构建（下游 docker/release 依赖其产物缓存，
+      # 且 pipeline 已统一门控，不能用 skip-duplicate 因内容重复而跳过本轮构建）。
       should_skip: >-
         ${{
-          (
-            steps.skip_check.outputs.should_skip == 'true' ||
-            (
-              github.event_name == 'pull_request' &&
-              steps.path_filter.outputs.relevant != 'true'
-            )
-          ) &&
-          !startsWith(github.ref_name, 'releases/') &&
-          github.ref_type != 'tag'
+          github.event_name == 'pull_request' &&
+          steps.path_filter.outputs.relevant != 'true'
         }}
     steps:
       - id: skip_check
