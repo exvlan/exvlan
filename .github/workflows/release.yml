@@ -30,12 +30,32 @@ jobs:
         uses: actions/checkout@v5
 
       # 产物由 Build Core / Studio / Mobile 以 Actions artifact 上传
-      # （core-<platform> / studio-<name> / mobile-<arch> / magisk）；
-      # 一次拉取本轮 run 的全部产物，避免 cache 10GB 配额 LRU 驱逐导致取不到。
-      - name: Download all build artifacts
+      # （core-<platform> / studio-<name> / mobile-<arch> / magisk）。
+      # 用 pattern 精确拉取，排除 docker buildx 产生的 `<owner>~<repo>~*.dockerbuild`
+      # artifact（其名字含保留分隔符 `~`，会导致 download-artifact 解压失败）。
+      - name: Download core artifacts
         uses: actions/download-artifact@v4
         with:
           path: release_assets
+          pattern: core-*
+
+      - name: Download magisk artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets
+          pattern: magisk
+
+      - name: Download studio artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets
+          pattern: studio-*
+
+      - name: Download mobile artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets
+          pattern: mobile-*
 
       - name: Package release assets
         env:
