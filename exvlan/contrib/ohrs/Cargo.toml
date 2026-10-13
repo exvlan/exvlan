@@ -1,3 +1,33 @@
+[workspace]
+resolver = "2"
+members = ["crates/exvlan-ohos-core", "crates/exvlan-ohos-features"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+
+[workspace.dependencies]
+anyhow = "1.0"
+async-trait = "0.1.92"
+base64 = "0.23"
+bytes = "1.12.1"
+exvlan = { path = "../../exvlan", default-features = false }
+exvlan-core = { path = "../../core", default-features = false }
+exvlan-ohos-core = { path = "crates/exvlan-ohos-core", default-features = false }
+exvlan-ohos-features = { path = "crates/exvlan-ohos-features", default-features = false }
+exvlan-proto = { path = "../../proto", default-features = false }
+futures = "0.3"
+gethostname = "1.1"
+once_cell = "1.21"
+serde = "1.0.229"
+serde_json = "1.0"
+tokio = { version = "1.53", default-features = false }
+tracing = "0.1"
+tracing-core = "0.1.33"
+tracing-subscriber = { version = "0.3", default-features = false }
+url = "2.5"
+uuid = "1.26.1"
+
 [package]
 name = "exvlan-ohrs"
 version = "0.1.0"
@@ -9,6 +39,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow.workspace = true
+ohos-hilog-binding = { version = "*", features = ["redirect"] }
+tracing-core.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 exvlan = { workspace = true, default-features = true }

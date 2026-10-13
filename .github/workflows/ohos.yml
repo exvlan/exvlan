@@ -86,11 +86,11 @@ jobs:
           rustup component add rustfmt
           cargo fmt --all --manifest-path \
             exvlan/contrib/ohrs/Cargo.toml -- --check
-          cargo test --locked --manifest-path \
+          cargo test --manifest-path \
             exvlan/contrib/ohrs/Cargo.toml \
             -p exvlan-ohos-core -p exvlan-ohos-features \
             --lib -- --test-threads=1
-          cargo check --locked --manifest-path \
+          cargo check --manifest-path \
             exvlan/contrib/ohrs/Cargo.toml \
             -p exvlan-ohrs --tests
 
