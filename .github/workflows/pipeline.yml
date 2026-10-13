@@ -31,6 +31,7 @@ permissions:
   contents: write
   actions: write
   packages: write
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
