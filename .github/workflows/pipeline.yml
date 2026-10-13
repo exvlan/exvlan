@@ -11,11 +11,21 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "flake.lock"
+      - "**/*.nix"
       - "exvlan/**"
       - ".github/workflows/*.yml"
+      - ".github/actions/**"
       - "packages/**"
 
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish ohos HAR and dispatch downstream'
+        type: boolean
+        default: false
+        required: false
 
 permissions:
   contents: write
@@ -32,8 +42,51 @@ env:
 defaults:
   run:
     shell: bash
- 
+
 jobs:
+  # 统一编排入口：所有组件都经此依赖链调用，组件工作流不再各自触发。
+  # 门控策略：
+  #   - feature push / PR(develop,main)：仅 tests + core（轻量）
+  #   - develop/main push：core 链必跑；go/js/nix/ohos 按路径门控
+  #   - tag v* / workflow_dispatch：全量（旁路绕过路径门控）+ release(tag)
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      js: ${{ steps.filter.outputs.js }}
+      nix: ${{ steps.filter.outputs.nix }}
+      ohos: ${{ steps.filter.outputs.ohos }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: filter
+        if: github.event_name == 'push' && github.ref_type != 'tag'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            go:
+              - 'exvlan/go/**'
+              - '.github/workflows/go.yml'
+            js:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'exvlan/core/**'
+              - 'exvlan/proto/**'
+              - 'packages/sdk/**'
+              - '.github/workflows/js.yml'
+            nix:
+              - '**/*.nix'
+              - 'flake.lock'
+              - 'rust-toolchain.toml'
+            ohos:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - 'exvlan/**'
+              - '.github/workflows/ohos.yml'
+              - '.github/actions/**'
+
   tests:
     name: Core Tests
     uses: ./.github/workflows/test.yml
@@ -44,26 +97,74 @@ jobs:
     needs: tests
     if: needs.tests.result == 'success' || needs.tests.result == 'skipped'
     uses: ./.github/workflows/core.yml
+    with:
+      targets: ${{ github.ref_name == 'feature' && '["x86_64-unknown-linux-musl"]' || 'all' }}
+      build_magisk: ${{ github.ref_name != 'feature' }}
+    secrets: inherit
+
+  # 旁路组件：develop/main push 按路径门控；tag/dispatch 全量；feature/PR 跳过。
+  go:
+    name: Go Tests
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true')
+    uses: ./.github/workflows/go.yml
+    secrets: inherit
+
+  js:
+    name: JavaScript Hosts
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.js == 'true')
+    uses: ./.github/workflows/js.yml
+    secrets: inherit
+
+  nix:
+    name: Nix Check
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.nix == 'true')
+    uses: ./.github/workflows/nix.yml
+    secrets: inherit
+
+  ohos:
+    name: OpenHarmony
+    needs: [ core, changes ]
+    if: >-
+      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.ohos == 'true')
+    uses: ./.github/workflows/ohos.yml
+    with:
+      publish: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
     secrets: inherit
 
   studio:
     name: Build Studio GUI
-    if: needs.core.result == 'success' || needs.core.result == 'skipped'
     needs: core
+    if: >-
+      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      (needs.core.result == 'success' || needs.core.result == 'skipped')
     uses: ./.github/workflows/studio.yml
     secrets: inherit
 
   mobile:
     name: Build Studio Mobile
-    if: needs.core.result == 'success' || needs.core.result == 'skipped'
     needs: core
+    if: >-
+      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      (needs.core.result == 'success' || needs.core.result == 'skipped')
     uses: ./.github/workflows/mobile.yml
     secrets: inherit
 
   docker:
     name: Builder & Publish Docker Image
-    if: needs.core.result == 'success'
     needs: core
+    if: >-
+      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      needs.core.result == 'success'
     uses: ./.github/workflows/docker.yml
     with:
       mark_unstable: false
@@ -79,8 +180,8 @@ jobs:
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled') &&
       (
-        needs.core.result == 'success' || 
-        needs.studio.result == 'success' || 
+        needs.core.result == 'success' ||
+        needs.studio.result == 'success' ||
         needs.mobile.result == 'success'
       )
     needs: [core, studio, mobile]
