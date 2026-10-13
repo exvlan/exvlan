@@ -1,26 +1,13 @@
 name: ohos
 
 on:
-  push:
-    branches: [develop, main, "releases/**", "ohos/**"]
-    tags:
-      - "v*"
-      - "!*-pre"
-  pull_request:
-    branches: [develop, main, "ohos/**"]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - ".cargo/**"
-      - "exvlan/**"
-      - "exvlan/core/**"
-      - "exvlan/proto/**"
-      - "exvlan/proto/build/**"
-      - "exvlan/contrib/ohrs/**"
-      - ".github/workflows/ohos.yml"
-      - ".github/actions/**"
+  workflow_call:
+    inputs:
+      publish:
+        description: Publish this non-main branch and dispatch downstream builds
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       publish:
@@ -33,6 +20,10 @@ permissions:
   actions: write
   contents: read
   pull-requests: read
+
+concurrency:
+  group: ohos-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always

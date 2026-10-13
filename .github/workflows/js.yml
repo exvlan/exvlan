@@ -1,28 +1,11 @@
 name: Exvlan JavaScript Hosts
 
 on:
-  push:
-    branches: ["develop", "main", "releases/**"]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "exvlan/core/**"
-      - "exvlan/proto/**"
-      - "packages/sdk/**"
-      - ".github/workflows/js.yml"
-  pull_request:
-    branches: ["develop", "main"]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "exvlan/core/**"
-      - "exvlan/proto/**"
-      - "packages/sdk/**"
-      - ".github/workflows/js.yml"
+  workflow_call:
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: js-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:

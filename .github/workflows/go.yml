@@ -1,20 +1,11 @@
 name: Exvlan Go
 
 on:
-  push:
-    branches: ["develop", "main", "releases/**"]
-    paths:
-      - "exvlan/go/**"
-      - ".github/workflows/go.yml"
-  pull_request:
-    branches: ["develop", "main"]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "exvlan/go/**"
-      - ".github/workflows/go.yml"
+  workflow_call:
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: go-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
