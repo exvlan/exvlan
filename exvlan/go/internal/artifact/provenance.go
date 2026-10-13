@@ -4,5 +4,5 @@ package artifact
 
 const (
 	Commit = "599e4eacaa9c9a6f84b8d6439418af9d860f9aa3"
-	SHA256 = "f5cc76a30d4c6128f7ce77d494dd4e8130aa7e3ce9d5b9ede7604745064bed8d"
+	SHA256 = "ce0b9617212cdf519a72fd70743df4942fe82965f80e3666cb4bf9df8ad2da61"
 )

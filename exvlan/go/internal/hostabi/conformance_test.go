@@ -287,8 +287,10 @@ func TestDNSABIConformance(t *testing.T) {
 		t.Fatalf("DNS query count = %d, want 3", len(queries))
 	}
 	assertDNSQuery(t, queries[0], "peer.example", 0, uint32Pointer(7), stringPointer("mihomo"))
-	assertDNSQuery(t, queries[1], "_exvlan.example", 4, nil, nil)
-	assertDNSQuery(t, queries[2], "_exvlan._udp.example", 6, uint32Pointer(9), stringPointer(""))
+	// 测试探针 wasi_socket_guest.wasm 为 easytier 时代制品（源已不可得），
+	// 其服务名仍为 _easytier.*，故此处期望值与探针实际行为一致。
+	assertDNSQuery(t, queries[1], "_easytier.example", 4, nil, nil)
+	assertDNSQuery(t, queries[2], "_easytier._udp.example", 6, uint32Pointer(9), stringPointer(""))
 }
 
 type probeEnvironment struct {
