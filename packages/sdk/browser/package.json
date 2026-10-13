@@ -1,13 +1,13 @@
 {
   "name": "@exvlan/browser",
-  "version": "26.410.20700",
+  "version": "0.1.0",
   "description": "Run an Exvlan TCP client in the browser",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/exvlan/exvlan.git",
-    "directory": "packages/sdk/browser"
+    "directory": "exvlan-js/browser"
   },
   "homepage": "https://github.com/exvlan/exvlan",
   "bugs": "https://github.com/exvlan/exvlan/issues",

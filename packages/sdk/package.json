@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/sdk",
-  "version": "26.410.20700",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "build": "pnpm --filter @exvlan/browser build && pnpm --filter @exvlan/cloudflare build",
