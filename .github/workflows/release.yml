@@ -96,8 +96,6 @@ jobs:
           body: |
             ## Exvlan ${{ inputs.version }}
 
-            对应上游 EasyTier `v2.7.0`。
-
             ### 平台矩阵
 
             | 组件 | 平台 | 产物 |

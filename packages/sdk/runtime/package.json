@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/runtime",
-  "version": "0.1.0",
+  "version": "26.410.20700",
   "description": "Shared WebAssembly runtime for Exvlan web hosts",
   "type": "module",
   "license": "Apache-2.0",
@@ -39,6 +39,7 @@
     "vitest": "3.2.7"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
   }
 }

@@ -12,7 +12,7 @@
 
 ## 1. 目的与适用范围
 
-- 记录 EXVlan 从外部上游 **EasyTier/EasyTier** 同步代码的历史做法与现行规范。
+- 记录 EXVlan 从外部上游同步代码的历史做法与现行规范。
 - 约束对象：`develop`、`feature` 两条长期分支，以及四个远程 `upstream` / `origin` / `cloud` / `std-v`。
 - 适用动作：上游 release 合并、develop 与 feature 互同步、feature squash 进 develop、版本对齐、冲突处理。
 - 不适用：本地特性分支的日常开发（按 `CONTRIBUTING.md` 从 develop 切 feature/* 即可）。
@@ -35,7 +35,7 @@
 | `develop` | **稳定主干 / 独立历史** | 线性，**0 个 merge 提交**；基点 `9779923b`(2024) → `382534d0`(2026) → 各 squash 批次 |
 | `feature` | **整合中枢**            | 含 merge 提交；承载上游 release、develop 同步与本地特性                              |
 
-**核心不变量**：`develop` 不得混入任何上游链（EasyTier 等外部仓库）。判定 `upstream/*` 是否为 `develop` 祖先必须为假。
+**核心不变量**：`develop` 不得混入任何上游链（如上游仓库等外部来源）。判定 `upstream/*` 是否为 `develop` 祖先必须为假。
 
 ## 3. 历史复原（两阶段）
 
@@ -139,9 +139,8 @@ git push origin develop
   `packages/studio/src-tauri/tauri.windows.conf.json` 对 Windows 生效。
 - 版本号需同步更新各 `Cargo.toml` / `package.json` / `magisk` 清单 / README 版本串；
   详见 `c21eac5d version: v26.308.20604`。
-- **范围排除 `packages/sdk/**`**：sdk 为嵌套独立 workspace（自带 `pnpm-workspace.yaml`/`pnpm-lock.yaml`），
-  其子包（`@exvlan/runtime|browser|cloudflare` 等）独立版本化（`0.1.0`）且被 `workspace:0.1.0` 引用；
-  版本对齐**不得**覆盖 sdk 子包（否则 specifier 不匹配、`ERR_PNPM_OUTDATED_LOCKFILE`）。
+- **`packages/sdk/**` 一并纳入**（嵌套独立 workspace）：需同时改各子包 `version` 与内部 `workspace:<v>`
+  specifier，并重生成 `packages/sdk/pnpm-lock.yaml`；否则 specifier 不匹配、`ERR_PNPM_OUTDATED_LOCKFILE`。
 
 ### E. CI 编排（统一 pipeline 单入口）
 
@@ -159,6 +158,11 @@ git push origin develop
   决定 Windows MSI **UpgradeCode** 与资产命名，**勿轻改**（改了升级会变并存新装）。
 - **可见性**：默认 private；私仓 Actions 额度耗尽时，跑 CI/发版可临时
   `gh api -X PATCH repos/exvlan/exvlan -f visibility=public`，完毕立即改回 private。
+- **发布 go/sdk**（仅 tag，**失败阻塞 release**）：`publish-npm.yml` 发
+  `@exvlan/runtime|browser|cloudflare|sdk` 到 GitHub Packages npm；`publish-go.yml` 推
+  Go module tag `exvlan/go/<tag>`（消费需 `GOPRIVATE=github.com/exvlan/*`）。`release` 的 `needs` 含二者。
+- **同提交去重**：pipeline `concurrency.group` 按 `github.sha`；发版“先 push develop 再 push tag”，
+  同 sha 下 tag 运行胜出、分支运行被取消（只一轮）。
 
 ## 6. 冲突解决策略
 

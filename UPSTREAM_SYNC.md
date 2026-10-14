@@ -6,7 +6,7 @@
 ## 分支模型
 
 ```
-upstream (EasyTier)  ──releases/v*──►  feature  ──squash──►  develop
+upstream  ──releases/v*──►  feature  ──squash──►  develop
                                         ▲                      │
                                         └──── merge ───────────┘
                                         (develop 同步进 feature)
@@ -49,7 +49,7 @@ git merge-base --is-ancestor upstream/releases/vX.Y.Z feature # 期望 0（是�
 
 - 标准：`YY.QMM.Mmpp`，如 `26.410.20700` = 2026 年 Q4 10 月，对齐上游 `v2.7.0`。
 - Windows MSI：`YY.MMQ.mmmm-pp`（仅 `tauri.windows.conf.json` 生效）。
-- **排除 `packages/sdk/**`**：sdk 为嵌套独立 workspace，子包独立版本化（`0.1.0`），不得被版本对齐覆盖。
+- **`packages/sdk/**` 纳入**：需同改子包 `version` + `workspace:<v>` specifier + 重生成 sdk 锁文件。
 
 ## CI 编排（单入口）
 
@@ -59,3 +59,5 @@ git merge-base --is-ancestor upstream/releases/vX.Y.Z feature # 期望 0（是�
   （`core-*`/`studio-*`/`mobile-*`/`magisk`；`release.yml` 用 `download-artifact` 的 `pattern` 拉取）。
 - 发布自动（`draft:false`）；`productName` 决定 Windows MSI UpgradeCode，勿轻改。
 - 私仓 Actions 额度耗尽时临时 public 跑 CI，完毕立即改回 private。
+- **发布 go/sdk**（仅 tag，失败阻塞 release）：npm→GitHub Packages（`@exvlan/runtime|browser|cloudflare|sdk`）；Go→module tag `exvlan/go/<tag>`。
+- **同提交去重**：pipeline `concurrency` 按 `github.sha`；发版先 push develop 再 push tag，只跑一轮。

@@ -43,11 +43,13 @@ git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
 - **发版产物经 Actions artifact 传递**（`core-*`/`studio-*`/`mobile-*`/`magisk` 前缀上传；`release.yml` 用 `download-artifact` 的 `pattern` 精确拉取）。不用 `actions/cache`（10GB 配额 LRU 驱逐不可靠），也不用全量 `download-artifact`（buildx 产生的 `<owner>~<repo>~*.dockerbuild` 名字含 `~`，会导致解压失败）。
 - **发布**：`release.yml` 自动发布（`draft:false`），`version` = tag 名；Windows/macOS 资产由 `productName`（`tauri.conf.json`）决定命名与 MSI **UpgradeCode** —— **切勿轻改 `productName`**，否则升级会变成并存新装。
 - **仓库可见性**：默认 **private**。私仓 Actions 额度耗尽时，需要跑 CI/发版可**临时** `gh api -X PATCH repos/exvlan/exvlan -f visibility=public`，跑完**立即改回 private**。
+- **发布 go/sdk**（仅 tag，且**失败阻塞 release**）：`publish-npm.yml` 将 `@exvlan/runtime|browser|cloudflare|sdk` 发到 **GitHub Packages npm**（`npm.pkg.github.com`，token=`GITHUB_TOKEN`，dist-tag=`latest`，手动可传）；`publish-go.yml` 推 Go module tag **`exvlan/go/<tag>`**（消费需 `GOPRIVATE=github.com/exvlan/*`）。`release` 作业的 `needs` 含这两个作业。
+- **同提交去重**：`pipeline.yml` 的 `concurrency.group` 用 `github.sha`（非 `github.ref`）；发版时**先 push develop、再 push tag** → 同 sha 下 tag 运行胜出（含 release），分支运行被取消，只跑一轮。
 
 ## 版本对齐范围
 
 - 标准版本 `YY.QMM.Mmpp` 覆盖：根 `Cargo.toml`/各 crate、`packages/{studio,std,ui,generator}/package.json`、`tauri.conf.json`、magisk 清单、README 等。
-- **排除 `packages/sdk/**`**：sdk 是**嵌套独立 workspace**（自带 `pnpm-workspace.yaml`/`pnpm-lock.yaml`），其子包（`@exvlan/runtime|browser|cloudflare` 等）**独立版本化（`0.1.0`）**，并被 `workspace:0.1.0` 引用。**版本对齐不得覆盖 sdk 子包**（否则 specifier 不匹配、`ERR_PNPM_OUTDATED_LOCKFILE`）。
+- **`packages/sdk/**` 一并纳入**（sdk 为嵌套独立 workspace）：需同时改各子包 `version` 与内部 `workspace:<v>` specifier，并重生成 `packages/sdk/pnpm-lock.yaml`；否则 specifier 不匹配、`ERR_PNPM_OUTDATED_LOCKFILE`。
 
 <!--VITE PLUS START-->
 

@@ -9,12 +9,22 @@ overrides:
 
 importers:
 
-  .: {}
+  .:
+    dependencies:
+      '@exvlan/browser':
+        specifier: workspace:26.410.20700
+        version: link:browser
+      '@exvlan/cloudflare':
+        specifier: workspace:26.410.20700
+        version: link:cloudflare
+      '@exvlan/runtime':
+        specifier: workspace:26.410.20700
+        version: link:runtime
 
   browser:
     dependencies:
       '@exvlan/runtime':
-        specifier: workspace:0.1.0
+        specifier: workspace:26.410.20700
         version: link:../runtime
     devDependencies:
       '@types/node':
@@ -36,7 +46,7 @@ importers:
         specifier: 5.20260917.1
         version: 5.20260917.1
       '@exvlan/runtime':
-        specifier: workspace:0.1.0
+        specifier: workspace:26.410.20700
         version: link:../runtime
     devDependencies:
       '@types/node':
@@ -55,10 +65,10 @@ importers:
   examples/web:
     dependencies:
       '@exvlan/browser':
-        specifier: workspace:0.1.0
+        specifier: workspace:26.410.20700
         version: link:../../browser
       '@exvlan/cloudflare':
-        specifier: workspace:0.1.0
+        specifier: workspace:26.410.20700
         version: link:../../cloudflare
     devDependencies:
       '@cloudflare/workers-types':

@@ -1,0 +1,65 @@
+name: Exvlan Publish SDK (npm)
+
+on:
+  workflow_call:
+    inputs:
+      dist_tag:
+        description: 'npm dist-tag（如 latest / next）'
+        type: string
+        default: 'latest'
+        required: false
+  workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: 'npm dist-tag（如 latest / next）'
+        type: string
+        default: 'latest'
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-npm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish @exvlan SDK to GitHub Packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.95
+          target: wasm32-wasip1
+          cache: false
+          rustflags: ''
+
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: '35.1'
+          repo-token: ${{ github.token }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@exvlan'
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm --dir packages/sdk install --frozen-lockfile
+
+      # 发布 runtime / browser / cloudflare / 聚合包（sdk）；
+      # examples/web 为 private，自动跳过。各包 prepack=check 会先构建（含 wasm）。
+      - name: Publish (recursive)
+        run: pnpm --dir packages/sdk -r publish --access public --no-git-checks --tag "${{ inputs.dist_tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

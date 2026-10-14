@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/cloudflare",
-  "version": "0.1.0",
+  "version": "26.410.20700",
   "description": "Run an Exvlan relay in a Cloudflare Durable Object",
   "type": "module",
   "license": "Apache-2.0",
@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@cloudflare/workers-types": "5.20260917.1",
-    "@exvlan/runtime": "workspace:0.1.0"
+    "@exvlan/runtime": "workspace:26.410.20700"
   },
   "devDependencies": {
     "@types/node": "22.18.1",
@@ -42,6 +42,7 @@
     "wrangler": "4.134.0"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
   }
 }

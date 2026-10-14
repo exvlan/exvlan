@@ -1,11 +1,20 @@
 {
   "name": "@exvlan/sdk",
-  "version": "0.1.0",
-  "private": true,
+  "version": "26.410.20700",
   "scripts": {
     "build": "pnpm --filter @exvlan/browser build && pnpm --filter @exvlan/cloudflare build",
     "test": "pnpm build && pnpm test:unit",
     "test:unit": "pnpm --filter @exvlan/runtime test && pnpm --filter @exvlan/browser exec vitest run && pnpm --filter @exvlan/cloudflare exec vitest run",
     "check": "pnpm build && pnpm test:unit && pnpm --filter @exvlan/web-example check"
+  },
+  "files": [],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
+  },
+  "dependencies": {
+    "@exvlan/runtime": "workspace:26.410.20700",
+    "@exvlan/browser": "workspace:26.410.20700",
+    "@exvlan/cloudflare": "workspace:26.410.20700"
   }
 }
