@@ -402,7 +402,7 @@ function Get-RemoteVersion {
         throw "无法从 GitHub 获取最新版本信息`n$response"
     }
 }
-function Get-EXVlan {
+function Get-Exvlan {
     $Arch = Get-SystemArchitecture
 
     $tempDirectory = Join-Path $ScriptRoot "exvlan_update"
@@ -427,7 +427,7 @@ function Get-EXVlan {
 
     $localVersion = Get-LocalVersion($EraXVlanPath)
     if ($localVersion -ge $latestVersion) {
-        Write-Host "EXVlan 已是最新版本 $localVersion" -ForegroundColor Green
+        Write-Host "Exvlan 已是最新版本 $localVersion" -ForegroundColor Green
         return
     }
 
@@ -468,7 +468,7 @@ function Get-EXVlan {
     if ($activeServices) {
         try {
             Write-Host "发现正在运行的服务: $ServiceName" -ForegroundColor Yellow
-            Write-Host "停止 EXVlan 服务..." -ForegroundColor Yellow
+            Write-Host "停止 Exvlan 服务..." -ForegroundColor Yellow
             $activeServices | Stop-Service -Force
         }
         catch {
@@ -495,7 +495,7 @@ function Get-EXVlan {
                 throw "服务启动失败!`n$_"
             }
         }
-        Write-Host "EXVlan 已成功更新到版本 $latestVersion" -ForegroundColor Green
+        Write-Host "Exvlan 已成功更新到版本 $latestVersion" -ForegroundColor Green
     }
     else {
         throw "更新文件失败! 请检查脚本是否过时或者文件/文件夹是否被其他程序占用"
@@ -504,7 +504,7 @@ function Get-EXVlan {
 }
 
 $HelpText = @"
-EXVlan 服务管理脚本
+Exvlan 服务管理脚本
 
 【使用方式】
 直接双击运行或在命令行中执行:
@@ -517,10 +517,10 @@ EXVlan 服务管理脚本
         显示此帮助信息并退出。
 
     -U / -Update
-        更新 EXVlan 到最新版本
+        更新 Exvlan 到最新版本
 
     -X / -Uninstall
-        卸载 EXVlan 服务
+        卸载 Exvlan 服务
 
     -UGHP / -UseGitHubProxy
         使用 GitHub 镜像代理下载 (默认: $false)
@@ -627,7 +627,7 @@ $WatchDogTemplate = @"
 </Task>
 "@
 
-$host.ui.rawui.WindowTitle = "安装/卸载/更新 EXVlan 服务"
+$host.ui.rawui.WindowTitle = "安装/卸载/更新 Exvlan 服务"
 Clear-Host
 $ScriptRoot = (Get-Location).Path
 $RegistryPath = "HKLM:\SOFTWARE\EraXVlanServiceManage"
@@ -675,12 +675,12 @@ try {
         exit 0
     }
     if ($Update) {
-        Get-EXVlan
+        Get-Exvlan
         Show-Pause -Text "按任意键退出..."
         exit 0
     }
     if (-not (Test-Path $EraXVlanPath)) {
-        Get-EXVlan
+        Get-Exvlan
     }
     if (-not $ConfigType) {
         $choices = @(
@@ -724,8 +724,8 @@ try {
             Stop-Service -Name $ServiceName -Force | Out-Null
             Remove-ServiceCompatible -Name $ServiceName
         }
-        New-Service -Name $ServiceName -DisplayName "EXVlan" `
-            -Description "EXVlan 核心服务" `
+        New-Service -Name $ServiceName -DisplayName "Exvlan" `
+            -Description "Exvlan 核心服务" `
             -StartupType Automatic `
             -BinaryPathName $BinaryPath | Out-Null
         Start-Service -Name $ServiceName | Out-Null

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+exvlan_source="${1:-${EXVLAN_SOURCE:-"${repository_root}/.."}}"
+proto_root="${exvlan_source}/exvlan-proto/proto"
+
+if [[ ! -f "${proto_root}/api_instance.proto" ]]; then
+    echo "Exvlan proto source not found at ${proto_root}" >&2
+    exit 1
+fi
+
+if [[ "$(protoc --version)" != "libprotoc 35.1" ]]; then
+    echo "protoc 35.1 is required" >&2
+    exit 1
+fi
+if [[ "$(protoc-gen-go --version)" != "protoc-gen-go v1.36.11" ]]; then
+    echo "protoc-gen-go v1.36.11 is required" >&2
+    exit 1
+fi
+
+protoc \
+    -I "${proto_root}" \
+    --go_out="${repository_root}" \
+    --go_opt=module=github.com/exvlan/exvlan/exvlan-go \
+    --go_opt=Mcommon.proto=github.com/exvlan/exvlan/exvlan-go/proto/common \
+    --go_opt=Merror.proto=github.com/exvlan/exvlan/exvlan-go/proto/error \
+    --go_opt=Macl.proto=github.com/exvlan/exvlan/exvlan-go/proto/acl \
+    --go_opt=Mpeer_rpc.proto=github.com/exvlan/exvlan/exvlan-go/proto/peer_rpc \
+    --go_opt=Mapi_instance.proto=github.com/exvlan/exvlan/exvlan-go/proto/api/instance \
+    --go_opt=Mapi_config.proto=github.com/exvlan/exvlan/exvlan-go/proto/api/config \
+    --go_opt=Mapi_manage.proto=github.com/exvlan/exvlan/exvlan-go/proto/api/manage \
+    --go_opt=Mweb.proto=github.com/exvlan/exvlan/exvlan-go/proto/web \
+    "${proto_root}/common.proto" \
+    "${proto_root}/error.proto" \
+    "${proto_root}/acl.proto" \
+    "${proto_root}/peer_rpc.proto" \
+    "${proto_root}/api_instance.proto" \
+    "${proto_root}/api_config.proto" \
+    "${proto_root}/api_manage.proto" \
+    "${proto_root}/web.proto"

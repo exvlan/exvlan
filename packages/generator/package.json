@@ -1,0 +1,25 @@
+{
+  "name": "@exvlan/generator",
+  "private": true,
+  "version": "26.410.20700",
+  "type": "module",
+  "scripts": {
+    "build:config-wasm": "wasm-pack build ../../exvlan/core --target web --out-dir ../../packages/generator/src/generated/config-wasm --out-name exvlan_config --release --no-pack -- --no-default-features --features browser-config",
+    "dev": "pnpm build:config-wasm && pnpm --dir ../std build && vp",
+    "build": "pnpm build:config-wasm && pnpm --dir ../std build && vue-tsc --noEmit && vp build",
+    "preview": "vp preview"
+  },
+  "dependencies": {
+    "@primeuix/themes": "^1.2.3",
+    "@exvlan/std": "workspace:*",
+    "kernelsu": "3.0.2",
+    "primevue": "^4.3.9",
+    "vue": "^3.5.12"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "typescript": "~5.6.3",
+    "vite": "catalog:",
+    "vue-tsc": "^3.3.9"
+  }
+}

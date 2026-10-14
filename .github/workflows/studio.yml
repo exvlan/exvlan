@@ -118,7 +118,7 @@ jobs:
               aarch64*) ARCH_DIR=arm64 ;;
           esac
           if [[ -n "$ARCH_DIR" ]]; then
-              find "./exvlan/core/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" -o -name "*.lib" \) -exec cp {} ./packages/studio/src-tauri/ \;
+              find "./exvlan/exvlan/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" -o -name "*.lib" \) -exec cp {} ./packages/studio/src-tauri/ \;
           fi
 
       - name: Build GUI (Tauri)
@@ -147,11 +147,16 @@ jobs:
           echo "Collected artifacts:"
           ls -F ./artifacts/
 
-      - name: Archive artifact
-        uses: actions/upload-artifact@v7
+      - name: Cache artifact
+        uses: actions/cache/save@v4
         with:
-          name: exvlan-studio-${{ matrix.ARTIFACT_NAME }}
-          path: |
-            ./artifacts/*
+          key: studio-${{ github.sha }}-${{ matrix.ARTIFACT_NAME }}
+          path: ./artifacts
+
+      - name: Upload studio artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-${{ matrix.ARTIFACT_NAME }}
+          path: ./artifacts
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14

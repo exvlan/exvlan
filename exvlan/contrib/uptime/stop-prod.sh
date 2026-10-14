@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# EXVlan Uptime Monitor 停止服务脚本
+# Exvlan Uptime Monitor 停止服务脚本
 
 set -e
 
-echo "🛑 Stopping EXVlan Uptime Monitor services..."
+echo "🛑 Stopping Exvlan Uptime Monitor services..."
 
 # 检查PID文件
 if [ -f "logs/backend.pid" ]; then

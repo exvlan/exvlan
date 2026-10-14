@@ -1,0 +1,35 @@
+name: Exvlan Go
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: go-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test Go modules
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.x"
+          cache-dependency-path: |
+            exvlan/go/go.sum
+            exvlan/go/examples/tun/go.sum
+
+      - name: Test main module
+        working-directory: exvlan/go
+        run: go test ./...
+
+      - name: Test TUN example module
+        working-directory: exvlan/go/examples/tun
+        run: go test ./...

@@ -1,12 +1,12 @@
-# EXVlan 贡献指南
+# Exvlan 贡献指南
 
 [English Version](CONTRIBUTING.md)
 
-感谢您对 EXVlan 项目的关注！本文档提供了参与项目贡献的指南和说明。
+感谢您对 Exvlan 项目的关注！本文档提供了参与项目贡献的指南和说明。
 
 ## 目录
 
-- [EXVlan 贡献指南](#exvlan-贡献指南)
+- [Exvlan 贡献指南](#exvlan-贡献指南)
   - [目录](#目录)
   - [开发环境配置](#开发环境配置)
     - [前置要求](#前置要求)
@@ -81,7 +81,7 @@ sudo apt install -y bridge-utils
 1. 克隆仓库：
    ```bash
    git clone https://github.com/exvlan/exvlan.git
-   cd EXVlan
+   cd Exvlan
    ```
 
 2. 安装依赖：
@@ -98,8 +98,8 @@ sudo apt install -y bridge-utils
 
 ```
 exvlan/          # 核心功能和库
-exvlan-web/      # Web 仪表盘和前端
-exvlan-gui/      # 桌面 GUI 应用
+exvlan/api/      # Web 仪表盘和前端
+packages/studio/      # 桌面 GUI 应用
 .github/workflows/ # CI/CD 配置文件
 ```
 
@@ -128,7 +128,7 @@ cargo build --release --target x86_64-pc-windows-msvc        # Windows x86_64
 pnpm -r build
 
 # 2. 构建 GUI 应用
-cd exvlan-gui
+cd packages/studio
 
 # Linux
 pnpm tauri build --target x86_64-unknown-linux-gnu
@@ -141,7 +141,7 @@ pnpm tauri build --target aarch64-apple-darwin     # Apple Silicon
 pnpm tauri build --target x86_64-pc-windows-msvc   # x64
 ```
 
-构建产物位置：`exvlan-gui/src-tauri/target/release/bundle/`
+构建产物位置：`packages/studio/src-tauri/target/release/bundle/`
 
 ### 构建移动应用
 
@@ -153,11 +153,11 @@ rustup target add i686-linux-android
 rustup target add x86_64-linux-android
 
 # 2. 构建 Android 应用
-cd exvlan-gui
+cd packages/studio
 pnpm tauri android build
 ```
 
-构建产物位置：`exvlan-gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/`
+构建产物位置：`packages/studio/src-tauri/gen/android/app/build/outputs/apk/universal/release/`
 
 ### 构建注意事项
 
@@ -230,4 +230,4 @@ cargo test --no-default-features --features=full --verbose
 - 参与社区讨论
 - 联系维护者
 
-感谢您为 EXVlan 做出贡献！ 
+感谢您为 Exvlan 做出贡献！ 

@@ -4,17 +4,17 @@ on:
   workflow_call:
     inputs:
       mark_latest:
-        description: 'Mark this image as latest'
+        description: "Mark this image as latest"
         type: boolean
         default: false
         required: true
       mark_unstable:
-        description: 'Mark this image as unstable'
+        description: "Mark this image as unstable"
         type: boolean
         default: false
         required: true
       is_alpha:
-        description: 'Mark this image as alpha'
+        description: "Mark this image as alpha"
         type: boolean
         default: false
         required: true
@@ -22,27 +22,27 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: 'The run id of Core Action in exvlan repo'
+        description: "The run id of Core Action in exvlan repo"
         type: number
         default: 10228239965
         required: true
       image_tag:
-        description: 'Tag for this image build'
+        description: "Tag for this image build"
         type: string
-        default: 'v26.206.1010000'
+        default: "v26.410.20700"
         required: true
       mark_latest:
-        description: 'Mark this image as latest'
+        description: "Mark this image as latest"
         type: boolean
         default: false
         required: true
       mark_unstable:
-        description: 'Mark this image as unstable'
+        description: "Mark this image as unstable"
         type: boolean
         default: false
         required: true
       is_alpha:
-        description: 'Mark this image as alpha'
+        description: "Mark this image as alpha"
         type: boolean
         default: false
         required: true
@@ -81,28 +81,42 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download all artifacts from workflow run
-        if: inputs.run_id == ''
-        uses: actions/download-artifact@v8
+      # core 二进制由 Build Core 存入 actions/cache（artifact 存储配额已超限，不走上传/下载 artifact）
+      - name: Restore core binaries (x86_64)
+        uses: actions/cache/restore@v4
         with:
-          path: docker_context
+          {
+            key: "core-${{ github.sha }}-linux-x86_64",
+            path: ./artifacts,
+            fail-on-cache-miss: true,
+          }
+      - run: mkdir -p docker_context/exvlan-linux-x86_64 && mv ./artifacts/* docker_context/exvlan-linux-x86_64/ && rm -rf ./artifacts
 
-      - name: List downloaded files (Debug)
-        run: |
-          echo "=== Docker context contents ==="
-          find ./docker_context -type f | head -50
-          echo "=== Directories ==="
-          find ./docker_context -type d | head -20
-
-      - name: Download artifact from run_id
-        if: inputs.run_id != ''
-        id: download-artifact
-        uses: dawidd6/action-download-artifact@v21
+      - name: Restore core binaries (armhf)
+        uses: actions/cache/restore@v4
         with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          run_id: ${{ inputs.run_id }}
-          repo: ${{ github.repository }}
-          path: docker_context
+          { key: "core-${{ github.sha }}-linux-armhf", path: ./artifacts, fail-on-cache-miss: true }
+      - run: mkdir -p docker_context/exvlan-linux-armhf && mv ./artifacts/* docker_context/exvlan-linux-armhf/ && rm -rf ./artifacts
+
+      - name: Restore core binaries (armv7hf)
+        uses: actions/cache/restore@v4
+        with:
+          {
+            key: "core-${{ github.sha }}-linux-armv7hf",
+            path: ./artifacts,
+            fail-on-cache-miss: true,
+          }
+      - run: mkdir -p docker_context/exvlan-linux-armv7hf && mv ./artifacts/* docker_context/exvlan-linux-armv7hf/ && rm -rf ./artifacts
+
+      - name: Restore core binaries (aarch64)
+        uses: actions/cache/restore@v4
+        with:
+          {
+            key: "core-${{ github.sha }}-linux-aarch64",
+            path: ./artifacts,
+            fail-on-cache-miss: true,
+          }
+      - run: mkdir -p docker_context/exvlan-linux-aarch64 && mv ./artifacts/* docker_context/exvlan-linux-aarch64/ && rm -rf ./artifacts
 
       - name: List files (Debug)
         run: ls -l -R ./docker_context
@@ -133,7 +147,7 @@ jobs:
           fi
 
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            # tag 推送追加版本标签（如 v26.308.20604）
+            # tag 推送追加版本标签（如 v26.410.20700）
             TAGS="${TAGS},${BASE_IMAGE}:${{ github.ref_name }}"
           fi
 

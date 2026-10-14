@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# EXVlan Uptime Monitor 生产环境启动脚本
+# Exvlan Uptime Monitor 生产环境启动脚本
 
 set -e
 
-echo "🚀 Starting EXVlan Uptime Monitor Production Environment..."
+echo "🚀 Starting Exvlan Uptime Monitor Production Environment..."
 
 # 检查依赖
 echo "📦 Checking dependencies..."

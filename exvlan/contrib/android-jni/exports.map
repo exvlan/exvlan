@@ -1,0 +1,6 @@
+{
+    global:
+        Java_com_exvlan_jni_ExvlanJNI_*;
+    local:
+        *;
+};

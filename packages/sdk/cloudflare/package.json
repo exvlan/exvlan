@@ -1,0 +1,48 @@
+{
+  "name": "@exvlan/cloudflare",
+  "version": "26.410.20700",
+  "description": "Run an Exvlan relay in a Cloudflare Durable Object",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/exvlan/exvlan.git",
+    "directory": "packages/sdk/cloudflare"
+  },
+  "homepage": "https://github.com/exvlan/exvlan",
+  "bugs": "https://github.com/exvlan/exvlan/issues",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build:dependencies": "pnpm --filter @exvlan/runtime build",
+    "build:wasm": "node ../runtime/scripts/build-wasm.mjs cloudflare src/generated/exvlan_core.wasm && node ../runtime/scripts/validate-wasm.mjs cloudflare src/generated/exvlan_core.wasm",
+    "build": "pnpm build:wasm && pnpm build:dependencies && tsc -p tsconfig.build.json && node ../runtime/scripts/copy-artifact.mjs src/generated/exvlan_core.wasm dist/generated/exvlan_core.wasm",
+    "check": "pnpm build && tsc --noEmit && wrangler deploy --dry-run",
+    "deploy": "pnpm build && wrangler deploy",
+    "test": "pnpm build && vitest run",
+    "prepack": "pnpm check"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "5.20260917.1",
+    "@exvlan/runtime": "workspace:26.410.20700"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7",
+    "wrangler": "4.134.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
+  }
+}

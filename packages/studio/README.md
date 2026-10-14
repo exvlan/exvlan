@@ -1,6 +1,6 @@
-# GUI for EXVlan
+# GUI for Exvlan
 
-this is a GUI implementation for EXVlan, based on Tauri2.
+this is a GUI implementation for Exvlan, based on Tauri2.
 
 ## Compile
 
@@ -18,7 +18,7 @@ cd ../tauri-plugin-vpnservice
 pnpm install
 pnpm build
 
-cd ../exvlan-web/frontend-lib
+cd ../std
 pnpm install
 pnpm build
 

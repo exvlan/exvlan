@@ -1,12 +1,12 @@
-# EXVlan Uptime Monitor
+# Exvlan Uptime Monitor
 
-一个用于监控 EXVlan 实例健康状态和运行时间的系统。
+一个用于监控 Exvlan 实例健康状态和运行时间的系统。
 
 ## 功能特性
 
-- 🏥 **健康监控**: 实时监控 EXVlan 节点的健康状态
+- 🏥 **健康监控**: 实时监控 Exvlan 节点的健康状态
 - 📊 **数据统计**: 提供详细的运行时间和响应时间统计
-- 🔧 **实例管理**: 管理多个 EXVlan 实例
+- 🔧 **实例管理**: 管理多个 Exvlan 实例
 - 🌐 **Web界面**: 直观的 Web 管理界面
 - 🚨 **告警系统**: 支持健康状态异常告警
 - 📈 **图表展示**: 可视化展示监控数据
@@ -89,7 +89,7 @@
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| `VITE_APP_TITLE` | `EXVlan Uptime Monitor` | 应用标题 |
+| `VITE_APP_TITLE` | `Exvlan Uptime Monitor` | 应用标题 |
 | `VITE_API_BASE_URL` | `/api` | API基础URL |
 | `VITE_APP_ENV` | `development` | 应用环境 |
 | `VITE_ENABLE_DEV_TOOLS` | `true` | 是否启用开发工具 |

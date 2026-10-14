@@ -9,13 +9,13 @@ SHAN='\e[1;33;5m'
 RES='\e[0m'
 
 HELP() {
-  echo -e "\r\n${GREEN_COLOR}EXVlan Installation Script Help${RES}\r\n"
+  echo -e "\r\n${GREEN_COLOR}Exvlan Installation Script Help${RES}\r\n"
   echo "Usage: ./install.sh [command] [options]"
   echo
   echo "Commands:"
-  echo "  install    Install EXVlan"
-  echo "  uninstall  Uninstall EXVlan"
-  echo "  update     Update EXVlan to the latest version"
+  echo "  install    Install Exvlan"
+  echo "  uninstall  Uninstall Exvlan"
+  echo "  update     Update Exvlan to the latest version"
   echo "  help       Show this help message"
   echo
   echo "Options:"
@@ -106,11 +106,11 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 echo -e "\r\n${RED_COLOR}----------------------NOTICE----------------------${RES}\r\n"
-echo " This is a temporary script to install EXVlan "
-echo " EXVlan requires a dedicated empty folder to install"
-echo " EXVlan is a developing product and may have some issues "
-echo " Using EXVlan requires some basic skills "
-echo " You need to face the risks brought by using EXVlan at your own risk "
+echo " This is a temporary script to install Exvlan "
+echo " Exvlan requires a dedicated empty folder to install"
+echo " Exvlan is a developing product and may have some issues "
+echo " Using Exvlan requires some basic skills "
+echo " You need to face the risks brought by using Exvlan at your own risk "
 echo -e "\r\n${RED_COLOR}-------------------------------------------------${RES}\r\n"
 
 # Get platform
@@ -175,7 +175,7 @@ fi
 CHECK() {
   if ! $SKIP_FOLDER_VERIFY; then
     if [ -f "$INSTALL_PATH/exvlan" ]; then
-      echo "There is EXVlan in $INSTALL_PATH. Please choose other path or use \"update\""
+      echo "There is Exvlan in $INSTALL_PATH. Please choose other path or use \"update\""
         echo -e "Or use Try ${GREEN_COLOR}--skip-folder-verify${RES} to skip"
       exit 0
     fi
@@ -187,7 +187,7 @@ CHECK() {
     # Check weather path is empty
     if ! $SKIP_FOLDER_VERIFY; then
       if [ -n "$(ls -A $INSTALL_PATH)" ]; then
-        echo "EXVlan requires to be installed in an empty directory. Please choose a empty path"
+        echo "Exvlan requires to be installed in an empty directory. Please choose a empty path"
         echo -e "Or use Try ${GREEN_COLOR}--skip-folder-verify${RES} to skip"
         echo -e "Current path: $INSTALL_PATH ( use ${GREEN_COLOR}--skip-folder-fix${RES} to disable folder fix )"
         exit 1
@@ -208,7 +208,7 @@ INSTALL() {
   fi
 
   # Download
-  echo -e "\r\n${GREEN_COLOR}Downloading EXVlan $LATEST_VERSION ...${RES}"
+  echo -e "\r\n${GREEN_COLOR}Downloading Exvlan $LATEST_VERSION ...${RES}"
   rm -rf /tmp/exvlan_tmp_install.zip
   BASE_URL="https://github.com/exvlan/exvlan/releases/latest/download/exvlan-linux-${ARCH}-${LATEST_VERSION}.zip"
   DOWNLOAD_URL=$($NO_GH_PROXY && echo "$BASE_URL" || echo "${GH_PROXY}${BASE_URL}")
@@ -232,7 +232,7 @@ INSTALL() {
 
 INIT() {
   if [ ! -f "$INSTALL_PATH/exvlan" ]; then
-    echo -e "\r\n${RED_COLOR}Opus${RES}, unable to find EXVlan\r\n"
+    echo -e "\r\n${RED_COLOR}Opus${RES}, unable to find Exvlan\r\n"
     exit 1
   fi
 
@@ -281,8 +281,8 @@ EOF
     cat >/etc/init.d/exvlan <<EOF
 #!/sbin/openrc-run
 
-name="EXVlan"
-description="EXVlan Service"
+name="Exvlan"
+description="Exvlan Service"
 command="$INSTALL_PATH/exvlan"
 command_args="-c $INSTALL_PATH/config/default.conf"
 command_user="nobody:nobody"
@@ -303,7 +303,7 @@ EOF
   if [ "$INIT_SYSTEM" = "systemd" ]; then
     cat >/etc/systemd/system/exvlan@.service <<EOF
 [Unit]
-Description=EXVlan Service
+Description=Exvlan Service
 Wants=network.target
 After=network.target network.service
 StartLimitIntervalSec=0
@@ -347,11 +347,11 @@ EOF
 
 SUCCESS() {
   clear
-  echo " Install EXVlan successfully!"
+  echo " Install Exvlan successfully!"
   echo -e "\r\nDefault Port: ${GREEN_COLOR}11010(UDP+TCP)${RES}, Notice allowing in firewall!\r\n"
   echo -e "Default Network Name: ${GREEN_COLOR}default${RES}, Please change it to your own network name!\r\n"
 
-  echo -e "Now EXVlan supports multiple config files. You can create config files in the ${GREEN_COLOR}${INSTALL_PATH}/config/${RES} folder"
+  echo -e "Now Exvlan supports multiple config files. You can create config files in the ${GREEN_COLOR}${INSTALL_PATH}/config/${RES} folder"
   echo -e "For more information, please check the documents in official site"
   echo -e "The management example of a single configuration file is as follows"
 
@@ -371,7 +371,7 @@ SUCCESS() {
 }
 
 UNINSTALL() {
-  echo -e "\r\n${GREEN_COLOR}Uninstall EXVlan ...${RES}\r\n"
+  echo -e "\r\n${GREEN_COLOR}Uninstall Exvlan ...${RES}\r\n"
   echo -e "${GREEN_COLOR}Stop process ...${RES}"
   if [ "$INIT_SYSTEM" = "systemd" ]; then
     systemctl disable "exvlan@*" >/dev/null 2>&1
@@ -387,14 +387,14 @@ UNINSTALL() {
   else
     rm -rf $INSTALL_PATH /etc/init.d/exvlan /usr/bin/exvlan /usr/bin/exvlan-cli /usr/sbin/exvlan /usr/sbin/exvlan-cli
   fi
-  echo -e "\r\n${GREEN_COLOR}EXVlan was removed successfully! ${RES}\r\n"
+  echo -e "\r\n${GREEN_COLOR}Exvlan was removed successfully! ${RES}\r\n"
 }
 
 # Minimizes downtime by preparing new files before stopping the service.
 # Correctly handles restarting multiple systemd service instances.
 UPDATE() {
   if [ ! -f "$INSTALL_PATH/exvlan" ]; then
-    echo -e "\r\n${RED_COLOR}Error${RES}: EXVlan not found in $INSTALL_PATH. Cannot perform update.\r\n"
+    echo -e "\r\n${RED_COLOR}Error${RES}: Exvlan not found in $INSTALL_PATH. Cannot perform update.\r\n"
     exit 1
   fi
 
@@ -446,14 +446,14 @@ UPDATE() {
     mapfile -t ACTIVE_SERVICES < <(systemctl list-units --type=service --state=active | grep "exvlan@" | awk '{print $1}')
     if [ ${#ACTIVE_SERVICES[@]} -gt 0 ]; then
         echo -e "\r\n${YELLOW_COLOR}Found running services: ${ACTIVE_SERVICES[*]}${RES}"
-        echo -e "${YELLOW_COLOR}Stopping EXVlan services...${RES}"
+        echo -e "${YELLOW_COLOR}Stopping Exvlan services...${RES}"
         systemctl stop "${ACTIVE_SERVICES[@]}"
     else
-        echo -e "\r\n${YELLOW_COLOR}No running EXVlan services found. Nothing to stop.${RES}"
+        echo -e "\r\n${YELLOW_COLOR}No running Exvlan services found. Nothing to stop.${RES}"
     fi
   else # openrc
     # openrc script seems to handle a single service, so keep it simple
-    echo -e "\r\n${YELLOW_COLOR}Stopping EXVlan service...${RES}"
+    echo -e "\r\n${YELLOW_COLOR}Stopping Exvlan service...${RES}"
     rc-service exvlan stop
   fi
 
@@ -480,13 +480,13 @@ UPDATE() {
   # 4. Start the services, restoring operation
   if [ "$INIT_SYSTEM" = "systemd" ]; then
     if [ ${#ACTIVE_SERVICES[@]} -gt 0 ]; then
-        echo -e "${GREEN_COLOR}Starting new version of EXVlan services: ${ACTIVE_SERVICES[*]}${RES}"
+        echo -e "${GREEN_COLOR}Starting new version of Exvlan services: ${ACTIVE_SERVICES[*]}${RES}"
         systemctl start "${ACTIVE_SERVICES[@]}"
     else
         echo -e "${GREEN_COLOR}No services were running before the update. Update complete.${RES}"
     fi
   else # openrc
-    echo -e "${GREEN_COLOR}Starting new version of EXVlan service...${RES}"
+    echo -e "${GREEN_COLOR}Starting new version of Exvlan service...${RES}"
     rc-service exvlan start
   fi
   
@@ -495,7 +495,7 @@ UPDATE() {
   rm -rf "$TEMP_UPDATE_DIR"
   rm -rf "$BACKUP_CONFIG_DIR"
   
-  echo -e "\r\n${GREEN_COLOR}EXVlan was successfully updated to version $LATEST_VERSION!${RES}\r\n"
+  echo -e "\r\n${GREEN_COLOR}Exvlan was successfully updated to version $LATEST_VERSION!${RES}\r\n"
 }
 
 

@@ -1,0 +1,24 @@
+[package]
+name = "exvlan-ios"
+version = "26.410.20700"
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, default-features = true, features = ["env-filter"] }
+exvlan-ffi = { workspace = true, features = [
+    "c-abi",
+] }
+
+[dev-dependencies]
+uuid.workspace = true
+exvlan-core = { workspace = true, default-features = true }
+exvlan-ffi = { workspace = true, features = [
+    "c-abi",
+    "ffi-dataplane",
+] }

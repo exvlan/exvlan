@@ -1,21 +1,28 @@
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use prost::Message;
+use quanta::Instant;
 use snow::params::NoiseParams;
 use tokio::sync::{Mutex, OwnedMutexGuard, oneshot};
-use tokio::time::{Duration, timeout};
 
-use crate::peers::foreign_network_client::ForeignNetworkClient;
 use crate::{
-    common::error::Error,
-    common::{PeerId, global_ctx::ArcGlobalCtx, shrink_dashmap},
-    peers::peer_map::PeerMap,
-    peers::peer_session::{PeerSession, PeerSessionAction, PeerSessionStore, SessionKey},
-    peers::route_trait::NextHopPolicy,
-    peers::traffic_metrics::AggregateTrafficMetrics,
+    config::PeerId,
+    foundation::time::{Duration, timeout},
+    packet::{PacketType, ZCPacket},
+    peers::{
+        conn::{
+            peer_map::PeerMap,
+            peer_session::{PeerSession, PeerSessionAction, PeerSessionStore, SessionKey},
+        },
+        context::ArcPeerContext,
+        error::Error,
+        foreign_network::client::ForeignNetworkClient,
+        route::NextHopPolicy,
+        util::shrink_dashmap,
+    },
+    proto::peer_rpc::RoutePeerInfo,
     proto::peer_rpc::{PeerConnSessionActionPb, RelayNoiseMsg1Pb, RelayNoiseMsg2Pb},
-    tunnel::packet_def::{PacketType, ZCPacket},
 };
 
 const RELAY_NOISE_VERSION: u32 = 1;
@@ -43,9 +50,9 @@ impl Default for RelayPeerState {
 }
 
 pub struct RelayPeerMap {
-    peer_map: Arc<PeerMap>,
-    foreign_network_client: Option<Arc<ForeignNetworkClient>>,
-    global_ctx: ArcGlobalCtx,
+    route_transport: Arc<dyn RelayRouteTransport>,
+    context: ArcPeerContext,
+    metric_network_name: String,
     my_peer_id: PeerId,
     peer_session_store: Arc<PeerSessionStore>,
     states: DashMap<PeerId, RelayPeerState>,
@@ -54,30 +61,89 @@ pub struct RelayPeerMap {
     pub(crate) pending_packets: DashMap<PeerId, Vec<(ZCPacket, NextHopPolicy)>>,
 
     is_secure_mode_enabled: bool,
-    control_metrics: AggregateTrafficMetrics,
+}
+
+#[async_trait::async_trait]
+#[auto_impl::auto_impl(Arc)]
+pub trait RelayRouteTransport: Send + Sync {
+    async fn get_route_peer_info(&self, peer_id: PeerId) -> Option<RoutePeerInfo>;
+
+    async fn send_msg_to_next_hop(
+        &self,
+        msg: ZCPacket,
+        dst_peer_id: PeerId,
+        policy: NextHopPolicy,
+    ) -> Result<(), Error>;
+}
+
+pub struct PeerMapRelayRouteTransport {
+    peer_map: Arc<PeerMap>,
+    foreign_network_client: Option<Arc<ForeignNetworkClient>>,
+}
+
+#[async_trait::async_trait]
+impl RelayRouteTransport for PeerMapRelayRouteTransport {
+    async fn get_route_peer_info(&self, peer_id: PeerId) -> Option<RoutePeerInfo> {
+        self.peer_map.get_route_peer_info(peer_id).await
+    }
+
+    async fn send_msg_to_next_hop(
+        &self,
+        msg: ZCPacket,
+        dst_peer_id: PeerId,
+        policy: NextHopPolicy,
+    ) -> Result<(), Error> {
+        let Some(next_hop) = self.peer_map.get_gateway_peer_id(dst_peer_id, policy).await else {
+            return Err(Error::RouteError(Some(format!(
+                "next hop not found in route for peer {dst_peer_id:?}"
+            ))));
+        };
+        if self.peer_map.has_peer(next_hop) {
+            self.peer_map.send_msg_directly(msg, next_hop).await
+        } else if let Some(foreign_network_client) = &self.foreign_network_client {
+            foreign_network_client.send_msg(msg, next_hop).await
+        } else {
+            Err(Error::RouteError(Some(format!(
+                "next hop not found in direct peer map: {next_hop:?}"
+            ))))
+        }
+    }
+}
+
+pub fn new_relay_peer_map(
+    peer_map: Arc<PeerMap>,
+    foreign_network_client: Option<Arc<ForeignNetworkClient>>,
+    context: ArcPeerContext,
+    my_peer_id: PeerId,
+    peer_session_store: Arc<PeerSessionStore>,
+) -> Arc<RelayPeerMap> {
+    RelayPeerMap::new(
+        Arc::new(PeerMapRelayRouteTransport {
+            peer_map,
+            foreign_network_client,
+        }),
+        context,
+        my_peer_id,
+        peer_session_store,
+    )
 }
 
 impl RelayPeerMap {
-    pub fn new(
-        peer_map: Arc<PeerMap>,
-        foreign_network_client: Option<Arc<ForeignNetworkClient>>,
-        global_ctx: ArcGlobalCtx,
+    pub(crate) fn new(
+        route_transport: Arc<dyn RelayRouteTransport>,
+        context: ArcPeerContext,
         my_peer_id: PeerId,
         peer_session_store: Arc<PeerSessionStore>,
     ) -> Arc<Self> {
-        let is_secure_mode_enabled = global_ctx
-            .config
-            .get_secure_mode()
+        let is_secure_mode_enabled = context
+            .secure_mode()
             .map(|cfg| cfg.enabled)
             .unwrap_or(false);
+        let metric_network_name = context.network_name();
         Arc::new(Self {
-            control_metrics: AggregateTrafficMetrics::control(
-                global_ctx.stats_manager().clone(),
-                global_ctx.get_network_name(),
-            ),
-            peer_map,
-            foreign_network_client,
-            global_ctx,
+            route_transport,
+            context,
+            metric_network_name,
             my_peer_id,
             peer_session_store,
             states: DashMap::new(),
@@ -94,9 +160,8 @@ impl RelayPeerMap {
 
     fn get_local_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), Error> {
         let cfg = self
-            .global_ctx
-            .config
-            .get_secure_mode()
+            .context
+            .secure_mode()
             .ok_or_else(|| Error::RouteError(Some("secure mode config not set".to_string())))?;
         let private = cfg
             .private_key()
@@ -109,7 +174,7 @@ impl RelayPeerMap {
 
     async fn get_remote_static_pubkey(&self, peer_id: PeerId) -> Result<Vec<u8>, Error> {
         let info = self
-            .peer_map
+            .route_transport
             .get_route_peer_info(peer_id)
             .await
             .ok_or_else(|| Error::RouteError(Some("route peer info not found".to_string())))?;
@@ -137,9 +202,13 @@ impl RelayPeerMap {
     ) -> Result<(), Error> {
         let mut pkt = ZCPacket::new_with_payload(&payload);
         pkt.fill_peer_manager_hdr(self.my_peer_id, dst_peer_id, packet_type as u8);
+        pkt.mut_peer_manager_header()
+            .unwrap()
+            .set_latency_first(matches!(&policy, NextHopPolicy::LeastCost));
         let pkt_len = pkt.buf_len() as u64;
         self.send_via_next_hop(pkt, dst_peer_id, policy).await?;
-        self.control_metrics.record_tx(pkt_len);
+        self.context
+            .record_control_tx(&self.metric_network_name, pkt_len);
         Ok(())
     }
 
@@ -149,20 +218,9 @@ impl RelayPeerMap {
         dst_peer_id: PeerId,
         policy: NextHopPolicy,
     ) -> Result<(), Error> {
-        let Some(next_hop) = self.peer_map.get_gateway_peer_id(dst_peer_id, policy).await else {
-            return Err(Error::RouteError(Some(format!(
-                "next hop not found in route for peer {dst_peer_id:?}"
-            ))));
-        };
-        if self.peer_map.has_peer(next_hop) {
-            self.peer_map.send_msg_directly(msg, next_hop).await
-        } else if let Some(foreign_network_client) = &self.foreign_network_client {
-            foreign_network_client.send_msg(msg, next_hop).await
-        } else {
-            Err(Error::RouteError(Some(format!(
-                "next hop not found in direct peer map: {next_hop:?}"
-            ))))
-        }
+        self.route_transport
+            .send_msg_to_next_hop(msg, dst_peer_id, policy)
+            .await
     }
 
     pub async fn send_msg(
@@ -171,6 +229,15 @@ impl RelayPeerMap {
         dst_peer_id: PeerId,
         policy: NextHopPolicy,
     ) -> Result<(), Error> {
+        // Forwarded packets belong to the original sender's end-to-end session.
+        // Do not establish another session or encrypt them at this hop.
+        if msg
+            .peer_manager_header()
+            .is_some_and(|hdr| hdr.from_peer_id.get() != self.my_peer_id)
+        {
+            return self.send_via_next_hop(msg, dst_peer_id, policy).await;
+        }
+
         let now = Instant::now();
 
         self.states.entry(dst_peer_id).or_default().last_active_at = now;
@@ -229,7 +296,7 @@ impl RelayPeerMap {
     pub fn has_session(&self, dst_peer_id: PeerId) -> bool {
         self.peer_session_store
             .get(&SessionKey::new(
-                self.global_ctx.get_network_identity().network_name.clone(),
+                self.context.network_identity().network_name,
                 dst_peer_id,
             ))
             .is_some()
@@ -240,7 +307,7 @@ impl RelayPeerMap {
         dst_peer_id: PeerId,
         policy: NextHopPolicy,
     ) -> Result<Arc<PeerSession>, Error> {
-        let network = self.global_ctx.get_network_identity();
+        let network = self.context.network_identity();
         let key = SessionKey::new(network.network_name.clone(), dst_peer_id);
         if let Some(session) = self.peer_session_store.get(&key) {
             return Ok(session);
@@ -267,7 +334,7 @@ impl RelayPeerMap {
         policy: NextHopPolicy,
         _lock_guard: Option<OwnedMutexGuard<()>>,
     ) -> Result<(), Error> {
-        let network = self.global_ctx.get_network_identity();
+        let network = self.context.network_identity();
         let key = SessionKey::new(network.network_name.clone(), dst_peer_id);
         if let Some(session) = self.peer_session_store.get(&key) {
             self.flush_pending_packets(dst_peer_id, session).await;
@@ -299,7 +366,7 @@ impl RelayPeerMap {
                     self.register_handshake_failure(dst_peer_id, attempt);
                     if attempt + 1 < HANDSHAKE_MAX_ATTEMPTS {
                         let backoff = HANDSHAKE_RETRY_BASE_MS.saturating_mul(1 << attempt);
-                        tokio::time::sleep(Duration::from_millis(backoff)).await;
+                        crate::foundation::time::sleep(Duration::from_millis(backoff)).await;
                     }
                 }
             }
@@ -318,7 +385,7 @@ impl RelayPeerMap {
         dst_peer_id: PeerId,
         policy: NextHopPolicy,
     ) -> Result<Arc<PeerSession>, Error> {
-        let network = self.global_ctx.get_network_identity();
+        let network = self.context.network_identity();
         let session_key = SessionKey::new(network.network_name.clone(), dst_peer_id);
         let (local_private_key, _local_public_key) = self.get_local_keypair()?;
         let remote_static = self.get_remote_static_pubkey(dst_peer_id).await?;
@@ -346,7 +413,7 @@ impl RelayPeerMap {
             version: RELAY_NOISE_VERSION,
             a_session_generation,
             a_conn_id: Some(a_conn_id.into()),
-            client_encryption_algorithm: self.global_ctx.get_flags().encryption_algorithm.clone(),
+            client_encryption_algorithm: self.context.flags().encryption_algorithm,
         };
         let payload = msg1_pb.encode_to_vec();
         let mut out = vec![0u8; 4096];
@@ -419,7 +486,7 @@ impl RelayPeerMap {
                 key_bytes.copy_from_slice(v);
                 key_bytes
             });
-        let algo = self.global_ctx.get_flags().encryption_algorithm.clone();
+        let algo = self.context.flags().encryption_algorithm;
         let session = self
             .peer_session_store
             .apply_initiator_action(
@@ -476,7 +543,8 @@ impl RelayPeerMap {
             .peer_manager_header()
             .ok_or_else(|| Error::RouteError(Some("packet without header".to_string())))?;
         let src_peer_id = hdr.from_peer_id.get();
-        self.control_metrics.record_rx(packet.buf_len() as u64);
+        self.context
+            .record_control_rx(&self.metric_network_name, packet.buf_len() as u64);
         match hdr.packet_type {
             x if x == PacketType::RelayHandshake as u8 => {
                 tracing::debug!("handle_relay_msg1 from {:?}", src_peer_id);
@@ -493,6 +561,17 @@ impl RelayPeerMap {
     }
 
     async fn handle_relay_msg1(&self, msg1: ZCPacket, remote_peer_id: PeerId) -> Result<(), Error> {
+        let header = msg1
+            .peer_manager_header()
+            .ok_or_else(|| Error::RouteError(Some("packet without header".to_string())))?;
+        let ack_policy = if header.is_latency_first() || header.forward_counter > 0 {
+            // Older peers do not mark latency-first handshakes. A forwarded
+            // request must still avoid the stale direct-peer shortcut.
+            NextHopPolicy::LeastCost
+        } else {
+            NextHopPolicy::LeastHop
+        };
+
         // Check for bidirectional handshake race condition.
         // If we are also waiting for a RelayHandshakeAck from this peer,
         // use deterministic rule: the peer with smaller peer_id becomes initiator.
@@ -563,8 +642,8 @@ impl RelayPeerMap {
             ))));
         }
 
-        let server_network_name = self.global_ctx.get_network_name();
-        let algo = self.global_ctx.get_flags().encryption_algorithm.clone();
+        let server_network_name = self.context.network_name();
+        let algo = self.context.flags().encryption_algorithm;
         let key = SessionKey::new(server_network_name.clone(), remote_peer_id);
         let upsert = self
             .peer_session_store
@@ -601,7 +680,7 @@ impl RelayPeerMap {
             out[..out_len].to_vec(),
             PacketType::RelayHandshakeAck,
             remote_peer_id,
-            NextHopPolicy::LeastHop,
+            ack_policy,
         )
         .await?;
 
@@ -620,15 +699,19 @@ impl RelayPeerMap {
             .peer_manager_header()
             .ok_or_else(|| Error::RouteError(Some("packet without header".to_string())))?;
         let from_peer_id = hdr.from_peer_id.get();
-        let network = self.global_ctx.get_network_identity();
+        let handshake_policy = if hdr.is_latency_first() || hdr.forward_counter > 0 {
+            NextHopPolicy::LeastCost
+        } else {
+            NextHopPolicy::LeastHop
+        };
+        let network = self.context.network_identity();
         let key = SessionKey::new(network.network_name.clone(), from_peer_id);
         let Some(session) = self.peer_session_store.get(&key) else {
             tracing::debug!(
                 "relay session not found for peer {}, try handshake",
                 from_peer_id
             );
-            self.ensure_session(from_peer_id, NextHopPolicy::LeastHop)
-                .await?;
+            self.ensure_session(from_peer_id, handshake_policy).await?;
             return Ok(false);
         };
         let now = Instant::now();
@@ -662,17 +745,6 @@ impl RelayPeerMap {
         self.states.contains_key(&peer_id)
     }
 
-    pub fn failure_count(&self, peer_id: PeerId) -> Option<u32> {
-        self.states.get(&peer_id).map(|v| v.failure_count)
-    }
-
-    pub fn is_backoff_active(&self, peer_id: PeerId) -> bool {
-        self.states
-            .get(&peer_id)
-            .and_then(|v| v.next_retry_at)
-            .is_some_and(|ts| Instant::now() < ts)
-    }
-
     /// Remove relay-specific state for a specific peer.
     /// This does NOT remove the session from PeerSessionStore, because the
     /// session lifecycle is independent of any particular connection type
@@ -689,5 +761,240 @@ impl RelayPeerMap {
         shrink_dashmap(&self.pending_packets, None);
 
         tracing::debug!(?peer_id, "RelayPeerMap removed peer relay state");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Mutex as StdMutex, Weak};
+
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    use super::*;
+    use crate::{
+        peers::context::{ArcPeerContext, NetworkIdentity, PeerContext},
+        proto::common::{FlagsInConfig, SecureModeConfig},
+    };
+
+    struct RelayTestContext {
+        network_identity: NetworkIdentity,
+        secure_mode: SecureModeConfig,
+        flags: FlagsInConfig,
+    }
+
+    impl PeerContext for RelayTestContext {
+        fn network_identity(&self) -> NetworkIdentity {
+            self.network_identity.clone()
+        }
+
+        fn secure_mode(&self) -> Option<SecureModeConfig> {
+            Some(self.secure_mode.clone())
+        }
+
+        fn flags(&self) -> FlagsInConfig {
+            self.flags.clone()
+        }
+    }
+
+    struct TestRelayTransport {
+        remote: StdMutex<Option<Weak<RelayPeerMap>>>,
+        remote_pubkey: Vec<u8>,
+        ack_policies: StdMutex<Vec<NextHopPolicy>>,
+    }
+
+    impl TestRelayTransport {
+        fn new(remote_pubkey: Vec<u8>) -> Self {
+            Self {
+                remote: StdMutex::new(None),
+                remote_pubkey,
+                ack_policies: StdMutex::new(Vec::new()),
+            }
+        }
+
+        fn set_remote(&self, remote: &Arc<RelayPeerMap>) {
+            *self.remote.lock().unwrap() = Some(Arc::downgrade(remote));
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RelayRouteTransport for TestRelayTransport {
+        async fn get_route_peer_info(&self, peer_id: PeerId) -> Option<RoutePeerInfo> {
+            Some(RoutePeerInfo {
+                peer_id,
+                noise_static_pubkey: self.remote_pubkey.clone(),
+                ..Default::default()
+            })
+        }
+
+        async fn send_msg_to_next_hop(
+            &self,
+            msg: ZCPacket,
+            _dst_peer_id: PeerId,
+            policy: NextHopPolicy,
+        ) -> Result<(), Error> {
+            let packet_type = msg.peer_manager_header().unwrap().packet_type;
+            if packet_type == PacketType::RelayHandshakeAck as u8 {
+                self.ack_policies.lock().unwrap().push(policy.clone());
+                if matches!(policy, NextHopPolicy::LeastHop) {
+                    return Ok(());
+                }
+            }
+
+            let remote = self
+                .remote
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(Weak::upgrade)
+                .ok_or_else(|| Error::RouteError(Some("test relay is unavailable".to_owned())))?;
+            remote.handle_handshake_packet(msg).await
+        }
+    }
+
+    fn relay_test_context(seed: u8) -> (ArcPeerContext, Vec<u8>) {
+        let private = StaticSecret::from([seed; 32]);
+        let public = PublicKey::from(&private);
+        let context = RelayTestContext {
+            network_identity: NetworkIdentity {
+                network_name: "test".to_owned(),
+                network_secret: Some("secret".to_owned()),
+                network_secret_digest: None,
+            },
+            secure_mode: SecureModeConfig {
+                enabled: true,
+                local_private_key: Some(BASE64_STANDARD.encode(private.as_bytes())),
+                local_public_key: Some(BASE64_STANDARD.encode(public.as_bytes())),
+            },
+            flags: FlagsInConfig {
+                encryption_algorithm: "aes-gcm".to_owned(),
+                ..Default::default()
+            },
+        };
+        (Arc::new(context), public.as_bytes().to_vec())
+    }
+
+    #[derive(Default)]
+    struct ForwardedPacketTransport {
+        packets: StdMutex<Vec<(ZCPacket, PeerId, NextHopPolicy)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl RelayRouteTransport for ForwardedPacketTransport {
+        async fn get_route_peer_info(&self, _peer_id: PeerId) -> Option<RoutePeerInfo> {
+            None
+        }
+
+        async fn send_msg_to_next_hop(
+            &self,
+            msg: ZCPacket,
+            dst_peer_id: PeerId,
+            policy: NextHopPolicy,
+        ) -> Result<(), Error> {
+            self.packets
+                .lock()
+                .unwrap()
+                .push((msg, dst_peer_id, policy));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn secure_relay_forwards_remote_packets_without_changing_payload() {
+        let (context, _) = relay_test_context(2);
+        let transport = Arc::new(ForwardedPacketTransport::default());
+        let relay = RelayPeerMap::new(
+            transport.clone(),
+            context,
+            2,
+            Arc::new(PeerSessionStore::new()),
+        );
+
+        for packet_type in [
+            PacketType::RelayHandshake,
+            PacketType::RelayHandshakeAck,
+            PacketType::Data,
+        ] {
+            let mut packet = ZCPacket::new_with_payload(b"end-to-end payload");
+            packet.fill_peer_manager_hdr(1, 3, packet_type as u8);
+            if matches!(packet_type, PacketType::Data) {
+                packet
+                    .mut_peer_manager_header()
+                    .unwrap()
+                    .set_encrypted(true);
+            }
+            let expected = packet.clone();
+            relay
+                .send_msg(packet, 3, NextHopPolicy::LeastCost)
+                .await
+                .unwrap();
+
+            let mut packets = transport.packets.lock().unwrap();
+            assert_eq!(
+                packets.len(),
+                1,
+                "forwarded packet was held for a local handshake"
+            );
+            let (forwarded, destination, policy) = packets.pop().unwrap();
+            assert_eq!(forwarded.into_bytes(), expected.into_bytes());
+            assert_eq!(destination, 3);
+            assert!(matches!(policy, NextHopPolicy::LeastCost));
+        }
+    }
+
+    #[tokio::test]
+    async fn latency_first_handshake_returns_ack_over_least_cost_route() {
+        let (context_a, pubkey_a) = relay_test_context(1);
+        let (context_b, pubkey_b) = relay_test_context(2);
+        let transport_a = Arc::new(TestRelayTransport::new(pubkey_b));
+        let transport_b = Arc::new(TestRelayTransport::new(pubkey_a));
+        let relay_a = RelayPeerMap::new(
+            transport_a.clone(),
+            context_a,
+            1,
+            Arc::new(PeerSessionStore::new()),
+        );
+        let relay_b = RelayPeerMap::new(
+            transport_b.clone(),
+            context_b,
+            2,
+            Arc::new(PeerSessionStore::new()),
+        );
+        transport_a.set_remote(&relay_b);
+        transport_b.set_remote(&relay_a);
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            relay_a.handshake_session(2, NextHopPolicy::LeastCost, None),
+        )
+        .await
+        .expect("relay handshake ack used the blackholed least-hop route")
+        .unwrap();
+
+        assert!(relay_a.has_session_without_touch(2));
+        assert!(relay_b.has_session_without_touch(1));
+        assert!(
+            transport_b
+                .ack_policies
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|policy| matches!(policy, NextHopPolicy::LeastCost))
+        );
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+mod test_utils {
+    use super::*;
+
+    impl RelayPeerMap {
+        #[doc(hidden)]
+        pub(crate) fn has_session_without_touch(&self, dst_peer_id: PeerId) -> bool {
+            self.peer_session_store.contains_valid(&SessionKey::new(
+                self.context.network_identity().network_name,
+                dst_peer_id,
+            ))
+        }
     }
 }

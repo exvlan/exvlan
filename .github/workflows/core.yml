@@ -1,4 +1,4 @@
-name: Builder Core
+name: Exvlan Core
 
 on:
   workflow_call:
@@ -6,62 +6,70 @@ on:
       targets:
         description: 'Build targets: JSON array of target triples, or "all"'
         type: string
-        default: "all"
+        default: 'all'
+      build_magisk:
+        description: 'Build the Magisk module'
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       targets:
         description: 'Build targets: JSON array of target triples, or "all"'
-        default: "all"
-
-permissions:
-  contents: read
-  actions: write
+        type: string
+        default: 'all'
+      build_magisk:
+        description: 'Build the Magisk module'
+        type: boolean
+        default: true
 
 concurrency:
-  group: core-${{ github.workflow }}-${{ github.event.pull_request.number ||
-    github.ref }}
+  group: core-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
-  VITE_PRIMEUI_LICENSE: ${{ secrets.PRIMEUI_LICENSE }}
 
 defaults:
   run:
+    # necessary for windows
     shell: bash
 
 jobs:
   pre_job:
-    name: Run Pre check
-    # continue-on-error: true # Uncomment once integration is finished
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    env:
+      RELEVANT_PATHS: >-
+        ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**",
+        "pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "exvlan/**",
+        "exvlan/core/**", "exvlan/proto/**", "exvlan/proto/build/**",
+        "exvlan/api/**", "exvlan/contrib/magisk/**",
+        ".github/workflows/core.yml", ".github/actions/**"]
     outputs:
-      should_skip: "false"
+      # 仅 PR 按路径门控跳过；push/tag/dispatch 一律构建（下游 docker/release 依赖其产物缓存，
+      # 且 pipeline 已统一门控，不能用 skip-duplicate 因内容重复而跳过本轮构建）。
+      should_skip: >-
+        ${{
+          github.event_name == 'pull_request' &&
+          steps.path_filter.outputs.relevant != 'true'
+        }}
     steps:
-      - run: echo "Skip disabled (pipeline chaining requires artifacts)"
-  dashboard:
-    name: Build Kit & Dashboard
-    runs-on: ubuntu-latest
-    needs: pre_job
-    if: needs.pre_job.outputs.should_skip != 'true'
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Frontend Environment
-        uses: ./.github/actions/prepare-pnpm
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
         with:
-          build-filter: "./packages/*"
+          concurrent_skipping: 'same_content_newer'
+          skip_after_successful_duplicate: 'true'
+          cancel_others: 'true'
+          paths: ${{ env.RELEVANT_PATHS }}
 
-      - name: Archive artifact
-        uses: actions/upload-artifact@v7
+      - id: path_filter
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.skip_check.outputs.should_skip != 'true'
+        uses: dorny/paths-filter@v4
         with:
-          name: exvlan-dashboard
-          path: |
-            packages/ui/dist/*
-          retention-days: 7
-
+          filters: |
+            relevant: ${{ env.RELEVANT_PATHS }}
   prepare_matrix:
     name: Prepare build matrix
     runs-on: ubuntu-latest
@@ -79,6 +87,8 @@ jobs:
           ALL = [
             {"TARGET": "x86_64-unknown-linux-musl", "OS": "ubuntu-24.04", "ARTIFACT_NAME": "linux-x86_64"},
             {"TARGET": "aarch64-unknown-linux-musl", "OS": "ubuntu-24.04-arm", "ARTIFACT_NAME": "linux-aarch64"},
+            {"TARGET": "riscv64gc-unknown-linux-musl", "OS": "ubuntu-24.04", "ARTIFACT_NAME": "linux-riscv64"},
+            {"TARGET": "loongarch64-unknown-linux-musl", "OS": "ubuntu-24.04", "ARTIFACT_NAME": "linux-loongarch64"},
             {"TARGET": "armv7-unknown-linux-musleabihf", "OS": "ubuntu-24.04", "ARTIFACT_NAME": "linux-armv7hf"},
             {"TARGET": "armv7-unknown-linux-musleabi", "OS": "ubuntu-24.04", "ARTIFACT_NAME": "linux-armv7"},
             {"TARGET": "arm-unknown-linux-musleabihf", "OS": "ubuntu-24.04", "ARTIFACT_NAME": "linux-armhf"},
@@ -87,14 +97,15 @@ jobs:
             {"TARGET": "x86_64-apple-darwin", "OS": "macos-latest", "ARTIFACT_NAME": "macos-x86_64"},
             {"TARGET": "aarch64-apple-darwin", "OS": "macos-latest", "ARTIFACT_NAME": "macos-aarch64"},
             {"TARGET": "x86_64-pc-windows-msvc", "OS": "windows-latest", "ARTIFACT_NAME": "windows-x86_64"},
+            {"TARGET": "i686-pc-windows-msvc", "OS": "windows-latest", "ARTIFACT_NAME": "windows-i686"},
             {"TARGET": "aarch64-pc-windows-msvc", "OS": "windows-11-arm", "ARTIFACT_NAME": "windows-arm64"},
           ]
 
-          selected = sys.argv[1]
-          if selected == "all":
+          sel = sys.argv[1] if len(sys.argv) > 1 else "all"
+          if sel in ("", "all"):
               result = ALL
           else:
-              wanted = set(json.loads(selected))
+              wanted = set(json.loads(sel))
               result = [e for e in ALL if e["TARGET"] in wanted]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write("include=" + json.dumps(result) + "\n")
@@ -102,7 +113,6 @@ jobs:
           PY
 
   build:
-    name: Build Core ${{ matrix.ARTIFACT_NAME }}
     strategy:
       fail-fast: false
       matrix:
@@ -113,20 +123,17 @@ jobs:
       NAME: exvlan
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
-    needs: [pre_job, dashboard, prepare_matrix]
-    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+      OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
+    needs:
+      - pre_job
+      - prepare_matrix
+    if: needs.pre_job.outputs.should_skip != 'true'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v5
 
       - name: Set current ref as env variable
         run: |
           echo "GIT_DESC=$(git log -1 --format=%cd.%h --date=format:%Y-%m-%d_%H:%M:%S)" >> $GITHUB_ENV
-
-      - name: Download web artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: exvlan-dashboard
-          path: packages/ui/dist/
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
@@ -138,40 +145,56 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # The prefix cache key, this can be changed to start a new cache manually.
+          # default: "v0-rust"
           prefix-key: ""
-          shared-key: "exvlan-shared"
-          cache-targets: true
+          shared-key: "core-registry"
+          cache-targets: "false"
 
-      - uses: jdx/mise-action@v4
+      - uses: mlugg/setup-zig@v2
         if: ${{ contains(matrix.OS, 'ubuntu') }}
         with:
-          mise_toml: |
-            [tools]
-            zig = "0.16.0"
-          cache_key_prefix: "mise-zig"
+          version: 0.16.0
+          use-cache: true
 
-      - uses: taiki-e/install-action@v2.85.11
+      - uses: taiki-e/install-action@v2
         if: ${{ contains(matrix.OS, 'ubuntu') }}
         with:
-          tool: cargo-zigbuild
+          # v0.23.3 emits -mcpu=generic+v6+strict_align for
+          # arm-unknown-linux-musleabi, which zig 0.16.0 rejects;
+          # unpin only together with a zig bump.
+          tool: cargo-zigbuild@0.23.2
 
-      - name: Build (${{ matrix.ARTIFACT_NAME }})
+      - name: Build
         if: ${{ !contains(matrix.TARGET, 'mips') }}
-        run: |
-          export PATH="$PATH:$HOME/.cargo/bin"
-          SUFFIX=$([[ "$TARGET" == *windows* ]] && echo ".exe" || echo "")
-          BUILD=$([[ "$TARGET" =~ (x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|windows|darwin) ]] && echo "build" || echo "zigbuild")
-          FEATURES=$([[ "$TARGET" =~ ^(riscv64|loongarch64|aarch64).*$ || "$TARGET" =~ (freebsd|windows) ]] && echo "mimalloc" || echo "jemalloc")
+        run: |          
+          if [[ "$TARGET" == *windows* ]]; then
+            SUFFIX=.exe
+          else
+            SUFFIX=""
+          fi
 
+          if [[ "$TARGET" =~ (x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|windows|darwin) ]]; then
+            BUILD=build
+          else
+            BUILD=zigbuild
+          fi
+
+          if [[ "$TARGET" =~ ^(riscv64|loongarch64|aarch64).*$ || "$TARGET" =~ (freebsd|windows) ]]; then
+            FEATURES="mimalloc"
+          else
+            FEATURES="jemalloc"
+          fi
+          
           cargo $BUILD --release --target $TARGET --package=exvlan-api --features=embed
           mv ./target/$TARGET/release/exvlan-api"$SUFFIX" ./target/$TARGET/release/exvlan-api-embed"$SUFFIX"
+          
           cargo $BUILD --release --target $TARGET --features=$FEATURES
 
-      - name: Build (MIPS) (${{ matrix.ARTIFACT_NAME }})
+      - name: Build (MIPS)
         if: ${{ contains(matrix.TARGET, 'mips') }}
         env:
           RUSTC_BOOTSTRAP: 1
-          RUSTFLAGS: "--cfg portable_atomic_unsafe_assume_single_core"
         run: |
           cargo build -r --target $TARGET -Z build-std=std,panic_abort --package=exvlan --features=jemalloc
 
@@ -188,7 +211,7 @@ jobs:
                   aarch64*) ARCH_DIR=arm64 ;;
               esac
               if [[ -n "$ARCH_DIR" ]]; then
-                  find "exvlan/core/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./artifacts/objects/ \;
+                  find "exvlan/exvlan/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./artifacts/objects/ \;
               fi
           fi
 
@@ -197,34 +220,24 @@ jobs:
           else
             TAG=$GITHUB_SHA
           fi
-
+          
           if [[ $OS =~ ^ubuntu.*$ && ! $TARGET =~ (loongarch|freebsd) ]]; then
             HOST_ARCH=$(uname -m)
             case $HOST_ARCH in
               x86_64)  UPX_ARCH="amd64" ;;
               aarch64) UPX_ARCH="arm64" ;;
-              armv7*)  UPX_ARCH="arm" ;;
               *)       UPX_ARCH="amd64" ;;
             esac
 
             UPX_VERSION=4.2.4
             UPX_PKG="upx-${UPX_VERSION}-${UPX_ARCH}_linux"
-            UPX_URL="https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_PKG}.tar.xz"
-            
-            echo "⬇️ Downloading UPX from: $UPX_URL"
-            
-            if curl  -f -s -L "$UPX_URL" -o upx.tar.xz; then
-              # 解压并移动二进制文件到当前目录
-              tar -xJvf upx.tar.xz
-              cp "${UPX_PKG}/upx" .
-              UPX_BIN=./upx
-              echo "✅ UPX installed successfully."
-            else
-              echo "❌ Failed to download UPX, skipping compression."
-            fi
+            curl -L "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_PKG}.tar.xz" -s | tar xJvf -
+            cp "${UPX_PKG}/upx" .
+            UPX_BIN=./upx
           fi
 
-          for BIN in ./target/$TARGET/release/{exvlan,exvlan-cli,exvlan-api,exvlan-api-embed}"$SUFFIX"; do
+          for BIN_NAME in exvlan exvlan-cli exvlan-api exvlan-api-embed; do
+            BIN="./target/$TARGET/release/${BIN_NAME}${SUFFIX}"
             if [[ -f "$BIN" ]]; then
               if [[ -n "$UPX_BIN" ]]; then
                 $UPX_BIN --lzma --best "$BIN" || true
@@ -237,46 +250,113 @@ jobs:
           mv ./artifacts/objects/* ./artifacts/
           rm -rf ./artifacts/objects/
 
-      - name: Archive artifact
-        uses: actions/upload-artifact@v7
+      - name: Cache core binaries
+        uses: actions/cache/save@v4
         with:
-          name: exvlan-${{ matrix.ARTIFACT_NAME }}
-          path: |
-            ./artifacts/*
-          retention-days: 7
+          key: core-${{ github.sha }}-${{ matrix.ARTIFACT_NAME }}
+          path: ./artifacts
 
-  magisk:
-    name: Build Magisk Module
+      - name: Upload core artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-${{ matrix.ARTIFACT_NAME }}
+          path: ./artifacts
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Prepare SignPath test artifact
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
+        run: |
+          mkdir -p ./signpath-artifacts
+          cp \
+            ./artifacts/exvlan.exe \
+            ./artifacts/exvlan-cli.exe \
+            ./artifacts/exvlan-api.exe \
+            ./artifacts/exvlan-api-embed.exe \
+            ./signpath-artifacts/
+
+      - name: Upload unsigned SignPath test artifact
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
+        id: signpath-upload
+        uses: actions/upload-artifact@v5
+        with:
+          name: signpath-unsigned-${{ matrix.ARTIFACT_NAME }}
+          path: ./signpath-artifacts/*
+          if-no-files-found: error
+
+      - name: Submit SignPath test-signing request
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: 368cf38d-86d5-4bfe-a1fa-82a50dce7e9f
+          project-slug: Exvlan
+          signing-policy-slug: test-signing
+          artifact-configuration-slug: initial
+          github-artifact-id: ${{ steps.signpath-upload.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: ./signpath-signed-artifacts
+
+      - name: Upload signed SignPath test artifact
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: signpath-signed-${{ matrix.ARTIFACT_NAME }}
+          path: ./signpath-signed-artifacts/*
+          if-no-files-found: error
+
+  build_magisk:
     runs-on: ubuntu-latest
-    needs: [pre_job, dashboard, build]
-    # if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
-    if: false
+    needs: [ pre_job, prepare_matrix, build ]
+    if: inputs.build_magisk && needs.pre_job.result == 'success' && needs.build.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7 # 必须先检出代码才能获取模块配置
+        uses: actions/checkout@v5  # 必须先检出代码才能获取模块配置
 
-      # 下载二进制文件到独立目录
-      - name: Download Linux aarch64 binaries
-        uses: actions/download-artifact@v8
+      - name: Setup Frontend Environment
+        uses: ./.github/actions/prepare-pnpm
         with:
-          name: exvlan-linux-aarch64
-          path: ./downloaded-binaries/ # 独立目录避免冲突
+          token: ${{ github.token }}
+          build-filter: './packages/*'
 
-      # 将二进制文件复制到 Magisk 模块目录
-      - name: Prepare binaries
+      - name: Restore Linux aarch64 binaries
+        uses: actions/cache/restore@v4
+        with:
+          key: core-${{ github.sha }}-linux-aarch64
+          path: ./artifacts
+          fail-on-cache-miss: true
+
+      # 将二进制文件和 WebUI 复制到 Magisk 模块目录
+      - name: Prepare Magisk module
         run: |
-          mkdir -p ./exvlan-contrib/magisk/
-          cp ./downloaded-binaries/exvlan ./exvlan-contrib/magisk/
-          cp ./downloaded-binaries/exvlan-cli ./exvlan-contrib/magisk/
-          cp ./downloaded-binaries/exvlan-api ./exvlan-contrib/magisk/
+          module_dir=./exvlan/contrib/magisk
+          mkdir -p "$module_dir/webroot"
+          cp ./artifacts/exvlan "$module_dir/"
+          cp ./artifacts/exvlan-cli "$module_dir/"
+          cp ./artifacts/exvlan-api "$module_dir/"
+          cp -R ./packages/ui/dist/config-generator/. "$module_dir/webroot/"
+          test -f "$module_dir/webroot/index.html"
 
-      # 上传生成的模块
-      - name: Upload Magisk Module
-        uses: actions/upload-artifact@v7
+      # 缓存生成的模块
+      - name: Cache Magisk Module
+        uses: actions/cache/save@v4
         with:
-          name: exvlan-magisk
-          path: |
-            ./exvlan-contrib/magisk
-            !./exvlan-contrib/magisk/build.sh
-            !./exvlan-contrib/magisk/magisk_update.json
+          key: magisk-${{ github.sha }}
+          path: ./exvlan/contrib/magisk
+
+      - name: Upload magisk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: magisk
+          path: ./exvlan/contrib/magisk
           if-no-files-found: error
+          retention-days: 14
+
+  core-result:
+    runs-on: ubuntu-latest
+    needs: [ pre_job, build, build_magisk ]
+    if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
+    steps:
+      - name: Mark result as failed
+        if: contains(needs.*.result, 'failure')
+        run: exit 1

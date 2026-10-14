@@ -80,7 +80,6 @@ impl Clone for Throughput {
     }
 }
 
-// add sync::Send and sync::Sync traits to Throughput
 unsafe impl Send for Throughput {}
 unsafe impl Sync for Throughput {}
 

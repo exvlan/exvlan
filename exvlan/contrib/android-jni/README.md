@@ -1,13 +1,14 @@
-# EXVlan Android JNI
+# Exvlan Android JNI
 
-这是 EXVlan 的 Android JNI 绑定库，允许 Android 应用程序调用 EXVlan 的网络功能。
+这是 Exvlan 的 Android JNI 绑定库，允许 Android 应用程序调用 Exvlan 的网络功能。
 
 ## 功能特性
 
-- 🚀 完整的 EXVlan FFI 接口封装
+- 🚀 完整的 Exvlan FFI 接口封装
 - 📱 原生 Android JNI 支持
 - 🔧 支持多种 Android 架构 (arm64-v8a, armeabi-v7a, x86, x86_64)
 - 🛡️ 类型安全的 Java 接口
+- 🔌 支持通过 JSON 调用已暴露的 Exvlan RPC 查询/管理接口
 - 📝 详细的错误处理和日志记录
 
 ## 支持的架构
@@ -53,7 +54,7 @@
 
 1. **克隆项目并进入目录**
    ```bash
-   cd /path/to/EXVlan/exvlan-contrib/exvlan-android-jni
+   cd /path/to/Exvlan/exvlan/contrib/android-jni
    ```
 
 2. **运行构建脚本**
@@ -143,7 +144,7 @@ public class EraXVlanManager {
                 throw new RuntimeException("网络实例启动失败: " + error);
             }
             
-            System.out.println("EXVlan 网络实例启动成功");
+            System.out.println("Exvlan 网络实例启动成功");
             
         } catch (RuntimeException e) {
             System.err.println("启动失败: " + e.getMessage());
@@ -176,6 +177,20 @@ public class EraXVlanManager {
 }
 ```
 
+### 通用 JSON RPC
+
+`ExvlanJNI.callJsonRpc(serviceName, methodName, domainName, payloadJson)` 可以调用已暴露的
+Exvlan RPC 服务，payload 和返回值均为 protobuf JSON。该接口不支持
+`api.manage.WebClientService`；实例启动、保留、删除、信息收集仍使用专用 JNI API。
+
+```java
+String response = ExvlanJNI.callJsonRpc(
+    "api.logger.LoggerRpcService",
+    "get_logger_config",
+    "{}"
+);
+```
+
 ### VPN 服务集成
 
 如果您要在 Android VPN 服务中使用：
@@ -195,7 +210,7 @@ public class EraXVlanVpnService extends VpnService {
             try {
                 EraXVlanJNI.setTunFd("my_instance", fd);
             } catch (RuntimeException e) {
-                Log.e("EXVlan", "设置 TUN FD 失败", e);
+                Log.e("Exvlan", "设置 TUN FD 失败", e);
             }
         }
         
@@ -207,7 +222,7 @@ public class EraXVlanVpnService extends VpnService {
         builder.setMtu(1500);
         builder.addAddress("10.0.0.2", 24);
         builder.addRoute("0.0.0.0", 0);
-        builder.setSession("EXVlan VPN");
+        builder.setSession("Exvlan VPN");
         
         return builder.establish();
     }
@@ -249,12 +264,12 @@ public class EraXVlanVpnService extends VpnService {
 ### 调试技巧
 
 - 启用 Android 日志查看 JNI 层的日志输出
-- 使用 `adb logcat -s EXVlan-JNI` 查看相关日志
+- 使用 `adb logcat -s Exvlan-JNI` 查看相关日志
 - 检查 `getLastError()` 返回的错误信息
 
 ## 许可证
 
-本项目遵循与 EXVlan 主项目相同的许可证。
+本项目遵循与 Exvlan 主项目相同的许可证。
 
 ## 贡献
 
@@ -262,6 +277,6 @@ public class EraXVlanVpnService extends VpnService {
 
 ## 相关链接
 
-- [EXVlan 主项目](https://github.com/exvlan/exvlan)
+- [Exvlan 主项目](https://github.com/exvlan/exvlan)
 - [Android NDK 文档](https://developer.android.com/ndk)
 - [Rust JNI 文档](https://docs.rs/jni/)

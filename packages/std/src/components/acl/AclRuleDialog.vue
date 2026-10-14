@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { AutoComplete, Button, Checkbox, Dialog, InputNumber, InputText, Select, Panel, SelectButton, ToggleButton } from 'primevue';
-import { computed, ref } from 'vue';
+import { AutoComplete, Button, Checkbox, Dialog, InputNumber, InputText, MultiSelect, Panel, SelectButton, ToggleButton } from 'primevue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { AclAction, AclProtocol, AclRule } from '../../types/network';
+import { AclAction, AclProtocol, AclRule, ensureAclRuleLists } from '../../types/network';
 
 const props = defineProps<{
   visible: boolean
@@ -31,6 +31,8 @@ const actionOptions = [
 const showPorts = computed(() => {
   return rule.value.protocol === AclProtocol.TCP || rule.value.protocol === AclProtocol.UDP || rule.value.protocol === AclProtocol.Any
 })
+
+watch(() => rule.value, ensureAclRuleLists, { immediate: true })
 
 function close() {
   emit('update:visible', false)
@@ -130,12 +132,12 @@ const genericSuggestions = ref<string[]>([])
 
           <div class="flex flex-col gap-2">
             <label class="font-bold">{{ t('acl.rule.src_groups') }}</label>
-            <Select v-model="rule.source_groups" :options="props.groupNames" multiple fluid filter
+            <MultiSelect v-model="rule.source_groups" :options="props.groupNames" multiple fluid filter
               :placeholder="t('acl.rule.src_groups')" />
           </div>
           <div class="flex flex-col gap-2">
             <label class="font-bold">{{ t('acl.rule.dst_groups') }}</label>
-            <Select v-model="rule.destination_groups" :options="props.groupNames" multiple fluid filter
+            <MultiSelect v-model="rule.destination_groups" :options="props.groupNames" multiple fluid filter
               :placeholder="t('acl.rule.dst_groups')" />
           </div>
         </div>
@@ -143,8 +145,8 @@ const genericSuggestions = ref<string[]>([])
     </div>
 
     <template #footer>
-      <Button @click="close" text><i class="pi pi-times"></i><span>{{ t('web.common.cancel') }}</span></Button>
-      <Button @click="save"><i class="pi pi-save"></i><span>{{ t('web.common.save') }}</span></Button>
+      <Button :label="t('web.common.cancel')" icon="pi pi-times" @click="close" text />
+      <Button :label="t('web.common.save')" icon="pi pi-save" @click="save" />
     </template>
   </Dialog>
 </template>

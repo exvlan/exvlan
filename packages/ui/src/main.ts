@@ -1,9 +1,14 @@
 import { createApp } from 'vue'
 import '@exvlan/std/style.css'
 import './style.css'
+import './console.css'
 import App from './App.vue'
 import ExvlanFrontendLib from '@exvlan/std'
+import PrimeVue from 'primevue/config'
+import ConsoleTheme from './theme';
+import { initThemeMode } from './modules/theme';
 import ConfirmationService from 'primevue/confirmationservice';
+import { I18nUtils } from '@exvlan/std'
 
 import { createRouter, createWebHashHistory } from 'vue-router'
 import MainPage from './components/MainPage.vue'
@@ -11,9 +16,10 @@ import Login from './components/Login.vue'
 import DeviceList from './components/DeviceList.vue'
 import DeviceManagement from './components/DeviceManagement.vue'
 import Dashboard from './components/Dashboard.vue'
+import NetworkList from './components/NetworkList.vue'
+import NetworkDetail from './components/NetworkDetail.vue'
 import DialogService from 'primevue/dialogservice';
 import ToastService from 'primevue/toastservice';
-import ConfigGenerator from './components/ConfigGenerator.vue'
 
 const routes = [
     {
@@ -34,7 +40,7 @@ const routes = [
         ]
     },
     {
-        path: '/h/:apiHost', component: MainPage, children: [
+        path: '/h', component: MainPage, children: [
             {
                 path: '',
                 alias: 'dashboard',
@@ -53,21 +59,20 @@ const routes = [
                     }
                 ]
             },
+            {
+                path: 'networks',
+                name: 'networkList',
+                component: NetworkList,
+            },
+            {
+                path: 'networks/:networkId',
+                name: 'networkDetail',
+                component: NetworkDetail,
+            },
         ]
     },
     {
-        path: '/:pathMatch(.*)*', name: 'notFound', redirect: () => {
-            let apiHost = localStorage.getItem('apiHost');
-            if (apiHost) {
-                return { name: 'dashboard', params: { apiHost: apiHost } }
-            } else {
-                return { name: 'login' }
-            }
-        }
-    },
-    {
-        path: '/config_generator',
-        component: ConfigGenerator,
+        path: '/:pathMatch(.*)*', name: 'notFound', redirect: { name: 'dashboard' }
     }
 ]
 
@@ -78,4 +83,28 @@ const router = createRouter({
 
 const app = createApp(App)
 
-app.use(ToastService as any).use(DialogService as any).use(router).use(ConfirmationService as any).use(ExvlanFrontendLib).mount('#app')
+// Use i18n
+app.use(I18nUtils.i18n)
+// Apply the Web-specific PrimeVue theme first; register the shared
+// component library without its built-in theme so our dark mode selector
+// is the only one that takes effect.
+app.use(PrimeVue,
+    {
+        theme: {
+            preset: ConsoleTheme,
+            options: {
+                prefix: 'p',
+                darkModeSelector: '.app-dark',
+                cssLayer: {
+                    name: 'primevue',
+                    order: 'tailwind-base, primevue, tailwind-utilities'
+                }
+            }
+        }
+    }
+).use(ToastService as any).use(DialogService as any).use(router).use(ConfirmationService as any)
+
+app.use(ExvlanFrontendLib, { skipPrimeVue: true })
+
+initThemeMode()
+app.mount('#app')

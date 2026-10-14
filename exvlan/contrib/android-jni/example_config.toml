@@ -1,5 +1,5 @@
-# EXVlan Android JNI 示例配置文件
-# 这是一个基本的配置示例，展示如何配置 EXVlan 网络实例
+# Exvlan Android JNI 示例配置文件
+# 这是一个基本的配置示例，展示如何配置 Exvlan 网络实例
 
 # 实例名称 (必需)
 inst_name = "android_instance"

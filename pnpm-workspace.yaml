@@ -1,4 +1,5 @@
 packages:
+  - packages/generator
   - packages/ui
   - packages/std
   - packages/studio
@@ -19,9 +20,7 @@ minimumReleaseAgeExclude:
   - rolldown-plugin-dts@0.26.0
   - tsdown@0.22.3
 overrides:
-  '@vue/language-core': ^3.3.9
   minimatch: ^10.2.6
-  typescript: npm:typescript@6.0.3
   vite: 'catalog:'
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.8

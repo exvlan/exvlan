@@ -1,169 +1,113 @@
-name: Publish Release
+name: Exvlan Release
 
 on:
   workflow_call:
     inputs:
-      version:
-        description: 'Version for this release'
-        type: string
-        required: true
-      mark_latest:
-        description: 'Mark this release as latest'
-        type: boolean
-        default: true
-      is_alpha:
-        description: 'Is this an alpha release'
-        type: boolean
-        default: false
-
+      version: { description: 'Version', type: string, required: false }
+      mark_latest: { description: 'Mark as latest', type: boolean, default: true, required: false }
+      is_alpha: { description: 'Is alpha', type: boolean, default: false, required: false }
   workflow_dispatch:
     inputs:
-      core_run_id:
-        description: 'The run id of exvlan Core Action (used for manual workflow_dispatch)'
-        type: number
-        required: true
-      gui_run_id:
-        description: 'The run id of exvlan GUI Action (used for manual workflow_dispatch)'
-        type: number
-        required: true
-      mobile_run_id:
-        description: 'The run id of exvlan Mobile Action (used for manual workflow_dispatch)'
-        type: number
-        required: true
       version:
         description: 'Version for this release'
         type: string
-        default: 'v26.206.17020604'
+        default: 'v26.410.20700'
         required: true
-      mark_latest:
+      make_latest:
         description: 'Mark this release as latest'
         type: boolean
         default: true
         required: true
-      is_alpha:
-        description: 'Is this an alpha release'
-        type: boolean
-        default: false
-        required: false
 
 permissions:
   contents: write
-  actions: read
 
-env:
-  CARGO_TERM_COLOR: always
 jobs:
   release:
-    name: Release Publish
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v5
 
-      - name: Download Core Artifact
-        if: inputs.core_run_id != ''
-        uses: dawidd6/action-download-artifact@v21
+      # 产物由 Build Core / Studio / Mobile 以 Actions artifact 上传
+      # （core-<platform> / studio-<name> / mobile-<arch> / magisk）。
+      # 用 pattern 精确拉取，排除 docker buildx 产生的 `<owner>~<repo>~*.dockerbuild`
+      # artifact（其名字含保留分隔符 `~`，会导致 download-artifact 解压失败）。
+      - name: Download core artifacts
+        uses: actions/download-artifact@v4
         with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          name: 'exvlan-(linux|macos|windows|freebsd)-.*|exvlan-dashboard|exvlan-magisk'
-          name_is_regexp: true
-          run_id: ${{ inputs.core_run_id }}
-          repo: ${{ github.repository }}
           path: release_assets
+          pattern: core-*
 
-      - name: Download Core Artifact (from workflow_call)
-        if: inputs.core_run_id == ''
-        uses: actions/download-artifact@v8
+      - name: Download magisk artifact
+        uses: actions/download-artifact@v4
         with:
-          # pattern 为单个 Minimatch glob（不支持换行分隔）。
-          # exvlan-[!s]* 匹配全部 core 产物（linux/macos/windows/freebsd/dashboard/magisk），排除 exvlan-studio-*
-          pattern: 'exvlan-[!s]*'
           path: release_assets
+          pattern: magisk
 
-      - name: Download GUI Artifact
-        if: inputs.core_run_id != ''
-        uses: dawidd6/action-download-artifact@v21
+      - name: Download studio artifacts
+        uses: actions/download-artifact@v4
         with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          name: 'exvlan-studio-.*'
-          name_is_regexp: true
-          run_id: ${{ inputs.gui_run_id }}
-          repo: ${{ github.repository }}
-          path: release_assets_nozip
+          path: release_assets
+          pattern: studio-*
 
-      - name: Download GUI Artifact (from workflow_call)
-        if: inputs.core_run_id == ''
-        uses: actions/download-artifact@v8
+      - name: Download mobile artifacts
+        uses: actions/download-artifact@v4
         with:
-          pattern: 'exvlan-studio-*'
-          path: release_assets_nozip
-          merge-multiple: true
+          path: release_assets
+          pattern: mobile-*
 
-      - name: Download Mobile Artifact
-        if: inputs.core_run_id != ''
-        uses: dawidd6/action-download-artifact@v21
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          name: 'exvlan-studio-.*'
-          name_is_regexp: true
-          run_id: ${{ inputs.mobile_run_id }}
-          repo: ${{ github.repository }}
-          path: release_assets_nozip
-
-      - name: Download Mobile Artifact (from workflow_call)
-        if: inputs.core_run_id == ''
-        uses: actions/download-artifact@v8
-        with:
-          pattern: 'exvlan-studio-*'
-          path: release_assets_nozip
-          merge-multiple: true
-
-      - name: Zip release assets
+      - name: Package release assets
         env:
           VERSION: ${{ inputs.version }}
         run: |
+          set -euo pipefail
           mkdir -p zipped_assets
+          cd release_assets
+          shopt -s nullglob
 
-          # 处理不需要二次 ZIP 的文件（如 APK, DMG, MSI）
-          # 使用 find 将所有层级的产物移动到 zipped_assets 根目录
-          # 注意：{} 必须加引号，否则含空格的文件名（如 "EXVlan Studio_x64.dmg"）会被拆词
-          if [ -d "release_assets_nozip" ]; then
-            find release_assets_nozip -type f -exec cp "{}" zipped_assets/ \; 2>/dev/null || true
+          # core-<platform> -> <platform>-<version>.zip（二进制置于 zip 根）
+          for d in core-*; do
+            name="${d#core-}"
+            ( cd "$d" && zip -r "../../zipped_assets/${name}-${VERSION}.zip" . )
+          done
+
+          # magisk -> Exvlan-Magisk-<version>.zip（根）
+          if [ -d magisk ]; then
+            ( cd magisk && zip -r "../../zipped_assets/Exvlan-Magisk-${VERSION}.zip" . )
           fi
 
-          # 处理需要二次 ZIP 的 Core 二进制文件
-          if [ -d "release_assets" ]; then
-            cd release_assets
-            # 增加权限确保可执行
-            chmod -R 755 . 2>/dev/null || true
+          # studio / mobile 安装包与 APK：摊平后原样上传
+          for d in studio-* mobile-*; do
+            find "$d" -type f -exec mv {} ../zipped_assets/ \;
+          done
 
-            for x in *; do
-              [ -e "$x" ] || continue
-              if [ "$x" = "exvlan-magisk" ]; then
-                # Magisk 模块特殊处理：不带父目录打包
-                pushd "$x" 2>/dev/null || continue
-                zip -r "../../zipped_assets/$x-${VERSION}.zip" . 2>/dev/null
-                popd 2>/dev/null || true
-              elif [[ ! "$x" == exvlan-studio-* ]]; then
-                # 普通 Core 产物：带目录打包以保持结构
-                zip -r "../zipped_assets/$x-${VERSION}.zip" "$x" 2>/dev/null || true
-              fi
-            done
-            cd ..
-          fi
+          cd ..
+          echo "=== zipped_assets ==="
+          ls -lR zipped_assets
 
-          echo "=================================================="
-          echo "📦 Final Assets to be uploaded:"
-          ls -lh ./zipped_assets/ 2>/dev/null || echo "No assets found"
-          echo "=================================================="
-
-      - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v3
+      - name: Release
+        uses: softprops/action-gh-release@v2
         with:
           name: ${{ inputs.version }}
           draft: false
-          prerelease: ${{ inputs.is_alpha }}
-          make_latest: ${{ inputs.mark_latest }}
+          make_latest: true
+          generate_release_notes: false
+          body: |
+            ## Exvlan ${{ inputs.version }}
+
+            ### 平台矩阵
+
+            | 组件 | 平台 | 产物 |
+            | --- | --- | --- |
+            | Core | Windows x86_64 / i686 / arm64 | `exvlan`, `exvlan-cli`, `exvlan-api`, `exvlan-api-embed`（.exe） |
+            | Core | macOS x86_64 / aarch64 | 同上 |
+            | Core | Linux x86_64 / aarch64 / arm / armhf / armv7 / armv7hf / riscv64 / loongarch64 | 同上 |
+            | Core | FreeBSD 13.2 x86_64 | 同上 |
+            | Desktop GUI | macOS x86_64 | `.dmg` |
+            | Desktop GUI | Windows x86_64 | `.msi` / `.exe` |
+            | Mobile | Android arm64-v8a / armeabi-v7a / x86 / x86_64 | `.apk`（split-per-abi） |
+            | Magisk | Android | `Exvlan-Magisk-*.zip` |
           files: |
             ./zipped_assets/*
           token: ${{ secrets.GITHUB_TOKEN }}

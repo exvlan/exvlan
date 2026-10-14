@@ -21,8 +21,8 @@ export async function useTray(init: boolean = false) {
     tray = await TrayIcon.getById(DEFAULT_TRAY_NAME)
     if (!tray) {
       tray = await TrayIcon.new({
-        tooltip: `EXVlan\n${pkg.version}`,
-        title: `EXVlan\n${pkg.version}`,
+        tooltip: `Exvlan\n${pkg.version}`,
+        title: `Exvlan\n${pkg.version}`,
         id: DEFAULT_TRAY_NAME,
         menu: await Menu.new({
           id: 'main',
@@ -40,7 +40,7 @@ export async function useTray(init: boolean = false) {
   }
 
   if (init) {
-    tray.setTooltip(`EXVlan\n${pkg.version}`)
+    tray.setTooltip(`Exvlan\n${pkg.version}`)
     tray.setMenuOnLeftClick(false)
     tray.setMenu(await Menu.new({
       id: 'main',
@@ -99,7 +99,7 @@ export async function setTrayTooltip(tooltip: string) {
     const tray = await useTray()
     if (!tray)
       return
-    tray.setTooltip(`EXVlan\n${pkg.version}\n${tooltip}`)
-    tray.setTitle(`EXVlan\n${pkg.version}\n${tooltip}`)
+    tray.setTooltip(`Exvlan\n${pkg.version}\n${tooltip}`)
+    tray.setTitle(`Exvlan\n${pkg.version}\n${tooltip}`)
   }
 }

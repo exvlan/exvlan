@@ -41,8 +41,6 @@ node_modules
 .flake-profile
 pnpm-lock.yaml
 **/**/pnpm-lock.yaml
-Cargo.lock
-**/**/Cargo.lock
 flake.lock
 package-lock.json
 **/**/package-lock.json

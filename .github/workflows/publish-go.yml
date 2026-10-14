@@ -1,0 +1,57 @@
+name: Exvlan Publish Go SDK
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: '发布 tag（如 v26.410.20700）'
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布 tag（如 v26.410.20700）'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-go-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Tag Go module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Go module 位于子目录 exvlan/go，其 tag 前缀必须为 exvlan/go/。
+      # 消费：GOPRIVATE=github.com/exvlan/* go get github.com/exvlan/exvlan/exvlan-go@<version>
+      - name: Create and push Go module tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          tag="exvlan/go/${VERSION}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "tag ${tag} 已存在，跳过创建"
+          else
+            git tag -a "${tag}" -m "Release ${tag}"
+          fi
+          git push origin "refs/tags/${tag}"
+
+      - name: Verify module resolves (best effort)
+        continue-on-error: true
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          GOPRIVATE='github.com/exvlan/*' GOFLAGS=-mod=mod \
+            go list -m "github.com/exvlan/exvlan/exvlan-go@${VERSION}"

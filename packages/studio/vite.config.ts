@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'

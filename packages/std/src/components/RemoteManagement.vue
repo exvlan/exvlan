@@ -35,7 +35,7 @@ const currentNetworkConfig = ref<NetworkTypes.NetworkConfig | undefined>(undefin
 const listInstanceIdResponse = ref<Api.ListNetworkInstanceIdResponse | undefined>(undefined);
 
 const isRunning = (instanceId: string) => {
-    return listInstanceIdResponse.value?.running_inst_ids.map(Utils.UuidToStr).includes(instanceId);
+    return (listInstanceIdResponse.value?.running_inst_ids ?? []).map(Utils.UuidToStr).includes(instanceId);
 }
 
 const networkMetaCache = ref<Record<string, Api.NetworkMeta>>({});
@@ -46,7 +46,7 @@ const loadNetworkMetas = async (instanceIds: string[]) => {
 
     try {
         const response = await props.api.get_network_metas(missingIds);
-        Object.assign(networkMetaCache.value, response.metas);
+        Object.assign(networkMetaCache.value, response.metas ?? {});
     } catch (e) {
         console.error("Failed to load network metas", e);
     }
@@ -80,8 +80,8 @@ const updateInstanceList = () => {
     let insts = new Set<string>();
     let t = listInstanceIdResponse.value;
     if (t) {
-        t.running_inst_ids.forEach((u) => insts.add(Utils.UuidToStr(u)));
-        t.disabled_inst_ids.forEach((u) => insts.add(Utils.UuidToStr(u)));
+        (t.running_inst_ids ?? []).forEach((u) => insts.add(Utils.UuidToStr(u)));
+        (t.disabled_inst_ids ?? []).forEach((u) => insts.add(Utils.UuidToStr(u)));
     }
 
     const newList = Array.from(insts).map((instance: string) => {
@@ -149,7 +149,7 @@ const networkIsDisabled = computed(() => {
     if (!selectedInstanceId.value) {
         return false;
     }
-    return listInstanceIdResponse.value?.disabled_inst_ids.map(Utils.UuidToStr).includes(selectedInstanceId.value?.uuid);
+    return (listInstanceIdResponse.value?.disabled_inst_ids ?? []).map(Utils.UuidToStr).includes(selectedInstanceId.value?.uuid);
 });
 watch(networkIsDisabled, async (newVal, oldVal) => {
     if (newVal !== oldVal && newVal === true) {
@@ -287,17 +287,35 @@ const loadNetworkInstanceIds = async () => {
 }
 
 const loadCurrentNetworkInfo = async () => {
-    if (!selectedInstanceId.value) {
+    const selected = selectedInstanceId.value?.uuid;
+    if (!selected) {
+        curNetworkInfo.value = null;
         return;
     }
     if (!needShowNetworkStatus.value) {
+        curNetworkInfo.value = null;
+        return;
+    }
+    if (curNetworkInfo.value?.instance_id !== selected) {
+        curNetworkInfo.value = null;
+    }
+
+    let network_info = await props.api.get_network_info(selected);
+    if (selectedInstanceId.value?.uuid !== selected) {
         return;
     }
 
-    let network_info = await props.api.get_network_info(selectedInstanceId.value.uuid);
+    if (!network_info) {
+        curNetworkInfo.value = {
+            instance_id: selected,
+            running: false,
+            error_msg: t('web.device_management.network_info_unavailable'),
+        } as NetworkTypes.NetworkInstance;
+        return;
+    }
 
     curNetworkInfo.value = {
-        instance_id: selectedInstanceId.value.uuid,
+        instance_id: selected,
         running: network_info?.running ?? false,
         error_msg: network_info?.error_msg ?? '',
         detail: network_info,
@@ -453,7 +471,7 @@ onUnmounted(() => {
         <ConfirmPopup></ConfirmPopup>
 
         <!-- 网络选择和操作按钮始终在同一行 -->
-        <div class="network-header bg-surface-50 p-3 rounded-lg shadow-2xs mb-1">
+        <div class="network-header mb-3">
             <div class="flex flex-row justify-between items-center gap-2" style="align-items: center;">
                 <!-- 网络选择 -->
                 <div class="flex-1 min-w-0">
@@ -492,7 +510,7 @@ onUnmounted(() => {
                                     <div class="flex items-center min-w-0">
                                         <div class="mr-4 min-w-0 flex-1">
                                             <span class="truncate block">{{ t('network_name') }}: {{
-                                                slotProps.option.meta.network_name }}</span>
+                                                slotProps.option.meta?.network_name ?? slotProps.option.uuid }}</span>
                                         </div>
                                         <Tag class="my-auto leading-3 shrink-0"
                                             :severity="isRunning(slotProps.option.uuid) ? 'success' : 'info'"
@@ -512,19 +530,33 @@ onUnmounted(() => {
                 <!-- 简化的按钮区域 - 无论屏幕大小都显示 -->
                 <div class="flex gap-2 shrink-0 button-container items-center">
                     <!-- Create/Cancel button based on state -->
-                    <Button v-if="!isEditingNetwork" @click="newNetwork" :class="['create-button', screenWidth <= 640 ? 'p-button-icon-only' : '']" :style="screenWidth <= 640 ? 'width: 3rem !important; height: 3rem !important; font-size: 1.2rem' : ''" :tooltip="screenWidth <= 640 ? t('web.device_management.create_network') : undefined" tooltipOptions="{ position: 'bottom' }" severity="primary"><i class="pi pi-plus"></i><span>{{ screenWidth > 640 ? t('web.device_management.create_new') : undefined }}</span></Button>
+                    <Button v-if="!isEditingNetwork" @click="newNetwork" icon="pi pi-plus"
+                        :label="screenWidth > 640 ? t('web.device_management.create_new') : undefined"
+                        :class="['create-button', screenWidth <= 640 ? 'p-button-icon-only' : '']"
+                        :style="screenWidth <= 640 ? 'width: 3rem !important; height: 3rem !important; font-size: 1.2rem' : ''"
+                        :tooltip="screenWidth <= 640 ? t('web.device_management.create_network') : undefined"
+                        tooltipOptions="{ position: 'bottom' }" severity="primary" />
 
-                    <Button v-else @click="cancelEditNetwork" :class="['cancel-button', screenWidth <= 640 ? 'p-button-icon-only' : '']" :style="screenWidth <= 640 ? 'width: 3rem !important; height: 3rem !important; font-size: 1.2rem' : ''" :tooltip="screenWidth <= 640 ? t('web.device_management.cancel_edit') : undefined" tooltipOptions="{ position: 'bottom' }" severity="secondary"><i class="pi pi-times"></i><span>{{ screenWidth > 640 ? t('web.device_management.cancel_edit') : undefined }}</span></Button>
+                    <Button v-else @click="cancelEditNetwork" icon="pi pi-times"
+                        :label="screenWidth > 640 ? t('web.device_management.cancel_edit') : undefined"
+                        :class="['cancel-button', screenWidth <= 640 ? 'p-button-icon-only' : '']"
+                        :style="screenWidth <= 640 ? 'width: 3rem !important; height: 3rem !important; font-size: 1.2rem' : ''"
+                        :tooltip="screenWidth <= 640 ? t('web.device_management.cancel_edit') : undefined"
+                        tooltipOptions="{ position: 'bottom' }" severity="secondary" />
 
                     <!-- More actions menu -->
                     <Menu ref="menuRef" :model="actionMenu" :popup="true" />
-                    <Button v-if="!isEditingNetwork && selectedInstanceId" class="p-button-rounded flex items-center justify-center" severity="help" style="width: 3rem !important; height: 3rem !important; font-size: 1.2rem" @click="menuRef.toggle($event)" :aria-label="t('web.device_management.more_actions')" :tooltip="t('web.device_management.more_actions')" tooltipOptions="{ position: 'bottom' }"><i class="pi pi-ellipsis-v"></i></Button>
+                    <Button v-if="!isEditingNetwork && selectedInstanceId" icon="pi pi-ellipsis-v"
+                        class="p-button-rounded flex items-center justify-center" severity="help"
+                        style="width: 3rem !important; height: 3rem !important; font-size: 1.2rem"
+                        @click="menuRef.toggle($event)" :aria-label="t('web.device_management.more_actions')"
+                        :tooltip="t('web.device_management.more_actions')" tooltipOptions="{ position: 'bottom' }" />
                 </div>
             </div>
         </div>
 
         <!-- Main Content Area -->
-        <div class="network-content bg-surface-0 p-4 rounded-lg shadow-2xs">
+        <div class="network-content">
             <!-- Network Creation Form -->
             <div v-if="isEditingNetwork || networkIsDisabled" class="network-creation-container">
                 <div class="network-creation-header flex items-center gap-2 mb-3">
@@ -533,9 +565,13 @@ onUnmounted(() => {
                 </div>
 
                 <div class="w-full flex gap-2 flex-wrap justify-start mb-3">
-                    <Button @click="showConfigEditDialog = true" severity="secondary"><i class="pi pi-file-edit"></i><span>{{ t('web.device_management.edit_as_file') }}</span></Button>
-                    <Button @click="importConfig" severity="help"><i class="pi pi-upload"></i><span>{{ t('web.device_management.import_config') }}</span></Button>
-                    <Button v-if="networkIsDisabled" @click="saveNetworkConfig" :disabled="!currentNetworkConfig" severity="success"><i class="pi pi-save"></i><span>{{ t('web.device_management.save_config') }}</span></Button>
+                    <Button @click="showConfigEditDialog = true" icon="pi pi-file-edit"
+                        :label="t('web.device_management.edit_as_file')" iconPos="left" severity="secondary" />
+                    <Button @click="importConfig" icon="pi pi-upload" :label="t('web.device_management.import_config')"
+                        iconPos="left" severity="help" />
+                    <Button v-if="networkIsDisabled" @click="saveNetworkConfig" :disabled="!currentNetworkConfig"
+                        icon="pi pi-save" :label="t('web.device_management.save_config')" iconPos="left"
+                        severity="success" />
                 </div>
 
                 <Divider />
@@ -551,13 +587,19 @@ onUnmounted(() => {
                     <h2 class="text-xl font-medium">{{ t('web.device_management.network_status') }}</h2>
                 </div>
 
-                <Status v-if="(curNetworkInfo?.error_msg ?? '') === ''" v-bind:cur-network-inst="curNetworkInfo"
+                <Status v-if="curNetworkInfo && curNetworkInfo.error_msg === ''" v-bind:cur-network-inst="curNetworkInfo"
+                    :api="api" :readonly="!currentNetworkControl.editable.value"
                     class="mb-4">
                 </Status>
-                <Message v-else severity="error" class="mb-4">{{ curNetworkInfo?.error_msg }}</Message>
+                <Message v-else-if="curNetworkInfo?.error_msg" severity="error" class="mb-4">{{
+                    curNetworkInfo.error_msg }}</Message>
+                <Message v-else severity="info" class="mb-4">{{ t('web.device_management.loading_network_status') }}
+                </Message>
 
                 <div class="text-center mt-4">
-                    <Button @click="stopNetwork" :disabled="!currentNetworkControl.deletable.value" severity="danger"><i class="pi pi-power-off"></i><span>{{ t('web.device_management.disable_network') }}</span></Button>
+                    <Button @click="stopNetwork" :disabled="!currentNetworkControl.deletable.value"
+                        :label="t('web.device_management.disable_network')" severity="danger" icon="pi pi-power-off"
+                        iconPos="left" />
                 </div>
             </div>
 
@@ -569,7 +611,8 @@ onUnmounted(() => {
                 <p class="text-secondary text-center mb-6 max-w-md">
                     {{ t('web.device_management.select_existing_network_or_create_new') }}
                 </p>
-                <Button @click="newNetwork"><i class="pi pi-plus"></i><span>{{ t('web.device_management.create_network') }}</span></Button>
+                <Button @click="newNetwork" :label="t('web.device_management.create_network')" icon="pi pi-plus"
+                    iconPos="left" />
             </div>
         </div>
 
@@ -587,6 +630,9 @@ onUnmounted(() => {
     height: 100%;
     display: flex;
     flex-direction: column;
+    /* hosts that mount this full-page (@exvlan/studio) have no padding of
+       their own, so keep a safe inset here; panel chrome stays with hosts */
+    padding: 0.75rem;
 }
 
 .network-content {
@@ -652,9 +698,12 @@ onUnmounted(() => {
     max-width: 100%;
 }
 
-/* Dark mode adaptations */
+/* Dark mode adaptations: surface utilities follow host theme tokens; the
+   app-dark branch supplies dark fallbacks for hosts that define no tokens.
+   :global must own the whole selector — mixing it with :deep in one selector
+   makes the compiler drop the :deep part. */
 :deep(.bg-surface-50) {
-    background-color: var(--surface-50, #f8fafc);
+    background-color: var(--surface-ground, #f8fafc);
 }
 
 :deep(.bg-surface-0) {
@@ -669,25 +718,16 @@ onUnmounted(() => {
     color: var(--text-color-secondary, #64748b);
 }
 
-@media (prefers-color-scheme: dark) {
-    :deep(.bg-surface-50) {
-        background-color: var(--surface-ground, #0f172a);
-    }
+:global(html.app-dark .device-management .bg-surface-50) {
+    background-color: var(--surface-ground, #0f172a);
+}
 
-    :deep(.bg-surface-0) {
-        background-color: var(--surface-card, #1e293b);
-    }
+:global(html.app-dark .device-management .bg-surface-0) {
+    background-color: var(--surface-card, #1e293b);
 }
 
 /* Responsive design for mobile devices */
 @media (max-width: 768px) {
-    .network-header {
-        padding: 0.75rem;
-    }
-
-    .network-content {
-        padding: 0.75rem;
-    }
 
     /* 在小屏幕上缩短网络标签文本 */
     .network-label {

@@ -1,345 +1,198 @@
-use std::net::SocketAddr;
+use std::sync::Mutex as StdMutex;
 
-use super::{FromUrl, TunnelInfo};
-use crate::tunnel::common::bind;
-use async_trait::async_trait;
-use futures::stream::FuturesUnordered;
-use tokio::net::{TcpListener, TcpSocket, TcpStream};
-
-use super::{
-    IpVersion, Tunnel, TunnelError, TunnelListener,
-    common::{FramedReader, FramedWriter, TunnelWrapper, wait_for_connect_futures},
+use crate::{
+    proto::common::TunnelInfo,
+    socket::tcp::VirtualTcpSocket,
+    tunnel::framed::{FramedReader, FramedWriter, TCP_MTU_BYTES},
+    tunnel::{SplitTunnel, Tunnel, TunnelError},
 };
 
-const TCP_MTU_BYTES: usize = 2000;
-
-#[derive(Debug)]
-pub struct TcpTunnelListener {
-    addr: url::Url,
-    listener: Option<TcpListener>,
+pub struct TcpTunnel<S> {
+    info: Option<TunnelInfo>,
+    socket: StdMutex<Option<S>>,
+    max_packet_size: usize,
 }
 
-impl TcpTunnelListener {
-    pub fn new(addr: url::Url) -> Self {
-        TcpTunnelListener {
-            addr,
-            listener: None,
+impl<S> TcpTunnel<S> {
+    fn new(socket: S, tunnel_info: TunnelInfo, max_packet_size: usize) -> Self {
+        Self {
+            info: Some(tunnel_info),
+            socket: StdMutex::new(Some(socket)),
+            max_packet_size,
+        }
+    }
+}
+
+impl<S> Tunnel for TcpTunnel<S>
+where
+    S: VirtualTcpSocket,
+{
+    fn split(&self) -> SplitTunnel {
+        let socket = self
+            .socket
+            .lock()
+            .unwrap()
+            .take()
+            .expect("TcpTunnel can only be split once");
+        let (reader, writer) = socket.into_split();
+        (
+            Box::pin(FramedReader::new(reader, self.max_packet_size)),
+            Box::pin(FramedWriter::new(writer)),
+        )
+    }
+
+    fn info(&self) -> Option<TunnelInfo> {
+        self.info.clone()
+    }
+}
+
+pub struct TcpTunnelUpgrader {
+    tunnel_info: TunnelInfo,
+    max_packet_size: usize,
+}
+
+impl TcpTunnelUpgrader {
+    pub fn new(tunnel_info: TunnelInfo) -> Self {
+        Self {
+            tunnel_info,
+            max_packet_size: TCP_MTU_BYTES,
         }
     }
 
-    async fn do_accept(&self) -> Result<Box<dyn Tunnel>, std::io::Error> {
-        let listener = self.listener.as_ref().unwrap();
-        let (stream, _) = listener.accept().await?;
+    pub(crate) fn with_max_packet_size(mut self, max_packet_size: usize) -> Self {
+        self.max_packet_size = max_packet_size;
+        self
+    }
 
-        if let Err(e) = stream.set_nodelay(true) {
-            tracing::warn!(?e, "set_nodelay fail in accept");
-        }
-
-        let info = TunnelInfo {
-            tunnel_type: "tcp".to_owned(),
-            local_addr: Some(self.local_url().into()),
-            remote_addr: Some(
-                super::build_url_from_socket_addr(&stream.peer_addr()?.to_string(), "tcp").into(),
-            ),
-            resolved_remote_addr: Some(
-                super::build_url_from_socket_addr(&stream.peer_addr()?.to_string(), "tcp").into(),
-            ),
-        };
-
-        let (r, w) = stream.into_split();
-        Ok(Box::new(TunnelWrapper::new(
-            FramedReader::new(r, TCP_MTU_BYTES),
-            FramedWriter::new(w),
-            Some(info),
+    pub fn upgrade<S>(self, socket: S) -> Result<Box<dyn Tunnel>, TunnelError>
+    where
+        S: VirtualTcpSocket,
+    {
+        Ok(Box::new(TcpTunnel::new(
+            socket,
+            self.tunnel_info,
+            self.max_packet_size,
         )))
-    }
-}
-
-#[async_trait]
-impl TunnelListener for TcpTunnelListener {
-    async fn listen(&mut self) -> Result<(), TunnelError> {
-        self.listener = None;
-
-        let addr = SocketAddr::from_url(self.addr.clone(), IpVersion::Both).await?;
-        let listener = bind::<TcpListener>().addr(addr).only_v6(true).call()?;
-
-        self.addr
-            .set_port(Some(listener.local_addr()?.port()))
-            .unwrap();
-        self.listener = Some(listener);
-
-        Ok(())
-    }
-
-    async fn accept(&mut self) -> Result<Box<dyn Tunnel>, super::TunnelError> {
-        loop {
-            match self.do_accept().await {
-                Ok(ret) => return Ok(ret),
-                Err(e) => {
-                    use std::io::ErrorKind::*;
-                    if matches!(
-                        e.kind(),
-                        NotConnected | ConnectionAborted | ConnectionRefused | ConnectionReset
-                    ) {
-                        tracing::warn!(?e, "accept fail with retryable error: {:?}", e);
-                        continue;
-                    }
-                    tracing::warn!(?e, "accept fail");
-                    return Err(e.into());
-                }
-            }
-        }
-    }
-
-    fn local_url(&self) -> url::Url {
-        self.addr.clone()
-    }
-}
-
-fn get_tunnel_with_tcp_stream(
-    stream: TcpStream,
-    remote_url: url::Url,
-) -> Result<Box<dyn Tunnel>, super::TunnelError> {
-    if let Err(e) = stream.set_nodelay(true) {
-        tracing::warn!(?e, "set_nodelay fail in get_tunnel_with_tcp_stream");
-    }
-
-    let info = TunnelInfo {
-        tunnel_type: "tcp".to_owned(),
-        local_addr: Some(
-            super::build_url_from_socket_addr(&stream.local_addr()?.to_string(), "tcp").into(),
-        ),
-        remote_addr: Some(remote_url.into()),
-        resolved_remote_addr: Some(
-            super::build_url_from_socket_addr(&stream.peer_addr()?.to_string(), "tcp").into(),
-        ),
-    };
-
-    let (r, w) = stream.into_split();
-    Ok(Box::new(TunnelWrapper::new(
-        FramedReader::new(r, TCP_MTU_BYTES),
-        FramedWriter::new(w),
-        Some(info),
-    )))
-}
-
-#[derive(Debug)]
-pub struct TcpTunnelConnector {
-    addr: url::Url,
-
-    bind_addrs: Vec<SocketAddr>,
-    ip_version: IpVersion,
-    resolved_addr: Option<SocketAddr>,
-}
-
-impl TcpTunnelConnector {
-    pub fn new(addr: url::Url) -> Self {
-        TcpTunnelConnector {
-            addr,
-            bind_addrs: vec![],
-            ip_version: IpVersion::Both,
-            resolved_addr: None,
-        }
-    }
-
-    async fn connect_with_default_bind(
-        &self,
-        addr: SocketAddr,
-    ) -> Result<Box<dyn Tunnel>, super::TunnelError> {
-        tracing::info!(url = ?self.addr, ?addr, "connect tcp start, bind addrs: {:?}", self.bind_addrs);
-        let stream = TcpStream::connect(addr).await?;
-        tracing::info!(url = ?self.addr, ?addr, "connect tcp succ");
-        get_tunnel_with_tcp_stream(stream, self.addr.clone())
-    }
-
-    async fn connect_with_custom_bind(
-        &self,
-        addr: SocketAddr,
-    ) -> Result<Box<dyn Tunnel>, super::TunnelError> {
-        let futures = FuturesUnordered::new();
-
-        for bind_addr in self.bind_addrs.iter() {
-            tracing::info!(?bind_addr, ?addr, "bind addr");
-            match bind::<TcpSocket>().addr(*bind_addr).only_v6(true).call() {
-                Ok(socket) => futures.push(socket.connect(addr)),
-                Err(error) => {
-                    tracing::error!(?bind_addr, ?addr, ?error, "bind addr fail");
-                    continue;
-                }
-            }
-        }
-
-        let ret = wait_for_connect_futures(futures).await;
-        get_tunnel_with_tcp_stream(ret?, self.addr.clone())
-    }
-}
-
-#[async_trait]
-impl super::TunnelConnector for TcpTunnelConnector {
-    async fn connect(&mut self) -> Result<Box<dyn Tunnel>, TunnelError> {
-        let addr = match self.resolved_addr {
-            Some(addr) => addr,
-            None => SocketAddr::from_url(self.addr.clone(), self.ip_version).await?,
-        };
-        if self.bind_addrs.is_empty() {
-            self.connect_with_default_bind(addr).await
-        } else {
-            self.connect_with_custom_bind(addr).await
-        }
-    }
-
-    fn remote_url(&self) -> url::Url {
-        self.addr.clone()
-    }
-
-    fn set_bind_addrs(&mut self, addrs: Vec<SocketAddr>) {
-        self.bind_addrs = addrs;
-    }
-
-    fn set_ip_version(&mut self, ip_version: IpVersion) {
-        self.ip_version = ip_version;
-    }
-
-    fn set_resolved_addr(&mut self, addr: SocketAddr) {
-        self.resolved_addr = Some(addr);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::tunnel::{
-        TunnelConnector,
-        common::tests::{_tunnel_bench, _tunnel_pingpong},
+    use std::{
+        io,
+        net::SocketAddr,
+        pin::Pin,
+        task::{Context, Poll},
     };
+
+    use crate::packet::{PEER_MANAGER_HEADER_SIZE, ZCPacket, ZCPacketType};
+    use futures::{SinkExt, StreamExt};
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
 
     use super::*;
 
-    #[tokio::test]
-    async fn tcp_pingpong() {
-        let listener = TcpTunnelListener::new("tcp://0.0.0.0:31011".parse().unwrap());
-        let connector = TcpTunnelConnector::new("tcp://127.0.0.1:31011".parse().unwrap());
-        _tunnel_pingpong(listener, connector).await
+    struct MockTcpSocket {
+        stream: DuplexStream,
+        local_addr: SocketAddr,
+        peer_addr: SocketAddr,
+    }
+
+    impl MockTcpSocket {
+        fn new(stream: DuplexStream, local_addr: SocketAddr, peer_addr: SocketAddr) -> Self {
+            Self {
+                stream,
+                local_addr,
+                peer_addr,
+            }
+        }
+    }
+
+    impl AsyncRead for MockTcpSocket {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.stream).poll_read(cx, buf)
+        }
+    }
+
+    impl AsyncWrite for MockTcpSocket {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Pin::new(&mut self.stream).poll_write(cx, buf)
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.stream).poll_flush(cx)
+        }
+
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.stream).poll_shutdown(cx)
+        }
+    }
+
+    impl VirtualTcpSocket for MockTcpSocket {
+        fn local_addr(&self) -> io::Result<SocketAddr> {
+            Ok(self.local_addr)
+        }
+
+        fn peer_addr(&self) -> io::Result<SocketAddr> {
+            Ok(self.peer_addr)
+        }
+    }
+
+    fn set_tcp_tunnel_len(packet: &mut ZCPacket) {
+        let tcp_len = PEER_MANAGER_HEADER_SIZE + packet.payload_len();
+        packet
+            .mut_tcp_tunnel_header()
+            .unwrap()
+            .len
+            .set(tcp_len.try_into().unwrap());
     }
 
     #[tokio::test]
-    async fn tcp_bench() {
-        let listener = TcpTunnelListener::new("tcp://0.0.0.0:31012".parse().unwrap());
-        let connector = TcpTunnelConnector::new("tcp://127.0.0.1:31012".parse().unwrap());
-        _tunnel_bench(listener, connector).await
-    }
-
-    #[tokio::test]
-    async fn tcp_bench_with_bind() {
-        let listener = TcpTunnelListener::new("tcp://127.0.0.1:11013".parse().unwrap());
-        let mut connector = TcpTunnelConnector::new("tcp://127.0.0.1:11013".parse().unwrap());
-        connector.set_bind_addrs(vec!["127.0.0.1:0".parse().unwrap()]);
-        _tunnel_pingpong(listener, connector).await
-    }
-
-    #[tokio::test]
-    #[should_panic]
-    async fn tcp_bench_with_bind_fail() {
-        let listener = TcpTunnelListener::new("tcp://127.0.0.1:11014".parse().unwrap());
-        let mut connector = TcpTunnelConnector::new("tcp://127.0.0.1:11014".parse().unwrap());
-        connector.set_bind_addrs(vec!["10.0.0.1:0".parse().unwrap()]);
-        _tunnel_pingpong(listener, connector).await
-    }
-
-    #[tokio::test]
-    async fn bind_same_port() {
-        let mut listener = TcpTunnelListener::new("tcp://[::]:31014".parse().unwrap());
-        let mut listener2 = TcpTunnelListener::new("tcp://0.0.0.0:31014".parse().unwrap());
-        listener.listen().await.unwrap();
-        listener2.listen().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn ipv6_pingpong() {
-        let listener = TcpTunnelListener::new("tcp://[::1]:31015".parse().unwrap());
-        let connector = TcpTunnelConnector::new("tcp://[::1]:31015".parse().unwrap());
-        _tunnel_pingpong(listener, connector).await
-    }
-
-    #[tokio::test]
-    async fn ipv6_domain_pingpong() {
-        let listener = TcpTunnelListener::new("tcp://[::1]:31015".parse().unwrap());
-        let mut connector =
-            TcpTunnelConnector::new("tcp://test.xvlan.era-x.cn:31015".parse().unwrap());
-        connector.set_ip_version(IpVersion::V6);
-        _tunnel_pingpong(listener, connector).await;
-
-        let listener = TcpTunnelListener::new("tcp://127.0.0.1:31015".parse().unwrap());
-        let mut connector =
-            TcpTunnelConnector::new("tcp://test.xvlan.era-x.cn:31015".parse().unwrap());
-        connector.set_ip_version(IpVersion::V4);
-        _tunnel_pingpong(listener, connector).await;
-    }
-
-    #[tokio::test]
-    async fn connector_keeps_source_addr_and_reports_resolved_addr() {
-        let mut listener = TcpTunnelListener::new("tcp://127.0.0.1:0".parse().unwrap());
-        listener.listen().await.unwrap();
-
-        let port = listener.local_url().port().unwrap();
-        let source_url: url::Url = format!("tcp://localhost:{port}").parse().unwrap();
-        let mut connector = TcpTunnelConnector::new(source_url.clone());
-        connector.set_ip_version(IpVersion::V4);
-
-        let accept_task = tokio::spawn(async move { listener.accept().await.unwrap() });
-        let tunnel = connector.connect().await.unwrap();
-        let accepted_tunnel = accept_task.await.unwrap();
-
-        let info = tunnel.info().unwrap();
-        assert_eq!(info.remote_addr.unwrap().url, source_url.to_string());
-
-        let resolved_remote_addr: url::Url = info.resolved_remote_addr.unwrap().into();
-        assert_eq!(resolved_remote_addr.host_str(), Some("127.0.0.1"));
-        assert_eq!(resolved_remote_addr.port(), Some(port));
-
-        let accepted_info = accepted_tunnel.info().unwrap();
-        assert_eq!(
-            accepted_info.remote_addr,
-            accepted_info.resolved_remote_addr,
+    async fn tcp_tunnel_upgrader_preserves_metadata_and_framing() {
+        let (socket_stream, mut peer_stream) = tokio::io::duplex(65536);
+        let socket = MockTcpSocket::new(
+            socket_stream,
+            "127.0.0.1:1000".parse().unwrap(),
+            "127.0.0.1:2000".parse().unwrap(),
         );
-    }
-
-    #[tokio::test]
-    async fn connector_uses_pre_resolved_addr_without_resolving_url() {
-        let mut listener = TcpTunnelListener::new("tcp://127.0.0.1:0".parse().unwrap());
-        listener.listen().await.unwrap();
-
-        let port = listener.local_url().port().unwrap();
-        let source_url: url::Url = format!("tcp://unresolvable.invalid:{port}")
-            .parse()
+        let info = TunnelInfo {
+            tunnel_type: "tcp".to_owned(),
+            local_addr: None,
+            remote_addr: None,
+            resolved_remote_addr: None,
+        };
+        let tunnel = TcpTunnelUpgrader::new(info.clone())
+            .upgrade(socket)
             .unwrap();
-        let resolved_addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-        let mut connector = TcpTunnelConnector::new(source_url.clone());
-        connector.set_resolved_addr(resolved_addr);
+        assert_eq!(tunnel.info(), Some(info));
 
-        let accept_task = tokio::spawn(async move { listener.accept().await.unwrap() });
-        let tunnel = connector.connect().await.unwrap();
-        let _accepted_tunnel = accept_task.await.unwrap();
+        let (mut stream, mut sink) = tunnel.split();
+        let outbound = ZCPacket::new_with_payload(b"outbound");
+        let mut expected = outbound.clone().convert_type(ZCPacketType::TCP);
+        set_tcp_tunnel_len(&mut expected);
+        let expected_raw = expected.into_bytes();
+        let read_peer = tokio::spawn(async move {
+            let mut raw = vec![0; expected_raw.len()];
+            peer_stream.read_exact(&mut raw).await.unwrap();
+            assert_eq!(raw, expected_raw);
 
-        let info = tunnel.info().unwrap();
-        assert_eq!(info.remote_addr.unwrap().url, source_url.to_string());
+            let mut inbound =
+                ZCPacket::new_with_payload(b"inbound").convert_type(ZCPacketType::TCP);
+            set_tcp_tunnel_len(&mut inbound);
+            peer_stream.write_all(&inbound.into_bytes()).await.unwrap();
+        });
+        sink.send(outbound).await.unwrap();
+        sink.flush().await.unwrap();
 
-        let resolved_remote_addr: url::Url = info.resolved_remote_addr.unwrap().into();
-        assert_eq!(resolved_remote_addr.host_str(), Some("127.0.0.1"));
-        assert_eq!(resolved_remote_addr.port(), Some(port));
-    }
-
-    #[tokio::test]
-    async fn test_alloc_port() {
-        // v4
-        let mut listener = TcpTunnelListener::new("tcp://0.0.0.0:0".parse().unwrap());
-        listener.listen().await.unwrap();
-        let port = listener.local_url().port().unwrap();
-        assert!(port > 0);
-
-        // v6
-        let mut listener = TcpTunnelListener::new("tcp://[::]:0".parse().unwrap());
-        listener.listen().await.unwrap();
-        let port = listener.local_url().port().unwrap();
-        assert!(port > 0);
+        let packet = stream.next().await.unwrap().unwrap();
+        assert_eq!(packet.payload(), b"inbound");
+        read_peer.await.unwrap();
     }
 }

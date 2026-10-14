@@ -58,7 +58,7 @@ defaultNetworkConfig(): string
 exvlanVersion(): string
 ```
 
-获取 EXVlan 当前版本号。
+获取 Exvlan 当前版本号。
 
 ---
 

@@ -1,0 +1,38 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "exvlan-web-example",
+  "main": "worker.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": ["**/*.wasm"],
+      "fallthrough": true
+    }
+  ],
+  "vars": {
+    "EXVLAN_NETWORK_NAME": "exvlan-web-example"
+  },
+  "secrets": {
+    "required": ["EXVLAN_NETWORK_SECRET"]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "EXVLAN_CORE",
+        "class_name": "ExvlanCoreObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ExvlanCoreObject"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

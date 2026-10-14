@@ -100,7 +100,7 @@ onMounted(() => {
           <el-icon size="32" color="#409EFF">
             <Monitor />
           </el-icon>
-          <h1 class="app-title">EXVlan Uptime</h1>
+          <h1 class="app-title">Exvlan Uptime</h1>
         </div>
 
         <el-menu :default-active="activeMenuIndex" mode="horizontal" class="nav-menu"
@@ -155,7 +155,7 @@ onMounted(() => {
     <el-footer class="app-footer">
       <div class="footer-content">
         <p>
-          © 2024 EXVlan Community |
+          © 2024 Exvlan Community |
           <el-button type="primary" link size="small"
             @click="() => openExternalLink('https://github.com/exvlan/exvlan')">
             开源项目

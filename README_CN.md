@@ -1,4 +1,4 @@
-# EXVlan
+# Exvlan
 
 [![Github release](https://img.shields.io/github/v/tag/exvlan/exvlan)](https://github.com/exvlan/exvlan/releases)
 [![GitHub](https://img.shields.io/github/license/exvlan/exvlan)](https://github.com/exvlan/exvlan/blob/main/LICENSE)
@@ -30,13 +30,13 @@
 | QMM | 季度 + 月份 (zero-padded) | `308` = Q3 8月 |
 | Mmpp | major(不补零) + minor(2位) + patch(2位) | `20604` = v2.6.4 |
 
-示例：`26.308.20604` = 2026年 Q3 8月 v2.6.4
+示例：`26.410.20700` = 2026年 Q3 8月 v2.6.4
 
 注意：第三段整体必须是**无前导零**的数值（否则违反 semver，pnpm/npm 等会拒绝；Windows MSI 也要求每段 ≤65535，`20604` 满足）。
 
 > **MSI 专用版本**：Windows MSI 打包要求版本三段每段 ≤ 255/255/65535，标准版本
 > `YY.QMM.Mmpp` 的中段（QMM）超过 255 限制，故 Windows 构建单独使用 MSI 专用版本
-> `YY.MMQ.mmmm-pp`（如 `26.83.206-4`）：
+> `YY.MMQ.mmmm-pp`（如 `26.104.207-0`）：
 > YY=年、MMQ=月份(2位)+季度(1位)（整体为无前导零整数）、mmmm=主版本+次版本(2位)、pp=修订版本(2位)。
 > 该版本通过 `packages/studio/src-tauri/tauri.windows.conf.json` 仅对 Windows 生效，其他平台保持标准版本。
 
@@ -76,7 +76,7 @@ curl -fsSL "https://github.com/exvlan/exvlan/blob/main/script/install.sh?raw=tru
 Homebrew（MacOS/Linux）：
 ```bash
 brew tap era-club/exvlan
-brew install --cask exvlan-studio
+brew install --cask @exvlan/studio
 ```
 
 Windows（推荐，请以管理员权限运行）：
@@ -86,7 +86,7 @@ irm "https://github.com/exvlan/exvlan/blob/main/script/install.ps1?raw=true" | i
 
 通过 cargo 安装（最新开发版本）：
 ```bash
-cargo install --git https://github.com/exvlan/exvlan.git exvlan-studio
+cargo install --git https://github.com/exvlan/exvlan.git @exvlan/studio
 ```
 
 [下载预编译文件](https://github.com/exvlan/exvlan/releases)（推荐，支持所有平台）
@@ -103,7 +103,7 @@ cargo install --git https://github.com/exvlan/exvlan.git exvlan-studio
 
 #### 使用共享节点快速组网
 
-EXVlan 支持使用共享节点快速组网。当您没有公网 IP 时，可以使用公共共享节点。节点会自动尝试 NAT 穿透并建立 P2P 连接。当 P2P 失败时，数据将通过共享节点中继。
+Exvlan 支持使用共享节点快速组网。当您没有公网 IP 时，可以使用公共共享节点。节点会自动尝试 NAT 穿透并建立 P2P 连接。当 P2P 失败时，数据将通过共享节点中继。
 
 使用共享节点时，每个进入网络的节点需要提供相同的 `--network-name` 和 `--network-secret` 参数作为网络的唯一标识符。
 
@@ -128,9 +128,9 @@ sudo exvlan -d --network-name abc --network-secret abc -p tcp://<共享节点IP>
 ```text
 | ipv4         | hostname       | cost  | lat_ms | loss_rate | rx_bytes | tx_bytes | tunnel_proto | nat_type | id         | version         |
 | ------------ | -------------- | ----- | ------ | --------- | -------- | -------- | ------------ | -------- | ---------- | --------------- |
-| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.308.20604-70e69a38~ |
-| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.308.20604-70e69a38~ |
-|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.308.20604-70e69a38~ |
+| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.410.20700-70e69a38~ |
+| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.410.20700-70e69a38~ |
+|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.410.20700-70e69a38~ |
 ```
 
 您可以测试节点之间的连通性：
@@ -152,7 +152,7 @@ sudo exvlan -d --network-name abc --network-secret abc -p tcp://<公共节点IP>
 
 #### 去中心化组网
 
-EXVlan 本质上是去中心化的，没有服务器和客户端的区分。只要一个设备能与虚拟网络中的任何节点通信，它就可以加入虚拟网络。以下是如何设置去中心化网络：
+Exvlan 本质上是去中心化的，没有服务器和客户端的区分。只要一个设备能与虚拟网络中的任何节点通信，它就可以加入虚拟网络。以下是如何设置去中心化网络：
 
 1. 启动第一个节点（节点 A）：
 
@@ -208,11 +208,11 @@ sudo exvlan -i 10.144.144.3 -p udp://任何现有节点的公网IP:11010
 flowchart LR
 
 subgraph 节点 A 公网 IP 22.1.1.1
-nodea[EXVlan<br/>10.144.144.1]
+nodea[Exvlan<br/>10.144.144.1]
 end
 
 subgraph 节点 B
-nodeb[EXVlan<br/>10.144.144.2]
+nodeb[Exvlan<br/>10.144.144.2]
 end
 
 id1[[10.1.1.0/24]]
@@ -220,7 +220,7 @@ id1[[10.1.1.0/24]]
 nodea <--> nodeb <-.-> id1
 ```
 
-要共享子网，在启动 EXVlan 时添加 `-n` 参数：
+要共享子网，在启动 Exvlan 时添加 `-n` 参数：
 
 ```bash
 # 与其他节点共享子网 10.1.1.0/24
@@ -247,7 +247,7 @@ ping 10.1.1.2
 
 #### WireGuard 集成
 
-EXVlan 可以作为 WireGuard 服务器，允许任何安装了 WireGuard 客户端的设备（包括 iOS 和 Android）访问 EXVlan 网络。以下是设置示例：
+Exvlan 可以作为 WireGuard 服务器，允许任何安装了 WireGuard 客户端的设备（包括 iOS 和 Android）访问 Exvlan 网络。以下是设置示例：
 
 ```mermaid
 flowchart LR
@@ -255,11 +255,11 @@ flowchart LR
 ios[[iPhone<br/>已安装 WireGuard]]
 
 subgraph 节点 A 公网 IP 22.1.1.1
-nodea[EXVlan<br/>10.144.144.1]
+nodea[Exvlan<br/>10.144.144.1]
 end
 
 subgraph 节点 B
-nodeb[EXVlan<br/>10.144.144.2]
+nodeb[Exvlan<br/>10.144.144.2]
 end
 
 id1[[10.1.1.0/24]]
@@ -283,12 +283,12 @@ exvlan-cli vpn-portal
 
 3. 在输出配置中：
    - 将 `Interface.Address` 设置为 WireGuard 子网中的可用 IP
-   - 将 `Peer.Endpoint` 设置为您的 EXVlan 节点的公网 IP/域名
+   - 将 `Peer.Endpoint` 设置为您的 Exvlan 节点的公网 IP/域名
    - 将修改后的配置导入到您的 WireGuard 客户端
 
 #### 自建公共共享节点
 
-您可以运行自己的公共共享节点来帮助其他节点相互发现。公共共享节点只是一个普通的 EXVlan 网络（具有相同的网络名称和密钥），其他网络可以连接到它。
+您可以运行自己的公共共享节点来帮助其他节点相互发现。公共共享节点只是一个普通的 Exvlan 网络（具有相同的网络名称和密钥），其他网络可以连接到它。
 
 要运行公共共享节点：
 
@@ -297,11 +297,11 @@ exvlan-cli vpn-portal
 sudo exvlan --network-name mysharednode --network-secret mysharednode
 ```
 
-网络设置成功后，您可以轻松配置它以在系统启动时自动启动。请参阅 [一键注册服务指南](https://xvlan.era-x.cn/en/guide/network/oneclick-install-as-service.html) 了解如何将 EXVlan 注册为系统服务。
+网络设置成功后，您可以轻松配置它以在系统启动时自动启动。请参阅 [一键注册服务指南](https://xvlan.era-x.cn/en/guide/network/oneclick-install-as-service.html) 了解如何将 Exvlan 注册为系统服务。
 
 ## 相关项目
 
-- [EasyTier](https://easytier.cn/)：✨ 一个由 Rust 和 Tokio 驱动的简单、安全、去中心化的异地组网方案。
+- [Exvlan](https://exvlan.cn/)：✨ 一个由 Rust 和 Tokio 驱动的简单、安全、去中心化的异地组网方案。
 - [ZeroTier](https://www.zerotier.com/)：用于连接设备的全球虚拟网络。
 - [TailScale](https://tailscale.com/)：旨在简化网络配置的 VPN 解决方案。
 
@@ -311,5 +311,5 @@ sudo exvlan --network-name mysharednode --network-secret mysharednode
 
 ## 许可证
 
-EXVlan 在 [LGPL-3.0](https://github.com/exvlan/exvlan/blob/main/LICENSE) 许可下发布。
+Exvlan 在 [LGPL-3.0](https://github.com/exvlan/exvlan/blob/main/LICENSE) 许可下发布。
 

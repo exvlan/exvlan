@@ -2,23 +2,14 @@ name: Nix Check
 
 on:
   workflow_call:
-  push:
-    branches: ["main", "develop"]
-    paths: &nix_paths
-      - "**/*.nix"
-      - "flake.lock"
-      - "rust-toolchain.toml"
-  pull_request:
-    branches: ["main", "develop"]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths: *nix_paths
+  workflow_dispatch:
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: nix-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

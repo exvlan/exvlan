@@ -3,17 +3,16 @@ use std::{future::Future, sync::Arc};
 use dashmap::DashMap;
 use futures::future::BoxFuture;
 
-use crate::common::{
-    PeerId, shrink_dashmap,
-    stats_manager::{CounterHandle, LabelSet, LabelType, MetricName, StatsManager},
-};
+use crate::config::PeerId;
+use crate::foundation::stats::{CounterHandle, LabelSet, LabelType, MetricName, StatsManager};
+use crate::packet::{PacketType, ZCPacket};
+use crate::peers::util::shrink_dashmap;
 use crate::proto::peer_rpc::RoutePeerInfo;
-use crate::tunnel::packet_def::PacketType;
 
-pub(crate) const UNKNOWN_INSTANCE_ID: &str = "unknown";
+pub const UNKNOWN_INSTANCE_ID: &str = "unknown";
 
 #[derive(Clone, Copy)]
-pub(crate) enum InstanceLabelKind {
+pub enum InstanceLabelKind {
     To,
     From,
 }
@@ -32,61 +31,19 @@ impl TrafficCounters {
 }
 
 #[derive(Clone)]
-pub(crate) struct AggregateTrafficMetrics {
-    tx: TrafficCounters,
-    rx: TrafficCounters,
-}
-
-impl AggregateTrafficMetrics {
-    pub(crate) fn control(stats_mgr: Arc<StatsManager>, network_name: String) -> Self {
-        Self::new(
-            stats_mgr,
-            network_name,
-            MetricName::TrafficControlBytesTx,
-            MetricName::TrafficControlPacketsTx,
-            MetricName::TrafficControlBytesRx,
-            MetricName::TrafficControlPacketsRx,
-        )
-    }
-
-    fn new(
-        stats_mgr: Arc<StatsManager>,
-        network_name: String,
-        tx_bytes_metric: MetricName,
-        tx_packets_metric: MetricName,
-        rx_bytes_metric: MetricName,
-        rx_packets_metric: MetricName,
-    ) -> Self {
-        let label_set =
-            LabelSet::new().with_label_type(LabelType::NetworkName(network_name.clone()));
-        Self {
-            tx: TrafficCounters {
-                bytes: stats_mgr.get_counter(tx_bytes_metric, label_set.clone()),
-                packets: stats_mgr.get_counter(tx_packets_metric, label_set.clone()),
-            },
-            rx: TrafficCounters {
-                bytes: stats_mgr.get_counter(rx_bytes_metric, label_set.clone()),
-                packets: stats_mgr.get_counter(rx_packets_metric, label_set),
-            },
-        }
-    }
-
-    pub(crate) fn record_tx(&self, bytes: u64) {
-        self.tx.add_sample(bytes);
-    }
-
-    pub(crate) fn record_rx(&self, bytes: u64) {
-        self.rx.add_sample(bytes);
-    }
-}
-
-#[derive(Clone)]
 enum CachedPeerTrafficCounters {
     Unknown(TrafficCounters),
     Resolved(TrafficCounters),
 }
 
 impl CachedPeerTrafficCounters {
+    fn add_sample(&self, bytes: u64) {
+        match self {
+            CachedPeerTrafficCounters::Unknown(counters)
+            | CachedPeerTrafficCounters::Resolved(counters) => counters.add_sample(bytes),
+        }
+    }
+
     fn counters(&self) -> TrafficCounters {
         match self {
             CachedPeerTrafficCounters::Unknown(counters)
@@ -99,7 +56,7 @@ impl CachedPeerTrafficCounters {
     }
 }
 
-pub(crate) struct LogicalTrafficMetrics {
+pub struct LogicalTrafficMetrics {
     stats_mgr: Arc<StatsManager>,
     network_name: String,
     instance_bytes_metric: MetricName,
@@ -110,7 +67,7 @@ pub(crate) struct LogicalTrafficMetrics {
 }
 
 impl LogicalTrafficMetrics {
-    pub(crate) fn new(
+    pub fn new(
         stats_mgr: Arc<StatsManager>,
         network_name: String,
         total_bytes_metric: MetricName,
@@ -135,12 +92,8 @@ impl LogicalTrafficMetrics {
         }
     }
 
-    pub(crate) async fn record_with_resolver<F, Fut>(
-        &self,
-        peer_id: PeerId,
-        bytes: u64,
-        resolver: F,
-    ) where
+    pub async fn record_with_resolver<F, Fut>(&self, peer_id: PeerId, bytes: u64, resolver: F)
+    where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Option<String>>,
     {
@@ -149,7 +102,7 @@ impl LogicalTrafficMetrics {
         if let Some(entry) = self.per_peer.get(&peer_id)
             && entry.value().is_resolved()
         {
-            entry.value().counters().add_sample(bytes);
+            entry.value().add_sample(bytes);
             return;
         }
 
@@ -186,22 +139,16 @@ impl LogicalTrafficMetrics {
         }
     }
 
-    pub(crate) fn remove_peer(&self, peer_id: PeerId) {
+    pub fn remove_peer(&self, peer_id: PeerId) {
         self.per_peer.remove(&peer_id);
         shrink_dashmap(&self.per_peer, None);
     }
 
-    pub(crate) fn clear_peer_cache(&self) {
+    pub fn clear_peer_cache(&self) {
         self.per_peer.clear();
         shrink_dashmap(&self.per_peer, None);
     }
 
-    #[cfg(test)]
-    fn peer_cache_size(&self) -> usize {
-        self.per_peer.len()
-    }
-
-    #[cfg(test)]
     fn contains_peer_cache(&self, peer_id: PeerId) -> bool {
         self.per_peer.contains_key(&peer_id)
     }
@@ -226,12 +173,12 @@ impl LogicalTrafficMetrics {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TrafficKind {
+pub enum TrafficKind {
     Data,
     Control,
 }
 
-pub(crate) fn traffic_kind(packet_type: u8) -> TrafficKind {
+pub fn traffic_kind(packet_type: u8) -> TrafficKind {
     if packet_type == PacketType::Data as u8
         || packet_type == PacketType::KcpSrc as u8
         || packet_type == PacketType::KcpDst as u8
@@ -246,11 +193,31 @@ pub(crate) fn traffic_kind(packet_type: u8) -> TrafficKind {
     }
 }
 
-pub(crate) fn is_relay_data_packet_type(packet_type: u8) -> bool {
+pub fn is_relay_data_packet_type(packet_type: u8) -> bool {
     // Relay handshakes are control-plane setup; payload data is blocked by its
     // original packet type after the session exists.
     traffic_kind(packet_type) == TrafficKind::Data
         || packet_type == PacketType::ForeignNetworkPacket as u8
+}
+
+pub(crate) fn data_packet_payload_len(packet: &ZCPacket) -> Option<u64> {
+    let header = packet.peer_manager_header()?;
+    if header.packet_type == PacketType::ForeignNetworkPacket as u8 {
+        if header.is_encrypted() {
+            return Some(packet.payload_len() as u64);
+        }
+        return match packet.foreign_network_inner_packet_info() {
+            Some((inner_header, payload_len))
+                if traffic_kind(inner_header.packet_type) == TrafficKind::Data =>
+            {
+                Some(payload_len as u64)
+            }
+            Some(_) => None,
+            None => Some(packet.payload_len() as u64),
+        };
+    }
+
+    (traffic_kind(header.packet_type) == TrafficKind::Data).then(|| packet.payload_len() as u64)
 }
 
 #[derive(Clone)]
@@ -270,7 +237,7 @@ impl TrafficMetricGroup {
 
 type InstanceIdResolver = dyn Fn(PeerId) -> BoxFuture<'static, Option<String>> + Send + Sync;
 
-pub(crate) struct TrafficMetricRecorder {
+pub struct TrafficMetricRecorder {
     my_peer_id: PeerId,
     tx_metrics: TrafficMetricGroup,
     rx_metrics: TrafficMetricGroup,
@@ -278,7 +245,7 @@ pub(crate) struct TrafficMetricRecorder {
 }
 
 impl TrafficMetricRecorder {
-    pub(crate) fn new<F, Fut>(
+    pub fn new<F, Fut>(
         my_peer_id: PeerId,
         tx_data: Arc<LogicalTrafficMetrics>,
         tx_control: Arc<LogicalTrafficMetrics>,
@@ -304,7 +271,7 @@ impl TrafficMetricRecorder {
         }
     }
 
-    pub(crate) async fn record_tx(&self, peer_id: PeerId, packet_type: u8, bytes: u64) {
+    pub async fn record_tx(&self, peer_id: PeerId, packet_type: u8, bytes: u64) {
         if peer_id == self.my_peer_id {
             return;
         }
@@ -314,7 +281,7 @@ impl TrafficMetricRecorder {
             .await;
     }
 
-    pub(crate) async fn record_rx(&self, peer_id: PeerId, packet_type: u8, bytes: u64) {
+    pub async fn record_rx(&self, peer_id: PeerId, packet_type: u8, bytes: u64) {
         if peer_id == self.my_peer_id {
             return;
         }
@@ -324,22 +291,21 @@ impl TrafficMetricRecorder {
             .await;
     }
 
-    pub(crate) fn remove_peer(&self, peer_id: PeerId) {
+    pub fn remove_peer(&self, peer_id: PeerId) {
         self.tx_metrics.data.remove_peer(peer_id);
         self.tx_metrics.control.remove_peer(peer_id);
         self.rx_metrics.data.remove_peer(peer_id);
         self.rx_metrics.control.remove_peer(peer_id);
     }
 
-    pub(crate) fn clear_peer_cache(&self) {
+    pub fn clear_peer_cache(&self) {
         self.tx_metrics.data.clear_peer_cache();
         self.tx_metrics.control.clear_peer_cache();
         self.rx_metrics.data.clear_peer_cache();
         self.rx_metrics.control.clear_peer_cache();
     }
 
-    #[cfg(test)]
-    pub(crate) fn contains_peer_cache(&self, peer_id: PeerId) -> bool {
+    pub fn contains_peer_cache(&self, peer_id: PeerId) -> bool {
         self.tx_metrics.data.contains_peer_cache(peer_id)
             || self.tx_metrics.control.contains_peer_cache(peer_id)
             || self.rx_metrics.data.contains_peer_cache(peer_id)
@@ -351,7 +317,7 @@ impl TrafficMetricRecorder {
     }
 }
 
-pub(crate) fn route_peer_info_instance_id(route_peer_info: &RoutePeerInfo) -> Option<String> {
+pub fn route_peer_info_instance_id(route_peer_info: &RoutePeerInfo) -> Option<String> {
     let instance_id = route_peer_info.inst_id.as_ref()?;
     let instance_id: uuid::Uuid = (*instance_id).into();
     if instance_id.is_nil() {
@@ -364,7 +330,12 @@ pub(crate) fn route_peer_info_instance_id(route_peer_info: &RoutePeerInfo) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::stats_manager::LabelSet;
+
+    impl LogicalTrafficMetrics {
+        fn peer_cache_size(&self) -> usize {
+            self.per_peer.len()
+        }
+    }
 
     fn network_labels(network_name: &str) -> LabelSet {
         LabelSet::new().with_label_type(LabelType::NetworkName(network_name.to_string()))
@@ -374,6 +345,86 @@ mod tests {
         LabelSet::new()
             .with_label_type(LabelType::NetworkName(network_name.to_string()))
             .with_label_type(LabelType::ToInstanceId(instance_id.to_string()))
+    }
+
+    #[test]
+    fn relay_limiter_classifies_only_data_packets() {
+        for packet_type in [
+            PacketType::Data,
+            PacketType::KcpSrc,
+            PacketType::KcpDst,
+            PacketType::QuicSrc,
+            PacketType::QuicDst,
+            PacketType::DataWithKcpSrcModified,
+            PacketType::DataWithQuicSrcModified,
+            PacketType::ForeignNetworkPacket,
+        ] {
+            assert!(is_relay_data_packet_type(packet_type as u8));
+        }
+
+        for packet_type in [
+            PacketType::Ping,
+            PacketType::Pong,
+            PacketType::RpcReq,
+            PacketType::RpcResp,
+            PacketType::RelayHandshake,
+            PacketType::RelayHandshakeAck,
+        ] {
+            assert!(!is_relay_data_packet_type(packet_type as u8));
+        }
+    }
+
+    fn packet_with_type(packet_type: PacketType, payload_len: usize) -> ZCPacket {
+        let mut packet = ZCPacket::new_with_payload(&vec![0; payload_len]);
+        packet.fill_peer_manager_hdr(1, 2, packet_type as u8);
+        packet
+    }
+
+    #[test]
+    fn data_packet_payload_len_uses_exvlan_payload() {
+        let mut data_packet = packet_with_type(PacketType::Data, 1_024);
+        data_packet.mut_peer_manager_header().unwrap().len.set(0);
+        assert_eq!(data_packet_payload_len(&data_packet), Some(1_024));
+
+        let control_packet = packet_with_type(PacketType::RpcReq, 128);
+        assert_eq!(data_packet_payload_len(&control_packet), None);
+    }
+
+    #[test]
+    fn data_packet_payload_len_unwraps_foreign_network_packet() {
+        let network_name = "foreign".to_string();
+        let mut inner_data = packet_with_type(PacketType::Data, 1_024);
+        inner_data.mut_peer_manager_header().unwrap().len.set(0);
+        let foreign_data = ZCPacket::new_for_foreign_network(&network_name, 2, &inner_data);
+        assert!(!foreign_data.peer_manager_header().unwrap().is_encrypted());
+        assert_eq!(data_packet_payload_len(&foreign_data), Some(1_024));
+
+        let inner_control = packet_with_type(PacketType::RpcReq, 128);
+        let foreign_control = ZCPacket::new_for_foreign_network(&network_name, 2, &inner_control);
+        assert_eq!(data_packet_payload_len(&foreign_control), None);
+
+        let malformed_foreign = packet_with_type(PacketType::ForeignNetworkPacket, 7);
+        assert_eq!(
+            data_packet_payload_len(&malformed_foreign),
+            Some(malformed_foreign.payload_len() as u64)
+        );
+    }
+
+    #[test]
+    fn data_packet_payload_len_charges_encrypted_foreign_payload() {
+        let network_name = "foreign".to_string();
+        let inner_control = packet_with_type(PacketType::RpcReq, 128);
+        let mut encrypted_foreign =
+            ZCPacket::new_for_foreign_network(&network_name, 2, &inner_control);
+        encrypted_foreign
+            .mut_peer_manager_header()
+            .unwrap()
+            .set_encrypted(true);
+
+        assert_eq!(
+            data_packet_payload_len(&encrypted_foreign),
+            Some(encrypted_foreign.payload_len() as u64)
+        );
     }
 
     #[tokio::test]

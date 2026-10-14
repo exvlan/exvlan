@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Button, Column, DataTable, Dialog, InputText, Select, Password } from 'primevue';
-import { ref } from 'vue';
+import { Button, Column, DataTable, Dialog, InputText, MultiSelect, Password } from 'primevue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { GroupIdentity, GroupInfo } from '../../types/network';
+import { GroupIdentity, GroupInfo, ensureGroupInfo } from '../../types/network';
 
 const props = defineProps<{
   groupNames?: string[]
@@ -18,6 +18,17 @@ const editingGroupIndex = ref(-1)
 const showGroupDialog = ref(false)
 const oldGroupName = ref('')
 
+function groupInfo() {
+  return ensureGroupInfo(group.value)
+}
+
+const members = computed({
+  get: () => groupInfo().members,
+  set: value => {
+    groupInfo().members = value
+  },
+})
+
 function addGroup() {
   editingGroupIndex.value = -1
   editingGroup.value = {
@@ -30,13 +41,13 @@ function addGroup() {
 
 function editGroup(index: number) {
   editingGroupIndex.value = index
-  editingGroup.value = JSON.parse(JSON.stringify(group.value.declares[index]))
+  editingGroup.value = JSON.parse(JSON.stringify(groupInfo().declares[index]))
   oldGroupName.value = editingGroup.value?.group_name || ''
   showGroupDialog.value = true
 }
 
 function deleteGroup(index: number) {
-  group.value.declares.splice(index, 1)
+  groupInfo().declares.splice(index, 1)
 }
 
 function saveGroup() {
@@ -44,15 +55,15 @@ function saveGroup() {
   const newName = editingGroup.value.group_name
 
   if (editingGroupIndex.value === -1) {
-    group.value.declares.push(editingGroup.value)
+    groupInfo().declares.push(editingGroup.value)
   } else {
     if (oldGroupName.value && oldGroupName.value !== newName) {
       // Sync in members
-      group.value.members = group.value.members.map(m => m === oldGroupName.value ? newName : m)
+      groupInfo().members = groupInfo().members.map(m => m === oldGroupName.value ? newName : m)
       // Notify parent to sync in rules
       emit('rename-group', { oldName: oldGroupName.value, newName })
     }
-    group.value.declares[editingGroupIndex.value] = editingGroup.value
+    groupInfo().declares[editingGroupIndex.value] = editingGroup.value
   }
   showGroupDialog.value = false
 }
@@ -67,21 +78,21 @@ function saveGroup() {
           <label class="font-bold text-lg">{{ t('acl.group.declares') }}</label>
           <small class="text-gray-500">{{ t('acl.group.help') }}</small>
         </div>
-        <Button severity="success" @click="addGroup"><i class="pi pi-plus"></i><span>{{ t('web.common.add') }}</span></Button>
+        <Button icon="pi pi-plus" :label="t('web.common.add')" severity="success" @click="addGroup" />
       </div>
 
-      <DataTable :value="group.declares" responsiveLayout="scroll">
+      <DataTable :value="groupInfo().declares" responsiveLayout="scroll">
         <Column field="group_name" :header="t('acl.group.name')" />
         <Column field="group_secret" :header="t('acl.group.secret')">
           <template #body="{ data }">
-            <Password v-model="data.group_secret" :feedback="false" toggleMask readonly class="w-full" />
+            <Password v-model="data.group_secret" :feedback="false" toggleMask readonly plain class="w-full" />
           </template>
         </Column>
         <Column :header="t('web.common.edit')" headerStyle="width: 8rem">
           <template #body="{ index }">
             <div class="flex gap-2">
-              <Button text rounded @click="editGroup(index)"><i class="pi pi-pencil"></i></Button>
-              <Button severity="danger" text rounded @click="deleteGroup(index)"><i class="pi pi-trash"></i></Button>
+              <Button icon="pi pi-pencil" text rounded @click="editGroup(index)" />
+              <Button icon="pi pi-trash" severity="danger" text rounded @click="deleteGroup(index)" />
             </div>
           </template>
         </Column>
@@ -90,7 +101,7 @@ function saveGroup() {
 
     <div class="flex flex-col gap-2">
       <label class="font-bold text-lg">{{ t('acl.group.members') }}</label>
-      <Select v-model="group.members" :options="props.groupNames" multiple fluid filter
+      <MultiSelect v-model="members" :options="props.groupNames" multiple fluid filter
         :placeholder="t('acl.group.members')" />
     </div>
 
@@ -107,8 +118,8 @@ function saveGroup() {
         </div>
       </div>
       <template #footer>
-        <Button @click="showGroupDialog = false" text><i class="pi pi-times"></i><span>{{ t('web.common.cancel') }}</span></Button>
-        <Button @click="saveGroup"><i class="pi pi-save"></i><span>{{ t('web.common.save') }}</span></Button>
+        <Button :label="t('web.common.cancel')" icon="pi pi-times" @click="showGroupDialog = false" text />
+        <Button :label="t('web.common.save')" icon="pi pi-save" @click="saveGroup" />
       </template>
     </Dialog>
   </div>

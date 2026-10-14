@@ -1,4 +1,4 @@
-# EXVlan
+# Exvlan
 
 [![Github release](https://img.shields.io/github/v/tag/exvlan/exvlan)](https://github.com/exvlan/exvlan/releases)
 [![GitHub](https://img.shields.io/github/license/exvlan/exvlan)](https://github.com/exvlan/exvlan/blob/main/LICENSE)
@@ -56,7 +56,7 @@ curl -fsSL "https://github.com/exvlan/exvlan/blob/main/script/install.sh?raw=tru
 Homebrew (MacOS/Linux):
 ```bash
 brew tap era-club/exvlan
-brew install --cask exvlan-studio
+brew install --cask @exvlan/studio
 ```
 
 Windows (Recommended, run with administrator privileges):
@@ -66,7 +66,7 @@ irm "https://github.com/exvlan/exvlan/blob/main/script/install.ps1?raw=true" | i
 
 Install via cargo (Latest development version): 
 ```bash
-cargo install --git https://github.com/exvlan/exvlan.git exvlan-studio
+cargo install --git https://github.com/exvlan/exvlan.git @exvlan/studio
 ```
 
 [Install pre-built binary](https://github.com/exvlan/exvlan/releases) (Recommended, All platforms supported)
@@ -83,7 +83,7 @@ Additional steps:
 
 #### Quick Networking with Shared Nodes
 
-EXVlan supports quick networking using shared public nodes. When you don't have a public IP, you can use the free shared nodes provided by the EXVlan community. Nodes will automatically attempt NAT traversal and establish P2P connections. When P2P fails, data will be relayed through shared nodes.
+Exvlan supports quick networking using shared public nodes. When you don't have a public IP, you can use the free shared nodes provided by the Exvlan community. Nodes will automatically attempt NAT traversal and establish P2P connections. When P2P fails, data will be relayed through shared nodes.
 
 When using shared nodes, each node entering the network needs to provide the same `--network-name` and `--network-secret` parameters as the unique identifier of the network.
 
@@ -108,9 +108,9 @@ After successful execution, you can check the network status using `exvlan-cli`:
 ```text
 | ipv4         | hostname       | cost  | lat_ms | loss_rate | rx_bytes | tx_bytes | tunnel_proto | nat_type | id         | version         |
 | ------------ | -------------- | ----- | ------ | --------- | -------- | -------- | ------------ | -------- | ---------- | --------------- |
-| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.308.20604-70e69a38~ |
-| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.308.20604-70e69a38~ |
-|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.308.20604-70e69a38~ |
+| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.410.20700-70e69a38~ |
+| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.410.20700-70e69a38~ |
+|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.410.20700-70e69a38~ |
 ```
 
 You can test connectivity between nodes:
@@ -130,11 +130,11 @@ To improve availability, you can connect to multiple shared nodes simultaneously
 sudo exvlan -d --network-name abc --network-secret abc -p tcp://<SharedNodeIP1>:11010 -p udp://<SharedNodeIP2>:11010
 ```
 
-Once your network is set up successfully, you can easily configure it to start automatically on system boot. Refer to the [One-Click Register Service guide](https://xvlan.era-x.cn/en/guide/network/oneclick-install-as-service.html) for step-by-step instructions on registering EXVlan as a system service.
+Once your network is set up successfully, you can easily configure it to start automatically on system boot. Refer to the [One-Click Register Service guide](https://xvlan.era-x.cn/en/guide/network/oneclick-install-as-service.html) for step-by-step instructions on registering Exvlan as a system service.
 
 #### Decentralized Networking
 
-EXVlan is fundamentally decentralized, with no distinction between server and client. As long as one device can communicate with any node in the virtual network, it can join the virtual network. Here's how to set up a decentralized network:
+Exvlan is fundamentally decentralized, with no distinction between server and client. As long as one device can communicate with any node in the virtual network, it can join the virtual network. Here's how to set up a decentralized network:
 
 1. Start First Node (Node A):
 
@@ -190,11 +190,11 @@ Assuming the network topology is as follows, Node B wants to share its accessibl
 flowchart LR
 
 subgraph Node A Public IP 22.1.1.1
-nodea[EXVlan<br/>10.144.144.1]
+nodea[Exvlan<br/>10.144.144.1]
 end
 
 subgraph Node B
-nodeb[EXVlan<br/>10.144.144.2]
+nodeb[Exvlan<br/>10.144.144.2]
 end
 
 id1[[10.1.1.0/24]]
@@ -202,7 +202,7 @@ id1[[10.1.1.0/24]]
 nodea <--> nodeb <-.-> id1
 ```
 
-To share a subnet, add the `-n` parameter when starting EXVlan:
+To share a subnet, add the `-n` parameter when starting Exvlan:
 
 ```bash
 # Share subnet 10.1.1.0/24 with other nodes
@@ -229,7 +229,7 @@ ping 10.1.1.2
 
 #### WireGuard Integration
 
-EXVlan can act as a WireGuard server, allowing any device with a WireGuard client (including iOS and Android) to access the EXVlan network. Here's an example setup:
+Exvlan can act as a WireGuard server, allowing any device with a WireGuard client (including iOS and Android) to access the Exvlan network. Here's an example setup:
 
 ```mermaid
 flowchart LR
@@ -237,11 +237,11 @@ flowchart LR
 ios[[iPhone<br/>WireGuard Installed]]
 
 subgraph Node A Public IP 22.1.1.1
-nodea[EXVlan<br/>10.144.144.1]
+nodea[Exvlan<br/>10.144.144.1]
 end
 
 subgraph Node B
-nodeb[EXVlan<br/>10.144.144.2]
+nodeb[Exvlan<br/>10.144.144.2]
 end
 
 id1[[10.1.1.0/24]]
@@ -249,7 +249,7 @@ id1[[10.1.1.0/24]]
 ios <-.-> nodea <--> nodeb <-.-> id1
 ```
 
-1. Start EXVlan with WireGuard portal enabled:
+1. Start Exvlan with WireGuard portal enabled:
 
 ```bash
 # Listen on 0.0.0.0:11013 and use 10.14.14.0/24 subnet for WireGuard clients
@@ -265,12 +265,12 @@ exvlan-cli vpn-portal
 
 3. In the output configuration:
    - Set `Interface.Address` to an available IP from the WireGuard subnet
-   - Set `Peer.Endpoint` to the public IP/domain of your EXVlan node
+   - Set `Peer.Endpoint` to the public IP/domain of your Exvlan node
    - Import the modified configuration into your WireGuard client
 
 #### Self-Hosted Public Shared Node
 
-You can run your own public shared node to help other nodes discover each other. A public shared node is just a regular EXVlan network (with same network name and secret) that other networks can connect to.
+You can run your own public shared node to help other nodes discover each other. A public shared node is just a regular Exvlan network (with same network name and secret) that other networks can connect to.
 
 To run a public shared node:
 
@@ -281,7 +281,7 @@ sudo exvlan --network-name mysharednode --network-secret mysharednode
 
 ## Related Projects
 
-- [EasyTier](https://easytier.cn/)：✨ A simple, secure, decentralized virtual private network solution powered by Rust and Tokio
+- [Exvlan](https://exvlan.cn/)：✨ A simple, secure, decentralized virtual private network solution powered by Rust and Tokio
 - [ZeroTier](https://www.zerotier.com/): A global virtual network for connecting devices.
 - [TailScale](https://tailscale.com/): A VPN solution aimed at simplifying network configuration.
 
@@ -291,4 +291,4 @@ sudo exvlan --network-name mysharednode --network-secret mysharednode
 
 ## License
 
-EXVlan is released under the [LGPL-3.0](https://github.com/exvlan/exvlan/blob/main/LICENSE).
+Exvlan is released under the [LGPL-3.0](https://github.com/exvlan/exvlan/blob/main/LICENSE).
