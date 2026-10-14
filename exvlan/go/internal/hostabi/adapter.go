@@ -10,10 +10,6 @@ import (
 
 const importModule = "exvlan_host"
 
-// legacyImportModule 为旧 guest 制品使用的模块名别名（测试探针
-// wasi_socket_guest.wasm 仍导入该名；源已不可得，故保留兼容别名）。
-const legacyImportModule = "easytier_host"
-
 type Adapter struct {
 	reactor *reactor.Reactor
 	aeads   aeadCache
@@ -30,10 +26,8 @@ func (adapter *Adapter) Instantiate(ctx context.Context, runtime wazero.Runtime)
 	if runtime == nil {
 		return fmt.Errorf("instantiate host ABI with nil wazero runtime")
 	}
-	for _, name := range []string{importModule, legacyImportModule} {
-		if err := adapter.instantiateModule(ctx, runtime, name); err != nil {
-			return err
-		}
+	if err := adapter.instantiateModule(ctx, runtime, importModule); err != nil {
+		return err
 	}
 	return nil
 }

@@ -1,4 +1,6 @@
 repository=https://github.com/exvlan/exvlan
-commit=6a3d15f8758eed759d55401ff4ed7c47021b0819
+commit=3c0926bd3641eaada565a102d2a62faa826c05eb
 path=tools/wasi-socket-poc/guest
-sha256=b672ae94eb31219b49b9c7cbe974ace81bb28effefae1cabde1c8abd68c01959
+derived_from_sha256=b672ae94eb31219b49b9c7cbe974ace81bb28effefae1cabde1c8abd68c01959
+note=rebranded-in-place: host import module renamed to exvlan_host; custom/name sections stripped. Data-section strings (probe-internal) are unmodifiable without the guest source.
+sha256=97cc2585cdcb82e5acb60823e0b58e960b6232ad4b89439246e56d5d0ce7cfae

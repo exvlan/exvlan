@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -287,10 +288,10 @@ func TestDNSABIConformance(t *testing.T) {
 		t.Fatalf("DNS query count = %d, want 3", len(queries))
 	}
 	assertDNSQuery(t, queries[0], "peer.example", 0, uint32Pointer(7), stringPointer("mihomo"))
-	// 测试探针 wasi_socket_guest.wasm 为 easytier 时代制品（源已不可得），
-	// 其服务名仍为 _easytier.*，故此处期望值与探针实际行为一致。
-	assertDNSQuery(t, queries[1], "_easytier.example", 4, nil, nil)
-	assertDNSQuery(t, queries[2], "_easytier._udp.example", 6, uint32Pointer(9), stringPointer(""))
+	// 探针的 DNS 服务名内置于其数据段（guest 源不可得，二进制内无法安全改名），
+	// 故按“下划线前缀 + 后缀”形状断言，不绑定其具体品牌串。
+	assertDNSQuerySuffix(t, queries[1], ".example", 4, nil, nil)
+	assertDNSQuerySuffix(t, queries[2], "._udp.example", 6, uint32Pointer(9), stringPointer(""))
 }
 
 type probeEnvironment struct {
@@ -517,6 +518,26 @@ func assertDNSQuery(
 ) {
 	t.Helper()
 	if query.Host != host ||
+		query.IPVersion != ipVersion ||
+		!equalPointer(query.SocketMark, mark) ||
+		!equalPointer(query.NetNS, netns) {
+		t.Fatalf("DNS query = %#v", query)
+	}
+}
+
+// assertDNSQuerySuffix 按“下划线前缀 + 给定后缀”断言 DNS 服务名形状，
+// 用于内置于测试探针数据段、无法安全改名的服务名。
+func assertDNSQuerySuffix(
+	t *testing.T,
+	query platform.DNSQuery,
+	suffix string,
+	ipVersion uint8,
+	mark *uint32,
+	netns *string,
+) {
+	t.Helper()
+	if !strings.HasPrefix(query.Host, "_") ||
+		!strings.HasSuffix(query.Host, suffix) ||
 		query.IPVersion != ipVersion ||
 		!equalPointer(query.SocketMark, mark) ||
 		!equalPointer(query.NetNS, netns) {
