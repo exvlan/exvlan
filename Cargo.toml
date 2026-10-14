@@ -39,8 +39,6 @@ dashmap = "6.2.1"
 exvlan = { version = "26.410.20700", path = "exvlan/exvlan", default-features = false }
 exvlan-core = { version = "26.410.20700", path = "exvlan/core", default-features = false }
 exvlan-ffi = { version = "26.410.20700", path = "exvlan/contrib/ffi", default-features = false }
-exvlan-ohos-core = { version = "26.410.20700", path = "exvlan/contrib/ohrs/crates/exvlan-ohos-core", default-features = false }
-exvlan-ohos-features = { version = "26.410.20700", path = "exvlan/contrib/ohrs/crates/exvlan-ohos-features", default-features = false }
 exvlan-proto = { version = "26.410.20700", path = "exvlan/proto", default-features = false }
 futures = "0.3"
 gethostname = "1.1"

@@ -30,16 +30,12 @@ jobs:
         "tauri-plugin-vpnservice/**", "exvlan/contrib/**",
         ".github/workflows/test.yml", ".github/actions/**"]
     outputs:
+      # 仅 PR 按路径门控跳过；push/tag/dispatch 一律构建（pipeline 已统一门控，
+      # 不再用 skip-duplicate 因内容重复而跳过）。
       should_skip: >-
         ${{
-          (
-            steps.skip_check.outputs.should_skip == 'true' ||
-            (
-              github.event_name == 'pull_request' &&
-              steps.path_filter.outputs.relevant != 'true'
-            )
-          ) &&
-          github.ref_type != 'tag'
+          github.event_name == 'pull_request' &&
+          steps.path_filter.outputs.relevant != 'true'
         }}
     steps:
       - id: skip_check
