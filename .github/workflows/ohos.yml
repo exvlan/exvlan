@@ -95,7 +95,7 @@ jobs:
             -p exvlan-ohrs --tests
 
           cargo_version=$(cargo metadata --format-version 1 --no-deps \
-            --manifest-path exvlan/Cargo.toml | jq -r '.packages[0].version')
+            --manifest-path exvlan/exvlan/Cargo.toml | jq -r '.packages[0].version')
           last_tag=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || true)
           if [ -n "$last_tag" ]; then
             base_version=$(printf '%s\n' "$cargo_version" "${last_tag#v}" \

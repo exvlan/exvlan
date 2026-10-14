@@ -37,6 +37,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           tag="exvlan/go/${VERSION}"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "tag ${tag} 已存在，跳过创建"
