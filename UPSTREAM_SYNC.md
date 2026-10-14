@@ -49,3 +49,13 @@ git merge-base --is-ancestor upstream/releases/vX.Y.Z feature # 期望 0（是�
 
 - 标准：`YY.QMM.Mmpp`，如 `26.410.20700` = 2026 年 Q4 10 月，对齐上游 `v2.7.0`。
 - Windows MSI：`YY.MMQ.mmmm-pp`（仅 `tauri.windows.conf.json` 生效）。
+- **排除 `packages/sdk/**`**：sdk 为嵌套独立 workspace，子包独立版本化（`0.1.0`），不得被版本对齐覆盖。
+
+## CI 编排（单入口）
+
+- 唯一入口 `pipeline.yml`；其余工作流仅 `workflow_call`(+`workflow_dispatch`)，不得自带 push/PR/tag 触发。
+- 门控：`feature`=test+core(x86_64)；PR=test+core；`develop`/`main`=全链+旁路路径门控；tag/dispatch=全量+release。
+- `core/test/mobile` 不因内容重复跳过（否则 `docker`/`release` 取不到产物）；发版产物走 Actions artifact
+  （`core-*`/`studio-*`/`mobile-*`/`magisk`；`release.yml` 用 `download-artifact` 的 `pattern` 拉取）。
+- 发布自动（`draft:false`）；`productName` 决定 Windows MSI UpgradeCode，勿轻改。
+- 私仓 Actions 额度耗尽时临时 public 跑 CI，完毕立即改回 private。

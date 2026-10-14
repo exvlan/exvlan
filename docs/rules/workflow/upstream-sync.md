@@ -139,6 +139,26 @@ git push origin develop
   `packages/studio/src-tauri/tauri.windows.conf.json` 对 Windows 生效。
 - 版本号需同步更新各 `Cargo.toml` / `package.json` / `magisk` 清单 / README 版本串；
   详见 `c21eac5d version: v26.308.20604`。
+- **范围排除 `packages/sdk/**`**：sdk 为嵌套独立 workspace（自带 `pnpm-workspace.yaml`/`pnpm-lock.yaml`），
+  其子包（`@exvlan/runtime|browser|cloudflare` 等）独立版本化（`0.1.0`）且被 `workspace:0.1.0` 引用；
+  版本对齐**不得**覆盖 sdk 子包（否则 specifier 不匹配、`ERR_PNPM_OUTDATED_LOCKFILE`）。
+
+### E. CI 编排（统一 pipeline 单入口）
+
+- **唯一入口** `pipeline.yml`；其余工作流（`test/core/studio/mobile/docker/release/go/js/nix/ohos`）
+  只保留 `workflow_call`(+`workflow_dispatch`)，不得自带 `on: push/pull_request/tags`。
+- **门控**：`feature`=test+core(仅 linux-x86_64、无 magisk)；PR(develop/main)=test+core；
+  `develop`/`main`=全链(core/studio/mobile/docker 必跑)+旁路(go/js/nix/ohos)按路径门控；
+  tag `v*` 与 `workflow_dispatch`=全量（绕路径门控）+ `release`(仅 tag)。
+- **不因内容重复跳过** `core/test/mobile`（`should_skip` 仅由 PR 路径门控决定；`fkirc/skip-duplicate-actions`
+  输出不再影响构建，其 `cancel_others` 保留），否则下游 `docker`/`release` 取不到本轮 core 产物。
+- **发版产物经 Actions artifact 传递**（`core-*`/`studio-*`/`mobile-*`/`magisk` 上传；
+  `release.yml` 用 `download-artifact` 的 `pattern` 精确拉取）。不用 `actions/cache`（配额 LRU 驱逐），
+  也不用全量 download（buildx 的 `*~*.dockerbuild` 名含 `~` 会解压失败）。
+- **发布**：`release.yml` 自动 `draft:false` 发布，`version`=tag 名；`productName`（`tauri.conf.json`）
+  决定 Windows MSI **UpgradeCode** 与资产命名，**勿轻改**（改了升级会变并存新装）。
+- **可见性**：默认 private；私仓 Actions 额度耗尽时，跑 CI/发版可临时
+  `gh api -X PATCH repos/exvlan/exvlan -f visibility=public`，完毕立即改回 private。
 
 ## 6. 冲突解决策略
 

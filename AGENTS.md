@@ -28,6 +28,27 @@ git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
 **不变量校验**：`git rev-list --merges --count develop` 必须为 `0`；
 `git merge-base --is-ancestor upstream/main develop` 必须非祖先。
 
+## CI 编排（统一 pipeline 单入口）
+
+- **唯一入口**：`.github/workflows/pipeline.yml`。**所有** CI 都经其依赖链编排；其余工作流（`test/core/studio/mobile/docker/release/go/js/nix/ohos`）一律**只保留 `workflow_call`(+`workflow_dispatch`)**，不得自带 `on: push/pull_request/tags`。
+- **门控矩阵**：
+  | 事件 | tests | core | studio/mobile/docker | go/js/nix/ohos | release |
+  |---|---|---|---|---|---|
+  | `feature` push | ✓ | ✓（仅 linux-x86_64，无 magisk） | ✗ | ✗ | ✗ |
+  | PR(develop/main) | ✓ | ✓（全量） | ✗ | ✗ | ✗ |
+  | `develop`/`main` push | ✓ | ✓（全量+magisk） | ✓（必跑） | 按路径门控 | ✗ |
+  | tag `v*` | ✓ | ✓（全量） | ✓ | **全量**（绕门控） | ✓ |
+  | `workflow_dispatch` | ✓ | ✓（全量） | ✓ | **全量**（绕门控） | ✗ |
+- **不因内容重复跳过构建**：`core/test/mobile` 的 `should_skip` 仅由 PR 路径门控决定（`fkirc/skip-duplicate-actions` 的输出不再影响构建；其 `cancel_others` 仍用于取消被取代的运行）。原因：下游 `docker`/`release` 依赖本轮 `core` 的产物，跳过会导致取不到。
+- **发版产物经 Actions artifact 传递**（`core-*`/`studio-*`/`mobile-*`/`magisk` 前缀上传；`release.yml` 用 `download-artifact` 的 `pattern` 精确拉取）。不用 `actions/cache`（10GB 配额 LRU 驱逐不可靠），也不用全量 `download-artifact`（buildx 产生的 `<owner>~<repo>~*.dockerbuild` 名字含 `~`，会导致解压失败）。
+- **发布**：`release.yml` 自动发布（`draft:false`），`version` = tag 名；Windows/macOS 资产由 `productName`（`tauri.conf.json`）决定命名与 MSI **UpgradeCode** —— **切勿轻改 `productName`**，否则升级会变成并存新装。
+- **仓库可见性**：默认 **private**。私仓 Actions 额度耗尽时，需要跑 CI/发版可**临时** `gh api -X PATCH repos/exvlan/exvlan -f visibility=public`，跑完**立即改回 private**。
+
+## 版本对齐范围
+
+- 标准版本 `YY.QMM.Mmpp` 覆盖：根 `Cargo.toml`/各 crate、`packages/{studio,std,ui,generator}/package.json`、`tauri.conf.json`、magisk 清单、README 等。
+- **排除 `packages/sdk/**`**：sdk 是**嵌套独立 workspace**（自带 `pnpm-workspace.yaml`/`pnpm-lock.yaml`），其子包（`@exvlan/runtime|browser|cloudflare` 等）**独立版本化（`0.1.0`）**，并被 `workspace:0.1.0` 引用。**版本对齐不得覆盖 sdk 子包**（否则 specifier 不匹配、`ERR_PNPM_OUTDATED_LOCKFILE`）。
+
 <!--VITE PLUS START-->
 
 # Using Vite+, the Unified Toolchain for the Web
