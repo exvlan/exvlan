@@ -6,12 +6,12 @@ on:
       targets:
         description: 'Build targets: JSON array of target triples, or "all"'
         type: string
-        default: 'all'
+        default: "all"
   workflow_dispatch:
     inputs:
       targets:
         description: 'Build targets: JSON array of target triples, or "all"'
-        default: 'all'
+        default: "all"
 
 permissions:
   contents: read
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     outputs:
-      should_skip: 'false'
+      should_skip: "false"
     steps:
       - run: echo "Skip disabled (pipeline chaining requires artifacts)"
 
@@ -85,10 +85,10 @@ jobs:
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
       GUI_TARGET: ${{ matrix.GUI_TARGET }}
-    needs: [ pre_job, prepare_matrix ]
+    needs: [pre_job, prepare_matrix]
     if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set current ref as env variable
         run: |
@@ -100,10 +100,10 @@ jobs:
           target: ${{ matrix.TARGET }}
           gui: true
           pnpm: true
-          pnpm-build-filter: ''
+          pnpm-build-filter: ""
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           prefix-key: ""
           shared-key: "exvlan-shared"
@@ -123,7 +123,7 @@ jobs:
 
       - name: Build GUI (Tauri)
         if: ${{ matrix.GUI_TARGET != '' }}
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
         env:
           RUSTFLAGS: "-L native=${{ github.workspace }}/packages/studio/src-tauri/"
           CARGO_TERM_COLOR: always
@@ -142,7 +142,7 @@ jobs:
               # 扩展匹配：包含 .deb, .rpm 和 .AppImage
               find ./target/$GUI_TARGET/release/bundle/ -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \) -exec cp {} ./artifacts/ \; 2>/dev/null || true
           fi
-          
+
           # 打印列表，确保你在日志中能看到到底抓取了哪些文件
           echo "Collected artifacts:"
           ls -F ./artifacts/
@@ -154,7 +154,7 @@ jobs:
           path: ./artifacts
 
       - name: Upload studio artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: studio-${{ matrix.ARTIFACT_NAME }}
           path: ./artifacts

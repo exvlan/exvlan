@@ -122,37 +122,34 @@ fn cidr_to_subnet_mask(prefix_length: u8) -> Ipv4Addr {
     all(target_os = "macos", not(feature = "macos-ne")),
     target_os = "freebsd"
 ))]
-async fn run_shell_cmd(cmd: &str) -> Result<(), Error> {
-    let cmd_out: std::process::Output;
-    let stdout: String;
-    let stderr: String;
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd_out = Command::new("cmd")
-            .stdin(std::process::Stdio::null())
-            .arg("/C")
-            .arg(cmd)
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .await?;
-        stdout = crate::utils::string::utf8_or_gbk_to_string(cmd_out.stdout.as_slice());
-        stderr = crate::utils::string::utf8_or_gbk_to_string(cmd_out.stderr.as_slice());
-    };
+async fn run_cmd(program: &str, args: &[&str]) -> Result<(), Error> {
+    let output = Command::new(program).args(args).output().await?;
+    let stdout = String::from_utf8_lossy(output.stdout.as_slice()).to_string();
+    let stderr = String::from_utf8_lossy(output.stderr.as_slice()).to_string();
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        cmd_out = Command::new("sh").arg("-c").arg(cmd).output().await?;
-        stdout = String::from_utf8_lossy(cmd_out.stdout.as_slice()).to_string();
-        stderr = String::from_utf8_lossy(cmd_out.stderr.as_slice()).to_string();
-    };
+    let ec = output.status.code();
+    let succ = output.status.success();
+    tracing::info!(program, ?args, ?ec, ?succ, ?stdout, ?stderr, "run cmd");
 
-    let ec = cmd_out.status.code();
-    let succ = cmd_out.status.success();
-    tracing::info!(?cmd, ?ec, ?succ, ?stdout, ?stderr, "run shell cmd");
-
-    if !cmd_out.status.success() {
+    if !output.status.success() {
         return Err(Error::ShellCommandError(stdout + &stderr));
+    }
+    Ok(())
+}
+
+/// 校验网卡名，防止将不可信（如配置/服务端下发）的接口名用于系统命令。
+#[cfg(any(
+    all(target_os = "macos", not(feature = "macos-ne")),
+    target_os = "freebsd"
+))]
+pub(crate) fn validate_ifname(name: &str) -> Result<(), Error> {
+    if name.is_empty()
+        || name.len() > 15
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '@'))
+    {
+        return Err(Error::InvalidInterfaceName(name.to_string()));
     }
     Ok(())
 }

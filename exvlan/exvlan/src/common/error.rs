@@ -20,6 +20,8 @@ pub enum Error {
     InvalidUrl(String),
     #[error("Shell Command error: {0}")]
     ShellCommandError(String),
+    #[error("Invalid interface name: {0}")]
+    InvalidInterfaceName(String),
     #[error("Timeout error: {0}")]
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("anyhow error: {0}")]

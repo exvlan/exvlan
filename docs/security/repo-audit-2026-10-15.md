@@ -10,18 +10,19 @@
 
 **未发现后门、隐蔽遥测或未授权的数据收集。** 主要风险集中在：**依赖漏洞**、**CI 供应链（action 未钉 SHA）**、**同名配置注入面（`sh -c`）**、以及**一处向第三方个人仓库的发布外发**。
 
-| 严重度 | 数量 | 条目 |
-| --- | --- | --- |
-| High | 4 | H1 配置注入到 `sh -c`；H2 CI action 未钉 SHA；H3 pnpm 依赖漏洞；H4 cargo 依赖漏洞 |
-| Medium | 2 | M1 Go stdlib 漏洞；M2 ohos 向第三方仓库 dispatch |
-| Low | 3 | L1 `ALIYUN_OSS_BUCKET` 冗余 secret；L2 CI 安装器 `curl\|sh`；L3 未固定分支 git 依赖 |
-| Info | 若干 | 特权脚本 base64 配置；遥测缺席；动态抽流结论；二进制无隐藏 host；误报说明；信任边界 |
+| 严重度 | 数量 | 条目                                                                                |
+| ------ | ---- | ----------------------------------------------------------------------------------- |
+| High   | 4    | H1 配置注入到 `sh -c`；H2 CI action 未钉 SHA；H3 pnpm 依赖漏洞；H4 cargo 依赖漏洞   |
+| Medium | 2    | M1 Go stdlib 漏洞；M2 ohos 向第三方仓库 dispatch                                    |
+| Low    | 3    | L1 `ALIYUN_OSS_BUCKET` 冗余 secret；L2 CI 安装器 `curl\|sh`；L3 未固定分支 git 依赖 |
+| Info   | 若干 | 特权脚本 base64 配置；遥测缺席；动态抽流结论；二进制无隐藏 host；误报说明；信任边界 |
 
 ---
 
 ## 1. High
 
 ### H1. 配置可控字符串拼入 `sh -c`（macOS/FreeBSD 特权守护进程）—— 命令注入面
+
 - 证据：`exvlan/exvlan/src/common/ifcfg/mod.rs:145`
   ```rust
   cmd_out = Command::new("sh").arg("-c").arg(cmd).output().await?;   // macOS/FreeBSD 分支
@@ -36,17 +37,20 @@
 - 建议：避免 `sh -c`，改为 `Command::new("ifconfig").args([...])` 的 argv 直传；或对 `dev_name`/地址做严格白名单校验（`^[A-Za-z0-9_.-]{1,15}$`）。
 
 ### H2. CI 供应链：`uses:` 全部按 major tag（非 commit SHA）
+
 - 证据：`.github/workflows/*.yml` 中所有 `uses:` 均为 `@vN`（`actions/checkout@v5`、`pnpm/action-setup@v5`、`ErBWs/setup-ohos@v1`、`signpath/...@v2` 等）。
 - 影响：上游（含第三方个人 action）可移动 tag → 在被引用后注入代码。
 - 建议（仅建议，本次未改）：关键 action 钉 **commit SHA**；对第三方（非 GitHub 官方）action 尤其重要。
 
 ### H3. 前端依赖漏洞（pnpm audit：18 枚，11 high / 7 moderate）
+
 - `axios`（多枚，high/moderate）：`>=1.13.0 <1.20.0` 的 SSRF/prototype-pollution/ReDoS/DoS/header-injection 等；出现在 **`packages/std`、`packages/ui`**。
 - `js-yaml`（high/moderate）：`>=4.0.0 <4.3.2` ReDoS/原型污染。
 - `@vue/server-renderer`（high）：`<3.5.42` XSS。
 - 建议：升级 `axios>=1.20.0`、`js-yaml>=4.3.2`、`@vue/server-renderer>=3.5.42`，并重生成相应锁文件。
 
 ### H4. Rust 依赖漏洞（cargo audit：7 枚）
+
 - `rustls 0.23.45`：`RUSTSEC-2026-0346`（`Debug` 泄露会话密钥）、`-0347`（ECH 拒后向外部服务器发送缓冲数据）、`-0348`（Brotli 证书解压**认证前最多分配 1GiB**）、`-0349`（ServerHello 降级到经典密钥交换）。
 - `hickory-proto 0.25.2`：`RUSTSEC-2026-0118`（NSEC3 校验无界循环）、`-0119`（O(n²) 名称压缩 CPU 耗尽）。
 - `rsa 0.9.10`：`RUSTSEC-2023-0071`（Marvin 定时侧信道）。
@@ -58,10 +62,12 @@
 ## 2. Medium
 
 ### M1. Go 标准库漏洞（govulncheck：5 枚**可达**）
+
 - 证据：`go1.24.4` 的 `net/url`（`GO-2025-4010` 等）、`os/exec`（`GO-2025-3956`），命中 `internal/host/instance_config.go`、`cmd/update-wasm/main.go`。
 - 建议：提升 Go toolchain（`go.mod`/`toolchain`）到已修复版本；重跑 `govulncheck` 归零可达项。
 
 ### M2. 发布外发：ohos 向第三方（个人）仓库 dispatch
+
 - 证据：`.github/workflows/ohos.yml`（Publish 步骤）用 `DOWNSTREAM_DISPATCH_TOKEN` `POST` 到
   `FrankHan052176/Exvlan-ArkTS`、`FrankHan052176/exvlan-pro-app`，载荷含 `repository/ref/package`。
 - 影响：属**向第三方个人账户仓库外发**（非本组织）。虽非“数据窃取”，但属于**供应链/数据面外部依赖**。
@@ -98,3 +104,18 @@
 5. 清理：移除 `ALIYUN_OSS_BUCKET` env（L1）；CI 安装器钉版本（L2）。
 
 > 说明：本报告为**静态 + 非侵入动态**审查，未对运行中服务注入故障；依赖审计基于当日 advisory 数据库。供应链修复按约定**仅建议、未直接实施**。
+
+---
+
+## 6. 处置结果（本次实施）
+
+| 发现                                        | 处置                                                                                                                                                                                                                                |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H1 配置注入到 `sh -c`                       | **已修**：`ifcfg` 改为 `Command::new(prog).args([...])` **argv 直传**，并新增 `validate_ifname`（`dev_name` 白名单 `^[A-Za-z0-9_.-]{1,15}$`）。                                                                                     |
+| H2 CI action 未钉 SHA                       | **已加固**：`.github/workflows/*` 中全部 `uses:` 钉到 **commit SHA**（含 `# <tag>` 注释）；`actions/setup-java@v6`、`android-actions/setup-android@v4` 顺带升级以处理 Node20 告警（`arduino/setup-protoc` 无更高 major，保留 v3）。 |
+| H3 前端依赖漏洞（18）                       | **已修**：`axios ^1.20.0`、`vue ^3.5.42`（含 `@vue/server-renderer`）、`js-yaml` 定向 override `^4.3.2`；`pnpm audit` → **0 漏洞**。                                                                                                |
+| H4 Rust 依赖漏洞（7）                       | **部分修复**：`rustls 0.23.45 → 0.23.46`（清除 4 枚）。剩余 `hickory-proto 0.25.2`（2 枚，**上游未发补丁**，见 hickory-dns PR #3597/#3613）、`rsa 0.9.10`（Marvin，传递依赖）→ **待上游**。                                         |
+| M1 Go stdlib（5）                           | CI 使用 `go-version: 1.25.x`（≥ 修复版 1.25.8）；本地 `govulncheck` 的 5 枚源自旧的 go1.24.4，CI 侧不应复现（保持监控）。                                                                                                           |
+| M2 第三方仓库 dispatch                      | **文档化保留**：`ohos.yml` 增加显式注释说明目标为外部个人仓库、需授权。                                                                                                                                                             |
+| L1 冗余 `OSS_BUCKET`                        | **已移除**：`core.yml`、`mobile.yml` 中的 `OSS_BUCKET` env 删除。                                                                                                                                                                   |
+| L2 CI 安装器 `curl\|sh` / L3 未固定分支依赖 | 待办（未改）。                                                                                                                                                                                                                      |

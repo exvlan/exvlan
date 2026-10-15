@@ -39,17 +39,17 @@ jobs:
         }}
     steps:
       - id: skip_check
-        uses: fkirc/skip-duplicate-actions@v5
+        uses: fkirc/skip-duplicate-actions@b974a9395958c231af965b70070979a577efa578 # v5
         with:
-          concurrent_skipping: 'never'
-          skip_after_successful_duplicate: 'true'
+          concurrent_skipping: "never"
+          skip_after_successful_duplicate: "true"
           paths: ${{ env.RELEVANT_PATHS }}
 
       - id: path_filter
         if: >-
           github.event_name == 'pull_request' &&
           steps.skip_check.outputs.should_skip != 'true'
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         with:
           filters: |
             relevant: ${{ env.RELEVANT_PATHS }}
@@ -60,7 +60,7 @@ jobs:
     needs: pre_job
     if: needs.pre_job.outputs.should_skip != 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
@@ -69,13 +69,13 @@ jobs:
           pnpm: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           components: rustfmt,clippy
           target: wasm32-wasip1
-          rustflags: ''
+          rustflags: ""
 
-      - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@d8a3af99c9218844a5b609a03d73ecfb4fdee649 # cargo-hack
 
       - name: Check formatting
         if: ${{ !cancelled() }}
@@ -109,7 +109,7 @@ jobs:
     needs: pre_job
     if: needs.pre_job.outputs.should_skip != 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
@@ -118,7 +118,7 @@ jobs:
           pnpm: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Setup tools for test
         run: sudo apt install bridge-utils
@@ -141,7 +141,7 @@ jobs:
           sudo sysctl net.ipv6.conf.lo.disable_ipv6=0
           sudo ip addr add 2001:db8::2/64 dev lo
 
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@2eb6de229bc778f7df20e106e4b34e9a364c73e6 # nextest
 
       - name: Run tests
         run: |

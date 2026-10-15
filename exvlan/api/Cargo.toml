@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-api"
-version = "26.410.20700"
+version = "26.410.20701"
 edition.workspace = true
 rust-version.workspace = true
 description = "Config server for exvlan. exvlan-core gets config from this and web frontend use it as restful api server."
@@ -29,16 +29,12 @@ axum-embed = { version = "0.1.0", optional = true }
 tower-sessions-sqlx-store = { version = "0.15.0", features = ["sqlite"] }
 # Match axum-login 0.18 and the SQLx session store.
 tower-sessions = { version = "0.14.0", default-features = false, features = [
-    "signed",
-    "axum-core",
+  "signed",
+  "axum-core",
 ] }
 tower-http = { workspace = true, features = ["cors", "compression-full"] }
 sqlx = { workspace = true, features = ["sqlite"] }
-sea-orm = { workspace = true, features = [
-    "sqlx-sqlite",
-    "runtime-tokio-rustls",
-    "macros",
-] }
+sea-orm = { workspace = true, features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
 sea-orm-migration.workspace = true
 
 
@@ -57,33 +53,23 @@ imageproc = { version = "0.27.0", default-features = false, features = ["text"] 
 
 rust-i18n.workspace = true
 sys-locale.workspace = true
-clap = { workspace = true, features = [
-    "string",
-    "unicode",
-    "derive",
-    "wrap_help",
-    "env",
-] }
+clap = { workspace = true, features = ["string", "unicode", "derive", "wrap_help", "env"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-uuid = { workspace = true, features = [
-    "v4",
-    "fast-rng",
-    "macro-diagnostics",
-    "serde",
-] }
+uuid = { workspace = true, features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
 
 chrono = { workspace = true, features = ["serde"] }
-openidconnect = { version = "4.0", default-features = false, features = ["accept-rfc3339-timestamps", "reqwest"] }
+openidconnect = { version = "4.0", default-features = false, features = [
+  "accept-rfc3339-timestamps",
+  "reqwest",
+] }
 reqwest = { workspace = true, features = ["json", "rustls"] }
 subtle = "2.6"
 
 mimalloc.workspace = true
 
 [build-dependencies]
-thunk-rs = { workspace = true, features = [
-    "win7",
-] }
+thunk-rs = { workspace = true, features = ["win7"] }
 
 [features]
 default = []
@@ -91,8 +77,8 @@ embed = ["dep:axum-embed"]
 
 [package.metadata.cargo-machete]
 ignored = [
-    # Windows-only build.rs setup calls thunk::thunk().
-    "thunk-rs",
+  # Windows-only build.rs setup calls thunk::thunk().
+  "thunk-rs",
 ]
 
 [dev-dependencies]

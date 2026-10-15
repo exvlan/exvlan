@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-studio"
-version = "26.410.20700"
+version = "26.410.20701"
 description = "Exvlan GUI"
 authors = ["you"]
 edition.workspace = true
@@ -15,12 +15,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 # wry 0.47 may crash on android, see https://github.com/exvlan/exvlan/issues/527
-tauri = { workspace = true, features = [
-    "tray-icon",
-    "image-png",
-    "image-ico",
-    "devtools",
-] }
+tauri = { workspace = true, features = ["tray-icon", "image-png", "image-ico", "devtools"] }
 
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -46,7 +41,11 @@ async-trait.workspace = true
 url = { workspace = true, features = ["serde"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
 winapi = { workspace = true, features = ["securitybaseapi", "processthreadsapi"] }
 
 [target.'cfg(target_family = "unix")'.dependencies]
@@ -58,9 +57,7 @@ security-framework-sys = "2.17.0"
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
-thunk-rs = { workspace = true, features = [
-    "win7",
-] }
+thunk-rs = { workspace = true, features = ["win7"] }
 
 
 [features]
@@ -72,7 +69,7 @@ tauri-plugin-single-instance = "2.4.4"
 
 [package.metadata.cargo-machete]
 ignored = [
-    # Called by build.rs; thunk is only used on Windows.
-    "tauri-build",
-    "thunk-rs",
+  # Called by build.rs; thunk is only used on Windows.
+  "tauri-build",
+  "thunk-rs",
 ]

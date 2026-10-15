@@ -3,7 +3,7 @@ name = "exvlan-core"
 description = "Exvlan OS-free control-plane core primitives."
 homepage = "https://github.com/exvlan/exvlan"
 repository = "https://github.com/exvlan/exvlan"
-version = "26.410.20700"
+version = "26.410.20701"
 edition.workspace = true
 rust-version.workspace = true
 authors = ["kkrainbow"]
@@ -63,13 +63,7 @@ thiserror.workspace = true
 tracing.workspace = true
 strum = { workspace = true, features = ["derive"] }
 toml.workspace = true
-tokio = { workspace = true, features = [
-    "rt",
-    "time",
-    "sync",
-    "macros",
-    "io-util",
-] }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros", "io-util"] }
 tokio-util = { workspace = true, features = ["io", "rt"] }
 tokio-rustls = { workspace = true, optional = true }
 url = { workspace = true, features = ["serde"] }
@@ -86,7 +80,10 @@ openssl = { version = "0.10", optional = true, features = ["vendored"] }
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom-02 = { package = "getrandom", version = "0.2.17", features = ["js"] }
 getrandom-03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }
-snow = { version = "0.10.0", default-features = false, features = ["default-resolver", "default-resolver-crypto"] }
+snow = { version = "0.10.0", default-features = false, features = [
+  "default-resolver",
+  "default-resolver-crypto",
+] }
 uuid = { workspace = true, features = ["js"] }
 wasm-bindgen = "0.2"
 
@@ -103,23 +100,23 @@ ring-crypto = ["dep:ring"]
 wasi-crypto-offload = ["ring-crypto"]
 config-write = []
 endpoint-discovery = [
-    "dep:http-body-util",
-    "dep:hyper",
-    "dep:hyper-util",
-    "dep:rustls",
-    "dep:tokio-rustls",
-    "dep:webpki-roots",
+  "dep:http-body-util",
+  "dep:hyper",
+  "dep:hyper-util",
+  "dep:rustls",
+  "dep:tokio-rustls",
+  "dep:webpki-roots",
 ]
 dhcp-ipv4 = []
 public-ipv6-provider = []
 vpn-portal = []
 wrapped-transport = []
 extended-services = [
-    "dhcp-ipv4",
-    "public-ipv6-provider",
-    "vpn-portal",
-    "wrapped-transport",
-    "proxy-cidr-monitor",
+  "dhcp-ipv4",
+  "public-ipv6-provider",
+  "vpn-portal",
+  "wrapped-transport",
+  "proxy-cidr-monitor",
 ]
 web-client = ["management-rpc", "config-write"]
 management = ["web-client", "extended-services", "rich-config-errors", "exvlan-proto/json-rpc"]
@@ -128,23 +125,23 @@ proxy-cidr-monitor = []
 rich-config-errors = ["dep:ariadne"]
 tcp-hole-punch = []
 proxy-packet = [
-    "wrapped-transport",
-    "dep:smoltcp",
-    "smoltcp/std",
-    "smoltcp/proto-ipv4",
-    "smoltcp/proto-ipv4-fragmentation",
-    "smoltcp/fragmentation-buffer-size-65536",
-    "smoltcp/assembler-max-segment-count-16",
-    "smoltcp/reassembly-buffer-size-65536",
-    "smoltcp/reassembly-buffer-count-16",
+  "wrapped-transport",
+  "dep:smoltcp",
+  "smoltcp/std",
+  "smoltcp/proto-ipv4",
+  "smoltcp/proto-ipv4-fragmentation",
+  "smoltcp/fragmentation-buffer-size-65536",
+  "smoltcp/assembler-max-segment-count-16",
+  "smoltcp/reassembly-buffer-size-65536",
+  "smoltcp/reassembly-buffer-count-16",
 ]
 proxy-smoltcp-stack = [
-    "proxy-packet",
-    "smoltcp/medium-ip",
-    "smoltcp/socket-tcp",
-    "smoltcp/socket-udp",
-    "smoltcp/proto-ipv6",
-    "smoltcp/async",
+  "proxy-packet",
+  "smoltcp/medium-ip",
+  "smoltcp/socket-tcp",
+  "smoltcp/socket-udp",
+  "smoltcp/proto-ipv6",
+  "smoltcp/async",
 ]
 wasm-host-tunnel = []
 wasm-host-tunnel-outbound = ["wasm-host-tunnel"]
@@ -157,7 +154,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
 
 [package.metadata.cargo-machete]
 ignored = [
-    # Enable browser entropy backends for transitive rand/snow dependencies.
-    "getrandom-02",
-    "getrandom-03",
+  # Enable browser entropy backends for transitive rand/snow dependencies.
+  "getrandom-02",
+  "getrandom-03",
 ]

@@ -1,16 +1,21 @@
 {
   "name": "@exvlan/browser",
-  "version": "26.410.20700",
+  "version": "26.410.20701",
   "description": "Run an Exvlan TCP client in the browser",
-  "type": "module",
+  "homepage": "https://github.com/exvlan/exvlan",
+  "bugs": "https://github.com/exvlan/exvlan/issues",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/exvlan/exvlan.git",
     "directory": "packages/sdk/browser"
   },
-  "homepage": "https://github.com/exvlan/exvlan",
-  "bugs": "https://github.com/exvlan/exvlan/issues",
+  "files": [
+    "dist/*.js",
+    "dist/*.d.ts",
+    "README.md"
+  ],
+  "type": "module",
   "sideEffects": false,
   "exports": {
     ".": {
@@ -18,11 +23,10 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist/*.js",
-    "dist/*.d.ts",
-    "README.md"
-  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
+  },
   "scripts": {
     "build:dependencies": "pnpm --filter @exvlan/runtime build",
     "build:wasm": "node ../runtime/scripts/build-wasm.mjs browser src/generated/exvlan_core.wasm && node ../runtime/scripts/validate-wasm.mjs browser src/generated/exvlan_core.wasm",
@@ -34,16 +38,12 @@
     "prepack": "pnpm check"
   },
   "dependencies": {
-    "@exvlan/runtime": "workspace:26.410.20700"
+    "@exvlan/runtime": "workspace:26.410.20701"
   },
   "devDependencies": {
     "@types/node": "22.18.1",
     "esbuild": "0.28.2",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://npm.pkg.github.com"
   }
 }

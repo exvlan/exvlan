@@ -1,9 +1,8 @@
 {
   "name": "@exvlan/studio",
-  "type": "module",
-  "version": "26.410.20700",
+  "version": "26.410.20701",
   "private": true,
-  "packageManager": "pnpm@9.12.1+sha512.e5a7e52a4183a02d5931057f7a0dbff9d5e9ce3161e33fa68ae392125b79282a8a8a470a51dfc8a0ed86221442eb2fb57019b0990ed24fab519bf0e1bc5ccfc4",
+  "type": "module",
   "scripts": {
     "dev": "pnpm --dir ../std build && vp",
     "build": "pnpm --dir ../std build && vue-tsc --noEmit && vp build",
@@ -14,6 +13,7 @@
     "lint:fix": "eslint . --ignore-pattern src-tauri --fix"
   },
   "dependencies": {
+    "@exvlan/std": "workspace:*",
     "@primeuix/themes": "2.0.3",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
@@ -21,18 +21,19 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@vueuse/core": "^14.4.0",
-    "@exvlan/std": "workspace:*",
     "ip-num": "^1.6.2",
     "pinia": "^4.0.2",
     "primevue": "4.5.5",
     "tauri-plugin-vpnservice-api": "workspace:*",
-    "vue": "^3.5.41",
+    "vue": "^3.5.42",
     "vue-router": "^5.2.0"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^9.3.0",
     "@intlify/unplugin-vue-i18n": "^11.2.4",
     "@primevue/auto-import-resolver": "4.5.5",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/cli": "^2.11.4",
     "@types/default-gateway": "^7.2.2",
@@ -57,12 +58,11 @@
     "vite": "catalog:",
     "vite-plugin-vue-devtools": "^8.2.1",
     "vite-plugin-vue-layouts": "^0.11.0",
+    "vite-plus": "catalog:",
     "vitest": "^2.1.9",
     "vue-i18n": "^11.4.8",
-    "vue-tsc": "^3.3.9",
-    "@tailwindcss/postcss": "^4.3.3",
-    "@tailwindcss/vite": "^4.3.3",
     "vue-macros": "^3.1.4",
-    "vite-plus": "catalog:"
-  }
+    "vue-tsc": "^3.3.9"
+  },
+  "packageManager": "pnpm@9.12.1+sha512.e5a7e52a4183a02d5931057f7a0dbff9d5e9ce3161e33fa68ae392125b79282a8a8a470a51dfc8a0ed86221442eb2fb57019b0990ed24fab519bf0e1bc5ccfc4"
 }
