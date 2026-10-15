@@ -1,11 +1,11 @@
 ---
 name: upstream-fork-sync
-description: 同步上游 release（Exvlan）到重命名/重构过的 fork（Exvlan）。覆盖路径映射、merkle 合并策略、冲突分层裁决、不变量校验、构建验证与收口。触发词：上游同步、sync upstream vX.Y.Z、fork rebrand merge、合并 exvlan 上游。
+description: 同步外部上游 release 到重命名/重构过的 fork。覆盖路径映射、merkle 合并策略、冲突分层裁决、不变量校验、rebrand 遗留回归修复、构建验证与收口。触发词：上游同步、sync upstream vX.Y.Z、fork rebrand merge、合并外部上游 release。
 ---
 
 # upstream-fork-sync
 
-把外部上游（Exvlan）的某个 release 同步进本 fork（Exvlan），同时保持 fork 的品牌、目录布局与本地行为修正。
+把外部上游的某个 release 同步进本 fork，同时保持 fork 的品牌、目录布局与本地行为修正。
 
 ## 何时使用
 
@@ -82,6 +82,19 @@ bash .agents/skills/upstream-fork-sync/scripts/check_invariants.sh
 | 外部依赖 | `tun-easytier`、`github.com/EasyTier/*` | **保留原名** |
 
 **原则**：不要求与上游节点互通，但**功能必须与上游一致**（加密/协议机制不变；`check_fork_consistency.py` 做 features 对齐抽查）。WASI ABI 改动后必须**重建 wasm**（`script/build-wasi-core.sh`）并更新 `exvlan/go/internal/artifact/*.wasm`。
+
+## rebrand 后遗留回归（→ `fork-rebrand-audit`）
+
+大面积 rebrand / relayout 后，常留下**编译期或运行期才暴露**的回归，合并后须专项排查（细节见 `fork-rebrand-audit` 技能）：
+
+- Go 生成代码（`*.pb.go`）的被文本替换会破坏**内嵌 rawDesc** → protobuf 初始化 panic；用 `wasm-tools`/proto 工具**重生成**而非文本改写。
+- sdk 等**嵌套 workspace** 的子包 `version`/`workspace:<v>` specifier/锁文件需**成套**更新，否则 `ERR_PNPM_OUTDATED_LOCKFILE`。
+- `toolchain` 路径（脚本里的相对路径）因 relayout 偏移一层。
+- **测试夹具/wasm 制品**：二进制内的导入模块名可安全改（`wasm-tools print/parse`），但**数据段字符串不可改**（改了会破坏运行）。
+
+## 发布 / CI（→ `fork-release-ci`）
+
+同步落地后的发版与 CI 编排（单入口 pipeline、sha 去重、reusable 权限子集、artifact 化、`productName`→UpgradeCode、临时 public、npm/Go 发布）见 `fork-release-ci` 技能。
 
 ## 红线
 
