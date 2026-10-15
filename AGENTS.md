@@ -51,6 +51,13 @@ git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
 - 标准版本 `YY.QMM.Mmpp` 覆盖：根 `Cargo.toml`/各 crate、`packages/{studio,std,ui,generator}/package.json`、`tauri.conf.json`、magisk 清单、README 等。
 - **`packages/sdk/**` 一并纳入**（sdk 为嵌套独立 workspace）：需同时改各子包 `version` 与内部 `workspace:<v>` specifier，并重生成 `packages/sdk/pnpm-lock.yaml`；否则 specifier 不匹配、`ERR_PNPM_OUTDATED_LOCKFILE`。
 
+## 技能索引（`.agents/skills/`）
+
+- **`upstream-fork-sync`**：把外部上游 release 同步进本 fork（路径映射、冲突分层裁决、分支不变量、常量分类）。
+- **`fork-rebrand-audit`**：去品牌审计与 rebrand 遗留回归（白名单保留、二进制夹具处理、回归清单）。
+- **`fork-release-ci`**：发布与 CI 运维（单入口 pipeline/门控、发版、npm/Go 发布、临时 public、清理运行）。
+- 本地服务更新（**非 skill**）：runbook 与脚本见 `script/service-update/`。
+
 <!--VITE PLUS START-->
 
 # Using Vite+, the Unified Toolchain for the Web
