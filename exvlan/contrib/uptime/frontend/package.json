@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/uptime",
-  "version": "26.410.20700",
+  "version": "26.410.20701",
   "private": true,
   "author": {
     "name": "@长久同学 ",
@@ -16,7 +16,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@exvlan/uptime": "link:",
-    "axios": "^1.19.0",
+    "axios": "^1.20.0",
     "dayjs": "^1.11.21",
     "element-plus": "^2.14.4",
     "vue": "^3.5.41",

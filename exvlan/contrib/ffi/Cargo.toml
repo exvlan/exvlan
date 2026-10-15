@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-ffi"
-version = "26.410.20700"
+version = "26.410.20701"
 edition.workspace = true
 rust-version.workspace = true
 
@@ -10,17 +10,20 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = ["c-abi", "ffi-dataplane"]
 c-abi = []
-ffi-dataplane = [
-    "exvlan/ffi-dataplane",
-    "exvlan-core/proxy-smoltcp-stack",
-]
+ffi-dataplane = ["exvlan/ffi-dataplane", "exvlan-core/proxy-smoltcp-stack"]
 
 [dependencies]
 exvlan = { workspace = true, default-features = true, features = ["tracing-log"] }
 exvlan-core = { workspace = true, default-features = true }
 
 once_cell.workspace = true
-tokio = { workspace = true, default-features = true, features = ["rt-multi-thread", "io-util", "time", "sync", "macros"] }
+tokio = { workspace = true, default-features = true, features = [
+  "rt-multi-thread",
+  "io-util",
+  "time",
+  "sync",
+  "macros",
+] }
 async-trait.workspace = true
 log.workspace = true
 
@@ -28,12 +31,10 @@ serde_json.workspace = true
 uuid.workspace = true
 
 [build-dependencies]
-thunk-rs = { workspace = true, features = [
-    "win7",
-] }
+thunk-rs = { workspace = true, features = ["win7"] }
 
 [package.metadata.cargo-machete]
 ignored = [
-    # Windows-only build.rs setup calls thunk::thunk().
-    "thunk-rs",
+  # Windows-only build.rs setup calls thunk::thunk().
+  "thunk-rs",
 ]

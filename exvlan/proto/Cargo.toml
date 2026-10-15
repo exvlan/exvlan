@@ -3,7 +3,7 @@ name = "exvlan-proto"
 description = "Exvlan protobuf and generated RPC types."
 homepage = "https://github.com/exvlan/exvlan"
 repository = "https://github.com/exvlan/exvlan"
-version = "26.410.20700"
+version = "26.410.20701"
 edition.workspace = true
 rust-version.workspace = true
 authors = ["kkrainbow"]
@@ -46,50 +46,44 @@ reqwest = { workspace = true, default-features = true, features = ["blocking"] }
 zip = "8.6.0"
 
 [dev-dependencies]
-tokio = { workspace = true, features = [
-    "macros",
-    "rt",
-] }
-uuid = { workspace = true, features = [
-    "v4",
-    "fast-rng",
-] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+uuid = { workspace = true, features = ["v4", "fast-rng"] }
 
 [features]
 default = ["full"]
 full = [
-    "api",
-    "core",
-    "faketcp",
-    "magic-dns",
-    "quic",
-    "utils",
-    "websocket",
-    "wireguard",
-    "zstd",
-    "json-rpc",
+  "api",
+  "core",
+  "faketcp",
+  "magic-dns",
+  "quic",
+  "utils",
+  "websocket",
+  "wireguard",
+  "zstd",
+  "json-rpc",
 ]
 api = ["core"]
 core = [
-    "dep:anyhow",
-    "dep:async-trait",
-    "dep:auto_impl",
-    "dep:base64",
-    "dep:bytes",
-    "dep:chrono",
-    "dep:cidr",
-    "dep:hmac",
-    "dep:pbjson",
-    "dep:prost",
-    "dep:prost-types",
-    "dep:serde",
-    "dep:serde_json",
-    "dep:sha2",
-    "dep:thiserror",
-    "dep:tokio",
-    "dep:url",
-    "dep:uuid",
-    "dep:x25519-dalek",
+  "dep:anyhow",
+  "dep:async-trait",
+  "dep:auto_impl",
+  "dep:base64",
+  "dep:bytes",
+  "dep:chrono",
+  "dep:cidr",
+  "dep:hmac",
+  "dep:pbjson",
+  "dep:prost",
+  "dep:prost-types",
+  "dep:serde",
+  "dep:serde_json",
+  "dep:sha2",
+  "dep:thiserror",
+  "dep:tokio",
+  "dep:url",
+  "dep:uuid",
+  "dep:x25519-dalek",
 ]
 faketcp = []
 magic-dns = []
@@ -102,16 +96,16 @@ json-rpc = ["dep:prost-wkt-types"]
 
 [package.metadata.cargo-machete]
 ignored = [
-    # Used by build/main.rs and build/rpc.rs, including the Windows protoc download.
-    "indoc",
-    "pbjson-build",
-    "proc-macro2",
-    "prost-build",
-    "quote",
-    "reqwest",
-    "zip",
-    # Referenced by generated protobuf, serde and RPC code.
-    "auto_impl",
-    "pbjson",
-    "serde",
+  # Used by build/main.rs and build/rpc.rs, including the Windows protoc download.
+  "indoc",
+  "pbjson-build",
+  "proc-macro2",
+  "prost-build",
+  "quote",
+  "reqwest",
+  "zip",
+  # Referenced by generated protobuf, serde and RPC code.
+  "auto_impl",
+  "pbjson",
+  "serde",
 ]

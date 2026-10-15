@@ -1,7 +1,7 @@
 {
   "name": "@exvlan/std",
+  "version": "26.410.20701",
   "private": true,
-  "version": "26.410.20700",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -26,7 +26,7 @@
     "@protobuf-ts/runtime": "2.11.1",
     "@protobuf-ts/runtime-rpc": "2.11.1",
     "@vueuse/core": "^11.1.0",
-    "axios": "^1.13.5",
+    "axios": "^1.20.0",
     "chart.js": "^4.5.0",
     "floating-vue": "^5.2",
     "ip-num": "1.5.1",
@@ -42,6 +42,8 @@
     "@modyfi/vite-plugin-yaml": "^1.1.0",
     "@protobuf-ts/plugin": "2.11.1",
     "@protobuf-ts/protoc": "2.11.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.8.6",
     "@types/qrcode": "1.5.6",
     "@vitejs/plugin-vue": "^5.1.4",
@@ -53,16 +55,14 @@
     "postcss-nested": "^7.0.2",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.6.3",
+    "unplugin-dts": "^1.0.3",
     "vite": "^5.4.21",
     "vite-plugin-dts": "^4.3.0",
     "vitest": "^2.1.9",
-    "vue-tsc": "^2.1.10",
-    "unplugin-dts": "^1.0.3",
-    "@tailwindcss/vite": "^4.3.3",
-    "@tailwindcss/postcss": "^4.3.3"
+    "vue-tsc": "^2.1.10"
   },
   "peerDependencies": {
     "primevue": "^4.3.9",
-    "vue": "^3.5.12"
+    "vue": "^3.5.42"
   }
 }

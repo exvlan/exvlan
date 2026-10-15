@@ -24,13 +24,13 @@
 
 版本格式 `YY.QMM.Mmpp`：
 
-| 段 | 含义 | 示例 |
-|----|------|------|
-| YY | 年份末两位 | `26` = 2026 |
-| QMM | 季度 + 月份 (zero-padded) | `308` = Q3 8月 |
+| 段   | 含义                                    | 示例             |
+| ---- | --------------------------------------- | ---------------- |
+| YY   | 年份末两位                              | `26` = 2026      |
+| QMM  | 季度 + 月份 (zero-padded)               | `308` = Q3 8月   |
 | Mmpp | major(不补零) + minor(2位) + patch(2位) | `20604` = v2.6.4 |
 
-示例：`26.410.20700` = 2026年 Q3 8月 v2.6.4
+示例：`26.410.20701` = 2026年 Q3 8月 v2.6.4
 
 注意：第三段整体必须是**无前导零**的数值（否则违反 semver，pnpm/npm 等会拒绝；Windows MSI 也要求每段 ≤65535，`20604` 满足）。
 
@@ -69,22 +69,26 @@
 选择最适合您需求的安装方式：
 
 Linux（推荐）：
+
 ```bash
 curl -fsSL "https://github.com/exvlan/exvlan/blob/main/script/install.sh?raw=true" | sudo bash -s install
 ```
 
 Homebrew（MacOS/Linux）：
+
 ```bash
 brew tap era-club/exvlan
 brew install --cask @exvlan/studio
 ```
 
 Windows（推荐，请以管理员权限运行）：
+
 ```powershell
 irm "https://github.com/exvlan/exvlan/blob/main/script/install.ps1?raw=true" | iex
 ```
 
 通过 cargo 安装（最新开发版本）：
+
 ```bash
 cargo install --git https://github.com/exvlan/exvlan.git @exvlan/studio
 ```
@@ -128,9 +132,9 @@ sudo exvlan -d --network-name abc --network-secret abc -p tcp://<共享节点IP>
 ```text
 | ipv4         | hostname       | cost  | lat_ms | loss_rate | rx_bytes | tx_bytes | tunnel_proto | nat_type | id         | version         |
 | ------------ | -------------- | ----- | ------ | --------- | -------- | -------- | ------------ | -------- | ---------- | --------------- |
-| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.410.20700-70e69a38~ |
-| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.410.20700-70e69a38~ |
-|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.410.20700-70e69a38~ |
+| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.410.20701-70e69a38~ |
+| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.410.20701-70e69a38~ |
+|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.410.20701-70e69a38~ |
 ```
 
 您可以测试节点之间的连通性：
@@ -162,6 +166,7 @@ sudo exvlan -i 10.144.144.1
 ```
 
 启动后，该节点将默认监听以下端口：
+
 - TCP：11010
 - UDP：11010
 - WebSocket：11011
@@ -312,4 +317,3 @@ sudo exvlan --network-name mysharednode --network-secret mysharednode
 ## 许可证
 
 Exvlan 在 [LGPL-3.0](https://github.com/exvlan/exvlan/blob/main/LICENSE) 许可下发布。
-

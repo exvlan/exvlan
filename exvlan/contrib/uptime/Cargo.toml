@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-uptime"
-version = "26.410.20700"
+version = "26.410.20701"
 edition.workspace = true
 rust-version.workspace = true
 
@@ -21,12 +21,12 @@ tower-http = { workspace = true, features = ["cors", "compression-full"] }
 
 # SeaORM dependencies
 sea-orm = { workspace = true, features = [
-    "sqlx-sqlite",
-    "runtime-tokio-rustls",
-    "macros",
-    "with-chrono",
-    "with-uuid",
-    "with-json"
+  "sqlx-sqlite",
+  "runtime-tokio-rustls",
+  "macros",
+  "with-chrono",
+  "with-uuid",
+  "with-json",
 ] }
 sea-orm-migration.workspace = true
 sqlx = { workspace = true, features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid"] }

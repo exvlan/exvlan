@@ -24,23 +24,23 @@
 
 ### Core Features
 
-- 🔒 **Decentralized**: Nodes are equal and independent, no centralized services required  
-- 🚀 **Easy to Use**: Multiple operation methods via web, client, and command line  
-- 🌍 **Cross-Platform**: Supports Win/MacOS/Linux/FreeBSD/Android and X86/ARM/MIPS architectures  
-- 🔐 **Secure**: AES-GCM or WireGuard encryption, prevents man-in-the-middle attacks  
+- 🔒 **Decentralized**: Nodes are equal and independent, no centralized services required
+- 🚀 **Easy to Use**: Multiple operation methods via web, client, and command line
+- 🌍 **Cross-Platform**: Supports Win/MacOS/Linux/FreeBSD/Android and X86/ARM/MIPS architectures
+- 🔐 **Secure**: AES-GCM or WireGuard encryption, prevents man-in-the-middle attacks
 
 ### Advanced Capabilities
 
-- 🔌 **Efficient NAT Traversal**: Supports UDP and IPv6 traversal, works with NAT4-NAT4 networks  
-- 🌐 **Subnet Proxy**: Nodes can share subnets for other nodes to access  
-- 🔄 **Intelligent Routing**: Latency priority and automatic route selection for best network experience  
-- ⚡ **High Performance**: Zero-copy throughout the entire link, supports TCP/UDP/WSS/WG protocols  
+- 🔌 **Efficient NAT Traversal**: Supports UDP and IPv6 traversal, works with NAT4-NAT4 networks
+- 🌐 **Subnet Proxy**: Nodes can share subnets for other nodes to access
+- 🔄 **Intelligent Routing**: Latency priority and automatic route selection for best network experience
+- ⚡ **High Performance**: Zero-copy throughout the entire link, supports TCP/UDP/WSS/WG protocols
 
 ### Network Optimization
 
-- 📊 **UDP Loss Resistance**: KCP/QUIC proxy optimizes latency and bandwidth in high packet loss environments  
-- 🔧 **Web Management**: Easy configuration and monitoring through web interface  
-- 🛠️ **Zero Config**: Simple deployment with statically linked executables  
+- 📊 **UDP Loss Resistance**: KCP/QUIC proxy optimizes latency and bandwidth in high packet loss environments
+- 🔧 **Web Management**: Easy configuration and monitoring through web interface
+- 🛠️ **Zero Config**: Simple deployment with statically linked executables
 
 ## Quick Start
 
@@ -49,22 +49,26 @@
 Choose the installation method that best suits your needs:
 
 Linux (Recommended):
+
 ```bash
 curl -fsSL "https://github.com/exvlan/exvlan/blob/main/script/install.sh?raw=true" | sudo bash -s install
 ```
 
 Homebrew (MacOS/Linux):
+
 ```bash
 brew tap era-club/exvlan
 brew install --cask @exvlan/studio
 ```
 
 Windows (Recommended, run with administrator privileges):
+
 ```powershell
 irm "https://github.com/exvlan/exvlan/blob/main/script/install.ps1?raw=true" | iex
 ```
 
-Install via cargo (Latest development version): 
+Install via cargo (Latest development version):
+
 ```bash
 cargo install --git https://github.com/exvlan/exvlan.git @exvlan/studio
 ```
@@ -108,9 +112,9 @@ After successful execution, you can check the network status using `exvlan-cli`:
 ```text
 | ipv4         | hostname       | cost  | lat_ms | loss_rate | rx_bytes | tx_bytes | tunnel_proto | nat_type | id         | version         |
 | ------------ | -------------- | ----- | ------ | --------- | -------- | -------- | ------------ | -------- | ---------- | --------------- |
-| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.410.20700-70e69a38~ |
-| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.410.20700-70e69a38~ |
-|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.410.20700-70e69a38~ |
+| 10.126.126.1 | abc-1          | Local | *      | *         | *        | *        | udp          | FullCone | 439804259  | 26.410.20701-70e69a38~ |
+| 10.126.126.2 | abc-2          | p2p   | 3.452  | 0         | 17.33 kB | 20.42 kB | udp          | FullCone | 390879727  | 26.410.20701-70e69a38~ |
+|              | PublicServer_a | p2p   | 27.796 | 0.000     | 50.01 kB | 67.46 kB | tcp          | Unknown  | 3771642457 | 26.410.20701-70e69a38~ |
 ```
 
 You can test connectivity between nodes:
@@ -144,6 +148,7 @@ sudo exvlan -i 10.144.144.1
 ```
 
 After startup, this node will listen on the following ports by default:
+
 - TCP: 11010
 - UDP: 11010
 - WebSocket: 11011

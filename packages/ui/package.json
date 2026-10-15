@@ -1,7 +1,7 @@
 {
   "name": "@exvlan/ui",
+  "version": "26.410.20701",
   "private": true,
-  "version": "26.410.20700",
   "type": "module",
   "scripts": {
     "dev": "pnpm --dir ../std build && vp",
@@ -11,32 +11,32 @@
     "test:e2e": "pnpm build && cargo build -p exvlan-api --features embed && node --test tests/central-e2e.test.mjs"
   },
   "dependencies": {
+    "@exvlan/std": "workspace:*",
     "@modyfi/vite-plugin-yaml": "^1.1.1",
     "@primeuix/themes": "2.0.3",
-    "axios": "^1.19.0",
-    "@exvlan/std": "workspace:*",
+    "axios": "^1.20.0",
     "primevue": "4.5.5",
     "tailwindcss-primeui": "^0.6.1",
     "ts-md5": "^2.0.1",
     "uuid": "^11.0.2",
-    "vue": "^3.5.41",
+    "vue": "^3.5.42",
     "vue-i18n": "^11.4.8",
     "vue-router": "^5.2.0"
   },
   "devDependencies": {
-    "playwright": "1.61.0",
     "@primevue/auto-import-resolver": "4.5.5",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "autoprefixer": "^10.4.20",
+    "playwright": "1.61.0",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.6.3",
     "vite": "catalog:",
     "vite-plugin-singlefile": "^2.3.3",
-    "vue-tsc": "^2.1.10",
-    "@tailwindcss/postcss": "^4.3.3",
-    "@tailwindcss/vite": "^4.3.3",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "vue-tsc": "^2.1.10"
   }
 }

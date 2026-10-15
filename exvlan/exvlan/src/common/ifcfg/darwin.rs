@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-use super::{Error, IfConfiguerTrait, cidr_to_subnet_mask, run_shell_cmd};
+use super::{Error, IfConfiguerTrait, cidr_to_subnet_mask, run_cmd, validate_ifname};
 use async_trait::async_trait;
 use cidr::{Ipv4Inet, Ipv6Inet};
 
@@ -14,15 +14,23 @@ impl IfConfiguerTrait for MacIfConfiger {
         cidr_prefix: u8,
         cost: Option<i32>,
     ) -> Result<(), Error> {
-        run_shell_cmd(
-            format!(
-                "route -n add {} -netmask {} -interface {} -hopcount {}",
-                address,
-                cidr_to_subnet_mask(cidr_prefix),
+        validate_ifname(name)?;
+        let addr = address.to_string();
+        let mask = cidr_to_subnet_mask(cidr_prefix).to_string();
+        let hop = cost.unwrap_or(7).to_string();
+        run_cmd(
+            "route",
+            &[
+                "-n",
+                "add",
+                &addr,
+                "-netmask",
+                &mask,
+                "-interface",
                 name,
-                cost.unwrap_or(7)
-            )
-            .as_str(),
+                "-hopcount",
+                &hop,
+            ],
         )
         .await
     }
@@ -33,14 +41,12 @@ impl IfConfiguerTrait for MacIfConfiger {
         address: Ipv4Addr,
         cidr_prefix: u8,
     ) -> Result<(), Error> {
-        run_shell_cmd(
-            format!(
-                "route -n delete {} -netmask {} -interface {}",
-                address,
-                cidr_to_subnet_mask(cidr_prefix),
-                name
-            )
-            .as_str(),
+        validate_ifname(name)?;
+        let addr = address.to_string();
+        let mask = cidr_to_subnet_mask(cidr_prefix).to_string();
+        run_cmd(
+            "route",
+            &["-n", "delete", &addr, "-netmask", &mask, "-interface", name],
         )
         .await
     }
@@ -51,31 +57,32 @@ impl IfConfiguerTrait for MacIfConfiger {
         address: Ipv4Addr,
         cidr_prefix: u8,
     ) -> Result<(), Error> {
-        run_shell_cmd(
-            format!(
-                "ifconfig {} {:?}/{:?} {:?} up",
-                name, address, cidr_prefix, address,
-            )
-            .as_str(),
-        )
-        .await
+        validate_ifname(name)?;
+        let ip = format!("{}/{}", address, cidr_prefix);
+        run_cmd("ifconfig", &[name, &ip, &address.to_string(), "up"]).await
     }
 
     async fn set_link_status(&self, name: &str, up: bool) -> Result<(), Error> {
-        run_shell_cmd(format!("ifconfig {} {}", name, if up { "up" } else { "down" }).as_str())
-            .await
+        validate_ifname(name)?;
+        run_cmd("ifconfig", &[name, if up { "up" } else { "down" }]).await
     }
 
     async fn remove_ip(&self, name: &str, ip: Option<Ipv4Inet>) -> Result<(), Error> {
+        validate_ifname(name)?;
         if let Some(ip) = ip {
-            run_shell_cmd(format!("ifconfig {} inet {} delete", name, ip.address()).as_str()).await
+            run_cmd(
+                "ifconfig",
+                &[name, "inet", &ip.address().to_string(), "delete"],
+            )
+            .await
         } else {
-            run_shell_cmd(format!("ifconfig {} inet delete", name).as_str()).await
+            run_cmd("ifconfig", &[name, "inet", "delete"]).await
         }
     }
 
     async fn set_mtu(&self, name: &str, mtu: u32) -> Result<(), Error> {
-        run_shell_cmd(format!("ifconfig {} mtu {}", name, mtu).as_str()).await
+        validate_ifname(name)?;
+        run_cmd("ifconfig", &[name, "mtu", &mtu.to_string()]).await
     }
 
     async fn add_ipv6_ip(
@@ -84,13 +91,19 @@ impl IfConfiguerTrait for MacIfConfiger {
         address: std::net::Ipv6Addr,
         cidr_prefix: u8,
     ) -> Result<(), Error> {
-        run_shell_cmd(format!("ifconfig {} inet6 {}/{} add", name, address, cidr_prefix).as_str())
-            .await
+        validate_ifname(name)?;
+        let ip = format!("{}/{}", address, cidr_prefix);
+        run_cmd("ifconfig", &[name, "inet6", &ip, "add"]).await
     }
 
     async fn remove_ipv6(&self, name: &str, ip: Option<Ipv6Inet>) -> Result<(), Error> {
+        validate_ifname(name)?;
         if let Some(ip) = ip {
-            run_shell_cmd(format!("ifconfig {} inet6 {} delete", name, ip.address()).as_str()).await
+            run_cmd(
+                "ifconfig",
+                &[name, "inet6", &ip.address().to_string(), "delete"],
+            )
+            .await
         } else {
             // Remove all IPv6 addresses is more complex on macOS, just succeed
             Ok(())
@@ -104,18 +117,27 @@ impl IfConfiguerTrait for MacIfConfiger {
         cidr_prefix: u8,
         cost: Option<i32>,
     ) -> Result<(), Error> {
-        let cmd = if let Some(cost) = cost {
-            format!(
-                "route -n add -inet6 {}/{} -interface {} -hopcount {}",
-                address, cidr_prefix, name, cost
+        validate_ifname(name)?;
+        let net = format!("{}/{}", address, cidr_prefix);
+        if let Some(cost) = cost {
+            let hop = cost.to_string();
+            run_cmd(
+                "route",
+                &[
+                    "-n",
+                    "add",
+                    "-inet6",
+                    &net,
+                    "-interface",
+                    name,
+                    "-hopcount",
+                    &hop,
+                ],
             )
+            .await
         } else {
-            format!(
-                "route -n add -inet6 {}/{} -interface {}",
-                address, cidr_prefix, name
-            )
-        };
-        run_shell_cmd(cmd.as_str()).await
+            run_cmd("route", &["-n", "add", "-inet6", &net, "-interface", name]).await
+        }
     }
 
     async fn remove_ipv6_route(
@@ -124,12 +146,11 @@ impl IfConfiguerTrait for MacIfConfiger {
         address: std::net::Ipv6Addr,
         cidr_prefix: u8,
     ) -> Result<(), Error> {
-        run_shell_cmd(
-            format!(
-                "route -n delete -inet6 {}/{} -interface {}",
-                address, cidr_prefix, name
-            )
-            .as_str(),
+        validate_ifname(name)?;
+        let net = format!("{}/{}", address, cidr_prefix);
+        run_cmd(
+            "route",
+            &["-n", "delete", "-inet6", &net, "-interface", name],
         )
         .await
     }

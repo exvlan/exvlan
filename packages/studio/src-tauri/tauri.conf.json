@@ -8,16 +8,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": [
-      "icons/icon.png",
-      "icons/icon.rgba",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
+    "icon": ["icons/icon.png", "icons/icon.rgba", "icons/icon.icns", "icons/icon.ico"],
     "createUpdaterArtifacts": false
   },
   "productName": "EXVlan Studio",
-  "version": "26.410.20700",
+  "version": "26.410.20701",
   "identifier": "era.exvlan.studio",
   "plugins": {
     "shell": {

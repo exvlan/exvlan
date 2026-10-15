@@ -29,7 +29,7 @@ on:
       image_tag:
         description: "Tag for this image build"
         type: string
-        default: "v26.410.20700"
+        default: "v26.410.20701"
         required: true
       mark_latest:
         description: "Mark this image as latest"
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Validate inputs
         run: |
@@ -69,13 +69,13 @@ jobs:
           fi
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Login to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -147,7 +147,7 @@ jobs:
           fi
 
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            # tag 推送追加版本标签（如 v26.410.20700）
+            # tag 推送追加版本标签（如 v26.410.20701）
             TAGS="${TAGS},${BASE_IMAGE}:${{ github.ref_name }}"
           fi
 
@@ -156,7 +156,7 @@ jobs:
           echo "registry_tag=${REGISTRY_TAG}" >> $GITHUB_OUTPUT
 
       - name: Build and push (exvlan)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: ./docker_context
           cache-from: type=gha
@@ -170,7 +170,7 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - name: Build and push (registry)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: ./docker_context
           cache-from: type=gha

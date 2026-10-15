@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-vpnservice"
-version = "26.410.20700"
+version = "26.410.20701"
 authors = ["You"]
 description = ""
 edition.workspace = true
@@ -18,6 +18,6 @@ tauri-plugin = { version = "2.6.3", features = ["build"] }
 
 [package.metadata.cargo-machete]
 ignored = [
-    # Called by build.rs to generate plugin permissions and bindings.
-    "tauri-plugin",
+  # Called by build.rs to generate plugin permissions and bindings.
+  "tauri-plugin",
 ]
