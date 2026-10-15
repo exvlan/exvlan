@@ -8475,7 +8475,7 @@ dependencies = [
 [[package]]
 name = "service-manager"
 version = "0.8.0"
-source = "git+https://github.com/EasyTier/service-manager-rs.git?branch=main#5eb28f7a686858eea4f4933534ed989d3b71dc2a"
+source = "git+https://github.com/EasyTier/service-manager-rs.git?rev=5eb28f7a686858eea4f4933534ed989d3b71dc2a#5eb28f7a686858eea4f4933534ed989d3b71dc2a"
 dependencies = [
  "cfg-if",
  "dirs 4.0.0",
