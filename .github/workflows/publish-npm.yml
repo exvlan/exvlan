@@ -59,7 +59,16 @@ jobs:
 
       # 发布 runtime / browser / cloudflare / 聚合包（sdk）；
       # examples/web 为 private，自动跳过。各包 prepack=check 会先构建（含 wasm）。
+      # 幂等：若该版本已发布（例如重跑 tag 流水线），直接跳过，避免 npm 409。
       - name: Publish (recursive)
-        run: pnpm --dir packages/sdk -r publish --access public --no-git-checks --tag "${{ inputs.dist_tag }}"
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version packages/sdk/package.json)
+          if npm view "@exvlan/sdk@${version}" version \
+               --registry "https://npm.pkg.github.com" >/dev/null 2>&1; then
+            echo "@exvlan/sdk@${version} 已存在，跳过发布（幂等）"
+            exit 0
+          fi
+          pnpm --dir packages/sdk -r publish --access public --no-git-checks --tag "${{ inputs.dist_tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
