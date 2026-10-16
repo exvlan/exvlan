@@ -23,7 +23,18 @@ RUN apt-get update && apt-get install -y \
 
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+# 固定 rustup 版本并按官方 archive 的 sha256 校验（替代 `curl sh.rustup.rs | sh`；审计 L2）。
+ARG RUSTUP_VERSION=1.28.2
+ARG RUSTUP_INIT_SHA256=20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c
+RUN set -eux; \
+    curl --proto '=https' --tlsv1.2 -fsSL \
+      "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/x86_64-unknown-linux-gnu/rustup-init" \
+      -o /tmp/rustup-init; \
+    echo "${RUSTUP_INIT_SHA256}  /tmp/rustup-init" | sha256sum -c -; \
+    chmod +x /tmp/rustup-init; \
+    RUSTUP_HOME=/root/.rustup CARGO_HOME=/root/.cargo \
+      /tmp/rustup-init -y --no-modify-path --default-toolchain none; \
+    rm -f /tmp/rustup-init
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
@@ -35,11 +46,22 @@ RUN rustup set auto-self-update disable && \
     rustup target add i686-linux-android && \
     rustup target add x86_64-linux-android
 
+# 固定 Volta 版本并校验发布 tarball 的 sha256（替代 `curl get.volta.sh | bash`；审计 L2）。
+ARG VOLTA_VERSION=2.0.2
+ARG VOLTA_TARBALL_SHA256=6cec054c911fb925b629a09455775af6e95dc0f5694a4c28b63979ab9ef18037
+ENV VOLTA_HOME=/root/.volta
 ENV PATH="/root/.volta/bin:${PATH}"
-RUN curl https://get.volta.sh | bash && \
-    volta install node@25 && \
-    volta install pnpm@10 && \
-    pnpm --version && node --version
+RUN set -eux; \
+    curl --proto '=https' --tlsv1.2 -fsSL \
+      "https://github.com/volta-cli/volta/releases/download/v${VOLTA_VERSION}/volta-${VOLTA_VERSION}-linux.tar.gz" \
+      -o /tmp/volta.tar.gz; \
+    echo "${VOLTA_TARBALL_SHA256}  /tmp/volta.tar.gz" | sha256sum -c -; \
+    mkdir -p "${VOLTA_HOME}/bin"; \
+    tar -xzf /tmp/volta.tar.gz -C "${VOLTA_HOME}/bin"; \
+    rm -f /tmp/volta.tar.gz; \
+    volta install node@25; \
+    volta install pnpm@10; \
+    pnpm --version; node --version
 
 ENV ANDROID_HOME=/opt/android-sdk
 ENV ANDROID_SDK_ROOT=/opt/android-sdk

@@ -31,7 +31,7 @@ description: Fork 的发布与 CI 运维：单入口 pipeline 编排与门控、
   | tag `v*` / `workflow_dispatch` | ✓ | ✓ | ✓ | **全量**（绕门控） | ✓(仅 tag) |
 - **不因内容重复跳过**中游构建（`core/test/mobile` 的 `should_skip` 仅由 PR 路径门控决定）——否则下游（docker/release）取不到本轮产物。
 
-## 五个必知坑
+## 六个必知坑
 
 1. **reusable `permissions` 必须是调用方子集**：被调 workflow 声明的权限超过调用方授予 → 整轮 `startup_failure`（无日志）。解法：在 `pipeline.yml` 顶层授予被调方所需权限（如 `pull-requests: read`）。
 2. **发版产物用 Actions artifact，不用 `actions/cache`**：cache 有 10GB/仓库配额，**LRU 驱逐**会使最后运行的 release 取不到较早保存的产物；改用 `upload-artifact`（各组件，带前缀如 `core-*`/`studio-*`/`mobile-*`/`magisk`）+ release 端 `download-artifact` 的 **`pattern`** 精确拉取。
@@ -39,6 +39,9 @@ description: Fork 的发布与 CI 运维：单入口 pipeline 编排与门控、
 3. **同提交去重**：`concurrency.group` 用 `github.sha`（非 `github.ref`）；发版**先 push develop 再 push tag** → 同 sha 下 tag 运行胜出、分支运行被 `cancel-in-progress` 取消，只跑一轮。
 4. **`productName` 决定 Windows MSI `UpgradeCode`**：改动会使其变成“并存新装”而非升级。升级链要连续就别轻改 `productName`（`tauri.conf.json`）。
 5. **可见性开关**：私仓 Actions 额度耗尽时 runner 分配失败（job `steps=0`、秒失败）→ 临时 `visibility=public` 跑 CI，**完毕立即改回 private**。
+6. **预提交格式化器会重写文件语法 → 打挂 CI 解析**：Vite+ 的 `vp check --fix`（`.vite-hooks` 预提交，配置在 `vite.config.ts` 的 `staged`）会按 oxfmt 规则重排；`.json5` 会被**反引用化**（`"version"` → `version`、补尾逗号）→ 变成**非法 JSON**，于是任何用 `jq` 解析它的步骤会炸（实例：`ohos.yml` 用 `jq` 改写 `oh-package.json5` → `jq: parse error: Invalid numeric literal at line 2, column 10`）。
+   - 规避：`vite.config.ts` → `fmt: { ignorePatterns: ['**/*.json5'] }`（已在本项目落地）。
+   - 判据：**凡 CI 会用 `jq`/`JSON.parse` 读的文件**（配置/清单/清单类 JSON），被格式化器改过后，本地必须复跑一次解析（`jq -e . <file>`）再提交；CI 侧出现 `parse error` 时，先 `git diff` 该文件确认是不是被格式化器改写了语法。
 
 ## 发版流程
 
