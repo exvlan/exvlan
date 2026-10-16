@@ -4,7 +4,7 @@
 set -uo pipefail
 
 MODE="${1:-}"; shift || true
-REPO="${REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')}"
+REPO="${REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#')}"
 CHECK=0
 while [ $# -gt 0 ]; do case "$1" in --repo) REPO="$2"; shift 2;; --check) CHECK=1; shift;; *) shift;; esac; done
 

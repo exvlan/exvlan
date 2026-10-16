@@ -4,7 +4,7 @@
 #   默认删除所有 conclusion != success 的运行；--failed 仅删 conclusion=failure。
 set -uo pipefail
 
-REPO="${REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')}"
+REPO="${REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#')}"
 ONLY_FAILED=0
 while [ $# -gt 0 ]; do
   case "$1" in

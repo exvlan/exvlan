@@ -4,7 +4,7 @@
 set -uo pipefail
 
 TAG="${1:-}"; shift || true
-REPO="${REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')}"
+REPO="${REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#')}"
 FORBID="${FORBID:-EasyTier}"
 GO_PREFIX="${GO_PREFIX:-}"
 NPM_OWNER="${NPM_OWNER:-}"
