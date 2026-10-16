@@ -49,7 +49,7 @@ script/service-update/backup_restore.sh restore
 
 - 成功：`is-active=active` + 实例在列 + 对端建立（p2p/relay，loss 正常）+ 版本为新版。
 - 失败：实例加载错误、config server 握手失败、端口/身份异常 → **立即回滚**。
-- 注意：日志中对某上游域名的 `connect timeout` 若该域名解析到本机公网 IP，属**自连**既有现象，不代表升级失败；以 peers 实际建立为准。
+- 注意：`xvlan.era-x.cn`（两个 toml 里的 `[[peer]]`）会持续打 `connect timeout`，**看似异常但不可清理**——实测注释掉这 5 个 peer 后对端从 **10 降到 2**（它承担引导作用）。该域名解析到远端公网（非本机），timeout 属既有噪声，不代表升级失败；以 peers 实际建立为准。
 
 ## 风险
 
