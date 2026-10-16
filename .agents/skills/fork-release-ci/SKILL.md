@@ -52,9 +52,26 @@ description: Fork 的发布与 CI 运维：单入口 pipeline 编排与门控、
 5. `release.needs` 含 `publish_*` → **发布失败即阻塞 release**。
 6. 校验资产命名/正文/包，随后恢复 private。
 
+### 发布后修缺陷：移动 tag 重跑（而非新开版本）
+
+若 tag 的构建有缺陷（如某旁路作业红）而 release 已发布，**先把修复落 develop，再重定位同一 tag**，靠幂等把重跑变绿——不要为 CI 单点问题额外发一个版本：
+
+```bash
+git tag -d vX && git tag -a vX -m "..." <new-develop-head>
+git push origin refs/tags/vX --force
+```
+
+前提（否则重跑会红）：
+- **发布作业必须幂等**：`publish-go` 已内置「tag 存在则跳过」；`publish-npm` 需自检 `npm view @<owner>/<pkg>@<ver>` 已存在则跳过（否则 npm 409）。
+- `release` 用 `softprops/action-gh-release` 覆盖同名资产 → 重跑安全。
+- tag 刚发布、无外部消费者时再这么做；已广泛消费的版本应改为**发新补丁版**。
+
+⚠️ **Go module tag 例外**：`exvlan/go/<ver>` 经 module proxy/sumdb 缓存后**不可变**，不要为对齐而移动；如需与 release tag 同提交，应在**首次发布前**就对齐。
+
 ## 包发布
 
 - **npm → GitHub Packages**：`setup-node` 设 `registry-url: https://npm.pkg.github.com` + `scope: '@<owner>'`；各包 `publishConfig.registry=https://npm.pkg.github.com`（不依赖环境 `.npmrc`）；`pnpm -r publish --access public`；`NODE_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }}`。
+  - **务必做幂等**：发布前 `npm view @<owner>/<pkg>@<version> --registry https://npm.pkg.github.com` 命中即 `exit 0` 跳过；否则重跑 tag 会以 409「cannot publish over previously published version」失败，进而阻塞 `release`。
 - **Go → git tag**：module 在子目录时 tag 前缀必须是子目录路径（如 `exvlan/go/vX.Y.Z`）；私仓消费者需 `GOPRIVATE=github.com/<owner>/*`。
 - 发布作业需 `permissions: packages: write`（npm）/ `contents: write`（推 tag）。
 

@@ -38,10 +38,10 @@ jobs:
           cache: false
           rustflags: ""
 
-      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+      - uses: ./.github/actions/setup-protoc
         with:
           version: "35.1"
-          repo-token: ${{ github.token }}
+          token: ${{ github.token }}
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:

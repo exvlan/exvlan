@@ -49,9 +49,9 @@ defaults:
 jobs:
   # 统一编排入口：所有组件都经此依赖链调用，组件工作流不再各自触发。
   # 门控策略：
-  #   - feature push / PR(develop,main)：仅 tests + core（轻量）
-  #   - develop/main push：core 链必跑；go/js/nix/ohos 按路径门控
-  #   - tag v* / workflow_dispatch：全量（旁路绕过路径门控）+ release(tag)
+  #   - feature push / PR(develop,main)：仅 tests + core（轻量）；audit 按依赖路径门控（PR 全量）
+  #   - develop/main push：core 链必跑；go/js/nix/ohos 按路径门控；audit 按依赖路径门控
+  #   - tag v* / workflow_dispatch：全量（旁路绕过路径门控）+ release(tag) + audit（全量）
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
@@ -60,6 +60,7 @@ jobs:
       js: ${{ steps.filter.outputs.js }}
       nix: ${{ steps.filter.outputs.nix }}
       ohos: ${{ steps.filter.outputs.ohos }}
+      deps: ${{ steps.filter.outputs.deps }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - id: filter
@@ -89,6 +90,15 @@ jobs:
               - 'exvlan/**'
               - '.github/workflows/ohos.yml'
               - '.github/actions/**'
+            deps:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '**/package.json'
+              - '**/pnpm-lock.yaml'
+              - '**/go.mod'
+              - '**/go.sum'
+              - '.cargo/audit.toml'
+              - '.github/workflows/audit.yml'
 
   tests:
     name: Core Tests
@@ -131,6 +141,18 @@ jobs:
       github.event_name != 'pull_request' && github.ref_name != 'feature' &&
       (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.nix == 'true')
     uses: ./.github/workflows/nix.yml
+    secrets: inherit
+
+  # 依赖审计门禁：tag/dispatch 全量；PR 全量；push 按 manifest/lock 路径门控（含 feature——上游同步落在 feature）。
+  audit:
+    name: Dependency Audit
+    needs: changes
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.ref_type == 'tag' ||
+      github.event_name == 'workflow_dispatch' ||
+      needs.changes.outputs.deps == 'true'
+    uses: ./.github/workflows/audit.yml
     secrets: inherit
 
   ohos:

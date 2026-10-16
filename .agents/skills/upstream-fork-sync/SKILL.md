@@ -25,6 +25,24 @@ description: 同步外部上游 release 到重命名/重构过的 fork。覆盖�
 - `feature`：整合中枢，承载上游 release + develop 同步 + 本地特性。
 - 上游只进 `feature`；`develop` 只允许线性/ squash 推进。
 
+### develop 的 squash 推进（同树异史陷阱）
+
+`develop` 与 `feature` 常常**树一致但历史分叉**（develop 是历次 squash 的平行线，feature 是真实提交 + merge）。此时：
+
+- ❌ `git merge --squash feature` 会**大面积冲突**——3-way 以很老的 merge-base 为基准，两侧「都改过」同一批文件。
+- ✅ 正确做法：让 develop 的**树**直接等于 feature 的树（真 squash，父提交仍是 develop）：
+
+```bash
+git switch develop
+git read-tree -u --reset feature        # 索引+工作树 := feature 树；HEAD 不动
+git commit -m "feat: <批次>（压缩 feature@<sha>）"
+git rev-list --merges --count develop   # 必须为 0
+git diff --stat develop feature          # 应为空
+```
+
+- 反向（develop → feature）在内容一致时用 `git merge -s ours origin/develop --no-edit` 仅建立祖先关系。
+- 若两侧并非同树，先 `git diff --stat develop feature` 看清差异，再决定 merge / read-tree。
+
 ## 标准流程
 
 1. **读 manifest**：`docs/rules/workflow/upstream-path-map.yaml`。

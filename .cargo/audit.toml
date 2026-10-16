@@ -1,0 +1,10 @@
+# cargo-audit 配置：CI 依赖审计门禁的**允许清单**。
+# 语义：清单内的告警为「已评估并接受」；任何**不在**清单内的新漏洞会让 `cargo audit` 退出非零 → 门禁红灯。
+[advisories]
+ignore = [
+  # rsa 0.9.10 —— Marvin 时序侧信道。传递依赖，非本仓直接引入；当前仅经 TLS/JWT 链间接使用。
+  "RUSTSEC-2023-0071",
+  # hickory-proto 0.25.2 —— 上游 0.26.x 才有补丁（见 issues #1 / #6）；Dependabot 亦列为可修。
+  "RUSTSEC-2026-0118",
+  "RUSTSEC-2026-0119",
+]

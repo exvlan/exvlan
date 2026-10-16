@@ -1,0 +1,39 @@
+name: Setup protoc (pinned)
+description: 安装固定版本 protoc 并校验 sha256；替代 arduino/setup-protoc（去除 Node20 依赖）。
+
+inputs:
+  version:
+    description: protoc 版本（对应 protocolbuffers/protobuf 的 release tag）
+    required: false
+    default: "35.1"
+  sha256:
+    description: 对应 protoc-<version>-linux-x86_64.zip 的 sha256
+    required: false
+    default: "6930ebf62bd4ea607b98fff052596c6ee564b9835b4ce172c75a3f53ae9d91b7"
+  token:
+    description: 可选 GitHub token（仅用于 github.com 的下载请求，规避限流）
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install protoc ${{ inputs.version }}
+      shell: bash
+      env:
+        PROTOC_VERSION: ${{ inputs.version }}
+        PROTOC_SHA256: ${{ inputs.sha256 }}
+        PROTOC_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        url="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+        args=(-fsSL --proto '=https' --tlsv1.2)
+        if [ -n "${PROTOC_TOKEN}" ]; then
+          args+=(-H "Authorization: Bearer ${PROTOC_TOKEN}")
+        fi
+        curl "${args[@]}" "${url}" -o /tmp/protoc.zip
+        echo "${PROTOC_SHA256}  /tmp/protoc.zip" | sha256sum -c -
+        sudo unzip -o -q /tmp/protoc.zip -d /usr/local
+        sudo chmod +x /usr/local/bin/protoc
+        rm -f /tmp/protoc.zip
+        protoc --version
