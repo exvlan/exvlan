@@ -101,5 +101,18 @@
 
 其他：已开启 **Dependabot security updates**（仅为安全告警自动开 PR，不开常规 version updates）；审计门禁保持 `--prod` 范围（决策）。
 
+### 复核（2026-10-17，修复后）
+
+Dependabot 开启告警：**116 → 8**（-93%）。
+
+| 生态 | 剩余 | 明细 |
+| --- | --- | --- |
+| rust | 8 | `hickory-proto` ×3、`hickory-resolver` ×4、`glib` ×1（即 [#1](https://github.com/exvlan/exvlan/issues/1) 的上游阻塞项） |
+| npm | **0** | 107 项全部关闭（升级 + 删除陈旧嵌套锁） |
+| go | **0** | 已修 |
+
+严重度：high 3 / medium 5。剩余项均已由 `.cargo/audit-allowlist.toml`（含到期复核）与 issue #1 跟踪。
+
+
 
 
