@@ -75,6 +75,18 @@ git push origin refs/tags/vX --force
 - **Go → git tag**：module 在子目录时 tag 前缀必须是子目录路径（如 `exvlan/go/vX.Y.Z`）；私仓消费者需 `GOPRIVATE=github.com/<owner>/*`。
 - 发布作业需 `permissions: packages: write`（npm）/ `contents: write`（推 tag）。
 
+## 依赖审计门禁
+
+- **workflow**：`.github/workflows/audit.yml`（只提供 `workflow_call`/`workflow_dispatch`），由 `pipeline.yml` 的 `audit` job 调用。
+  - 门控：tag/dispatch **全量**、PR **全量**、push 按 `deps` 路径过滤（`Cargo.*`、`**/package.json`、`**/pnpm-lock.yaml`、`**/go.mod(,sum)`、`.cargo/audit.toml`、`audit.yml`）。
+- **Rust**：`cargo audit`；允许清单 = `.cargo/audit.toml` 的 `[advisories].ignore`。
+  - ⚠️ 文件名：`cargo-audit 0.22` 读 **`.cargo/audit.toml`**；根目录 `audit.toml` **不生效**（踩过）。
+  - 元数据放 `.cargo/audit-allowlist.toml`（`id`/`review_by`/`reason`），由 `script/check_audit_allowlist.py` 校验：**过期即失败**、且 id 集合必须与 `audit.toml` 一致 —— 防止允许清单变成永久豁免。
+- **npm**：`pnpm audit --prod`（root 与 `packages/sdk` 各一次），只阻塞**生产依赖**；dev/build 链交给 Dependabot + issue 跟踪。
+  - CI 无 `.npmrc` → 默认 npmjs；显式 `--registry https://registry.npmjs.org`（本地镜像如 npmmirror **没有 audit 端点**，会 `ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`）。
+  - root lock 未跟踪时需先 `pnpm install --ignore-scripts --no-frozen-lockfile` 才有锁可审。
+- **build-dep 陷阱**：`cargo audit` 扫 Cargo.lock **全量**，包括 `target = "cfg(windows)"` 的 build-dependencies。实例：`zip`（`exvlan-proto` 的 Windows-only build-dep）曾带 **9.1 critical**（RUSTSEC-2026-0369，`extract()` 经 symlink 越界），本地 advisory-db 可能滞后而 CI 不滞后 → **以 CI 为准**，该类大版本（8→9）该升就升。
+
 ## 清理失败运行
 
 ```bash
