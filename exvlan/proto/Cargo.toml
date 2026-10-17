@@ -43,7 +43,7 @@ quote = "1"
 
 [target.'cfg(windows)'.build-dependencies]
 reqwest = { workspace = true, default-features = true, features = ["blocking"] }
-zip = "8.6.0"
+zip = "9"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
