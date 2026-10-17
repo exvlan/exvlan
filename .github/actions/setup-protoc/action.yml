@@ -1,15 +1,11 @@
 name: Setup protoc (pinned)
-description: 安装固定版本 protoc 并校验 sha256；替代 arduino/setup-protoc（去除 Node20 依赖）。
+description: 按 runner 的 OS/arch 安装固定版本 protoc 并校验 sha256；替代 arduino/setup-protoc（去除 Node20 依赖）。
 
 inputs:
   version:
     description: protoc 版本（对应 protocolbuffers/protobuf 的 release tag）
     required: false
     default: "35.1"
-  sha256:
-    description: 对应 protoc-<version>-linux-x86_64.zip 的 sha256
-    required: false
-    default: "6930ebf62bd4ea607b98fff052596c6ee564b9835b4ce172c75a3f53ae9d91b7"
   token:
     description: 可选 GitHub token（仅用于 github.com 的下载请求，规避限流）
     required: false
@@ -22,18 +18,50 @@ runs:
       shell: bash
       env:
         PROTOC_VERSION: ${{ inputs.version }}
-        PROTOC_SHA256: ${{ inputs.sha256 }}
         PROTOC_TOKEN: ${{ inputs.token }}
+        RUNNER_OS_NAME: ${{ runner.os }}
+        RUNNER_ARCH_NAME: ${{ runner.arch }}
       run: |
         set -euo pipefail
-        url="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
-        args=(-fsSL --proto '=https' --tlsv1.2)
+
+        # 资产名 + sha256（macOS 用 universal binary；Windows 统一用 win64，可在 ARM64 上以 x64 仿真运行）
+        case "${RUNNER_OS_NAME}-${RUNNER_ARCH_NAME}" in
+          Linux-X64)
+            asset=linux-x86_64
+            sha=6930ebf62bd4ea607b98fff052596c6ee564b9835b4ce172c75a3f53ae9d91b7 ;;
+          Linux-ARM64)
+            asset=linux-aarch_64
+            sha=01bf9d08808c7f96678b63f4bd8efa559bb4f83d5a7a270d5edaf507f9d5d9cf ;;
+          macOS-*)
+            asset=osx-universal_binary
+            sha=9c27aebb44c537f5627cc13c9c1c6bc0e34ecfefc6e4d79b19764afb8302d95b ;;
+          Windows-*)
+            asset=win64
+            sha=5d3ff218d7d91eea95f7569bcb5a98f3030f8996d44151279d9772edcff76082 ;;
+          *)
+            echo "unsupported runner: ${RUNNER_OS_NAME}/${RUNNER_ARCH_NAME}" >&2; exit 1 ;;
+        esac
+
+        tmp="${RUNNER_TEMP:-/tmp}"
+        url="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${asset}.zip"
+        zip="${tmp}/protoc.zip"
+        args=(-fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2)
         if [ -n "${PROTOC_TOKEN}" ]; then
           args+=(-H "Authorization: Bearer ${PROTOC_TOKEN}")
         fi
-        curl "${args[@]}" "${url}" -o /tmp/protoc.zip
-        echo "${PROTOC_SHA256}  /tmp/protoc.zip" | sha256sum -c -
-        sudo unzip -o -q /tmp/protoc.zip -d /usr/local
-        sudo chmod +x /usr/local/bin/protoc
-        rm -f /tmp/protoc.zip
+        curl "${args[@]}" "${url}" -o "${zip}"
+        echo "${sha}  ${zip}" | sha256sum -c -
+
+        dest="${tmp}/protoc-${PROTOC_VERSION}"
+        rm -rf "${dest}"; mkdir -p "${dest}"
+        if [ "${RUNNER_OS_NAME}" = "Windows" ]; then
+          powershell -NoProfile -Command \
+            "Expand-Archive -Force -Path '$(cygpath -w "${zip}")' -DestinationPath '$(cygpath -w "${dest}")'"
+        else
+          unzip -oq "${zip}" -d "${dest}"
+        fi
+        chmod +x "${dest}/bin/protoc" 2>/dev/null || true
+
+        echo "${dest}/bin" >> "${GITHUB_PATH}"
+        export PATH="${dest}/bin:${PATH}"
         protoc --version
