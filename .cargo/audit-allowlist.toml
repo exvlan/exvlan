@@ -1,0 +1,20 @@
+# cargo-audit 允许清单的**元数据**（由 script/check_audit_allowlist.py 校验）。
+#
+# 约束：
+# - 本文件的 id 集合必须与 `.cargo/audit.toml` 的 `[advisories].ignore` 完全一致；
+# - 每项必须有 review_by；**到期后 CI 失败**，强制复核（避免允许清单变成永久豁免）。
+
+[[allow]]
+id = "RUSTSEC-2023-0071"
+review_by = "2027-01-31"
+reason = "rsa 0.9.10 Marvin 时序侧信道；传递依赖（非直接引入），当前使用路径不暴露私钥解密。待上游修复后移除。"
+
+[[allow]]
+id = "RUSTSEC-2026-0118"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 NSEC3 无界循环；hickory-client/server 尚无稳定 0.26（见 issue #1）。"
+
+[[allow]]
+id = "RUSTSEC-2026-0119"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 编码 O(n²)；同上，待 hickory 稳定 0.26 四件套协同升级。"

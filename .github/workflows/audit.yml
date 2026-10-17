@@ -28,6 +28,10 @@ jobs:
       - uses: taiki-e/install-action@3e95b5d2ea53a19022dddec602c648200467d281 # cargo-audit
 
       # 允许清单在 .cargo/audit.toml：清单内为「已评估接受」，清单外的新漏洞 → 红灯。
+      # 元数据（理由/复核日）在 .cargo/audit-allowlist.toml；过期或两处不一致 → 先失败。
+      - name: Check audit allow-list
+        run: python3 script/check_audit_allowlist.py
+
       - name: cargo audit
         run: cargo audit
 

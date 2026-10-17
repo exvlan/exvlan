@@ -1,5 +1,7 @@
 # cargo-audit 配置：CI 依赖审计门禁的**允许清单**。
 # 语义：清单内的告警为「已评估并接受」；任何**不在**清单内的新漏洞会让 `cargo audit` 退出非零 → 门禁红灯。
+# 元数据（理由 + 到期复核日）在 `.cargo/audit-allowlist.toml`，由 `script/check_audit_allowlist.py` 在 CI 校验：
+# 两处 id 集合必须一致，且过期即失败。
 [advisories]
 ignore = [
   # rsa 0.9.10 —— Marvin 时序侧信道。传递依赖，非本仓直接引入；当前仅经 TLS/JWT 链间接使用。
