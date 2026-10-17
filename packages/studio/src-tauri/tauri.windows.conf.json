@@ -1,5 +1,5 @@
 {
-  "version": "26.104.207-1",
+  "version": "26.104.207-2",
   "bundle": {
     "externalBin": [],
     "resources": ["./wintun.dll", "./Packet.dll", "./*.sys"],
