@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/cloudflare",
-  "version": "26.410.20701",
+  "version": "26.410.20702",
   "description": "Run an Exvlan relay in a Cloudflare Durable Object",
   "homepage": "https://github.com/exvlan/exvlan",
   "bugs": "https://github.com/exvlan/exvlan/issues",
@@ -37,12 +37,12 @@
   },
   "dependencies": {
     "@cloudflare/workers-types": "5.20260917.1",
-    "@exvlan/runtime": "workspace:26.410.20701"
+    "@exvlan/runtime": "workspace:26.410.20702"
   },
   "devDependencies": {
     "@types/node": "22.18.1",
     "typescript": "5.9.3",
-    "vitest": "3.2.7",
+    "vitest": "^4.1.11",
     "wrangler": "4.134.0"
   }
 }

@@ -1,7 +1,7 @@
 [package]
 name = "exvlan-mini"
 description = "Minimal native Exvlan node with TCP/UDP tunnels, TUN and UDP hole punching."
-version = "26.410.20701"
+version = "26.410.20702"
 edition.workspace = true
 rust-version.workspace = true
 license-file = "../../LICENSE"

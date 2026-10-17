@@ -36,10 +36,10 @@ cidr = "0.3.2"
 clap = "4.6.7"
 crossbeam = "0.8.5"
 dashmap = "6.2.1"
-exvlan = { version = "26.410.20701", path = "exvlan/exvlan", default-features = false }
-exvlan-core = { version = "26.410.20701", path = "exvlan/core", default-features = false }
-exvlan-ffi = { version = "26.410.20701", path = "exvlan/contrib/ffi", default-features = false }
-exvlan-proto = { version = "26.410.20701", path = "exvlan/proto", default-features = false }
+exvlan = { version = "26.410.20702", path = "exvlan/exvlan", default-features = false }
+exvlan-core = { version = "26.410.20702", path = "exvlan/core", default-features = false }
+exvlan-ffi = { version = "26.410.20702", path = "exvlan/contrib/ffi", default-features = false }
+exvlan-proto = { version = "26.410.20702", path = "exvlan/proto", default-features = false }
 futures = "0.3"
 gethostname = "1.1"
 guarden = "0.3"

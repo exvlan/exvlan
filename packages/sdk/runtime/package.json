@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/runtime",
-  "version": "26.410.20701",
+  "version": "26.410.20702",
   "description": "Shared WebAssembly runtime for Exvlan web hosts",
   "homepage": "https://github.com/exvlan/exvlan",
   "bugs": "https://github.com/exvlan/exvlan/issues",
@@ -40,6 +40,6 @@
     "@types/node": "22.18.1",
     "binaryen": "131.0.0",
     "typescript": "5.9.3",
-    "vitest": "3.2.7"
+    "vitest": "^4.1.11"
   }
 }

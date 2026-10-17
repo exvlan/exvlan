@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/studio",
-  "version": "26.410.20701",
+  "version": "26.410.20702",
   "private": true,
   "type": "module",
   "scripts": {
@@ -59,7 +59,7 @@
     "vite-plugin-vue-devtools": "^8.2.1",
     "vite-plugin-vue-layouts": "^0.11.0",
     "vite-plus": "catalog:",
-    "vitest": "^2.1.9",
+    "vitest": "^4.1.11",
     "vue-i18n": "^11.4.8",
     "vue-macros": "^3.1.4",
     "vue-tsc": "^3.3.9"

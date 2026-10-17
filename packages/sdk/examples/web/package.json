@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/web-example",
-  "version": "26.410.20701",
+  "version": "26.410.20702",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,14 +14,14 @@
     "deploy:cloudflare": "pnpm types:cloudflare && wrangler deploy --config cloudflare/wrangler.jsonc"
   },
   "dependencies": {
-    "@exvlan/browser": "workspace:26.410.20701",
-    "@exvlan/cloudflare": "workspace:26.410.20701"
+    "@exvlan/browser": "workspace:26.410.20702",
+    "@exvlan/cloudflare": "workspace:26.410.20702"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260917.1",
     "@types/node": "22.18.1",
     "typescript": "5.9.3",
-    "vite": "5.4.21",
+    "vite": "^6.4.3",
     "wrangler": "4.134.0"
   }
 }

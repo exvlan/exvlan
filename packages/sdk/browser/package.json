@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/browser",
-  "version": "26.410.20701",
+  "version": "26.410.20702",
   "description": "Run an Exvlan TCP client in the browser",
   "homepage": "https://github.com/exvlan/exvlan",
   "bugs": "https://github.com/exvlan/exvlan/issues",
@@ -38,12 +38,12 @@
     "prepack": "pnpm check"
   },
   "dependencies": {
-    "@exvlan/runtime": "workspace:26.410.20701"
+    "@exvlan/runtime": "workspace:26.410.20702"
   },
   "devDependencies": {
     "@types/node": "22.18.1",
     "esbuild": "0.28.2",
     "typescript": "5.9.3",
-    "vitest": "3.2.7"
+    "vitest": "^4.1.11"
   }
 }
