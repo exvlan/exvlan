@@ -27,6 +27,10 @@ on:
         default: false
         required: false
 
+  # 每周一 03:00 UTC：只跑依赖审计（无 push 也能发现新 advisory）。
+  schedule:
+    - cron: "0 3 * * 1"
+
 permissions:
   contents: write
   actions: write
@@ -102,13 +106,16 @@ jobs:
 
   tests:
     name: Core Tests
+    if: github.event_name != 'schedule'
     uses: ./.github/workflows/test.yml
     secrets: inherit
 
   core:
     name: Build Core
     needs: tests
-    if: needs.tests.result == 'success' || needs.tests.result == 'skipped'
+    if: >-
+      github.event_name != 'schedule' &&
+      (needs.tests.result == 'success' || needs.tests.result == 'skipped')
     uses: ./.github/workflows/core.yml
     with:
       targets: ${{ github.ref_name == 'feature' && '["x86_64-unknown-linux-musl"]' || 'all' }}
@@ -149,6 +156,7 @@ jobs:
     needs: changes
     if: >-
       github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
       github.ref_type == 'tag' ||
       github.event_name == 'workflow_dispatch' ||
       needs.changes.outputs.deps == 'true'
@@ -170,7 +178,8 @@ jobs:
     name: Build Studio GUI
     needs: core
     if: >-
-      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+      github.ref_name != 'feature' &&
       (needs.core.result == 'success' || needs.core.result == 'skipped')
     uses: ./.github/workflows/studio.yml
     secrets: inherit
@@ -179,7 +188,8 @@ jobs:
     name: Build Studio Mobile
     needs: core
     if: >-
-      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+      github.ref_name != 'feature' &&
       (needs.core.result == 'success' || needs.core.result == 'skipped')
     uses: ./.github/workflows/mobile.yml
     secrets: inherit
@@ -188,8 +198,8 @@ jobs:
     name: Builder & Publish Docker Image
     needs: core
     if: >-
-      github.event_name != 'pull_request' && github.ref_name != 'feature' &&
-      needs.core.result == 'success'
+      github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+      github.ref_name != 'feature' && needs.core.result == 'success'
     uses: ./.github/workflows/docker.yml
     with:
       mark_unstable: false
