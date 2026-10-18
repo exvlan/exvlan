@@ -39,7 +39,7 @@ git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
   | `develop`/`main` push | ✓ | ✓（全量+magisk） | ✓（必跑） | 按路径门控 | 按依赖路径门控 | ✗ |
   | tag `v*` | ✓ | ✓（全量） | ✓ | **全量**（绕门控） | ✓（全量） | ✓ |
   | `workflow_dispatch` | ✓ | ✓（全量） | ✓ | **全量**（绕门控） | ✓（全量） | ✗ |
-- **依赖审计门禁**：`audit.yml` 跑 `cargo audit` + `pnpm audit --prod`（root 与 sdk）；允许清单 `.cargo/audit.toml`，元数据 `.cargo/audit-allowlist.toml`（`review_by` 到期即 CI 失败，由 `script/check_audit_allowlist.py` 校验）。清单外的新漏洞直接红灯。
+- **依赖审计门禁**：`audit.yml` 跑 `cargo audit` + `pnpm audit --prod`（root 与 sdk）；允许清单 `.cargo/audit.toml`，元数据 `.cargo/audit-allowlist.toml`（`review_by` 到期即 CI 失败，由 `script/check_audit_allowlist.py` 校验）。清单外的新漏洞直接红灯。另有**每周一 03:00 UTC** 定时（`pipeline.yml` 的 `schedule`，该事件只跑 audit，其余作业均排除）。
 - **不因内容重复跳过构建**：`core/test/mobile` 的 `should_skip` 仅由 PR 路径门控决定（`fkirc/skip-duplicate-actions` 的输出不再影响构建；其 `cancel_others` 仍用于取消被取代的运行）。原因：下游 `docker`/`release` 依赖本轮 `core` 的产物，跳过会导致取不到。
 - **发版产物经 Actions artifact 传递**（`core-*`/`studio-*`/`mobile-*`/`magisk` 前缀上传；`release.yml` 用 `download-artifact` 的 `pattern` 精确拉取）。不用 `actions/cache`（10GB 配额 LRU 驱逐不可靠），也不用全量 `download-artifact`（buildx 产生的 `<owner>~<repo>~*.dockerbuild` 名字含 `~`，会导致解压失败）。
 - **发布**：`release.yml` 自动发布（`draft:false`），`version` = tag 名；Windows/macOS 资产由 `productName`（`tauri.conf.json`）决定命名与 MSI **UpgradeCode** —— **切勿轻改 `productName`**，否则升级会变成并存新装。
