@@ -47,6 +47,12 @@ git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
 - **发布 go/sdk**（仅 tag，且**失败阻塞 release**）：`publish-npm.yml` 将 `@exvlan/runtime|browser|cloudflare|sdk` 发到 **GitHub Packages npm**（`npm.pkg.github.com`，token=`GITHUB_TOKEN`，dist-tag=`latest`，手动可传）；`publish-go.yml` 推 Go module tag **`exvlan/go/<tag>`**（消费需 `GOPRIVATE=github.com/exvlan/*`）。`release` 作业的 `needs` 含这两个作业。
 - **同提交去重**：`pipeline.yml` 的 `concurrency.group` 用 `github.sha`（非 `github.ref`）；发版时**先 push develop、再 push tag** → 同 sha 下 tag 运行胜出（含 release），分支运行被取消，只跑一轮。
 
+## 安全与交接文档
+
+- 审查报告：`docs/security/repo-audit-2026-10-15.md`（后门/遥测/供应链分级发现）。
+- Dependabot 分类与复核：`docs/security/dependabot-triage-2026-10-16.md`（含 116→8 复核）。
+- **交接摘要**：`docs/security/handover-2026-10-18.md`（分支/发布/治理/依赖变更/踩坑/下一步）。
+
 ## 版本对齐范围
 
 - 标准版本 `YY.QMM.Mmpp` 覆盖：根 `Cargo.toml`/各 crate、`packages/{studio,std,ui,generator}/package.json`、`tauri.conf.json`、magisk 清单、README 等。
