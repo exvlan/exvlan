@@ -18,3 +18,8 @@ reason = "hickory-proto 0.25.2 NSEC3 无界循环；hickory-client/server 尚无
 id = "RUSTSEC-2026-0119"
 review_by = "2027-01-31"
 reason = "hickory-proto 0.25.2 编码 O(n²)；同上，待 hickory 稳定 0.26 四件套协同升级。"
+
+[[allow]]
+id = "RUSTSEC-2026-0387"
+review_by = "2027-01-31"
+reason = "crypto-bigint 0.5.5（timing 变异性）经 openidconnect 4.0.1→p256 0.13→ecdsa 0.16→elliptic-curve 0.13 引入；上游 openidconnect 最新仍 4.0.1，无 0.7 链路。仅 API 侧 OIDC 签名验证路径。见 issue #7。"

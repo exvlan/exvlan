@@ -9,4 +9,7 @@ ignore = [
   # hickory-proto 0.25.2 —— 上游 0.26.x 才有补丁（见 issues #1 / #6）；Dependabot 亦列为可修。
   "RUSTSEC-2026-0118",
   "RUSTSEC-2026-0119",
+  # crypto-bigint 0.5.5 —— 经 openidconnect 4.0.1 → p256 0.13 → ecdsa 0.16 → elliptic-curve 0.13 引入；
+  # 上游 openidconnect 尚无 0.7 链路（最新仍 4.0.1），仅影响 API 的 OIDC 签名验证路径。见 issue #7。
+  "RUSTSEC-2026-0387",
 ]
