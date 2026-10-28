@@ -1,6 +1,6 @@
 ---
 时间: 2026-10-10 18:55
-版本: v26.410.20702
+版本: v26.410.20703
 引用源: [AGENTS.md](../../../AGENTS.md) / [CLAUDE.md](../../../CLAUDE.md) / git 历史实测
 状态: 已完成
 ---
@@ -134,7 +134,7 @@ git push origin develop
 ### D. 版本对齐
 
 - 标准版本：`YY.QMM.Mmpp`，其中 `YY`=年、`QMM`=季度+月份（zero-padded）、`Mmpp`=major + minor(2位) + patch(2位)。
-  - 示例：`26.410.20702` = 2026 年 Q4 10 月，对齐上游 `v2.7.0`。
+  - 示例：`26.410.20703` = 2026 年 Q4 10 月，对齐上游 `v2.7.0`。
 - Windows MSI 专用版本：`YY.MMQ.mmmm-pp`（因 MSI 中段每段上限 255/255/65535），仅经
   `packages/studio/src-tauri/tauri.windows.conf.json` 对 Windows 生效。
 - 版本号需同步更新各 `Cargo.toml` / `package.json` / `magisk` 清单 / README 版本串；

@@ -87,6 +87,19 @@ git push origin refs/tags/vX --force
   - root lock 未跟踪时需先 `pnpm install --ignore-scripts --no-frozen-lockfile` 才有锁可审。
 - **build-dep 陷阱**：`cargo audit` 扫 Cargo.lock **全量**，包括 `target = "cfg(windows)"` 的 build-dependencies。实例：`zip`（`exvlan-proto` 的 Windows-only build-dep）曾带 **9.1 critical**（RUSTSEC-2026-0369，`extract()` 经 symlink 越界），本地 advisory-db 可能滞后而 CI 不滞后 → **以 CI 为准**，该类大版本（8→9）该升就升。
 
+## 依赖大版本升级（`deps:major` / taze）
+
+`pnpm deps:major` = `bunx taze major -r --peer -w`。**不要直接 `-w` 盲升**，先 `taze major -r --peer`（不带 `-w`）看影响面。已知坑：
+
+1. **taze 会写 tag（`@v7`），破坏 SHA 钉法**：升完必须重跑钉 SHA 脚本（本会话的 `pin_actions.py` 等价物），确认「残留未钉 = 0」。
+2. **`vite: catalog:` 解析失败**：taze 不懂 vite-plus 的 catalog（会报 `Timeout requesting "vite"`）。保持 catalog 不动，手动跳过 vite。
+3. **TS 7 × vue-tsc 不兼容**：`vue-tsc 3.3.13` 依赖 `typescript/lib/tsc.js`，TS 7（Go 端口）已移除该导出 → `ERR_PACKAGE_PATH_NOT_EXPORTED`。TypeScript 需留在 5.x，或等 vue-tsc 支持。
+4. **workspace 同库多版本**：例如同时存在 `primevue@4`(studio/ui/generator) 与 `primevue@5`(std) → `@primeuix/styles` 2.x/3.x 混装，表现为 **vitest 报 `does not provide an export named 'preflight'`**（生产构建却正常）。升级同一 UI 库必须**四包一起升**并用 `pnpm why -r <pkg>` 确认只剩一个版本。
+5. **PrimeVue 5 重命名**：`InputSwitch → ToggleSwitch`、主题 token `inverseColor → contrastColor`。漏改 `ui` 会导致 `prepare-build`（它构建前端）失败，而不是只有前端作业红。
+6. **`ubuntu-latest` 已迁 Ubuntu 26.04**：`android-actions/setup-android` 的 `cmdline-tools-version` 必须写**长版本（build）**（20.0 → `14742923`）；写短版本（`12.0`）会被拼成 `commandlinetools-linux-12_latest.zip` → **404**。
+7. **pnpm 版本要统一**：根 `devEngines.packageManager.version`、`packages/studio.packageManager`、CI 各处 `pnpm/action-setup.version` 必须一致；pnpm 12 会按 `devEngines` 回落，混用会导致「用 A 版本执行、实际跑 B 版本」。
+8. **每批必过的本地验证**：`pnpm install`（锁不变）→ 受影响的 `vue-tsc -b`/`vp build` → 单测（std `test:config-ui`、studio `test:mobile-vpn`）→ `cargo check --locked`。
+
 ## 清理失败运行
 
 ```bash

@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-api"
-version = "26.410.20702"
+version = "26.410.20703"
 edition.workspace = true
 rust-version.workspace = true
 description = "Config server for exvlan. exvlan-core gets config from this and web frontend use it as restful api server."

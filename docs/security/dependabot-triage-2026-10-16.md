@@ -15,7 +15,7 @@
 
 - `packages/std` 是**根 pnpm workspace 的成员**（见 `pnpm-workspace.yaml`），根 `pnpm-lock.yaml` 才是权威锁；
 - 但仓库**跟踪了陈旧的 `packages/std/pnpm-lock.yaml`**（解析为 axios 1.18.0 / vitest 2.1.9 / happy-dom 16.8.1 —— 远旧于实际），而**根 `pnpm-lock.yaml` 被 `.gitignore` 排除、未跟踪**；
-- 结果：Dependabot 只能扫到那份陈旧嵌套锁 → **71 项告警来自它**，其中多数（axios/vue/js-yaml 等）**在本轮 26.410.20702 已通过根 lock 修复**，属判读噪声；
+- 结果：Dependabot 只能扫到那份陈旧嵌套锁 → **71 项告警来自它**，其中多数（axios/vue/js-yaml 等）**在本轮 26.410.20703 已通过根 lock 修复**，属判读噪声；
 - 同时「根 lock 未跟踪」本身是问题：根 workspace 的安装不可复现、Dependabot 看不到真实依赖。
 
 ## 3. 可修项（有补丁版本）
