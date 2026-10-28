@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/sdk",
-  "version": "26.410.20702",
+  "version": "26.410.20703",
   "files": [],
   "publishConfig": {
     "access": "public",
@@ -13,8 +13,8 @@
     "check": "pnpm build && pnpm test:unit && pnpm --filter @exvlan/web-example check"
   },
   "dependencies": {
-    "@exvlan/browser": "workspace:26.410.20702",
-    "@exvlan/cloudflare": "workspace:26.410.20702",
-    "@exvlan/runtime": "workspace:26.410.20702"
+    "@exvlan/browser": "workspace:26.410.20703",
+    "@exvlan/cloudflare": "workspace:26.410.20703",
+    "@exvlan/runtime": "workspace:26.410.20703"
   }
 }

@@ -47,7 +47,7 @@ git merge-base --is-ancestor upstream/releases/vX.Y.Z feature # 期望 0（是�
 
 ## 版本对齐
 
-- 标准：`YY.QMM.Mmpp`，如 `26.410.20702` = 2026 年 Q4 10 月，对齐上游 `v2.7.0`。
+- 标准：`YY.QMM.Mmpp`，如 `26.410.20703` = 2026 年 Q4 10 月，对齐上游 `v2.7.0`。
 - Windows MSI：`YY.MMQ.mmmm-pp`（仅 `tauri.windows.conf.json` 生效）。
 - **`packages/sdk/**` 纳入**：需同改子包 `version` + `workspace:<v>` specifier + 重生成 sdk 锁文件。
 

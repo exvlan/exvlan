@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-vpnservice"
-version = "26.410.20702"
+version = "26.410.20703"
 authors = ["You"]
 description = ""
 edition.workspace = true
