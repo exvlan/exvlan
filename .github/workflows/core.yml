@@ -128,7 +128,7 @@ jobs:
       - prepare_matrix
     if: needs.pre_job.outputs.should_skip != 'true'
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set current ref as env variable
         run: |
@@ -256,7 +256,7 @@ jobs:
           path: ./artifacts
 
       - name: Upload core artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: core-${{ matrix.ARTIFACT_NAME }}
           path: ./artifacts
@@ -277,7 +277,7 @@ jobs:
       - name: Upload unsigned SignPath test artifact
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
         id: signpath-upload
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: signpath-unsigned-${{ matrix.ARTIFACT_NAME }}
           path: ./signpath-artifacts/*
@@ -298,7 +298,7 @@ jobs:
 
       - name: Upload signed SignPath test artifact
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: signpath-signed-${{ matrix.ARTIFACT_NAME }}
           path: ./signpath-signed-artifacts/*
@@ -310,7 +310,7 @@ jobs:
     if: inputs.build_magisk && needs.pre_job.result == 'success' && needs.build.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
       - name: Checkout Code
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5  # 必须先检出代码才能获取模块配置
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7  # 必须先检出代码才能获取模块配置
 
       - name: Setup Frontend Environment
         uses: ./.github/actions/prepare-pnpm
@@ -344,7 +344,7 @@ jobs:
           path: ./exvlan/contrib/magisk
 
       - name: Upload magisk artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: magisk
           path: ./exvlan/contrib/magisk
