@@ -113,6 +113,8 @@ Dependabot 开启告警：**116 → 8**（-93%）。
 
 严重度：high 3 / medium 5。剩余项均已由 `.cargo/audit-allowlist.toml`（含到期复核）与 issue #1 跟踪。
 
+**2026-10-29 复核**：依赖大版本升级批次后仍为 **8**（全 rust）；npm 与 go 维持 **0**（`happy-dom` 升至 21.0.4 关闭 GHSA-834v-8h66-3h79）。详见 `handover-2026-10-18.md` §8。
+
 
 
 
