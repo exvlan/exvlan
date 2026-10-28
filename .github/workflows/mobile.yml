@@ -88,7 +88,9 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
         with:
-          cmdline-tools-version: 12.0
+          # 长版本号（build）而非短版本：ubuntu-26.04 预装 cmdline-tools 20.0 = 14742923。
+          # 写短版本（如 12.0）会被直接拼进下载 URL → commandlinetools-linux-12_latest.zip → 404。
+          cmdline-tools-version: 14742923
           packages: "build-tools;34.0.0 ndk;26.0.10792818 platform-tools platforms;android-34 "
 
       - name: Setup Android Environment
