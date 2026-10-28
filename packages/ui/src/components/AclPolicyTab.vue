@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { v4 as uuidv4 } from 'uuid';
-import { Button, Drawer, InputNumber, InputText, InputSwitch, Message, MultiSelect, Select, SelectButton, useToast } from 'primevue';
+import { Button, Drawer, InputNumber, InputText, ToggleSwitch, Message, MultiSelect, Select, SelectButton, useToast } from 'primevue';
 import { useI18n } from 'vue-i18n';
 import ApiClient, { type AclPolicy, type AclPolicyRule, type AclProtocolTarget, type AclSelector, type CentralNetworkMember } from '../modules/api';
 
@@ -378,7 +378,7 @@ const defaultActionOptions = [
                             optionLabel="label" optionValue="value" />
                     </div>
                     <div class="flex items-center gap-2 mt-4">
-                        <InputSwitch inputId="acl-rule-enabled" v-model="editor.enabled" />
+                        <ToggleSwitch inputId="acl-rule-enabled" v-model="editor.enabled" />
                         <label for="acl-rule-enabled" class="text-sm">{{ t('web.acl.enabled') }}</label>
                     </div>
                 </div>
@@ -422,7 +422,7 @@ const defaultActionOptions = [
                             <span class="font-medium text-sm">{{ proto.toUpperCase() }}</span>
                             <div v-if="proto === 'tcp' && editor.action === 'allow'" class="flex items-center gap-2">
                                 <span class="text-xs muted">{{ t('web.acl.stateful') }}</span>
-                                <InputSwitch v-model="editor.tcp.stateful" v-tooltip.top="t('web.acl.stateful_hint')" />
+                                <ToggleSwitch v-model="editor.tcp.stateful" v-tooltip.top="t('web.acl.stateful_hint')" />
                             </div>
                         </div>
                         <div v-for="(entry, entryIndex) in editor[proto].entries" :key="entryIndex"

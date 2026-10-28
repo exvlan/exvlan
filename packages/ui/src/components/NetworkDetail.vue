@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { v4 as uuidv4 } from 'uuid';
-import { Button, Column, ConfirmDialog, DataTable, Dialog, Drawer, InputSwitch, InputText, Message, ProgressSpinner, ScrollPanel, Select, SelectButton, Skeleton, Tab, TabList, TabPanel, TabPanels, Tabs, Tag, useConfirm, useToast } from 'primevue';
+import { Button, Column, ConfirmDialog, DataTable, Dialog, Drawer, ToggleSwitch, InputText, Message, ProgressSpinner, ScrollPanel, Select, SelectButton, Skeleton, Tab, TabList, TabPanel, TabPanels, Tabs, Tag, useConfirm, useToast } from 'primevue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { Config, NetworkTypes, UrlListInput, Utils } from '@exvlan/std';
@@ -1154,7 +1154,7 @@ const switchTab = async (tab: string) => {
                         <label for="settings-secure-mode">{{ t('web.network_list.secure_mode') }}</label>
                         <span class="pi pi-question-circle ml-2 self-center" v-tooltip="t('web.network_list.secure_mode_hint')"></span>
                     </div>
-                    <InputSwitch inputId="settings-secure-mode" v-model="settingsForm.secure_mode" />
+                    <ToggleSwitch inputId="settings-secure-mode" v-model="settingsForm.secure_mode" />
                 </div>
                 <div class="flex flex-col gap-1">
                     <label>{{ t('network_secret') }}</label>
@@ -1162,7 +1162,7 @@ const switchTab = async (tab: string) => {
                         <InputText :model-value="network.network_secret" :aria-label="t('network_secret')" readonly class="flex-1 min-w-0" />
                     </div>
                     <div class="flex items-center gap-2 mt-1">
-                        <InputSwitch inputId="regenerate-secret" v-model="settingsForm.regenerate_secret" />
+                        <ToggleSwitch inputId="regenerate-secret" v-model="settingsForm.regenerate_secret" />
                         <label for="regenerate-secret" class="text-sm">{{ t('web.network_detail.regenerate_secret') }}</label>
                     </div>
                 </div>
@@ -1212,7 +1212,7 @@ const switchTab = async (tab: string) => {
             </DataTable>
             <div class="flex flex-col gap-2 mt-2">
                 <div class="flex items-center gap-2">
-                    <InputSwitch inputId="add-temporary" v-model="addTemporary" :disabled="!network?.secure_mode" />
+                    <ToggleSwitch inputId="add-temporary" v-model="addTemporary" :disabled="!network?.secure_mode" />
                     <label for="add-temporary" class="text-sm"
                         :class="{ 'text-500': !network?.secure_mode }">{{ t('web.network_detail.add_temporary_member') }}</label>
                     <span class="pi pi-question-circle text-sm" v-tooltip.top="network?.secure_mode
@@ -1325,7 +1325,7 @@ const switchTab = async (tab: string) => {
                         optionLabel="label" optionValue="value" />
                 </div>
                 <div class="flex items-center gap-2">
-                    <InputSwitch inputId="cred-reusable" v-model="generateForm.reusable" />
+                    <ToggleSwitch inputId="cred-reusable" v-model="generateForm.reusable" />
                     <label for="cred-reusable" class="text-sm">{{ t('web.network_detail.credential_reusable') }}</label>
                 </div>
                 <div class="text-xs text-500">{{ t('web.network_detail.credential_reusable_hint') }}</div>

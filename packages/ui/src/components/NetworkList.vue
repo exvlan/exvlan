@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { Button, Column, DataTable, Dialog, InputSwitch, InputText, Message, Skeleton, Tag, useToast } from 'primevue';
+import { Button, Column, DataTable, Dialog, ToggleSwitch, InputText, Message, Skeleton, Tag, useToast } from 'primevue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { UrlListInput, Utils } from '@exvlan/std';
@@ -221,7 +221,7 @@ const openNetwork = (network: CentralNetworkSummary) => {
                         :placeholder="t('web.network_list.virtual_cidr_placeholder')" />
                 </div>
                 <div class="flex items-center gap-2">
-                    <InputSwitch inputId="create-secure-mode" v-model="createForm.secure_mode" />
+                    <ToggleSwitch inputId="create-secure-mode" v-model="createForm.secure_mode" />
                     <label for="create-secure-mode" class="text-sm">{{ t('web.network_list.secure_mode') }}</label>
                     <span class="pi pi-question-circle text-sm" v-tooltip.top="t('web.network_list.secure_mode_hint')"></span>
                 </div>
