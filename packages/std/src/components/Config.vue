@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { v4 as uuidv4 } from 'uuid'
-import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, InputSwitch, InputText, MultiSelect, Panel, Password, SelectButton, ToggleButton } from 'primevue'
+import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, ToggleSwitch, InputText, MultiSelect, Panel, Password, SelectButton, ToggleButton } from 'primevue'
 import InputGroup from 'primevue/inputgroup'
 import InputGroupAddon from 'primevue/inputgroupaddon'
 import {
@@ -335,7 +335,7 @@ function removeVpnPortalClient(index: number) {
                   <label for="network_name">{{ t('network_name') }}</label>
                   <InputText id="network_name" v-model="curNetwork.network_name" aria-describedby="network_name-help" />
                   <div v-if="!hideSecureMode && identityMode === 'secret'" class="flex items-center gap-2">
-                    <InputSwitch inputId="secure_mode" v-model="secureModeEnabled" />
+                    <ToggleSwitch inputId="secure_mode" v-model="secureModeEnabled" />
                     <label for="secure_mode" class="cursor-pointer">{{ t('secure_mode') }}</label>
                     <span class="pi pi-question-circle text-sm" v-tooltip.top="t('secure_mode_hint')"></span>
                   </div>
