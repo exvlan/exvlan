@@ -1289,7 +1289,11 @@ mod tests {
                     if received.len() >= ETH_HDR_LEN
                         && received[ETH_HDR_LEN..] == frame[ETH_HDR_LEN..] =>
                 {
-                    assert_eq!(&received[..ETH_HDR_LEN], &frame[..ETH_HDR_LEN]);
+                    // try_send 用 AF_PACKET/SOCK_DGRAM：内核按**出接口**填充源 MAC，
+                    // 调用方可控的只有目的 MAC / ethertype / payload。
+                    assert_eq!(&received[..6], &frame[..6]);
+                    assert_eq!(&received[6..12], veth.capture_mac.as_bytes());
+                    assert_eq!(&received[12..ETH_HDR_LEN], &frame[12..ETH_HDR_LEN]);
                     break;
                 }
                 Ok(_) => {}
