@@ -42,8 +42,11 @@ jobs:
       - name: Download magisk artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          path: release_assets
+          # v8 在 pattern 单命中时会把内容直接解到 path 根（不建同名子目录），
+          # 因此这里显式指定子目录 + merge-multiple，保证打包脚本的 `[ -d magisk ]` 成立。
+          path: release_assets/magisk
           pattern: magisk
+          merge-multiple: true
 
       - name: Download studio artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
