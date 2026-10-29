@@ -4,13 +4,13 @@ on:
   workflow_call:
     inputs:
       version:
-        description: "发布 tag（如 v26.410.20703）"
+        description: "发布 tag（如 v26.410.20704）"
         type: string
         required: true
   workflow_dispatch:
     inputs:
       version:
-        description: "发布 tag（如 v26.410.20703）"
+        description: "发布 tag（如 v26.410.20704）"
         type: string
         required: true
 

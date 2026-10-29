@@ -36,6 +36,7 @@ permissions:
   actions: write
   packages: write
   pull-requests: read
+  issues: write
 
 concurrency:
   # 按 commit sha 去重：同一提交同时被分支与 tag 命中时（先推 develop 再推 tag），
@@ -163,6 +164,40 @@ jobs:
     uses: ./.github/workflows/audit.yml
     secrets: inherit
 
+  # 上游监控（仅 schedule）：对比 EasyTier/EasyTier 最新 release 与本地已同步的 v2.* tag。
+  upstream_watch:
+    name: Upstream Watch
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check upstream releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          latest=$(gh api repos/EasyTier/EasyTier/releases/latest --jq .tag_name)
+          synced=$(gh api "repos/$GITHUB_REPOSITORY/tags?per_page=100" --paginate --jq '.[].name' \
+            | grep -E '^v2\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
+          echo "upstream=$latest synced=${synced:-none}"
+          if [ -z "${synced:-}" ]; then echo "no synced upstream tag, skip"; exit 0; fi
+          newest=$(printf '%s\n%s\n' "$synced" "$latest" | sort -V | tail -n1)
+          if [ "$newest" = "$latest" ] && [ "$latest" != "$synced" ]; then
+            existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json title \
+              | jq --arg t "$latest" '[.[] | select(.title | contains($t))] | length')
+            if [ "${existing:-1}" = "0" ]; then
+              gh issue create --repo "$GITHUB_REPOSITORY" \
+                --title "upstream: 新 release $latest 待同步" \
+                --body "$(printf '检测到上游 `EasyTier/EasyTier` 发布了 **%s**，本地已同步到 **%s**。\n\n按 `.agents/skills/upstream-fork-sync` 流程同步：`upstream/releases/%s` → `feature` → 压缩进 `develop`。' "$latest" "$synced" "$latest")"
+            else
+              echo "open issue already exists for $latest, skip"
+            fi
+          else
+            echo "already synced to $synced"
+          fi
+
   ohos:
     name: OpenHarmony
     needs: [core, changes]
@@ -240,7 +275,7 @@ jobs:
     needs: [core, studio, mobile, publish_sdk, publish_go]
     uses: ./.github/workflows/release.yml
     with:
-      version: ${{ github.ref_name }} # tag 名即为版本号，如 v26.410.20703
+      version: ${{ github.ref_name }} # tag 名即为版本号，如 v26.410.20704
       mark_latest: true
       is_alpha: false
     secrets: inherit

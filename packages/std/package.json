@@ -1,6 +1,6 @@
 {
   "name": "@exvlan/std",
-  "version": "26.410.20703",
+  "version": "26.410.20704",
   "private": true,
   "type": "module",
   "main": "./dist/index.cjs",

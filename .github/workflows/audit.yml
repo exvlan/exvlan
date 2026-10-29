@@ -48,7 +48,7 @@ jobs:
       - name: pnpm audit (prod)
         run: |
           set -euo pipefail
-          pnpm install --ignore-scripts --no-frozen-lockfile
+          pnpm install --ignore-scripts --frozen-lockfile
           pnpm audit --prod --registry https://registry.npmjs.org
           pnpm --dir packages/sdk install --frozen-lockfile --ignore-scripts
           pnpm --dir packages/sdk audit --prod --registry https://registry.npmjs.org

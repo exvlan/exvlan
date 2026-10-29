@@ -100,6 +100,24 @@ git push origin refs/tags/vX --force
 7. **pnpm 版本要统一**：根 `devEngines.packageManager.version`、`packages/studio.packageManager`、CI 各处 `pnpm/action-setup.version` 必须一致；pnpm 12 会按 `devEngines` 回落，混用会导致「用 A 版本执行、实际跑 B 版本」。
 8. **每批必过的本地验证**：`pnpm install`（锁不变）→ 受影响的 `vue-tsc -b`/`vp build` → 单测（std `test:config-ui`、studio `test:mobile-vpn`）→ `cargo check --locked`。
 
+## 发版故障排查（实战清单）
+
+| 症状 | 根因 | 处置 |
+| --- | --- | --- |
+| 某个 core 平台**偶发**失败（如 `windows-i686` 跑 ~68 分钟后失败） | runner/网络抖动 | `gh run rerun <run> --failed`；GitHub 会**连带重跑**因它被跳过的下游（core-result/studio/mobile/docker/release） |
+| Studio GUI/Mobile 报 `Found version mismatched Tauri packages` | **Tauri 要求 npm 包与 Rust crate 的 major.minor 一致**；根 lock 未跟踪时 CI 重新解析 → npm 漂到更高 minor | npm 钉到与 `Cargo.lock` 同 minor（如 `@tauri-apps/plugin-* : ~2.4.0`）；根治=**跟踪根 `pnpm-lock.yaml` + CI `--frozen-lockfile`** |
+| Release 资产**缺 Magisk**（其余正常） | `download-artifact v8` 在 `pattern` **单命中**时把内容解到 `path` 根（不建同名子目录）→ 打包脚本 `[ -d magisk ]` 为假 | 下载步骤显式 `path: release_assets/magisk` + `merge-multiple: true`；已发版的可用 `gh release upload <tag> <zip> --clobber` 补传 |
+| `Core Tests / Test` 挂在 `linux_bpf_*_sends_ipv4_frame_to_ethernet_interface`（src MAC 不等） | `try_send` 用 **AF_PACKET/SOCK_DGRAM**：内核按**出接口**填 src MAC，调用方只能控 dst/ethertype/payload | 断言改为 dst MAC + 出接口 MAC + ethertype + payload；本地 `EXVLAN_LINUX_BPF_INTEGRATION=1 cargo test -p exvlan --lib linux_bpf` 可复现 |
+| `android-actions/setup-android` 404（`commandlinetools-linux-12_latest.zip`） | `ubuntu-latest` 已迁 **Ubuntu 26.04**；`cmdline-tools-version` 必须写**长版本(build)** | `cmdline-tools-version: 14742923`（= 20.0，与镜像预装一致） |
+| tag 运行在发布阶段失败 | 版本已发布（npm 409 / Go tag 已存在） | `publish-npm` 已做幂等跳过；`publish-go` 天然跳过；**Go tag 不可移动** |
+
+### 发版前自检
+
+1. `pnpm install --frozen-lockfile` 与 `cargo check --locked` 通过（根锁已跟踪，锁必须同步提交）。
+2. `cargo audit` + `pnpm audit --prod` 干净（allow-list 未过期）。
+3. 涉及 Tauri 插件变动时，核对 npm 与 `Cargo.lock` 的 major.minor 一致。
+4. 先把 develop 跑绿，再 push tag（同 sha 去重）。
+
 ## 清理失败运行
 
 ```bash
