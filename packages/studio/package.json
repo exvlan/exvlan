@@ -60,7 +60,7 @@
     "vite-plugin-vue-layouts": "^0.11.0",
     "vite-plus": "catalog:",
     "vitest": "^5.0.5",
-    "vue-i18n": "^11.4.8",
+    "vue-i18n": "^11.4.16",
     "vue-macros": "^3.1.4",
     "vue-tsc": "^3.3.13"
   },

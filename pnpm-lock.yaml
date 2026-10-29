@@ -405,7 +405,7 @@ importers:
         version: 10.0.0(@typescript-eslint/typescript-estree@8.72.1(supports-color@8.1.1)(typescript@5.6.3))(@typescript-eslint/utils@8.72.1(eslint@10.12.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.6.3))(@vue/compiler-sfc@3.5.44)(eslint-plugin-format@2.0.1(eslint@10.12.0(jiti@2.7.0)(supports-color@8.1.1)))(eslint@10.12.0(jiti@2.7.0)(supports-color@8.1.1))(oxlint@1.76.0(oxlint-tsgolint@7.0.2001)(vite-plus@0.2.8(@types/node@26.2.0)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0))(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0)))(supports-color@8.1.1)(ts-declaration-location@1.0.7(typescript@5.6.3))(typescript@5.6.3)(vitest@5.0.5)
       '@intlify/unplugin-vue-i18n':
         specifier: ^11.2.4
-        version: 11.2.5(@voidzero-dev/vite-plus-core@0.2.8(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0))(eslint@10.12.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.6.3)(vue-i18n@11.4.13(vue@3.5.44(typescript@5.6.3)))(vue@3.5.44(typescript@5.6.3))
+        version: 11.2.5(@voidzero-dev/vite-plus-core@0.2.8(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0))(eslint@10.12.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.6.3)(vue-i18n@11.4.16(vue@3.5.44(typescript@5.6.3)))(vue@3.5.44(typescript@5.6.3))
       '@primevue/auto-import-resolver':
         specifier: 5.0.4
         version: 5.0.4
@@ -494,8 +494,8 @@ importers:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@26.2.0)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.8(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0))(happy-dom@21.0.4)
       vue-i18n:
-        specifier: ^11.4.8
-        version: 11.4.13(vue@3.5.44(typescript@5.6.3))
+        specifier: ^11.4.16
+        version: 11.4.16(vue@3.5.44(typescript@5.6.3))
       vue-macros:
         specifier: ^3.1.4
         version: 3.1.4(@voidzero-dev/vite-plus-core@0.2.8(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0))(@vueuse/core@15.0.0(vue@3.5.44(typescript@5.6.3)))(esbuild@0.28.2)(rolldown@1.2.3)(typescript@5.6.3)(vue-tsc@3.3.13(typescript@5.6.3))(vue@3.5.44(typescript@5.6.3))
@@ -533,8 +533,8 @@ importers:
         specifier: ^3.5.42
         version: 3.5.44(typescript@5.6.3)
       vue-i18n:
-        specifier: ^11.4.8
-        version: 11.4.13(vue@3.5.44(typescript@5.6.3))
+        specifier: ^11.4.16
+        version: 11.4.16(vue@3.5.44(typescript@5.6.3))
       vue-router:
         specifier: ^5.2.0
         version: 5.4.0(@voidzero-dev/vite-plus-core@0.2.8(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0))(@vue/compiler-sfc@3.5.41)(esbuild@0.28.2)(pinia@4.1.0(@vue/devtools-api@8.2.1)(typescript@5.6.3)(vue@3.5.44(typescript@5.6.3)))(rolldown@1.2.3)(vue@3.5.44(typescript@5.6.3))
@@ -1308,16 +1308,8 @@ packages:
       vue-i18n:
         optional: true
 
-  '@intlify/core-base@11.4.13':
-    resolution: {integrity: sha512-3qGv1/j0fl6ZSeehGaznE78A4i3hCaOeOyDh7jq7SV6ch/XGoy96xIrYuALTV3xhIqj2rktsIKcwlLZ3CbOhkA==}
-    engines: {node: '>= 22'}
-
   '@intlify/core-base@11.4.16':
     resolution: {integrity: sha512-xB8nMdMRLNx7b0zPvrHy0+N9uq9Vfi1aUxHqWgn2e2/TbjCKy8HfoFpnUXXxVP8I0p1ccd6LFSC3XsFjZ3vweA==}
-    engines: {node: '>= 22'}
-
-  '@intlify/devtools-types@11.4.13':
-    resolution: {integrity: sha512-f38d2yvjNc1/c+BnTLsxTB0729clTtyy7kTxHu4FFlvI6FpmBOp7b9sLYtsKJpXSZ70kIEexvNwDSzLkIlYnlQ==}
     engines: {node: '>= 22'}
 
   '@intlify/devtools-types@11.4.16':
@@ -4282,8 +4274,8 @@ packages:
       '@nuxt/kit':
         optional: true
 
-  follow-redirects@1.16.0:
-    resolution: {integrity: sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw==}
+  follow-redirects@1.16.2:
+    resolution: {integrity: sha512-/kVP2U8z596Ia0gwFrwyIeo74ta5aVmSeU1FfAUMAmcEP5EP7zydmag3SLiN64NaRKef3lxsq7i/g7ltJQDGow==}
     engines: {node: '>=4.0'}
     peerDependencies:
       debug: '*'
@@ -6120,12 +6112,6 @@ packages:
     peerDependencies:
       eslint: ^8.57.0 || ^9.0.0 || ^10.0.0
 
-  vue-i18n@11.4.13:
-    resolution: {integrity: sha512-2G7LC9XcdZ0IljFib7lKGHNiBBOTv6HO+2bnBaOiQgDYZ+uUnqSpuED5DbBo1t7su50o/WRGn+ZfDQTGd26xEw==}
-    engines: {node: '>= 22'}
-    peerDependencies:
-      vue: ^3.0.0
-
   vue-i18n@11.4.16:
     resolution: {integrity: sha512-Kv9tp6iTmaAeOwop7hkAo28N1IBsbSVpnxyE26b6gqc4Q2E9Ke3ZHHA3oqqwS6/cYLT1henZU4etTaLQxrK98Q==}
     engines: {node: '>= 22'}
@@ -6887,7 +6873,7 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.3': {}
 
-  '@intlify/bundle-utils@11.2.5(vue-i18n@11.4.13(vue@3.5.44(typescript@5.6.3)))':
+  '@intlify/bundle-utils@11.2.5(vue-i18n@11.4.16(vue@3.5.44(typescript@5.6.3)))':
     dependencies:
       '@intlify/message-compiler': 11.4.13
       '@intlify/shared': 11.4.13
@@ -6899,24 +6885,13 @@ snapshots:
       source-map-js: 1.2.2
       yaml-eslint-parser: 1.2.2
     optionalDependencies:
-      vue-i18n: 11.4.13(vue@3.5.44(typescript@5.6.3))
-
-  '@intlify/core-base@11.4.13':
-    dependencies:
-      '@intlify/devtools-types': 11.4.13
-      '@intlify/message-compiler': 11.4.13
-      '@intlify/shared': 11.4.13
+      vue-i18n: 11.4.16(vue@3.5.44(typescript@5.6.3))
 
   '@intlify/core-base@11.4.16':
     dependencies:
       '@intlify/devtools-types': 11.4.16
       '@intlify/message-compiler': 11.4.16
       '@intlify/shared': 11.4.16
-
-  '@intlify/devtools-types@11.4.13':
-    dependencies:
-      '@intlify/core-base': 11.4.13
-      '@intlify/shared': 11.4.13
 
   '@intlify/devtools-types@11.4.16':
     dependencies:
@@ -6939,12 +6914,12 @@ snapshots:
 
   '@intlify/shared@11.4.16': {}
 
-  '@intlify/unplugin-vue-i18n@11.2.5(@voidzero-dev/vite-plus-core@0.2.8(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0))(eslint@10.12.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.6.3)(vue-i18n@11.4.13(vue@3.5.44(typescript@5.6.3)))(vue@3.5.44(typescript@5.6.3))':
+  '@intlify/unplugin-vue-i18n@11.2.5(@voidzero-dev/vite-plus-core@0.2.8(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0))(eslint@10.12.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.6.3)(vue-i18n@11.4.16(vue@3.5.44(typescript@5.6.3)))(vue@3.5.44(typescript@5.6.3))':
     dependencies:
       '@eslint-community/eslint-utils': 4.10.1(eslint@10.12.0(jiti@2.7.0)(supports-color@8.1.1))
-      '@intlify/bundle-utils': 11.2.5(vue-i18n@11.4.13(vue@3.5.44(typescript@5.6.3)))
+      '@intlify/bundle-utils': 11.2.5(vue-i18n@11.4.16(vue@3.5.44(typescript@5.6.3)))
       '@intlify/shared': 11.4.13
-      '@intlify/vue-i18n-extensions': 8.0.0(vue-i18n@11.4.13(vue@3.5.44(typescript@5.6.3)))(vue@3.5.44(typescript@5.6.3))
+      '@intlify/vue-i18n-extensions': 8.0.0(vue-i18n@11.4.16(vue@3.5.44(typescript@5.6.3)))(vue@3.5.44(typescript@5.6.3))
       '@rollup/pluginutils': 5.4.0
       '@typescript-eslint/scope-manager': 8.66.0
       '@typescript-eslint/typescript-estree': 8.66.0(supports-color@8.1.1)(typescript@5.6.3)
@@ -6956,21 +6931,21 @@ snapshots:
       vue: 3.5.44(typescript@5.6.3)
     optionalDependencies:
       vite: '@voidzero-dev/vite-plus-core@0.2.8(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@5.6.3)(yaml@2.9.0)'
-      vue-i18n: 11.4.13(vue@3.5.44(typescript@5.6.3))
+      vue-i18n: 11.4.16(vue@3.5.44(typescript@5.6.3))
     transitivePeerDependencies:
       - eslint
       - rollup
       - supports-color
       - typescript
 
-  '@intlify/vue-i18n-extensions@8.0.0(vue-i18n@11.4.13(vue@3.5.44(typescript@5.6.3)))(vue@3.5.44(typescript@5.6.3))':
+  '@intlify/vue-i18n-extensions@8.0.0(vue-i18n@11.4.16(vue@3.5.44(typescript@5.6.3)))(vue@3.5.44(typescript@5.6.3))':
     dependencies:
       '@babel/parser': 7.29.8
       '@intlify/shared': 10.0.8
       '@vue/compiler-dom': 3.5.41
     optionalDependencies:
       vue: 3.5.44(typescript@5.6.3)
-      vue-i18n: 11.4.13(vue@3.5.44(typescript@5.6.3))
+      vue-i18n: 11.4.16(vue@3.5.44(typescript@5.6.3))
 
   '@jest/types@27.0.2':
     dependencies:
@@ -9190,7 +9165,7 @@ snapshots:
 
   axios@1.20.0(debug@4.4.3(supports-color@7.1.0))(supports-color@7.1.0):
     dependencies:
-      follow-redirects: 1.16.0(debug@4.4.3(supports-color@7.1.0))
+      follow-redirects: 1.16.2(debug@4.4.3(supports-color@7.1.0))
       form-data: 4.0.6
       https-proxy-agent: 5.0.1(supports-color@7.1.0)
       proxy-from-env: 2.1.0
@@ -9200,7 +9175,7 @@ snapshots:
 
   axios@1.20.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1):
     dependencies:
-      follow-redirects: 1.16.0(debug@4.4.3(supports-color@8.1.1))
+      follow-redirects: 1.16.2(debug@4.4.3(supports-color@8.1.1))
       form-data: 4.0.6
       https-proxy-agent: 5.0.1(supports-color@8.1.1)
       proxy-from-env: 2.1.0
@@ -9968,11 +9943,11 @@ snapshots:
       '@floating-ui/dom': 1.8.0
       vue: 3.5.44(typescript@5.6.3)
 
-  follow-redirects@1.16.0(debug@4.4.3(supports-color@7.1.0)):
+  follow-redirects@1.16.2(debug@4.4.3(supports-color@7.1.0)):
     optionalDependencies:
       debug: 4.4.3(supports-color@7.1.0)
 
-  follow-redirects@1.16.0(debug@4.4.3(supports-color@8.1.1)):
+  follow-redirects@1.16.2(debug@4.4.3(supports-color@8.1.1)):
     optionalDependencies:
       debug: 4.4.3(supports-color@8.1.1)
 
@@ -12333,14 +12308,6 @@ snapshots:
       semver: 7.8.5
     transitivePeerDependencies:
       - supports-color
-
-  vue-i18n@11.4.13(vue@3.5.44(typescript@5.6.3)):
-    dependencies:
-      '@intlify/core-base': 11.4.13
-      '@intlify/devtools-types': 11.4.13
-      '@intlify/shared': 11.4.13
-      '@vue/devtools-api': 6.5.0
-      vue: 3.5.44(typescript@5.6.3)
 
   vue-i18n@11.4.16(vue@3.5.44(typescript@5.6.3)):
     dependencies:
