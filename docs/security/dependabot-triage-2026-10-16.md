@@ -115,6 +115,8 @@ Dependabot 开启告警：**116 → 8**（-93%）。
 
 **2026-10-29 复核**：依赖大版本升级批次后仍为 **8**（全 rust）；npm 与 go 维持 **0**（`happy-dom` 升至 21.0.4 关闭 GHSA-834v-8h66-3h79）。详见 `handover-2026-10-18.md` §8。
 
+**2026-10-30 复核**：根锁纳入跟踪后 `pnpm audit --prod` 改用固定锁审计，一次性暴露并在当日修复 3 条新 advisory：`vue-i18n`/`@intlify/core-base` **XSS(high)** → 11.4.16、`follow-redirects` **high ×2** → 1.16.2、`zip` **critical** → 9.1.3。现 npm 侧 **0**；rust 仍为 issue #1 的 8 项（allow-list 跟踪）。
+
 
 
 

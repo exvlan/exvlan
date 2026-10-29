@@ -394,7 +394,30 @@ pub(crate) mod tests {
             _tunnel_echo_server(ret, false).await
         });
 
-        let tunnel = c_netns.run_async(|| connector.connect()).await.unwrap();
+        // listener 的就绪与 connect 之间存在竞态（CI 上偶发 Connection refused），
+        // 这里做有限次重试，避免测试抖动误报。
+        let mut last_err = None;
+        let tunnel = {
+            let mut connected = None;
+            for attempt in 1..=20 {
+                match c_netns.run_async(|| connector.connect()).await {
+                    Ok(tunnel) => {
+                        connected = Some(tunnel);
+                        break;
+                    }
+                    Err(err) => {
+                        last_err = Some(err);
+                        if attempt == 1 {
+                            println!("connect attempt {attempt} failed, retrying...");
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                }
+            }
+            connected.unwrap_or_else(|| {
+                panic!("connect failed after retries: {last_err:?}");
+            })
+        };
         println!("connect: {:?}", tunnel.info());
 
         if connector.remote_url().scheme() == "faketcp" {
