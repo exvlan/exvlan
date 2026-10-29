@@ -39,11 +39,6 @@ node_modules
 
 .direnv
 .flake-profile
-# 根 pnpm-lock.yaml **刻意不跟踪**（决策；说明见 docs/security/handover-2026-10-18.md）：
-# 根 workspace 每次由 CI 重新解析，Dependabot/审计门禁另有覆盖。
-# packages/sdk|std 的锁已被跟踪，不受本规则影响。
-pnpm-lock.yaml
-**/**/pnpm-lock.yaml
 flake.lock
 package-lock.json
 **/**/package-lock.json
@@ -58,7 +53,6 @@ release/
 .env.secret
 keys
 archive/
-pnpm-lock.yaml
 .trae/
 target
 .secrets
