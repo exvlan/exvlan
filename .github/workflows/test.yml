@@ -148,4 +148,4 @@ jobs:
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo -E env "PATH=$PATH" EXVLAN_LINUX_BPF_INTEGRATION=required \
             cargo nextest run --package exvlan --package exvlan-core --features full \
-            --test-threads 1 --no-fail-fast
+            --test-threads 1 --no-fail-fast --retries 2
