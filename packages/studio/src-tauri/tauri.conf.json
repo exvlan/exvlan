@@ -12,7 +12,7 @@
     "createUpdaterArtifacts": false
   },
   "productName": "EXVlan Studio",
-  "version": "26.410.20703",
+  "version": "26.410.20704",
   "identifier": "era.exvlan.studio",
   "plugins": {
     "shell": {

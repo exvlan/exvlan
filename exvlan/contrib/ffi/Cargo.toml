@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-ffi"
-version = "26.410.20703"
+version = "26.410.20704"
 edition.workspace = true
 rust-version.workspace = true
 
