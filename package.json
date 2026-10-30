@@ -2,8 +2,8 @@
   "name": "@exvlan/monorepo",
   "private": true,
   "scripts": {
-    "deps:latest": "pnpx taze latest -r --peer -w",
-    "deps:major": "pnpx taze major -wr --peer --exclude typescript",
+    "deps:latest": "pnpx taze latest -r --peer -w -x @tauri-apps/api -x @tauri-apps/cli -x @tauri-apps/plugin-shell -x @tauri-apps/plugin-clipboard-manager -x @tauri-apps/plugin-os -x @tauri-apps/plugin-process",
+    "deps:major": "pnpx taze major -wr --peer --exclude typescript -x @tauri-apps/api -x @tauri-apps/cli -x @tauri-apps/plugin-shell -x @tauri-apps/plugin-clipboard-manager -x @tauri-apps/plugin-os -x @tauri-apps/plugin-process",
     "deps:prune": "bunx depcheck --json | jq -r '(.dependencies + .devDependencies)[]?' | xargs pnpm remove",
     "postinstall": "pnpm --filter=tauri-plugin-vpnservice-api --filter=@exvlan/std build",
     "prepare": "vp config"

@@ -95,6 +95,11 @@ jobs:
 
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
+
+      # Tauri 要求 npm 包与 Rust crate 的 major.minor 一致，不一致时 build 会在耗时构建末端才报错；
+      # 这里提前快速失败并给出可读原因。
+      - name: Check Tauri npm/Rust version alignment
+        run: node script/check_tauri_versions.mjs
         with:
           target: ${{ matrix.TARGET }}
           gui: true
