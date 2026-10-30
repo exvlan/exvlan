@@ -83,39 +83,23 @@ jobs:
 
       # core 二进制由 Build Core 存入 actions/cache（artifact 存储配额已超限，不走上传/下载 artifact）
       - name: Restore core binaries (x86_64)
-        uses: actions/cache/restore@v4
-        with:
-          {
-            key: "core-${{ github.sha }}-linux-x86_64",
-            path: ./artifacts,
-            fail-on-cache-miss: true,
-          }
+        uses: actions/cache/restore@v6
+        with: { key: "core-${{ github.sha }}-linux-x86_64", path: ./artifacts, fail-on-cache-miss: true }
       - run: mkdir -p docker_context/exvlan-linux-x86_64 && mv ./artifacts/* docker_context/exvlan-linux-x86_64/ && rm -rf ./artifacts
 
       - name: Restore core binaries (armhf)
-        uses: actions/cache/restore@v4
-        with:
-          { key: "core-${{ github.sha }}-linux-armhf", path: ./artifacts, fail-on-cache-miss: true }
+        uses: actions/cache/restore@v6
+        with: { key: "core-${{ github.sha }}-linux-armhf", path: ./artifacts, fail-on-cache-miss: true }
       - run: mkdir -p docker_context/exvlan-linux-armhf && mv ./artifacts/* docker_context/exvlan-linux-armhf/ && rm -rf ./artifacts
 
       - name: Restore core binaries (armv7hf)
-        uses: actions/cache/restore@v4
-        with:
-          {
-            key: "core-${{ github.sha }}-linux-armv7hf",
-            path: ./artifacts,
-            fail-on-cache-miss: true,
-          }
+        uses: actions/cache/restore@v6
+        with: { key: "core-${{ github.sha }}-linux-armv7hf", path: ./artifacts, fail-on-cache-miss: true }
       - run: mkdir -p docker_context/exvlan-linux-armv7hf && mv ./artifacts/* docker_context/exvlan-linux-armv7hf/ && rm -rf ./artifacts
 
       - name: Restore core binaries (aarch64)
-        uses: actions/cache/restore@v4
-        with:
-          {
-            key: "core-${{ github.sha }}-linux-aarch64",
-            path: ./artifacts,
-            fail-on-cache-miss: true,
-          }
+        uses: actions/cache/restore@v6
+        with: { key: "core-${{ github.sha }}-linux-aarch64", path: ./artifacts, fail-on-cache-miss: true }
       - run: mkdir -p docker_context/exvlan-linux-aarch64 && mv ./artifacts/* docker_context/exvlan-linux-aarch64/ && rm -rf ./artifacts
 
       - name: List files (Debug)

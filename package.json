@@ -3,14 +3,14 @@
   "private": true,
   "scripts": {
     "deps:latest": "bunx taze latest -r --peer -w",
-    "deps:major": "bunx taze major -r --peer -w",
+    "deps:major": "pnpx taze major -wr --peer --exclude typescript",
     "deps:prune": "bunx depcheck --json | jq -r '(.dependencies + .devDependencies)[]?' | xargs pnpm remove",
     "postinstall": "pnpm --filter=tauri-plugin-vpnservice-api --filter=@exvlan/std build",
     "prepare": "vp config"
   },
   "devDependencies": {
-    "@vue/language-core": "^3.3.9",
-    "minimatch": "^10.2.6",
+    "@vue/language-core": "^3.3.13",
+    "minimatch": "^11.0.3",
     "vite": "catalog:",
     "vite-plus": "catalog:"
   },
