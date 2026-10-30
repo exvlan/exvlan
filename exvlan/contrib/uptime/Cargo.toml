@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-uptime"
-version = "26.410.20704"
+version = "26.410.20705"
 edition.workspace = true
 rust-version.workspace = true
 
