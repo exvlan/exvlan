@@ -19,6 +19,13 @@ minimumReleaseAgeExclude:
   - ast-kit@3.0.0
   - rolldown-plugin-dts@0.26.0
   - tsdown@0.22.3
+  - "@openuxkit/themes@1.2.0"
+  - "@openvue/auto-import-resolver@1.1.0"
+  - "@openvue/core@1.1.0"
+  - "@openvue/icons@1.1.0"
+  - "@openvue/metadata@1.1.0"
+  - "@openvue/themes@1.1.0"
+  - openvue@1.1.0
 overrides:
   "js-yaml@>=4.0.0 <4.3.2": "4.3.2"
   minimatch: ^10.2.6

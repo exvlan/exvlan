@@ -9,7 +9,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@vueuse/core', () => ({ useTimeAgo: () => '' }))
 vi.mock('../src/components/NetworkChart.vue', () => ({ default: defineComponent({ render: () => h('div') }) }))
 
-vi.mock('primevue', () => {
+vi.mock('openvue', () => {
   const PassThrough = defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.()) })
   const Input = defineComponent({
     props: ['modelValue', 'inputId'],

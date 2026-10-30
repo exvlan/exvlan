@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ipv4InetToString, ipv4ToString, ipv6ToString } from '../modules/utils';
 import { latencyMs, lossRate, numericValue, peerConns } from '../modules/statusDisplay';
-import { Badge, DataTable, Column, Tag, Chip, Button, Dialog, Timeline, Divider, Card, } from 'primevue';
+import { Badge, DataTable, Column, Tag, Chip, Button, Dialog, Timeline, Divider, Card, } from 'openvue';
 import NetworkChart from './NetworkChart.vue';
 import VpnPortalDialog from './VpnPortalDialog.vue';
 

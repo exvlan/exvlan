@@ -13,18 +13,17 @@
   "dependencies": {
     "@exvlan/std": "workspace:*",
     "@modyfi/vite-plugin-yaml": "^1.1.1",
-    "@primeuix/themes": "3.1.0",
     "axios": "^1.20.0",
-    "primevue": "5.0.4",
     "tailwindcss-primeui": "^0.6.1",
     "ts-md5": "^2.0.1",
     "uuid": "^11.0.2",
     "vue": "^3.5.42",
     "vue-i18n": "^11.4.16",
-    "vue-router": "^5.2.0"
+    "vue-router": "^5.2.0",
+    "@openvue/themes": "1.1.0",
+    "openvue": "1.1.0"
   },
   "devDependencies": {
-    "@primevue/auto-import-resolver": "4.5.5",
     "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.2.0",
@@ -37,6 +36,7 @@
     "vite": "catalog:",
     "vite-plugin-singlefile": "^2.3.3",
     "vite-plus": "catalog:",
-    "vue-tsc": "^3.3.13"
+    "vue-tsc": "^3.3.13",
+    "@openvue/auto-import-resolver": "1.1.0"
   }
 }

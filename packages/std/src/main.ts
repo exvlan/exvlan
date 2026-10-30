@@ -2,8 +2,8 @@ import './style.css'
 
 import type { App } from 'vue';
 import { Config, Status, ConfigEditDialog, RemoteManagement, UrlListInput } from "./components";
-import Aura from '@primeuix/themes/aura';
-import PrimeVue from 'primevue/config'
+import Aura from '@openvue/themes/aura';
+import PrimeVue from 'openvue/config'
 
 import I18nUtils from './modules/i18n'
 import * as NetworkTypes from './types/network'
@@ -11,7 +11,7 @@ import HumanEvent from './components/HumanEvent.vue';
 
 // do not use primevue tooltip, it has serious memory leak issue
 // https://github.com/primefaces/primevue/issues/5856
-// import Tooltip from 'primevue/tooltip';
+// import Tooltip from 'openvue/tooltip';
 import { vTooltip } from 'floating-vue';
 
 import * as Api from './modules/api';

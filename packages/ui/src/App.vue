@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { I18nUtils } from '@exvlan/std'
 import { onMounted } from 'vue';
-import { Toast, DynamicDialog } from 'primevue';
+import { Toast, DynamicDialog } from 'openvue';
 
 onMounted(async () => {
   await I18nUtils.loadLanguageAsync(localStorage.getItem('lang') || 'en')

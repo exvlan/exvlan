@@ -4,10 +4,10 @@ import './style.css'
 import './console.css'
 import App from './App.vue'
 import ExvlanFrontendLib from '@exvlan/std'
-import PrimeVue from 'primevue/config'
+import PrimeVue from 'openvue/config'
 import ConsoleTheme from './theme';
 import { initThemeMode } from './modules/theme';
-import ConfirmationService from 'primevue/confirmationservice';
+import ConfirmationService from 'openvue/confirmationservice';
 import { I18nUtils } from '@exvlan/std'
 
 import { createRouter, createWebHashHistory } from 'vue-router'
@@ -18,8 +18,8 @@ import DeviceManagement from './components/DeviceManagement.vue'
 import Dashboard from './components/Dashboard.vue'
 import NetworkList from './components/NetworkList.vue'
 import NetworkDetail from './components/NetworkDetail.vue'
-import DialogService from 'primevue/dialogservice';
-import ToastService from 'primevue/toastservice';
+import DialogService from 'openvue/dialogservice';
+import ToastService from 'openvue/toastservice';
 
 const routes = [
     {

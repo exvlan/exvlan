@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Card, InputText, Password, Button } from 'primevue';
+import { Card, InputText, Password, Button } from 'openvue';
 import { useRouter } from 'vue-router';
-import { useToast } from 'primevue/usetoast';
+import { useToast } from 'openvue/usetoast';
 import { I18nUtils } from '@exvlan/std';
 import { getApiBase } from "../modules/api-host"
 import { useI18n } from 'vue-i18n'

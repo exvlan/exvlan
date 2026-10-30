@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { AutoComplete, Button, Dialog, InputNumber, InputText } from 'primevue'
-import InputGroup from 'primevue/inputgroup'
-import InputGroupAddon from 'primevue/inputgroupaddon'
+import { AutoComplete, Button, Dialog, InputNumber, InputText } from 'openvue'
+import InputGroup from 'openvue/inputgroup'
+import InputGroupAddon from 'openvue/inputgroupaddon'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 

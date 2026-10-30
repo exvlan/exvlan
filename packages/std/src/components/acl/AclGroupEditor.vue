@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Column, DataTable, Dialog, InputText, MultiSelect, Password } from 'primevue';
+import { Button, Column, DataTable, Dialog, InputText, MultiSelect, Password } from 'openvue';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { GroupIdentity, GroupInfo, ensureGroupInfo } from '../../types/network';

@@ -49,7 +49,7 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
-vi.mock('primevue', async () => {
+vi.mock('openvue', async () => {
   const { defineComponent, h } = await import('vue')
 
   const PassThrough = defineComponent({

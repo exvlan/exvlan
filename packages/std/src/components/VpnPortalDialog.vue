@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, Dialog, InputNumber, InputText, MultiSelect, Tag } from 'primevue'
+import { Button, Dialog, InputNumber, InputText, MultiSelect, Tag } from 'openvue'
 import QRCode from 'qrcode'
 import { v4 as uuidv4 } from 'uuid'
 import type { RemoteClient } from '../modules/api'

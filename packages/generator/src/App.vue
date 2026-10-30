@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { exec, moduleInfo } from 'kernelsu'
 import { Config, I18nUtils, NetworkTypes } from '@exvlan/std'
-import { Button, SelectButton, Textarea } from 'primevue'
+import { Button, SelectButton, Textarea } from 'openvue'
 import { computed, onMounted, ref, watch } from 'vue'
 import initConfigWasm, {
   generate_config as generateTomlConfig,
