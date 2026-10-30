@@ -11,14 +11,14 @@
   },
   "dependencies": {
     "@exvlan/std": "workspace:*",
-    "kernelsu": "3.0.2",
-    "vue": "^3.5.42",
     "@openvue/themes": "^1.1.0",
-    "openvue": "^1.1.0"
+    "kernelsu": "3.0.2",
+    "openvue": "^1.1.0",
+    "vue": "^3.5.44"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.10",
-    "typescript": "~5.6.3",
+    "typescript": "~6.0.3",
     "vite": "catalog:",
     "vue-tsc": "^3.3.13"
   }
