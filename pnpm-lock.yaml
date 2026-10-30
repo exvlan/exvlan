@@ -367,17 +367,17 @@ importers:
         specifier: ^2.7.0
         version: 2.7.0
       '@tauri-apps/plugin-clipboard-manager':
-        specifier: ~2.5.0
-        version: 2.5.0
+        specifier: 2.4.1
+        version: 2.4.1
       '@tauri-apps/plugin-os':
-        specifier: ~2.4.0
+        specifier: 2.4.0
         version: 2.4.0
       '@tauri-apps/plugin-process':
-        specifier: ~2.4.0
+        specifier: 2.4.0
         version: 2.4.0
       '@tauri-apps/plugin-shell':
-        specifier: ~2.6.0
-        version: 2.6.0
+        specifier: 2.4.1
+        version: 2.4.1
       '@vueuse/core':
         specifier: ^15.0.0
         version: 15.0.0(vue@3.5.44(typescript@6.0.3))
@@ -2054,8 +2054,8 @@ packages:
   '@tauri-apps/plugin-autostart@2.7.0':
     resolution: {integrity: sha512-4uRq+rqKSAh6MWAxgk6FnUPigc8VMG8eDVYTLk3A7OfKs9sLVwfeM8kbUvzjpabRQvyl4zd9tfzXBTrrtuprsA==}
 
-  '@tauri-apps/plugin-clipboard-manager@2.5.0':
-    resolution: {integrity: sha512-dibUy1nKURYDXRMvjNk4deAbTZ5jPQ8wCE4nolt5xniryWgXQ4sK2GkFXoXlHbRdPzfZptZj95BRLfalA7m/2Q==}
+  '@tauri-apps/plugin-clipboard-manager@2.4.1':
+    resolution: {integrity: sha512-5Q9hWWnsE7UF1xABWHpRwqGiyORrP9o/rJift/7V8woP/kSVF21W+bP9G7ch8Qd7pneDWUMk6hkfpLpjcC/4Ag==}
 
   '@tauri-apps/plugin-os@2.4.0':
     resolution: {integrity: sha512-XFQjntNNI3Vlqdy4WUGwiXX8DByzKVvoemAcUVkBm9NJPGmoDtII5i+vfuAzWaJfOE5cUJJLUDqXBnd4reSAIA==}
@@ -2063,8 +2063,8 @@ packages:
   '@tauri-apps/plugin-process@2.4.0':
     resolution: {integrity: sha512-GddrmsSLAYrLa/yTXlXK/YRDzUgYeeOnUXTbiyvJWkmI424RmDPD3FVLeqcon7rv6O6ZfhBilcrHWnSo7o6hIQ==}
 
-  '@tauri-apps/plugin-shell@2.6.0':
-    resolution: {integrity: sha512-z9LZGSr8jfD0FWWJ+CdD99i2FQcmJ26ebNJlYJdrlFdMLcggUS29BYrfS4hJlXO1UAI6A6r084vJUAG5734Y6w==}
+  '@tauri-apps/plugin-shell@2.4.1':
+    resolution: {integrity: sha512-gFRjdGPz7r7u+4Oaky6E0jl/7fFY+Oq2XsHH9pCBxW/u8b4Q/mjWWKpuDaEqVYrlzlocA4tFtq0p26dgvvBheg==}
 
   '@testing-library/dom@10.4.2':
     resolution: {integrity: sha512-yzr2S9HyAIdhz2/6qHgbs665Q7PKVcDF05vsOlHPxG1mo36gKVesdYVeDLnXgfjJ03CrKRk08knc6+E/9m8v2Q==}
@@ -6384,7 +6384,7 @@ snapshots:
     dependencies:
       '@tauri-apps/api': 2.12.4
 
-  '@tauri-apps/plugin-clipboard-manager@2.5.0':
+  '@tauri-apps/plugin-clipboard-manager@2.4.1':
     dependencies:
       '@tauri-apps/api': 2.12.4
 
@@ -6396,7 +6396,7 @@ snapshots:
     dependencies:
       '@tauri-apps/api': 2.12.4
 
-  '@tauri-apps/plugin-shell@2.6.0':
+  '@tauri-apps/plugin-shell@2.4.1':
     dependencies:
       '@tauri-apps/api': 2.12.4
 
