@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button } from 'primevue'
+import { Button } from 'openvue'
 import UrlInput from './UrlInput.vue'
 
 const props = defineProps<{

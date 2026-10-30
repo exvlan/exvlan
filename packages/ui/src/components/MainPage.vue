@@ -17,9 +17,9 @@ const cycleThemeMode = () => {
 
 import { I18nUtils } from '@exvlan/std'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button, Drawer, Menu, OverlayBadge, Popover, TieredMenu, useToast } from 'primevue';
+import { Button, Drawer, Menu, OverlayBadge, Popover, TieredMenu, useToast } from 'openvue';
 import { useRoute, useRouter } from 'vue-router';
-import { useDialog } from 'primevue/usedialog';
+import { useDialog } from 'openvue/usedialog';
 import ChangePassword from './ChangePassword.vue';
 import Icon from '../assets/exvlan.png'
 import { useI18n } from 'vue-i18n'

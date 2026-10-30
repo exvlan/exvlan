@@ -1,8 +1,8 @@
 import { createApp } from 'vue'
-import Aura from '@primeuix/themes/aura'
+import Aura from '@openvue/themes/aura'
 import ExvlanFrontendLib from '@exvlan/std'
 import '@exvlan/std/style.css'
-import PrimeVue from 'primevue/config'
+import PrimeVue from 'openvue/config'
 import App from './App.vue'
 
 createApp(App)

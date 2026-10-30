@@ -2,7 +2,7 @@
 import { useI18n } from 'vue-i18n';
 import { EventType } from '../types/network'
 import { computed } from 'vue';
-import { Fieldset } from 'primevue';
+import { Fieldset } from 'openvue';
 
 const props = defineProps<{
   event: {

@@ -7,7 +7,7 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-shell'
 import { exit } from '@tauri-apps/plugin-process'
 import { I18nUtils, RemoteManagement, Utils } from "@exvlan/std"
-import type { MenuItem } from 'primevue/menuitem'
+import type { MenuItem } from 'openvue/menuitem'
 import { useTray } from '~/composables/tray'
 import {
   consumePendingMobileVpnTileAction,
@@ -18,7 +18,7 @@ import {
 import { executeVpnTileAction } from '~/composables/mobile_vpn_tile'
 import { GUIRemoteClient } from '~/modules/api'
 
-import { useToast, useConfirm } from 'primevue'
+import { useToast, useConfirm } from 'openvue'
 import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mode'
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'

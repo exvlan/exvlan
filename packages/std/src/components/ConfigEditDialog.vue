@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue';
 import { NetworkConfig } from '../types/network';
-import { Divider, Button, Dialog, Textarea } from 'primevue'
+import { Divider, Button, Dialog, Textarea } from 'openvue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()

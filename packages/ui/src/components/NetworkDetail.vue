@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { v4 as uuidv4 } from 'uuid';
-import { Button, Column, ConfirmDialog, DataTable, Dialog, Drawer, ToggleSwitch, InputText, Message, ProgressSpinner, ScrollPanel, Select, SelectButton, Skeleton, Tab, TabList, TabPanel, TabPanels, Tabs, Tag, useConfirm, useToast } from 'primevue';
+import { Button, Column, ConfirmDialog, DataTable, Dialog, Drawer, ToggleSwitch, InputText, Message, ProgressSpinner, ScrollPanel, Select, SelectButton, Skeleton, Tab, TabList, TabPanel, TabPanels, Tabs, Tag, useConfirm, useToast } from 'openvue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { Config, NetworkTypes, UrlListInput, Utils } from '@exvlan/std';

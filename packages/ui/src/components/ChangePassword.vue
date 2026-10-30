@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, inject, ref } from 'vue';
-import { Card, Password, Button } from 'primevue';
+import { Card, Password, Button } from 'openvue';
 import ApiClient from '../modules/api';
 
 const dialogRef = inject<any>('dialogRef');

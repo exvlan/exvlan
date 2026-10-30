@@ -1,6 +1,6 @@
 import Kit, { I18nUtils } from '@exvlan/std'
 
-import { ConfirmationService, DialogService, ToastService } from 'primevue'
+import { ConfirmationService, DialogService, ToastService } from 'openvue'
 import { createRouter, createWebHistory } from 'vue-router'
 import { routes } from 'vue-router/auto-routes'
 

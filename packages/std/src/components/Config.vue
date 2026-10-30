@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { v4 as uuidv4 } from 'uuid'
-import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, ToggleSwitch, InputText, MultiSelect, Panel, Password, SelectButton, ToggleButton } from 'primevue'
-import InputGroup from 'primevue/inputgroup'
-import InputGroupAddon from 'primevue/inputgroupaddon'
+import { AutoComplete, Button, Checkbox, Dialog, Divider, InputNumber, ToggleSwitch, InputText, MultiSelect, Panel, Password, SelectButton, ToggleButton } from 'openvue'
+import InputGroup from 'openvue/inputgroup'
+import InputGroupAddon from 'openvue/inputgroupaddon'
 import {
   addRow,
   DEFAULT_NETWORK_CONFIG,

@@ -1,5 +1,5 @@
-import { definePreset } from '@primeuix/themes';
-import Aura from '@primeuix/themes/aura';
+import { definePreset } from '@openvue/themes';
+import Aura from '@openvue/themes/aura';
 
 const surface = {
     0: '#ffffff', 50: '#f7f8f9', 100: '#f0f2f4', 200: '#e3e6e9',
@@ -18,7 +18,7 @@ export default definePreset(Aura, {
         colorScheme: {
             light: {
                 surface,
-                primary: { color: '{primary.700}', contrastColor: '#ffffff', hoverColor: '{primary.800}', activeColor: '{primary.900}' },
+                primary: { color: '{primary.700}', inverseColor: '#ffffff', hoverColor: '{primary.800}', activeColor: '{primary.900}' },
                 highlight: { background: '{primary.50}', focusBackground: '{primary.100}', color: '{primary.700}', focusColor: '{primary.800}' },
             },
             dark: { surface },

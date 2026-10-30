@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { Button, Column, DataTable, Dialog, ToggleSwitch, InputText, Message, Skeleton, Tag, useToast } from 'primevue';
+import { Button, Column, DataTable, Dialog, ToggleSwitch, InputText, Message, Skeleton, Tag, useToast } from 'openvue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { UrlListInput, Utils } from '@exvlan/std';

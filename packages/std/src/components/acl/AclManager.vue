@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Menu, Tab, TabList, TabPanel, TabPanels, Tabs } from 'primevue'
+import { Button, Menu, Tab, TabList, TabPanel, TabPanels, Tabs } from 'openvue'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Acl, AclAction, AclChainType, ensureAclV1 } from '../../types/network'

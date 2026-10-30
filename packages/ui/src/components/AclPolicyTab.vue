@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { v4 as uuidv4 } from 'uuid';
-import { Button, Drawer, InputNumber, InputText, ToggleSwitch, Message, MultiSelect, Select, SelectButton, useToast } from 'primevue';
+import { Button, Drawer, InputNumber, InputText, ToggleSwitch, Message, MultiSelect, Select, SelectButton, useToast } from 'openvue';
 import { useI18n } from 'vue-i18n';
 import ApiClient, { type AclPolicy, type AclPolicyRule, type AclProtocolTarget, type AclSelector, type CentralNetworkMember } from '../modules/api';
 

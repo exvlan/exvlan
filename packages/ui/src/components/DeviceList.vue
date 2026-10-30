@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button, Checkbox, Column, DataTable, Dialog, Drawer, InputText, SelectButton, Skeleton, useToast } from 'primevue';
-import Tooltip from 'primevue/tooltip';
+import { Button, Checkbox, Column, DataTable, Dialog, Drawer, InputText, SelectButton, Skeleton, useToast } from 'openvue';
+import Tooltip from 'openvue/tooltip';
 import { useRoute, useRouter } from 'vue-router';
 import { Utils } from '@exvlan/std';
 import DeviceDetails from './DeviceDetails.vue';

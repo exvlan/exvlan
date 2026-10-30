@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AutoComplete, Button, Checkbox, Dialog, InputNumber, InputText, MultiSelect, Panel, SelectButton, ToggleButton } from 'primevue';
+import { AutoComplete, Button, Checkbox, Dialog, InputNumber, InputText, MultiSelect, Panel, SelectButton, ToggleButton } from 'openvue';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { AclAction, AclProtocol, AclRule, ensureAclRuleLists } from '../../types/network';

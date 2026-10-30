@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Column, DataTable, Divider, InputText, Select, SelectButton, ToggleButton } from 'primevue'
+import { Button, Column, DataTable, Divider, InputText, Select, SelectButton, ToggleButton } from 'openvue'
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AclAction, AclChain, AclChainType, AclProtocol, AclRule, ensureAclChain, ensureAclRuleLists } from '../../types/network'
