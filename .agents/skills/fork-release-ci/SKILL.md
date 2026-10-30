@@ -118,6 +118,14 @@ git push origin refs/tags/vX --force
 3. 涉及 Tauri 插件变动时，核对 npm 与 `Cargo.lock` 的 major.minor 一致。
 4. 先把 develop 跑绿，再 push tag（同 sha 去重）。
 
+### UI 库：PrimeVue 5 的许可与样式陷阱（已迁 OpenVue）
+
+- **许可变更**：PrimeVue 4.5.5 是 **MIT**；**5.x 改为 PrimeUI License**（`@primevue/core` 会 `verifyLicense('primeui')`；未在 `app.use(PrimeVue, { license })` 传密钥时 `console.warn` 并**在页面显示横幅**）。社区版密钥免费但需申请。
+- **样式体系重置**：5.x 的 `@primeuix/themes` 3.x 与 4.x 预设结构/token 不同（`inverseColor → contrastColor` 等），按 4.x 写的 preset 会大面积失效。
+- **退路 = OpenVue**（`openvue`，MIT，PrimeVue 4.5.5 的社区延续，API 同 4.x）：迁移即改名 `primevue→openvue`、`@primeuix/themes→@openvue/themes`、`@primevue/auto-import-resolver→@openvue/auto-import-resolver`，`contrastColor→inverseColor` 改回；**测试里的 `vi.mock('primevue')` 必须同步改名**，否则 mock 失效、真实组件挂载报错（`No PrimeVue Toast provided` / 空 DOMWrapper）。
+- **库 `external` 必须同步**：`packages/std` 作为组件库，`vite.config.ts` 的 `external`/`globals` 要包含整棵引擎（`openvue`/`@openvue/*`/`@openuxkit/*`）。漏配会把第二份引擎打进库 → 消费端出现两份引擎单例 → **组件 token（`--p-button-*`）缺失、样式全裸**。
+- **registry**：镜像（npmmirror）同步滞后会缺版本（如 `@openvue/core@1.1.0`）→ 项目 `.npmrc` 固定**官方 registry**。
+
 ## 清理失败运行
 
 ```bash

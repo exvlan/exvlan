@@ -29,7 +29,7 @@ on:
       image_tag:
         description: "Tag for this image build"
         type: string
-        default: "v26.410.20704"
+        default: "v26.410.20705"
         required: true
       mark_latest:
         description: "Mark this image as latest"
@@ -147,7 +147,7 @@ jobs:
           fi
 
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            # tag 推送追加版本标签（如 v26.410.20704）
+            # tag 推送追加版本标签（如 v26.410.20705）
             TAGS="${TAGS},${BASE_IMAGE}:${{ github.ref_name }}"
           fi
 
