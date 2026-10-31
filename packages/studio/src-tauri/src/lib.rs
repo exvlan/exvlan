@@ -5,6 +5,13 @@ mod elevate;
 mod kernel;
 
 use anyhow::Context;
+use exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
+use exvlan_core::config::toml::{ConfigLoader, ConfigSource, TomlConfigLoader};
+use exvlan_core::management::config_source_to_rpc;
+use exvlan_core::management::remote_client::{
+    GetNetworkMetasResponse, ListNetworkInstanceIdsJsonResp, ListNetworkProps, RemoteClientManager,
+    Storage,
+};
 use exvlan_proto::api::config::{
     ConfigPatchAction, ConfigRpc, ConfigRpcClientFactory, VpnPortalClientPatch,
 };
@@ -17,19 +24,14 @@ use exvlan_proto::api::manage::{
     WebClientServiceClientFactory,
 };
 use exvlan_proto::rpc_types::controller::BaseController;
-use exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
-use exvlan_core::config::toml::{ConfigLoader, ConfigSource, TomlConfigLoader};
-use exvlan_core::management::config_source_to_rpc;
-use exvlan_core::management::remote_client::{
-    GetNetworkMetasResponse, ListNetworkInstanceIdsJsonResp, ListNetworkProps, RemoteClientManager,
-    Storage,
-};
 
 // 移动端仍以内核库形式在同进程内跑实例（VPN Service 插件）。
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan::common::log;
-#[cfg(any(target_os = "android", target_os = "ios"))]
 use exvlan::common::config::{FileLoggerConfig, LoggingConfig};
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use exvlan::common::log;
+#[cfg(target_os = "android")]
+use exvlan::instance::factory::subscribe_native_instance_event;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use exvlan::instance::factory::{NativeInstanceManager, native_instance_manager};
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -45,8 +47,6 @@ use exvlan_core::{
     connectivity::protocol::raw::TunnelDialer as _, process_runtime::CoreProcessRuntime,
     socket::SocketListener, tunnel::Tunnel,
 };
-#[cfg(target_os = "android")]
-use exvlan::instance::factory::subscribe_native_instance_event;
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use std::ops::Deref;
@@ -809,16 +809,16 @@ mod manager {
     use super::*;
     use async_trait::async_trait;
     use dashmap::{DashMap, DashSet};
-    use exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
-    use exvlan_proto::api::logger::{LoggerRpc, LoggerRpcClientFactory, SetLoggerConfigRequest};
-    use exvlan_proto::api::manage::RunNetworkInstanceRequest;
-    use exvlan_core::rpc::bidirect::BidirectRpcManager;
-    use exvlan_proto::rpc_types::controller::BaseController;
     #[cfg(any(target_os = "android", target_os = "ios"))]
     use exvlan::web_client::WebClientHooks;
-    use exvlan_core::management::remote_client::PersistentConfig;
+    use exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     use exvlan_core::connectivity::protocol::raw::TunnelDialer as _;
+    use exvlan_core::management::remote_client::PersistentConfig;
+    use exvlan_core::rpc::bidirect::BidirectRpcManager;
+    use exvlan_proto::api::logger::{LoggerRpc, LoggerRpcClientFactory, SetLoggerConfigRequest};
+    use exvlan_proto::api::manage::RunNetworkInstanceRequest;
+    use exvlan_proto::rpc_types::controller::BaseController;
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
     pub(super) struct GuiHooks {
@@ -1497,7 +1497,11 @@ mod service {
     /// 服务定义指纹（程序 + 参数）。用于判断「是否需要重装」，避免每次启动都提权。
     pub fn fingerprint(opts: &ServiceOptions) -> String {
         let mut parts = vec![crate::kernel::kernel_path().display().to_string()];
-        parts.extend(opts.to_args_vec().iter().map(|a| a.to_string_lossy().to_string()));
+        parts.extend(
+            opts.to_args_vec()
+                .iter()
+                .map(|a| a.to_string_lossy().to_string()),
+        );
         parts.join("\u{0}")
     }
 
@@ -1518,14 +1522,12 @@ mod service {
     }
 
     pub fn install(opts: ServiceOptions) -> anyhow::Result<()> {
-        let service = exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let service =
+            exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
         // 服务执行的是内核仓库中的二进制（root-owned），而不是 app 内的 GUI 二进制。
         let program = crate::kernel::kernel_path();
         if !program.is_file() {
-            anyhow::bail!(
-                "内核未安装（{}），请先安装内核",
-                program.display()
-            );
+            anyhow::bail!("内核未安装（{}），请先安装内核", program.display());
         }
         let options = exvlan_rpc::service_manager::ServiceInstallOptions {
             program,
@@ -1545,7 +1547,8 @@ mod service {
     }
 
     pub fn uninstall() -> anyhow::Result<()> {
-        let service = exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let service =
+            exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
         service.uninstall()?;
         Ok(())
     }
@@ -1565,7 +1568,8 @@ mod service {
     }
 
     pub fn status() -> anyhow::Result<exvlan_rpc::service_manager::ServiceStatus> {
-        let service = exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let service =
+            exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
         service.status()
     }
 
@@ -1598,7 +1602,10 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
             let version = args.get(2).cloned().unwrap_or_default();
             match kernel::install_kernel(std::path::Path::new(&src), &version) {
                 Ok(()) => {
-                    eprintln!("[kernel] 已安装 {version} → {}", kernel::kernel_path().display());
+                    eprintln!(
+                        "[kernel] 已安装 {version} → {}",
+                        kernel::kernel_path().display()
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(err) => {
@@ -1659,11 +1666,7 @@ async fn ensure_kernel_service(
         let src = kernel::bundled_kernel(&app)
             .ok_or_else(|| "未找到随包内核资源（resources/kernel/），无法安装内核".to_string())?;
         let version = env!("CARGO_PKG_VERSION");
-        run_elevated(&[
-            "--install-kernel",
-            &src.display().to_string(),
-            version,
-        ])?;
+        run_elevated(&["--install-kernel", &src.display().to_string(), version])?;
     }
 
     if !service::is_current(&opts) {
@@ -1806,5 +1809,3 @@ pub fn run_gui() -> std::process::ExitCode {
 
     std::process::ExitCode::SUCCESS
 }
-
-

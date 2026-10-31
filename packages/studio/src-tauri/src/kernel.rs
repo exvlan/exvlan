@@ -17,7 +17,11 @@ use anyhow::{Context as _, bail};
 
 /// 内核可执行文件名。
 pub fn kernel_bin_name() -> &'static str {
-    if cfg!(windows) { "exvlan.exe" } else { "exvlan" }
+    if cfg!(windows) {
+        "exvlan.exe"
+    } else {
+        "exvlan"
+    }
 }
 
 /// 内核仓库目录（需 root 写入）。
@@ -61,9 +65,9 @@ pub fn installed_version() -> Option<String> {
     let out = Command::new(kernel_path()).arg("--version").output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     // 形如 "exvlan 26.410.20706-..."，取第二段。
-    text.split_whitespace().nth(1).map(|s| {
-        s.split('-').next().unwrap_or(s).to_string()
-    })
+    text.split_whitespace()
+        .nth(1)
+        .map(|s| s.split('-').next().unwrap_or(s).to_string())
 }
 
 /// 把 `src` 安装为当前内核。**需要 root**（由提权子命令调用）。
@@ -76,12 +80,10 @@ pub fn install_kernel(src: &Path, version: &str) -> anyhow::Result<()> {
     }
 
     let dir = kernel_dir();
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("无法创建内核目录 {}", dir.display()))?;
+    std::fs::create_dir_all(&dir).with_context(|| format!("无法创建内核目录 {}", dir.display()))?;
 
     let staged = dir.join(format!("{}.new", kernel_bin_name()));
-    std::fs::copy(src, &staged)
-        .with_context(|| format!("复制内核到 {} 失败", staged.display()))?;
+    std::fs::copy(src, &staged).with_context(|| format!("复制内核到 {} 失败", staged.display()))?;
 
     #[cfg(unix)]
     {
@@ -93,7 +95,12 @@ pub fn install_kernel(src: &Path, version: &str) -> anyhow::Result<()> {
     let output = Command::new(&staged)
         .arg("--version")
         .output()
-        .with_context(|| format!("预演执行 {} 失败（可能架构不匹配或未签名）", staged.display()))?;
+        .with_context(|| {
+            format!(
+                "预演执行 {} 失败（可能架构不匹配或未签名）",
+                staged.display()
+            )
+        })?;
     if !output.status.success() {
         let _ = std::fs::remove_file(&staged);
         bail!(

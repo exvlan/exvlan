@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use service_manager::ServiceManager as _;
 
-
 #[derive(Debug)]
 pub struct ServiceInstallOptions {
     pub program: PathBuf,
