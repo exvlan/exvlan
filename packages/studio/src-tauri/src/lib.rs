@@ -794,17 +794,6 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
     }
 }
 
-fn get_exe_path() -> String {
-    if let Ok(appimage_path) = std::env::var("APPIMAGE")
-        && !appimage_path.is_empty()
-    {
-        return appimage_path;
-    }
-    std::env::current_exe()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default()
-}
-
 mod manager {
     use super::*;
     use async_trait::async_trait;
@@ -1088,7 +1077,7 @@ mod manager {
     impl GUIClientManager {
         pub async fn new(
             rpc_url: Option<String>,
-            local_process_runtime: LocalProcessRuntime,
+            _local_process_runtime: LocalProcessRuntime,
         ) -> Result<Self, anyhow::Error> {
             let tunnel = if let Some(url) = rpc_url {
                 exvlan_rpc::rpc::runtime_rpc_dialer(url.parse()?)
@@ -1097,13 +1086,12 @@ mod manager {
             } else {
                 #[cfg(any(target_os = "android", target_os = "ios"))]
                 {
-                    local_process_runtime
+                    _local_process_runtime
                         .context("local RPC requires a core process runtime")?
                         .connect_ring_tunnel(*RPC_RING_UUID.deref())?
                 }
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 {
-                    let _ = local_process_runtime;
                     anyhow::bail!("desktop 端必须提供 rpc url（本地内核守护进程）")
                 }
             };
@@ -1257,6 +1245,7 @@ mod manager {
             Ok(())
         }
 
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         pub(super) async fn post_remote_remove_network_instances_hook(
             &self,
             app: &AppHandle,
