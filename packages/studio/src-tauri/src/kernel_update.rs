@@ -153,10 +153,7 @@ fn pick_entry<'a>(manifest: &'a Manifest, version: &str) -> Option<&'a VersionEn
 }
 
 /// 检查更新：返回最新版本与完整版本列表。
-pub async fn check_update(
-    base: &str,
-    studio_version: &str,
-) -> anyhow::Result<UpdateInfo> {
+pub async fn check_update(base: &str, studio_version: &str) -> anyhow::Result<UpdateInfo> {
     let manifest = fetch_manifest(base).await?;
     let platform = platform_key();
     let current = super::kernel::installed_version();
@@ -202,8 +199,8 @@ pub async fn install_version(
     let manifest = fetch_manifest(&base).await?;
     let platform = platform_key();
 
-    let entry = pick_entry(&manifest, version)
-        .with_context(|| format!("manifest 中没有版本 {version}"))?;
+    let entry =
+        pick_entry(&manifest, version).with_context(|| format!("manifest 中没有版本 {version}"))?;
     if entry.rpc_schema != 0 && entry.rpc_schema > 1 {
         bail!(
             "内核 {version} 的 RPC 契约版本为 {}，当前 GUI 不支持（请先升级客户端）",
@@ -249,12 +246,8 @@ pub async fn install_version(
     let binary = tmp.path().join(&asset.entry);
     extract_entry(&archive, &asset.entry, &binary)?;
 
-    super::run_elevated(&[
-        "--install-kernel",
-        &binary.display().to_string(),
-        version,
-    ])
-    .map_err(|e| anyhow::anyhow!(e))?;
+    super::run_elevated(&["--install-kernel", &binary.display().to_string(), version])
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     // 重启服务让新内核生效（失败不视为安装失败，UI 会提示需要手动重启）。
     let _ = super::run_elevated(&["--service-ctl", "stop"]);
@@ -314,7 +307,9 @@ mod tests {
     #[test]
     fn platform_key_matches_manifest_convention() {
         let key = platform_key();
-        assert!(key.starts_with("macos-") || key.starts_with("windows-") || key.starts_with("linux-"));
+        assert!(
+            key.starts_with("macos-") || key.starts_with("windows-") || key.starts_with("linux-")
+        );
         assert!(key.ends_with("x86_64") || key.ends_with("aarch64") || key.ends_with("arm"));
     }
 
@@ -328,8 +323,14 @@ mod tests {
 
     #[test]
     fn base_url_normalization() {
-        assert_eq!(normalize_base("https://a.example/core"), "https://a.example/core/");
-        assert_eq!(normalize_base("https://a.example/core/"), "https://a.example/core/");
+        assert_eq!(
+            normalize_base("https://a.example/core"),
+            "https://a.example/core/"
+        );
+        assert_eq!(
+            normalize_base("https://a.example/core/"),
+            "https://a.example/core/"
+        );
         assert_eq!(normalize_base(""), DEFAULT_BASE_URL);
         assert!(normalize_base("  ").ends_with('/'));
     }

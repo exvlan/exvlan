@@ -1691,10 +1691,7 @@ async fn kernel_update_info(source: Option<String>) -> Result<kernel_update::Upd
 /// 安装指定内核版本（下载 → 校验 → 提权写入系统目录 → 重启服务）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
-async fn kernel_install_version(
-    version: String,
-    source: Option<String>,
-) -> Result<(), String> {
+async fn kernel_install_version(version: String, source: Option<String>) -> Result<(), String> {
     let base = source.unwrap_or_else(kernel_update::base_url_override);
     kernel_update::install_version(&base, &version, env!("CARGO_PKG_VERSION"))
         .await
