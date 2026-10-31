@@ -22,7 +22,8 @@ import { useToast, useConfirm } from 'openvue'
 import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mode'
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
-import { getExvlanVersion, getServiceStatus } from '~/composables/backend'
+import { ensureKernelService, getExvlanVersion, getServiceStatus } from '~/composables/backend'
+import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
 
 const { t, locale } = useI18n()
 const confirm = useConfirm()
@@ -223,6 +224,25 @@ async function initWithMode(mode: Mode) {
   clientRunning.value = await isClientRunning()
 }
 
+/** 桌面端启动闭环：确保内核已安装、服务定义与当前配置一致（一致时不提权）。 */
+async function ensureLocalKernel(mode: Mode) {
+  const platform = type()
+  if (platform === 'android' || platform === 'ios')
+    return
+  if (mode.mode === 'remote')
+    return
+
+  const serviceMode = mode.mode === 'service' ? mode : undefined
+  const opts = {
+    config_dir: serviceMode?.config_dir || await join(await appConfigDir(), 'config.d'),
+    rpc_portal: serviceMode?.rpc_portal || '127.0.0.1:15999',
+    file_log_level: serviceMode?.file_log_level || 'info',
+    file_log_dir: serviceMode?.file_log_dir || await appLogDir(),
+    config_server: (mode as { config_server_url?: string }).config_server_url,
+  }
+  await ensureKernelService(opts)
+}
+
 onMounted(async () => {
   const cleanupFns: Array<() => void> = []
 
@@ -236,6 +256,15 @@ onMounted(async () => {
 
   cleanupFns.push(await listenGlobalEvents())
   currentMode.value = loadMode()
+
+  // 首次安装/升级后会自动装好内核并（重新）注册系统服务；失败不阻塞进入界面。
+  try {
+    await ensureLocalKernel(currentMode.value)
+  } catch (e: any) {
+    console.error("ensure kernel/service failed", e)
+    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 10000 })
+  }
+
   await initWithMode(currentMode.value);
 
   if (type() === 'android') {

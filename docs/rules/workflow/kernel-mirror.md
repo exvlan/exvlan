@@ -28,6 +28,9 @@ GitHub Release（private，CI 产出）
 
 只镜像 GUI 真正用到的 6 个平台；其余平台仍随 Release 提供，但不进镜像。
 
+镜像端的 `manifest.json` 会**合并最近 KEEP 个 release** 的 `versions[]`，
+因此 GUI 能拿到历史版本列表（用于回滚）。每个 Release 自带的 manifest 只含它自己的版本。
+
 ## manifest 契约
 
 ```jsonc
@@ -69,6 +72,7 @@ sudo chmod 640 /etc/exvlan-kernel-mirror/env
 sudo chown root:exvlan-mirror /etc/exvlan-kernel-mirror/env
 
 sudo install -m 755 script/kernel-mirror/exvlan-kernel-sync.sh /usr/local/bin/exvlan-kernel-sync
+sudo install -m 755 script/kernel-mirror/merge_manifests.py /usr/local/bin/merge_manifests.py
 sudo install -m 644 script/kernel-mirror/exvlan-kernel-mirror.service /etc/systemd/system/
 sudo install -m 644 script/kernel-mirror/exvlan-kernel-mirror.timer   /etc/systemd/system/
 sudo systemctl daemon-reload

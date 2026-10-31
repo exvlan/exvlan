@@ -138,6 +138,16 @@ export async function initService(opts?: ServiceOptions) {
   return await invoke('init_service', { opts })
 }
 
+/**
+ * 确保「内核已安装 + 服务定义与当前配置一致」。
+ *
+ * - 指纹一致时后端直接返回 `current`，**不会**弹系统授权框；
+ * - 仅在首次安装/配置变化时提权一次。
+ */
+export async function ensureKernelService(opts: ServiceOptions) {
+  return await invoke<'installed' | 'current'>('ensure_kernel_service', { opts })
+}
+
 export async function setServiceStatus(enable: boolean) {
   return await invoke('set_service_status', { enable })
 }

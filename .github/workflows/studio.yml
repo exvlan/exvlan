@@ -113,6 +113,25 @@ jobs:
           shared-key: "exvlan-shared"
           cache-targets: true
 
+      # 内核二进制来自 core 产物（不再由 GUI 编译），放进 bundle resources。
+      - name: Fetch kernel from core artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: core-${{ matrix.ARTIFACT_NAME }}
+          path: ./core-artifacts
+
+      - name: Stage kernel into bundle resources
+        run: |
+          set -euo pipefail
+          mkdir -p packages/studio/src-tauri/resources/kernel
+          if [[ "$GUI_TARGET" =~ windows ]]; then
+            cp ./core-artifacts/exvlan.exe packages/studio/src-tauri/resources/kernel/
+          else
+            cp ./core-artifacts/exvlan packages/studio/src-tauri/resources/kernel/
+          fi
+          chmod +x packages/studio/src-tauri/resources/kernel/exvlan || true
+          ls -l packages/studio/src-tauri/resources/kernel/
+
       - name: copy correct DLLs (Windows)
         if: ${{ contains(matrix.GUI_TARGET, 'windows') }}
         run: |

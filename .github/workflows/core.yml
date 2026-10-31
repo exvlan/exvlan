@@ -244,6 +244,21 @@ jobs:
           mv ./artifacts/objects/* ./artifacts/
           rm -rf ./artifacts/objects/
 
+      # 内核元数据：供 release.yml 汇总为 manifest.json，也便于镜像端校验。
+      - name: Emit kernel metadata
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -m1 '^version = ' exvlan/exvlan/Cargo.toml | cut -d'"' -f2)"
+          ENTRY=exvlan
+          if [[ "${{ matrix.ARTIFACT_NAME }}" == windows-* ]]; then ENTRY=exvlan.exe; fi
+          python3 - "$VERSION" "${{ matrix.ARTIFACT_NAME }}" "$ENTRY" <<'PY'
+          import json, sys
+          version, platform, entry = sys.argv[1:4]
+          with open("artifacts/kernel.json", "w", encoding="utf-8") as f:
+              json.dump({"version": version, "platform": platform, "entry": entry}, f)
+          print(f"[kernel] {platform} v{version} entry={entry}")
+          PY
+
       - name: Cache core binaries
         uses: actions/cache/save@v6
         with:

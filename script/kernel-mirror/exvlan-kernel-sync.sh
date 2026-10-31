@@ -67,14 +67,16 @@ if [ -z "$(find "$stage" -maxdepth 1 -name '*.zip' -print -quit)" ]; then
 fi
 mv -f "$stage"/*.zip "$DEST/"
 
-# manifest 取版本号最高的那份（其 versions[] 覆盖历史版本）
-manifest="$(find "$work" -type f -name 'manifest.json' | sort -V | tail -n1)"
-if [ -z "$manifest" ]; then
+# 合并所有已下载版本的 manifest（保证 GUI 能看到历史版本，便于回滚）
+manifests="$(find "$work" -type f -name 'manifest.json' | tr '\n' ':')"
+if [ -z "$manifests" ]; then
   echo "[sync] 未找到 manifest.json，保持旧清单并退出" >&2
   rm -rf "$stage"
   exit 1
 fi
-mv -f "$manifest" "$DEST/manifest.json"
+
+python3 "$(dirname "$0")/merge_manifests.py" "$manifests" "$stage/manifest.json"
+mv -f "$stage/manifest.json" "$DEST/manifest.json"
 rm -rf "$stage"
 
 # 4) 清理：只保留 manifest 引用到的 zip，再按 KEEP 兜底
