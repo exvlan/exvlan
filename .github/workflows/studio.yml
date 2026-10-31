@@ -154,6 +154,24 @@ jobs:
           projectPath: ./packages/studio
           args: --verbose --target ${{ matrix.GUI_TARGET }}
 
+      # 断言内核确实被打进产物（不是只看 staging 目录）。
+      - name: Verify kernel bundled
+        run: |
+          set -euo pipefail
+          if [[ "$GUI_TARGET" =~ darwin ]]; then
+            hits=$(find "target/$GUI_TARGET/release/bundle/macos" -path '*Contents/Resources*' -name 'exvlan' 2>/dev/null | wc -l)
+          elif [[ "$GUI_TARGET" =~ windows ]]; then
+            hits=$(find "target/$GUI_TARGET/release" -maxdepth 3 -name 'exvlan.exe' 2>/dev/null | wc -l)
+          else
+            hits=$(find "target/$GUI_TARGET/release/bundle" -name 'exvlan' 2>/dev/null | wc -l)
+          fi
+          echo "bundled kernel occurrences: $hits"
+          if [ "$hits" -lt 1 ]; then
+            echo "::error::内核未打进安装包（resources/kernel 未生效）"
+            find "target/$GUI_TARGET/release" -maxdepth 4 -name 'exvlan*' 2>/dev/null | head -20 || true
+            exit 1
+          fi
+
       - name: Collect artifact
         run: |
           mkdir -p ./artifacts/
