@@ -178,11 +178,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          latest=$(gh api repos/EasyTier/EasyTier/releases/latest --jq .tag_name)
-          synced=$(gh api "repos/$GITHUB_REPOSITORY/tags?per_page=100" --paginate --jq '.[].name' \
-            | grep -E '^v2\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
-          echo "upstream=$latest synced=${synced:-none}"
-          if [ -z "${synced:-}" ]; then echo "no synced upstream tag, skip"; exit 0; fi
+          # 不能用 releases/latest：该端点只返回非 prerelease。上游 EasyTier 的稳定 channel
+          # 长期停在 v2.6.4，实际迭代都发在 prerelease（v2.7.0 / nightly），用 latest 会永远漏报。
+          # 这里取全部 release（排除 draft 与 nightly 这类滚动 tag），按语义版本取最大。
+          latest=$(gh api "repos/EasyTier/EasyTier/releases?per_page=100" --paginate \
+            --jq '.[] | select(.draft == false) | .tag_name' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -uV | tail -n1 || true)
+          # 已同步版本以仓库内唯一事实源为准（不再依赖 fork 上的 v2.* tag：
+          # 上游 tag 未推送到本仓，之前 `synced` 恒为空 → 该 watch 实际从未生效）。
+          synced=$(grep -E '^version:' docs/rules/workflow/upstream-path-map.yaml 2>/dev/null \
+            | head -n1 | awk '{print $2}' | tr -d '"' || true)
+          echo "upstream=${latest:-none} synced=${synced:-none}"
+          if [ -z "${latest:-}" ]; then echo "no upstream release tag, skip"; exit 0; fi
+          if [ -z "${synced:-}" ]; then echo "no synced version in upstream-path-map.yaml, skip"; exit 0; fi
           newest=$(printf '%s\n%s\n' "$synced" "$latest" | sort -V | tail -n1)
           if [ "$newest" = "$latest" ] && [ "$latest" != "$synced" ]; then
             existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json title \
