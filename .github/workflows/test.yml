@@ -98,10 +98,18 @@ jobs:
       - name: Check Cargo.lock is up to date
         if: ${{ !cancelled() }}
         run: |
-          if ! cargo metadata --format-version 1 --locked > /dev/null; then
-            echo "::error::Cargo.lock is out of date. Run cargo generate-lockfile or cargo build locally, then commit Cargo.lock."
-            exit 1
-          fi
+          set -uo pipefail
+          # 保留 stderr：registry 瞬时不可用时能看到真实原因（历史上有过 stderr 为空却 exit 1 的情况）。
+          for i in 1 2 3; do
+            if cargo metadata --format-version 1 --locked > /dev/null; then
+              echo "Cargo.lock OK"
+              exit 0
+            fi
+            echo "::warning::cargo metadata --locked 失败（第 ${i} 次），10s 后重试"
+            sleep 10
+          done
+          echo "::error::Cargo.lock is out of date（或 registry 不可用）。本地执行 cargo generate-lockfile 后提交 Cargo.lock。"
+          exit 1
 
   test:
     name: Test
