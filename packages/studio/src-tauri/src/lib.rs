@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod elevate;
+mod kernel;
 
 use anyhow::Context;
 use exvlan_proto::api::config::{
@@ -113,7 +114,11 @@ macro_rules! get_client_manager {
 
 #[tauri::command]
 fn exvlan_version() -> Result<String, String> {
-    // 桌面端的内核是独立进程：版本以运行中的内核为准（PR3 起从 RPC 查询）。
+    // 桌面端的内核是独立进程：以已安装的内核版本为准，未安装时回退到 GUI 版本。
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if let Some(version) = kernel::installed_version() {
+        return Ok(version);
+    }
     Ok(env!("CARGO_PKG_VERSION").to_string())
 }
 
@@ -442,9 +447,18 @@ fn init_service(opts: Option<service::ServiceOptions>) -> Result<(), String> {
                 return Err("file_log_dir exists but is not a directory".to_string());
             }
 
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                let payload = serde_json::to_string(&args).map_err(|e| e.to_string())?;
+                run_elevated(&["--install-service", &payload])?;
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             service::install(args).map_err(|e| format!("{:#}", e))?;
         }
         None => {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            run_elevated(&["--uninstall-service"])?;
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             service::uninstall().map_err(|e| format!("{:#}", e))?;
         }
     }
@@ -453,7 +467,11 @@ fn init_service(opts: Option<service::ServiceOptions>) -> Result<(), String> {
 
 #[tauri::command]
 fn set_service_status(_enable: bool) -> Result<(), String> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        run_elevated(&["--service-ctl", if _enable { "start" } else { "stop" }])?;
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         service::set_status(_enable).map_err(|e| format!("{:#}", e))?;
     }
@@ -1374,7 +1392,7 @@ mod manager {
     #[cfg(test)]
     mod tests {
         use super::{PersistedConfigSource, StoredGuiConfig};
-        use exvlan::proto::api::manage::NetworkConfig;
+        use exvlan_proto::api::manage::NetworkConfig;
 
         #[test]
         fn stored_gui_config_defaults_missing_source_to_legacy() {
@@ -1476,10 +1494,41 @@ mod service {
         None
     }
 
+    /// 服务定义指纹（程序 + 参数）。用于判断「是否需要重装」，避免每次启动都提权。
+    pub fn fingerprint(opts: &ServiceOptions) -> String {
+        let mut parts = vec![crate::kernel::kernel_path().display().to_string()];
+        parts.extend(opts.to_args_vec().iter().map(|a| a.to_string_lossy().to_string()));
+        parts.join("\u{0}")
+    }
+
+    fn marker_path() -> std::path::PathBuf {
+        crate::kernel::kernel_dir().join("service.fingerprint")
+    }
+
+    /// 当前已安装的服务是否与本配置一致（不需要 root：marker 可读）。
+    pub fn is_current(opts: &ServiceOptions) -> bool {
+        std::fs::read_to_string(marker_path())
+            .map(|s| s == fingerprint(opts))
+            .unwrap_or(false)
+    }
+
+    fn write_marker(opts: &ServiceOptions) -> anyhow::Result<()> {
+        std::fs::write(marker_path(), fingerprint(opts))
+            .map_err(|e| anyhow::anyhow!("写入服务指纹失败: {e}"))
+    }
+
     pub fn install(opts: ServiceOptions) -> anyhow::Result<()> {
         let service = exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        // 服务执行的是内核仓库中的二进制（root-owned），而不是 app 内的 GUI 二进制。
+        let program = crate::kernel::kernel_path();
+        if !program.is_file() {
+            anyhow::bail!(
+                "内核未安装（{}），请先安装内核",
+                program.display()
+            );
+        }
         let options = exvlan_rpc::service_manager::ServiceInstallOptions {
-            program: super::get_exe_path().into(),
+            program,
             args: opts.to_args_vec(),
             work_directory: std::env::current_dir()?,
             environment: service_environment(),
@@ -1491,6 +1540,7 @@ mod service {
         service
             .install(&options)
             .with_context(|| "Failed to install service")?;
+        write_marker(&opts)?;
         Ok(())
     }
 
@@ -1532,6 +1582,124 @@ mod service {
             #[cfg(not(target_os = "macos"))]
             assert_eq!(super::service_environment(), None);
         }
+    }
+}
+
+/// 提权子命令入口（由 `main.rs` 在解析到内部参数时调用）。
+///
+/// 这些命令只会在通过 `elevate::Command` 以 root 拉起时执行；普通用户直接运行
+/// 同名参数没有任何跳过校验的捷径（写内核目录本身就要 root）。
+pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
+    use std::process::ExitCode;
+
+    let code = match args.first().map(|s| s.as_str()) {
+        Some("--install-kernel") => {
+            let src = args.get(1).cloned().unwrap_or_default();
+            let version = args.get(2).cloned().unwrap_or_default();
+            match kernel::install_kernel(std::path::Path::new(&src), &version) {
+                Ok(()) => {
+                    eprintln!("[kernel] 已安装 {version} → {}", kernel::kernel_path().display());
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    eprintln!("[kernel] 安装失败: {err:#}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("--install-service") => {
+            let payload = args.get(1).cloned().unwrap_or_default();
+            match serde_json::from_str::<service::ServiceOptions>(&payload) {
+                Ok(opts) => match service::install(opts) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(err) => {
+                        eprintln!("[service] 安装失败: {err:#}");
+                        ExitCode::FAILURE
+                    }
+                },
+                Err(err) => {
+                    eprintln!("[service] 参数解析失败: {err:#}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("--uninstall-service") => match service::uninstall() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("[service] 卸载失败: {err:#}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("--service-ctl") => {
+            let enable = args.get(1).map(|s| s.as_str()) == Some("start");
+            match service::set_status(enable) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("[service] 启停失败: {err:#}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        _ => return None,
+    };
+    Some(code)
+}
+
+/// 确保「内核已安装 + 服务定义与当前配置一致」。
+///
+/// 返回值：`"installed"`（本次新装/重装）或 `"current"`（无需动作）。
+/// 需要提权时只会弹一次系统授权框；指纹一致时**不会**提权。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn ensure_kernel_service(
+    app: AppHandle,
+    opts: service::ServiceOptions,
+) -> Result<String, String> {
+    if !kernel::is_installed() {
+        let src = kernel::bundled_kernel(&app)
+            .ok_or_else(|| "未找到随包内核资源（resources/kernel/），无法安装内核".to_string())?;
+        let version = env!("CARGO_PKG_VERSION");
+        run_elevated(&[
+            "--install-kernel",
+            &src.display().to_string(),
+            version,
+        ])?;
+    }
+
+    if !service::is_current(&opts) {
+        let payload = serde_json::to_string(&opts).map_err(|e| e.to_string())?;
+        run_elevated(&["--install-service", &payload])?;
+        return Ok("installed".to_string());
+    }
+
+    Ok("current".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn ensure_kernel_service(
+    _app: AppHandle,
+    _opts: serde_json::Value,
+) -> Result<String, String> {
+    Ok("current".to_string())
+}
+
+/// 以 root 重新拉起自身执行内部子命令（桌面端）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn run_elevated(args: &[&str]) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("无法定位自身可执行文件: {e}"))?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args);
+    let output = elevate::Command::new(cmd)
+        .output()
+        .map_err(|e| format!("提权执行失败: {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "提权命令执行失败（exit={}），可能是用户取消了授权",
+            output.status
+        ))
     }
 }
 
@@ -1613,6 +1781,7 @@ pub fn run_gui() -> std::process::ExitCode {
             load_configs,
             get_network_metas,
             init_service,
+            ensure_kernel_service,
             set_service_status,
             get_service_status,
             init_rpc_connection,
