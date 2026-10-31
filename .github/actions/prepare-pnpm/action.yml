@@ -21,8 +21,24 @@ runs:
         cache: false
         rustflags: ''
 
-    # wasm-pack 只被 packages/generator 使用（Windows 构建不需要）；
-    # 顺带规避 windows runner 上 install-action 的 bash 启动抖动（partner-runner-images#169）。
+    # Windows 上 install-action 偶发 bash 启动失败（actions/partner-runner-images#169），
+    # 这里直接拉官方预编译包，绕开该动作。
+    - name: Install wasm-pack (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $ver = '0.13.1'
+        $name = "wasm-pack-v$ver-x86_64-pc-windows-msvc"
+        $url = "https://github.com/rustwasm/wasm-pack/releases/download/v$ver/$name.tar.gz"
+        $dest = Join-Path $env:RUNNER_TEMP 'wasm-pack'
+        New-Item -ItemType Directory -Force -Path $dest | Out-Null
+        $archive = Join-Path $dest 'wasm-pack.tar.gz'
+        Invoke-WebRequest -Uri $url -OutFile $archive
+        tar -xzf $archive -C $dest
+        Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $dest $name)
+        & (Join-Path $dest "$name\wasm-pack.exe") --version
+
     - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
       if: runner.os != 'Windows'
       with:
