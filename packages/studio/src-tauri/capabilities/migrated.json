@@ -1,8 +1,12 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
+  "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "migrated",
-  "description": "permissions that were migrated from v1",
+  "description": "permissions that were migrated from v1（移动端）",
   "local": true,
+  "platforms": [
+    "android",
+    "iOS"
+  ],
   "windows": [
     "main"
   ],

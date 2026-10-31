@@ -3158,6 +3158,8 @@ dependencies = [
  "dashmap",
  "exvlan",
  "exvlan-core",
+ "exvlan-proto",
+ "exvlan-rpc",
  "libc",
  "once_cell",
  "security-framework-sys",
