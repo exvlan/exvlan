@@ -68,6 +68,43 @@ git push origin refs/tags/vX --force
 
 ⚠️ **Go module tag 例外**：`exvlan/go/<ver>` 经 module proxy/sumdb 缓存后**不可变**，不要为对齐而移动；如需与 release tag 同提交，应在**首次发布前**就对齐。
 
+## 内核产物与 GUI 分离（v26.410.20706 起）
+
+GUI 不再静态链接内核，改为「随包内核 + 独立守护进程 + 在线升级」。
+
+### 发布链路
+
+```
+core.yml   构建后写 artifacts/kernel.json {version, platform, entry}
+           → 上传 core-<platform> artifact
+studio.yml download-artifact 拉 core-<platform>
+           → cp exvlan[.exe] 到 packages/studio/src-tauri/resources/kernel/
+           → tauri 打包（bundle.resources 已含 resources/kernel/*）
+release.yml 汇总 core-*/kernel.json + 计算 <platform>-<ver>.zip 的 sha256
+           → zipped_assets/manifest.json（缺文件直接发版失败）
+```
+
+**发版前自检**：`release.yml` 的 `Generate kernel manifest` 会校验每个 manifest 引用的 zip 是否存在；若 core 某平台失败则该步直接红，不会产出残缺 manifest。
+
+### 客户端消费
+
+- 端点：`https://dl.exvlan.era-x.cn/core/manifest.json`（可配置，`EXVLAN_KERNEL_BASE_URL` 优先）
+- `sha256` 针对 **zip 本体**；解压后取 `assets[platform].entry` 安装
+- 镜像侧由 `script/kernel-mirror/` 同步（合并最近 KEEP 版 `versions[]`，供回滚）
+- 落盘：macOS `/Library/Application Support/exvlan/core/exvlan`；Windows `C:\ProgramData\exvlan\core\exvlan.exe`；Linux `/opt/exvlan/core/exvlan`
+
+### 升级/回滚
+
+- 升级 = 下载 → sha256 → 解包 → 提权 `--install-kernel`（预演 `--version` 校验 + 原子替换）→ 重启服务
+- **不保留 `exvlan.prev`**；回滚靠 manifest 历史版本**重新下载**
+- `min_studio_version` 不满足则拒绝升级；`rpc_schema` 不兼容同样拒绝
+
+### 坑
+
+- **不要在子 crate 里替别的 crate 决定 feature**（`exvlan-rpc` 曾写死 `exvlan-core/management`，经 feature 统一污染内核的 `cargo hack --each-feature` 构建）。
+- 内核以 root 运行，二进制必须放 root-owned 目录；**绝不能**放在用户可写路径。
+- 移动端（Android/iOS）内核随包编译，**不支持**运行时下载（iOS 商店禁止；两端一致不做热更新）。
+
 ## 包发布
 
 - **npm → GitHub Packages**：`setup-node` 设 `registry-url: https://npm.pkg.github.com` + `scope: '@<owner>'`；各包 `publishConfig.registry=https://npm.pkg.github.com`（不依赖环境 `.npmrc`）；`pnpm -r publish --access public`；`NODE_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }}`。
