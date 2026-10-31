@@ -161,9 +161,22 @@ jobs:
           if [[ "$GUI_TARGET" =~ darwin ]]; then
             hits=$(find "target/$GUI_TARGET/release/bundle/macos" -path '*Contents/Resources*' -name 'exvlan' 2>/dev/null | wc -l)
           elif [[ "$GUI_TARGET" =~ windows ]]; then
-            hits=$(find "target/$GUI_TARGET/release" -maxdepth 3 -name 'exvlan.exe' 2>/dev/null | wc -l)
+            # Windows 上资源落在 release/resources/... 层级不固定，这里递归找（排除构建中间产物）
+            hits=$(find "target/$GUI_TARGET/release" -name 'exvlan.exe' \
+              -not -path '*/build/*' -not -path '*/deps/*' -not -path '*/.fingerprint/*' 2>/dev/null | wc -l)
           else
             hits=$(find "target/$GUI_TARGET/release/bundle" -name 'exvlan' 2>/dev/null | wc -l)
+          fi
+
+          # Windows 上 Tauri 把资源打进 MSI/NSIS，输出目录不一定留副本 →
+          # 直接列安装包内容兜底（runner 自带 7-Zip）。
+          if [ "$hits" -lt 1 ] && [[ "$GUI_TARGET" =~ windows ]]; then
+            msi=$(find "target/$GUI_TARGET/release/bundle" -name '*.msi' 2>/dev/null | head -1)
+            if [ -n "$msi" ]; then
+              echo "fallback: listing $msi"
+              hits=$(7z l "$msi" 2>/dev/null | grep -ci 'exvlan\.exe' || true)
+              echo "msi kernel entries: $hits"
+            fi
           fi
           echo "bundled kernel occurrences: $hits"
           if [ "$hits" -lt 1 ]; then
