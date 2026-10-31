@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use service_manager::ServiceManager as _;
 
-use crate::common::log;
 
 #[derive(Debug)]
 pub struct ServiceInstallOptions {
@@ -75,7 +74,7 @@ impl Service {
 
         let kind = service_manager::ServiceManagerKind::native()?;
 
-        log::info!("service manager kind: {:?}", kind);
+        tracing::info!("service manager kind: {:?}", kind);
 
         Ok(Self {
             label: name.parse()?,
@@ -101,7 +100,7 @@ impl Service {
             self.service_manager
                 .update(ctx)
                 .map_err(|e| anyhow::anyhow!("failed to update service: {:?}", e))?;
-            log::info!("Service updated successfully! Service Name: {}", self.label);
+            tracing::info!("Service updated successfully! Service Name: {}", self.label);
             return Ok(());
         }
 
@@ -109,7 +108,7 @@ impl Service {
             .install(ctx)
             .map_err(|e| anyhow::anyhow!("failed to install service: {:?}", e))?;
 
-        log::info!(
+        tracing::info!(
             "Service installed successfully! Service Name: {}",
             self.label
         );
@@ -355,7 +354,8 @@ mod win_service_manager {
 
     use winreg::{RegKey, enums::*};
 
-    use crate::common::constants::WIN_SERVICE_WORK_DIR_REG_KEY;
+    /// 服务工作目录的注册表位置（与内核侧保持一致）。
+    const WIN_SERVICE_WORK_DIR_REG_KEY: &str = "SOFTWARE\\Exvlan\\Service\\WorkDir";
 
     use serde::{Deserialize, Serialize};
 

@@ -2835,6 +2835,7 @@ dependencies = [
  "encoding",
  "exvlan-core",
  "exvlan-proto",
+ "exvlan-rpc",
  "flume 0.12.0",
  "forwarded-header-value",
  "futures",
@@ -3123,6 +3124,19 @@ dependencies = [
  "uuid",
  "x25519-dalek 2.0.1",
  "zip",
+]
+
+[[package]]
+name = "exvlan-rpc"
+version = "26.410.20705"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "service-manager",
+ "tracing",
+ "windows-service",
+ "winreg",
 ]
 
 [[package]]

@@ -1,0 +1,25 @@
+[package]
+name = "exvlan-rpc"
+description = "EXVlan GUI 侧轻量依赖：RPC/服务管理，不含内核运行时"
+homepage = "https://github.com/exvlan/exvlan"
+repository = "https://github.com/exvlan/exvlan"
+version = "26.410.20705"
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../exvlan/LICENSE"
+readme = "../exvlan/README.md"
+
+[dependencies]
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tracing.workspace = true
+service-manager = { git = "https://github.com/EasyTier/service-manager-rs.git", rev = "5eb28f7a686858eea4f4933534ed989d3b71dc2a" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.56"
+windows-service = "0.8.1"
+
+[features]
+# 与内核 crate 同名 feature：macOS Network Extension 变体不走 launchd system 服务。
+macos-ne = []

@@ -37,6 +37,7 @@ harness = false
 [dependencies]
 exvlan-core.workspace = true
 exvlan-proto = { workspace = true, features = ["api", "core"] }
+exvlan-rpc.workspace = true
 git-version = "0.3.9"
 
 tracing.workspace = true

@@ -4,6 +4,7 @@ members = [
   "exvlan/exvlan",
   "exvlan/core",
   "exvlan/proto",
+  "exvlan/rpc",
   "exvlan/api",
   "packages/studio/src-tauri",
   "exvlan/contrib/ffi",
@@ -40,6 +41,7 @@ exvlan = { version = "26.410.20705", path = "exvlan/exvlan", default-features = 
 exvlan-core = { version = "26.410.20705", path = "exvlan/core", default-features = false }
 exvlan-ffi = { version = "26.410.20705", path = "exvlan/contrib/ffi", default-features = false }
 exvlan-proto = { version = "26.410.20705", path = "exvlan/proto", default-features = false }
+exvlan-rpc = { version = "26.410.20705", path = "exvlan/rpc", default-features = false }
 futures = "0.3"
 gethostname = "1.1"
 guarden = "0.3"

@@ -56,6 +56,7 @@ git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
 ## 版本对齐范围
 
 - 标准版本 `YY.QMM.Mmpp` 覆盖：根 `Cargo.toml`/各 crate、`packages/{studio,std,ui,generator}/package.json`、`tauri.conf.json`、magisk 清单、README 等。
+- **新增 crate 一并纳入**：`exvlan/rpc`（GUI 侧轻量依赖层）同时出现在 workspace `members`、`workspace.dependencies` 与自身 `package.version`，发版时三处都要改。
 - **`packages/sdk/**` 一并纳入**（sdk 为嵌套独立 workspace）：需同时改各子包 `version` 与内部 `workspace:<v>` specifier，并重生成 `packages/sdk/pnpm-lock.yaml`；否则 specifier 不匹配、`ERR_PNPM_OUTDATED_LOCKFILE`。
 
 ## 技能索引（`.agents/skills/`）
