@@ -25,6 +25,10 @@ serde_json.workspace = true
 exvlan-core = { workspace = true, default-features = false, features = ["management"] }
 exvlan-proto = { workspace = true, features = ["api", "core"] }
 exvlan-rpc = { workspace = true, features = ["logging", "management"] }
+reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
+sha2 = "0.10"
+tempfile.workspace = true
+zip = "9.1.3"
 tokio = { workspace = true, default-features = true, features = ["full"] }
 anyhow.workspace = true
 

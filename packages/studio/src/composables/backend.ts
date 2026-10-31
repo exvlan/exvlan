@@ -152,6 +152,23 @@ export async function setServiceStatus(enable: boolean) {
   return await invoke('set_service_status', { enable })
 }
 
+export interface KernelUpdateInfo {
+  platform: string
+  current?: string
+  latest?: string
+  available: boolean
+  versions: string[]
+  source: string
+}
+
+export async function kernelUpdateInfo(source?: string) {
+  return await invoke<KernelUpdateInfo>('kernel_update_info', { source })
+}
+
+export async function kernelInstallVersion(version: string, source?: string) {
+  return await invoke('kernel_install_version', { version, source })
+}
+
 export async function getServiceStatus() {
   return await invoke<ServiceStatus>('get_service_status')
 }

@@ -22,6 +22,7 @@ import { useToast, useConfirm } from 'openvue'
 import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mode'
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
+import KernelManager from '~/components/KernelManager.vue'
 import { ensureKernelService, getExvlanVersion, getServiceStatus } from '~/composables/backend'
 import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
 
@@ -546,6 +547,7 @@ const configServerConnectionStatus = computed(() => {
         {{ t('mode.autostart_hint') }}
       </Message>
       <ModeSwitcher v-model="editingMode" @uninstall-service="onUninstallService" @stop-service="onStopService" />
+      <KernelManager v-if="type() !== 'android' && type() !== 'ios'" class="mt-4" />
       <template #footer>
         <Button :label="t('web.common.cancel')" icon="pi pi-times" @click="modeDialogVisible = false" text />
         <Button :label="t('web.common.save')" icon="pi pi-save" @click="onModeSave" autofocus :loading="isModeSaving" />
