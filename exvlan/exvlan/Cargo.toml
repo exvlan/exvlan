@@ -372,9 +372,9 @@ jemalloc-prof = [
   "jemalloc-sys/profiling",
   "jemalloc-sys/stats",
 ]
-tracing = ["tokio/tracing", "dep:console-subscriber", "dep:tracing-subscriber"]
+tracing = ["tokio/tracing", "dep:console-subscriber", "dep:tracing-subscriber", "exvlan-rpc/tracing"]
 tracing-log = ["tracing/log", "exvlan-core/tracing-log"]
-logging = []
+logging = ["exvlan-rpc/logging", "exvlan-rpc/management"]
 dns-resolver = ["dep:hickory-proto", "dep:hickory-resolver"]
 magic-dns = [
   "dep:derive_builder",

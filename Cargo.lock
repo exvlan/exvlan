@@ -3131,10 +3131,20 @@ name = "exvlan-rpc"
 version = "26.410.20705"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "chrono",
+ "console-subscriber",
+ "exvlan-core",
+ "log",
+ "parking_lot",
+ "paste",
  "serde",
  "serde_json",
  "service-manager",
+ "tokio",
  "tracing",
+ "tracing-subscriber",
+ "url",
  "windows-service",
  "winreg",
 ]

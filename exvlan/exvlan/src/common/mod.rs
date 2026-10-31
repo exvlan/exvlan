@@ -9,7 +9,7 @@ pub mod error;
 pub mod global_ctx;
 pub mod ifcfg;
 #[cfg(feature = "logging")]
-pub mod log;
+pub use exvlan_rpc::log;
 pub mod machine_id;
 pub mod netns;
 pub mod network;
@@ -17,7 +17,7 @@ pub mod network;
 pub mod os_info;
 pub mod stun;
 #[cfg(feature = "management")]
-pub mod tracing_rolling_appender;
+pub use exvlan_rpc::tracing_rolling_appender;
 #[cfg(feature = "upnp")]
 pub mod upnp;
 

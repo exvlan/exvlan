@@ -7,6 +7,14 @@
 //! tun / smoltcp / quinn / websocket 等内核运行时依赖。
 //!
 //! 目前包含：
-//! - [`service_manager`]：系统服务（launchd / systemd / Windows SCM）的安装、启停与查询。
+//! - [`service_manager`]：系统服务（launchd / systemd / Windows SCM）的安装、启停与查询；
+//! - [`rpc`]：桌面端 RPC 拨号（最小 host runtime，不依赖内核 crate）；
+//! - [`log`]：日志初始化（控制台 + 滚动文件），内核与 GUI 共用同一实现。
 
+#[cfg(feature = "logging")]
+pub mod log;
+#[cfg(feature = "logging")]
+pub mod tracing_rolling_appender;
+
+pub mod rpc;
 pub mod service_manager;
