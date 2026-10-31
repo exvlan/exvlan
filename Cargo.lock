@@ -2835,6 +2835,7 @@ dependencies = [
  "encoding",
  "exvlan-core",
  "exvlan-proto",
+ "exvlan-rpc",
  "flume 0.12.0",
  "forwarded-header-value",
  "futures",
@@ -3126,6 +3127,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "exvlan-rpc"
+version = "26.410.20705"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "console-subscriber",
+ "exvlan-core",
+ "log",
+ "parking_lot",
+ "paste",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "service-manager",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "windows-service",
+ "winreg",
+]
+
+[[package]]
 name = "exvlan-studio"
 version = "26.410.20705"
 dependencies = [
@@ -3134,11 +3160,15 @@ dependencies = [
  "dashmap",
  "exvlan",
  "exvlan-core",
+ "exvlan-proto",
+ "exvlan-rpc",
  "libc",
  "once_cell",
+ "reqwest 0.13.5",
  "security-framework-sys",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
@@ -3147,12 +3177,14 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-single-instance",
  "tauri-plugin-vpnservice",
+ "tempfile",
  "thunk-rs",
  "tokio",
  "url",
  "uuid",
  "winapi",
  "windows 0.62.2",
+ "zip",
 ]
 
 [[package]]

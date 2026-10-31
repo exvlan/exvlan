@@ -38,6 +38,7 @@ macro_rules! __log__ {
     (@impl $_:tt, $target:expr, $($lvl:ident),+) => {
         paste! {
             $(
+                #[macro_export]
                 macro_rules! [< __ $lvl __ >] {
                     (category: $cat:expr, $_ ($arg:tt)+) => {
                         tracing::$lvl!(target: concat!($target, "::", $cat), $_ ($arg)+)
@@ -48,7 +49,7 @@ macro_rules! __log__ {
                 }
 
                 #[allow(unused_imports)]
-                pub(crate) use [< __ $lvl __ >] as $lvl;
+                pub use [< __ $lvl __ >] as $lvl;
             )+
         }
     };
@@ -425,7 +426,7 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "management")]
-    use crate::common::config::FileLoggerConfig;
+    use exvlan_core::config::toml::FileLoggerConfig;
 
     struct EnvVarGuard {
         previous: Option<std::ffi::OsString>,

@@ -24,9 +24,28 @@ j="$(gh release view "$TAG" -R "$REPO" --json isDraft,isPrerelease,assets,body 2
 echo "--- 资产 ---"
 echo "$j" | jq -r '.assets[].name' | sed 's/^/  /'
 n=$(echo "$j" | jq '.assets|length'); echo "  资产数=$n"
-for pat in 'windows-x86_64' 'macos-x86_64' 'linux-x86_64' '\.msi' '\.dmg' '\.apk' 'Magisk'; do
+for pat in 'windows-x86_64' 'macos-x86_64' 'linux-x86_64' '\.msi' '\.dmg' '\.apk' 'Magisk' '^manifest\.json$'; do
   echo "$j" | jq -r '.assets[].name' | grep -qiE "$pat" && ok "含 $pat" || bad "缺 $pat"
 done
+
+# manifest.json：内核分发清单（GUI 在线升级用）
+if echo "$j" | jq -r '.assets[].name' | grep -qx 'manifest.json'; then
+  tmp="$(mktemp -d)"
+  if gh release download "$TAG" -R "$REPO" -p 'manifest.json' -D "$tmp" >/dev/null 2>&1; then
+    ver="$(jq -r '.versions[0].version // empty' "$tmp/manifest.json" 2>/dev/null)"
+    latest="$(jq -r '.latest // empty' "$tmp/manifest.json" 2>/dev/null)"
+    echo "  manifest: latest=$latest versions=$(jq -r '.versions|length' "$tmp/manifest.json" 2>/dev/null)"
+    # manifest 里引用的每个 file 必须在本 Release 资产中
+    miss=0
+    for f in $(jq -r '.versions[].assets[].file' "$tmp/manifest.json" 2>/dev/null | sort -u); do
+      echo "$j" | jq -r '.assets[].name' | grep -qx "$f" || { bad "manifest 引用了不存在的资产: $f"; miss=1; }
+    done
+    [ "$miss" = "0" ] && ok "manifest 引用完整（${ver:-unknown}）"
+  else
+    bad "无法下载 manifest.json"
+  fi
+  rm -rf "$tmp"
+fi
 
 if [ -n "$FORBID" ]; then
   echo "$j" | jq -r .body | grep -qiE "$FORBID" && bad "正文含禁用字样: $FORBID" || ok "正文无 '$FORBID'"

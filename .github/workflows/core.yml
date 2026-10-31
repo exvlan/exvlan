@@ -244,6 +244,21 @@ jobs:
           mv ./artifacts/objects/* ./artifacts/
           rm -rf ./artifacts/objects/
 
+      # 内核元数据：供 release.yml 汇总为 manifest.json，也便于镜像端校验。
+      - name: Emit kernel metadata
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -m1 '^version = ' exvlan/exvlan/Cargo.toml | cut -d'"' -f2)"
+          ENTRY=exvlan
+          if [[ "${{ matrix.ARTIFACT_NAME }}" == windows-* ]]; then ENTRY=exvlan.exe; fi
+          python3 - "$VERSION" "${{ matrix.ARTIFACT_NAME }}" "$ENTRY" <<'PY'
+          import json, sys
+          version, platform, entry = sys.argv[1:4]
+          with open("artifacts/kernel.json", "w", encoding="utf-8") as f:
+              json.dump({"version": version, "platform": platform, "entry": entry}, f)
+          print(f"[kernel] {platform} v{version} entry={entry}")
+          PY
+
       - name: Cache core binaries
         uses: actions/cache/save@v6
         with:
@@ -259,7 +274,8 @@ jobs:
           retention-days: 14
 
       - name: Prepare SignPath test artifact
-        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
+        # 缺 SignPath API token 时跳过，避免 workflow_dispatch 验证被签名步骤卡红
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') && secrets.SIGNPATH_API_TOKEN != '' }}
         run: |
           mkdir -p ./signpath-artifacts
           cp \
@@ -270,7 +286,8 @@ jobs:
             ./signpath-artifacts/
 
       - name: Upload unsigned SignPath test artifact
-        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
+        # 缺 SignPath API token 时跳过，避免 workflow_dispatch 验证被签名步骤卡红
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') && secrets.SIGNPATH_API_TOKEN != '' }}
         id: signpath-upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -279,7 +296,8 @@ jobs:
           if-no-files-found: error
 
       - name: Submit SignPath test-signing request
-        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
+        # 缺 SignPath API token 时跳过，避免 workflow_dispatch 验证被签名步骤卡红
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') && secrets.SIGNPATH_API_TOKEN != '' }}
         uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -292,7 +310,8 @@ jobs:
           output-artifact-directory: ./signpath-signed-artifacts
 
       - name: Upload signed SignPath test artifact
-        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') }}
+        # 缺 SignPath API token 时跳过，避免 workflow_dispatch 验证被签名步骤卡红
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.TARGET, 'windows') && secrets.SIGNPATH_API_TOKEN != '' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: signpath-signed-${{ matrix.ARTIFACT_NAME }}

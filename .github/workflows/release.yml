@@ -89,6 +89,57 @@ jobs:
           echo "=== zipped_assets ==="
           ls -lR zipped_assets
 
+      # 汇总各平台内核元数据 + 计算内核包 sha256，产出 manifest.json。
+      # 客户端据此判断版本、校验完整性（sha256 针对下载到的 zip 本体）。
+      - name: Generate kernel manifest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, sys
+
+          version = os.environ["VERSION"]
+          # 内核 RPC 契约版本；不兼容变更时才 +1
+          RPC_SCHEMA = 1
+          # GUI 最低版本基线（新架构首发版本）；不要求升级内核时同步升 GUI
+          MIN_STUDIO = "26.410.20706"
+
+          assets = {}
+          for meta_path in sorted(pathlib.Path("release_assets").glob("core-*/kernel.json")):
+              meta = json.loads(meta_path.read_text(encoding="utf-8"))
+              platform = meta["platform"]
+              zip_path = pathlib.Path("zipped_assets") / f"{platform}-{version}.zip"
+              if not zip_path.is_file():
+                  sys.exit(f"[manifest] 缺少内核包 {zip_path}")
+              digest = hashlib.sha256()
+              with zip_path.open("rb") as fh:
+                  for chunk in iter(lambda: fh.read(1 << 20), b""):
+                      digest.update(chunk)
+              assets[platform] = {
+                  "file": zip_path.name,
+                  "sha256": digest.hexdigest(),
+                  "entry": meta["entry"],
+              }
+
+          if not assets:
+              sys.exit("[manifest] 未找到任何内核产物（core-*/kernel.json）")
+
+          manifest = {
+              "schema": 1,
+              "latest": version,
+              "versions": [{
+                  "version": version,
+                  "rpc_schema": RPC_SCHEMA,
+                  "min_studio_version": MIN_STUDIO,
+                  "assets": assets,
+              }],
+          }
+          out = pathlib.Path("zipped_assets/manifest.json")
+          out.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+          print(f"[manifest] {len(assets)} 个平台已写入 {out}")
+          PY
+
       - name: Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:

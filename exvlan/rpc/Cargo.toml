@@ -1,0 +1,48 @@
+[package]
+name = "exvlan-rpc"
+description = "EXVlan GUI 侧轻量依赖：RPC/服务管理，不含内核运行时"
+homepage = "https://github.com/exvlan/exvlan"
+repository = "https://github.com/exvlan/exvlan"
+version = "26.410.20705"
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../exvlan/LICENSE"
+readme = "../exvlan/README.md"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+console-subscriber = { version = "0.5.0", optional = true }
+log.workspace = true
+exvlan-core = { workspace = true, default-features = false }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+parking_lot.workspace = true
+paste = "1.0"
+tokio = { workspace = true, features = ["net", "io-util", "rt", "time"] }
+tracing-subscriber = { workspace = true, features = ["registry"] }
+tracing.workspace = true
+url = { workspace = true, features = ["serde"] }
+service-manager = { git = "https://github.com/EasyTier/service-manager-rs.git", rev = "5eb28f7a686858eea4f4933534ed989d3b71dc2a" }
+
+[dev-dependencies]
+serial_test = "4.0.1"
+tempfile.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.56"
+windows-service = "0.8.1"
+
+[features]
+# 与内核 crate 同名 feature：macOS Network Extension 变体不走 launchd system 服务。
+macos-ne = []
+# 日志栈（控制台 + 滚动文件）；management 在日志栈之上再开放 init。
+logging = []
+management = ["logging"]
+# RPC 拨号（依赖 exvlan-core 的 connectivity/socket，均为非 feature 门控模块）。
+rpc = []
+# 与工作区其它 crate 对齐：`cargo clippy --features full --all` 会用到。
+full = ["management", "rpc"]
+# 与内核 crate 的 `tracing` feature 对应：启用 tokio-console 后端。
+tracing = ["dep:console-subscriber"]

@@ -1,6 +1,6 @@
 use anyhow::Context as _;
 
-use crate::common::config::LoggingConfigLoader;
+use exvlan_core::config::toml::LoggingConfigLoader;
 
 use super::{FileSink, Logger, TargetFilter, install, parse_level};
 

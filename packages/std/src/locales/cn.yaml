@@ -800,3 +800,15 @@ acl:
     name: 名称
     type: 类型
   match: 匹配
+
+kernel:
+  title: 内核
+  current: 当前版本
+  unknown: 未知
+  source: 更新源
+  source_placeholder: https://dl.exvlan.era-x.cn/core/
+  check_update: 检查更新
+  up_to_date: 内核已是最新
+  available_versions: 可用版本
+  upgrade_to: 升级到 {version}
+  install_success: 内核已安装

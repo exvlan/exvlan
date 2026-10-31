@@ -800,3 +800,15 @@ acl:
     name: Name
     type: Type
   match: Match
+
+kernel:
+  title: Kernel
+  current: Current
+  unknown: unknown
+  source: Update source
+  source_placeholder: https://dl.exvlan.era-x.cn/core/
+  check_update: Check for updates
+  up_to_date: Kernel is up to date
+  available_versions: Available versions
+  upgrade_to: Upgrade to {version}
+  install_success: Kernel installed
