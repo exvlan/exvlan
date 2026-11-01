@@ -6,7 +6,7 @@ mod elevate;
 mod ffi_kernel;
 mod kernel;
 mod ui_state;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+// upgrade 全平台编译：kernel 子模块在移动端返回“不支持”，app 子模块移动端走 APK 流程。
 mod upgrade;
 
 use anyhow::Context;
