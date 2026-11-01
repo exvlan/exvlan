@@ -1,0 +1,80 @@
+name: Mobile FFI Compile Check
+
+# P6 快速反馈：只针对**单个 Android ABI** 编译 `exvlan-studio`（含移动端 FFI 改动）。
+#
+# 目的：P6 的 Rust 改动无法在本机验证（缺 Android NDK），全量 pipeline 一轮 ~1.5h；
+# 这里用 ~10–15min 的作业做迭代检查。
+
+on:
+  workflow_call:
+    inputs:
+      abi:
+        description: 'Android ABI（默认 arm64-v8a）'
+        type: string
+        default: 'arm64-v8a'
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: 'Android ABI'
+        default: 'arm64-v8a'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ffi-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: cargo check (android ${{ inputs.abi }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Resolve target
+        id: t
+        run: |
+          case "${{ inputs.abi }}" in
+            arm64-v8a)   echo "target=aarch64-linux-android" >> "$GITHUB_OUTPUT" ;;
+            armeabi-v7a) echo "target=armv7-linux-androideabi" >> "$GITHUB_OUTPUT" ;;
+            x86)         echo "target=i686-linux-android" >> "$GITHUB_OUTPUT" ;;
+            x86_64)      echo "target=x86_64-linux-android" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::未知 ABI ${{ inputs.abi }}"; exit 1 ;;
+          esac
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+        with:
+          cmdline-tools-version: 14742923
+          packages: "ndk;26.0.10792818 platform-tools"
+
+      - name: Setup Android environment
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.0.10792818" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/ndk/26.0.10792818/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        with:
+          toolchain: 1.95
+          target: ${{ steps.t.outputs.target }}
+          rustflags: ""
+
+      - uses: ./.github/actions/setup-protoc
+        with:
+          version: '35.1'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          prefix-key: mobile-ffi-check
+          shared-key: "mobile-ffi-check"
+          cache-targets: "false"
+
+      - name: cargo check (exvlan-studio, android)
+        run: |
+          set -euo pipefail
+          cargo check -p exvlan-studio --target "${{ steps.t.outputs.target }}"
