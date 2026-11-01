@@ -75,7 +75,7 @@ macro_rules! make_cstring {
     };
 }
 
-unsafe fn gui_runas(prog: *const i8, argv: *const *const i8) -> io::Result<ExitStatus> {
+unsafe fn gui_runas(prog: *const i8, argv: *const *const i8) -> io::Result<(ExitStatus, Vec<u8>)> {
     let mut authref: AuthorizationRef = ptr::null_mut();
     let mut pipe: *mut libc::FILE = ptr::null_mut();
 
@@ -126,10 +126,17 @@ unsafe fn gui_runas(prog: *const i8, argv: *const *const i8) -> io::Result<ExitS
     }
     let mut pipe_file = unsafe { File::from_raw_fd(read_fd) };
     let mut sink = [0_u8; 8192];
+    // 收集子进程输出（最多 64 KiB），用于把真实错误回传给 GUI。
+    let mut captured: Vec<u8> = Vec::new();
     loop {
         match pipe_file.read(&mut sink) {
             Ok(0) => break,
-            Ok(_) => {}
+            Ok(n) => {
+                if captured.len() < 64 * 1024 {
+                    let room = 64 * 1024 - captured.len();
+                    captured.extend_from_slice(&sink[..n.min(room)]);
+                }
+            }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
             Err(err) => {
                 libc::fclose(pipe);
@@ -156,10 +163,10 @@ unsafe fn gui_runas(prog: *const i8, argv: *const *const i8) -> io::Result<ExitS
 
     libc::fclose(pipe);
     AuthorizationFree(authref, kAuthorizationFlagDestroyRights);
-    Ok(ExitStatus::from_raw(status))
+    Ok((ExitStatus::from_raw(status), captured))
 }
 
-fn runas_root_gui(cmd: &Command) -> io::Result<ExitStatus> {
+fn runas_root_gui(cmd: &Command) -> io::Result<(ExitStatus, Vec<u8>)> {
     let exe: OsString = match get_exe_path(&cmd.cmd.get_program()) {
         Some(exe) => exe.into(),
         None => unsafe {
@@ -220,10 +227,10 @@ impl Command {
     /// }
     /// ```
     pub fn output(&self) -> Result<Output> {
-        let status = runas_root_gui(self)?;
+        let (status, captured) = runas_root_gui(self)?;
         Ok(Output {
             status,
-            stdout: Vec::new(),
+            stdout: captured,
             stderr: Vec::new(),
         })
     }

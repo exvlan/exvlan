@@ -38,7 +38,21 @@ get_error_msg / free_string
 | ④ FFI 事件回调（回调 + 内部队列） | ⬜ 需改内核 FFI |
 | ⑤ `mobile.yml` 下载 `.so` 注入 `jniLibs`，移除内核编译 | ⬜ |
 | ⑥ 移动作业耗时 25min → ~12min | ⬜ 依赖 ③④⑤ |
-| ⑦ iOS 无签名编译检查（`ios-check.yml`） | ✅ 新增，待 CI 验证 |
+| ⑦ iOS 无签名编译检查（`ios-check.yml`） | ✅ CI 已验证 |
+| ⑧ `WebClientService` 方案（决策 C） | ✅ 结论：**无需新内核 API** |
+
+### ⑧ WebClientService 的最终结论（重要）
+
+内核显式拒绝 `api.manage.WebClientService` 走通用 FFI RPC。排查 GUI 的实际用法后发现：
+它只在 `load_configs` 里用于「启动时把 enabled_networks 重新拉起」：
+
+```rust
+client.run_network_instance(BaseController::default(), RunNetworkInstanceRequest { ... })
+```
+
+而 FFI 已有等价能力：`run_network_instance(cfg_toml)` + `set_tun_fd(name, fd)`。
+因此 **Android 侧直接逐个调用现有 FFI 接口即可**，不需要新增「专用对账接口」，
+也不需要放开内核的拒绝分支 —— 内核零改动，API 面最小。
 
 ## ③ 的技术要点（下一步实施）
 

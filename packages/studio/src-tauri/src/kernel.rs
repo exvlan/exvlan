@@ -119,7 +119,13 @@ pub fn install_kernel(src: &Path, version: &str) -> anyhow::Result<()> {
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))?;
         std::fs::set_permissions(kernel_path(), std::fs::Permissions::from_mode(0o755))?;
+        // root 守护进程会执行这个二进制：必须是 root:wheel，否则本地任意用户可替换 → 提权。
+        set_root_owner(&dir)?;
+        set_root_owner(&kernel_path())?;
+        set_root_owner(&version_path())?;
     }
+
+    verify_root_owned(&kernel_path())?;
 
     Ok(())
 }
@@ -184,6 +190,45 @@ fn find_named(root: &Path, name: &str, max_depth: usize) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// 把路径属主改为 `root:wheel`（仅 unix；调用方应已是 root）。
+#[cfg(unix)]
+fn set_root_owner(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| anyhow::anyhow!("路径包含 NUL: {}", path.display()))?;
+    // uid=0, gid=0（macOS 的 wheel 即为 0）
+    let rc = unsafe { libc::chown(c.as_ptr(), 0, 0) };
+    if rc != 0 {
+        bail!(
+            "chown root:wheel 失败（{}）: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(())
+}
+
+/// 校验内核二进制的属主是 root，避免 root 执行用户可写文件。
+#[cfg(unix)]
+fn verify_root_owned(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    let meta =
+        std::fs::metadata(path).with_context(|| format!("读取 {} 元数据失败", path.display()))?;
+    if meta.uid() != 0 {
+        bail!(
+            "内核属主不是 root（uid={}）：{} —— 拒绝以 root 执行用户可写文件",
+            meta.uid(),
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn verify_root_owned(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
