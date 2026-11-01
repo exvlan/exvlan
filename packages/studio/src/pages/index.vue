@@ -23,13 +23,18 @@ import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mo
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
 import KernelManager from '~/components/KernelManager.vue'
-import { ensureKernelService, getServiceStatus } from '~/composables/backend'
+import { appDownloadUpdate, appInstallUpdate, appUpdateInfo, ensureKernelService, getServiceStatus } from '~/composables/backend'
 import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
 
 const { t, locale } = useI18n()
 const confirm = useConfirm()
 const aboutVisible = ref(false)
 const modeDialogVisible = ref(false)
+const appUpdateDialogVisible = ref(false)
+const appUpdateVersion = ref('')
+const appUpdateNotes = ref('')
+const appUpdating = ref(false)
+
 const currentMode = ref<Mode>({ mode: 'normal' })
 const editingMode = ref<Mode>({ mode: 'normal' })
 const isModeSaving = ref(false)
@@ -66,6 +71,7 @@ async function onModeSave() {
     toast.add({ severity: 'error', summary: t('error'), detail: e, life: 10000 })
     console.error("Error switching mode", e, currentMode.value, editingMode.value)
     await initWithMode(currentMode.value);
+  void maybeCheckAppUpdate();
   }
   finally {
     isModeSaving.value = false
@@ -215,6 +221,58 @@ async function ensureLocalKernel(mode: Mode) {
   await ensureKernelService(merged)
 }
 
+/** 应用更新：启动静默检查（24h 节流，已忽略的版本不再打扰）。 */
+async function maybeCheckAppUpdate() {
+  const KEY_LAST = 'upgrade_last_check'
+  const KEY_IGNORED = 'upgrade_ignored_version'
+
+  const last = Number(localStorage.getItem(KEY_LAST) || 0)
+  if (Date.now() - last < 24 * 3600 * 1000) {
+    return
+  }
+
+  try {
+    const info = await appUpdateInfo()
+    localStorage.setItem(KEY_LAST, String(Date.now()))
+    if (!info.available || !info.latest) {
+      return
+    }
+    if (localStorage.getItem(KEY_IGNORED) === info.latest) {
+      return
+    }
+    appUpdateVersion.value = info.latest
+    appUpdateNotes.value = info.notes || ''
+    appUpdateDialogVisible.value = true
+  }
+  catch (e) {
+    // 更新源未同步/离线：静默
+    console.warn('app update check failed', e)
+  }
+}
+
+async function onAppUpdateNow() {
+  if (!appUpdateVersion.value) {
+    return
+  }
+  appUpdating.value = true
+  try {
+    const path = await appDownloadUpdate(appUpdateVersion.value)
+    await appInstallUpdate(path)
+    appUpdateDialogVisible.value = false
+  }
+  catch (e: any) {
+    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 10000 })
+  }
+  finally {
+    appUpdating.value = false
+  }
+}
+
+function onAppUpdateLater() {
+  localStorage.setItem('upgrade_ignored_version', appUpdateVersion.value)
+  appUpdateDialogVisible.value = false
+}
+
 onMounted(async () => {
   const cleanupFns: Array<() => void> = []
 
@@ -238,6 +296,7 @@ onMounted(async () => {
   }
 
   await initWithMode(currentMode.value);
+  void maybeCheckAppUpdate();
 
   if (type() === 'android') {
     setMobileVpnTileActionHandler(handleMobileVpnTileAction)
@@ -512,6 +571,17 @@ const configServerConnectionStatus = computed(() => {
   <div id="root" class="flex flex-col">
     <Dialog v-model:visible="aboutVisible" modal :header="t('about.title')" :style="{ width: '70%' }">
       <About />
+    </Dialog>
+
+    <Dialog v-model:visible="appUpdateDialogVisible" modal :header="t('upgrade.app_version')" :style="{ width: '40vw' }">
+      <div class="flex flex-col gap-2">
+        <p>{{ t('upgrade.new_version', { version: appUpdateVersion }) }}</p>
+        <p v-if="appUpdateNotes" class="text-sm whitespace-pre-wrap text-gray-500">{{ appUpdateNotes }}</p>
+      </div>
+      <template #footer>
+        <Button :label="t('web.common.cancel')" text @click="onAppUpdateLater" />
+        <Button :label="t('upgrade.download_and_install')" :loading="appUpdating" @click="onAppUpdateNow" />
+      </template>
     </Dialog>
     <Dialog v-model:visible="modeDialogVisible" modal :header="t('mode.switch_mode')" :style="{ width: '50vw' }">
       <Message v-if="showAutostartHint" severity="info" :closable="false" class="mb-4">
