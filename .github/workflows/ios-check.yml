@@ -1,0 +1,99 @@
+name: iOS Compile Check
+
+# iOS 目前还没有完整的构建链路（无 gen/apple、无签名）。
+# 这里先做**无签名的交叉编译检查**：保证 Rust / FFI 代码在 iOS 目标下能编过。
+#
+# 说明（重要）：
+# - 本工作流**不产出 .ipa**，也不能验证 VPN 主链路（NetworkExtension 只能真机运行）。
+# - 真机 / TestFlight 需要 Apple 开发者签名（证书 + provisioning profile）。
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: cargo check (ios targets)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        with:
+          toolchain: 1.95
+          # 设备 + 模拟器（Apple Silicon）
+          target: aarch64-apple-ios,aarch64-apple-ios-sim
+          rustflags: ""
+
+      - uses: ./.github/actions/setup-protoc
+        with:
+          version: '35.1'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          prefix-key: ios-check
+          shared-key: "ios-check"
+          cache-targets: "false"
+
+      # 内核侧：确认在 iOS 目标下可编译（后续作为预编译静态库的来源）
+      - name: Check kernel for iOS
+        run: |
+          set -euo pipefail
+          cargo check -p exvlan-ios --target aarch64-apple-ios
+
+      # GUI 侧：目前移动端仍链接内核（P6 进行中）；这里先保证不回归
+      - name: Check studio for iOS
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cargo check -p exvlan-studio --target aarch64-apple-ios
+
+      # 无签名模拟器包：可用于看 UI / 验证 Rust 侧编译产物。
+      # 注意：NetworkExtension 在模拟器不可用 → **VPN 主链路无法验证**。
+      - name: Setup Node + pnpm
+        run: |
+          set -euo pipefail
+          corepack enable || true
+          node --version || true
+          command -v pnpm || npm i -g pnpm@10
+
+      - name: Init iOS project (no signing)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd packages/studio
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm tauri ios init --ci || true
+
+      - name: Build simulator .app
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd packages/studio
+          pnpm tauri ios build --debug --target aarch64-sim --no-bundle || true
+          find src-tauri/gen/apple -name '*.app' -maxdepth 6 2>/dev/null | head -5
+
+      - name: Upload simulator app (if any)
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-sim-app
+          path: packages/studio/src-tauri/gen/apple/**/*.app
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Summarize
+        run: |
+          echo "iOS：编译检查必过；模拟器包为尽力产物（NetworkExtension 模拟器不可用）。"
+          echo "真机/商店包需要 Apple 开发者账号 + 证书 + provisioning profile。"

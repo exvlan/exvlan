@@ -237,6 +237,18 @@ jobs:
     uses: ./.github/workflows/mobile.yml
     secrets: inherit
 
+  # 移动端预编译内核库（P6）：与 core 同期产出 per-ABI 的 libexvlan_ffi.so，
+  # 供 mobile 直接打包，从而不再在移动作业里重编内核。
+  mobile_kernel:
+    name: Mobile Kernel Libs
+    if: >-
+      github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+      github.ref_name != 'feature'
+    uses: ./.github/workflows/mobile-kernel.yml
+    with:
+      abis: "all"
+    secrets: inherit
+
   docker:
     name: Builder & Publish Docker Image
     needs: core

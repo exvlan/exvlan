@@ -34,6 +34,7 @@
 mod config_server;
 mod data_plane;
 mod error;
+mod event_api;
 mod instance_api;
 mod json_rpc;
 mod state;

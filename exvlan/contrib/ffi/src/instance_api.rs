@@ -1,3 +1,4 @@
+use exvlan_core::config::toml::ConfigLoader as _;
 use std::ffi::{CString, c_char, c_int};
 
 use exvlan::common::config::{ConfigFileControl, TomlConfigLoader};
@@ -77,6 +78,7 @@ pub(crate) unsafe fn run_network_instance(cfg_str: *const std::ffi::c_char) -> s
     };
 
     wait_for_config_server_delivery();
+    let inst_id = cfg.get_id();
     if let Err(e) = ffi_context().runtime.block_on(
         ffi_context()
             .process_management
@@ -84,6 +86,16 @@ pub(crate) unsafe fn run_network_instance(cfg_str: *const std::ffi::c_char) -> s
     ) {
         set_error_msg(&format!("failed to start instance: {}", e));
         return -1;
+    }
+
+    // P6：把实例事件（DHCP IP / 代理 CIDR 变化）转发到 FFI 事件队列，
+    // 供 app 侧更新 VPN 路由（替代桌面/旧移动端的进程内订阅）。
+    if let Some(instance) = ffi_context().manager.instance(inst_id) {
+        crate::event_api::spawn_forwarder(
+            ffi_context().runtime.handle().clone(),
+            instance,
+            inst_id.to_string(),
+        );
     }
 
     0
