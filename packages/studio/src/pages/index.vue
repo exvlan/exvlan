@@ -137,24 +137,9 @@ async function onStopService() {
 async function initWithMode(mode: Mode) {
   const running_inst_ids = (await remoteClient.value.list_network_instance_ids().catch(() => undefined))?.running_inst_ids ?? []
 
-  if (currentMode.value.mode === 'service' && mode.mode !== 'service') {
-    let serviceStatus = await getServiceStatus()
-    if (serviceStatus === "Running") {
-      manualDisconnect.value = true
-      await setServiceStatus(false)
-      serviceStatus = await getServiceStatus()
-      for (let i = 0; i < 10; i++) { // macOS takes a while to stop the service
-        if (serviceStatus === "Stopped") {
-          break;
-        }
-        await new Promise(resolve => setTimeout(resolve, 100))
-        serviceStatus = await getServiceStatus()
-      }
-    }
-    if (serviceStatus === "Stopped") {
-      await initService(undefined)
-    }
-  }
+  // 新架构：service 与 normal 共用同一个常驻 root 守护进程，
+  // 区别仅在于「退出应用时是否停实例」。因此切模式**不再**停/卸载服务
+  // （旧逻辑会因状态不匹配而失败，且会破坏 normal 模式所需的 TUN）。
 
   let url: string | undefined = undefined
   let retrys = 1
@@ -233,15 +218,17 @@ async function ensureLocalKernel(mode: Mode) {
   if (mode.mode === 'remote')
     return
 
-  const serviceMode = mode.mode === 'service' ? mode : undefined
-  const opts = {
-    config_dir: serviceMode?.config_dir || await join(await appConfigDir(), 'config.d'),
-    rpc_portal: serviceMode?.rpc_portal || '127.0.0.1:15999',
-    file_log_level: serviceMode?.file_log_level || 'info',
-    file_log_dir: serviceMode?.file_log_dir || await appLogDir(),
+  // daemon 参数与模式无关：优先取当前 mode 上的字段（service 模式有），
+  // 否则回退到已保存的 app_mode 里的同名字段，最后才用默认值。
+  const saved = loadMode() as { config_dir?: string, rpc_portal?: string, file_log_level?: string, file_log_dir?: string }
+  const merged = {
+    config_dir: (mode as any).config_dir || saved.config_dir || await join(await appConfigDir(), 'config.d'),
+    rpc_portal: (mode as any).rpc_portal || saved.rpc_portal || '127.0.0.1:15999',
+    file_log_level: (mode as any).file_log_level || saved.file_log_level || 'info',
+    file_log_dir: (mode as any).file_log_dir || saved.file_log_dir || await appLogDir(),
     config_server: (mode as { config_server_url?: string }).config_server_url,
   }
-  await ensureKernelService(opts)
+  await ensureKernelService(merged)
 }
 
 onMounted(async () => {

@@ -69,3 +69,9 @@
 .p-password > input {
   width: 100%;
 }
+
+/* 移动端：用动态视口高度，避免 100vh 被系统栏/浏览器 UI 算错。
+   Android 的实际安全区由原生 MainActivity 注入 padding，这里不重复处理。 */
+#root {
+  min-height: 100dvh;
+}

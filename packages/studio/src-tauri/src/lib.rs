@@ -1546,8 +1546,13 @@ mod service {
     }
 
     pub fn uninstall() -> anyhow::Result<()> {
+        use exvlan_rpc::service_manager::ServiceStatus;
         let service =
             exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        // 幂等：本来就没装 → 视为成功（切模式/重复点击不该报错）
+        if service.status()? == ServiceStatus::NotInstalled {
+            return Ok(());
+        }
         service.uninstall()?;
         Ok(())
     }
@@ -1556,12 +1561,19 @@ mod service {
         use exvlan_rpc::service_manager::*;
         let service = Service::new(env!("CARGO_PKG_NAME").to_string())?;
         let status = service.status()?;
-        if enable && status != ServiceStatus::Running {
-            service.start().with_context(|| "Failed to start service")?;
-        } else if !enable && status == ServiceStatus::Running {
-            service.stop().with_context(|| "Failed to stop service")?;
-        } else if status == ServiceStatus::NotInstalled {
+        // 幂等：目标状态已达成时直接成功
+        if (enable && status == ServiceStatus::Running)
+            || (!enable && status != ServiceStatus::Running)
+        {
+            return Ok(());
+        }
+        if status == ServiceStatus::NotInstalled {
             return Err(anyhow::anyhow!("Service not installed"));
+        }
+        if enable {
+            service.start().with_context(|| "Failed to start service")?;
+        } else {
+            service.stop().with_context(|| "Failed to stop service")?;
         }
         Ok(())
     }
@@ -1598,6 +1610,22 @@ mod service {
 pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
     use std::process::ExitCode;
 
+    /// 提权子进程的错误：同时写 stdout（父进程可捕获）与 /tmp 日志（stderr 在
+    /// AuthorizationExecuteWithPrivileges 下会进系统日志，拿不到）。
+    fn report(tag: &str, err: &str) {
+        let line = format!("[{tag}] {err}");
+        println!("{line}");
+        eprintln!("{line}");
+        use std::io::Write as _;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/exvlan-elevate.log")
+        {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+
     let code = match args.first().map(|s| s.as_str()) {
         Some("--install-kernel") => {
             let src = args.get(1).cloned().unwrap_or_default();
@@ -1611,7 +1639,7 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                     ExitCode::SUCCESS
                 }
                 Err(err) => {
-                    eprintln!("[kernel] 安装失败: {err:#}");
+                    report("kernel", &format!("安装失败: {err:#}"));
                     ExitCode::FAILURE
                 }
             }
@@ -1622,12 +1650,12 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 Ok(opts) => match service::install(opts) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
-                        eprintln!("[service] 安装失败: {err:#}");
+                        report("service", &format!("安装失败: {err:#}"));
                         ExitCode::FAILURE
                     }
                 },
                 Err(err) => {
-                    eprintln!("[service] 参数解析失败: {err:#}");
+                    report("service", &format!("参数解析失败: {err:#}"));
                     ExitCode::FAILURE
                 }
             }
@@ -1635,7 +1663,7 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
         Some("--uninstall-service") => match service::uninstall() {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
-                eprintln!("[service] 卸载失败: {err:#}");
+                report("service", &format!("卸载失败: {err:#}"));
                 ExitCode::FAILURE
             }
         },
@@ -1644,7 +1672,7 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
             match service::set_status(enable) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(err) => {
-                    eprintln!("[service] 启停失败: {err:#}");
+                    report("service", &format!("启停失败: {err:#}"));
                     ExitCode::FAILURE
                 }
             }
@@ -1731,17 +1759,46 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("无法定位自身可执行文件: {e}"))?;
     let mut cmd = std::process::Command::new(exe);
     cmd.args(args);
-    let output = elevate::Command::new(cmd)
-        .output()
-        .map_err(|e| format!("提权执行失败: {e}"))?;
+    let output = match elevate::Command::new(cmd).output() {
+        Ok(out) => out,
+        Err(err) => {
+            let msg = err.to_string();
+            if msg.contains("-60006") || msg.to_lowercase().contains("cancel") {
+                return Err("已取消管理员授权".to_string());
+            }
+            return Err(format!("无法启动提权进程: {msg}"));
+        }
+    };
     if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "提权命令执行失败（exit={}），可能是用户取消了授权",
-            output.status
-        ))
+        return Ok(());
     }
+
+    let mut detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if detail.is_empty() {
+        detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    }
+    if detail.is_empty()
+        && let Ok(log) = std::fs::read_to_string("/tmp/exvlan-elevate.log")
+    {
+        detail = log
+            .lines()
+            .rev()
+            .take(20)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    Err(format!(
+        "提权命令失败（exit={}）：{}",
+        output.status,
+        if detail.is_empty() {
+            "（无输出，详见 /tmp/exvlan-elevate.log）".to_string()
+        } else {
+            detail
+        }
+    ))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
