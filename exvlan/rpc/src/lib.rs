@@ -25,3 +25,5 @@ pub mod rpc;
 pub use exvlan_core;
 pub use exvlan_proto;
 pub mod service_manager;
+#[cfg(feature = "gui-client")]
+pub mod transport;
