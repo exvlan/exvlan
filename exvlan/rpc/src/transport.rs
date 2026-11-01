@@ -50,3 +50,114 @@ impl RpcTransport for TunnelTransport {
             .scoped_client::<VpnPortalRpcClientFactory<BaseController>>(1, 1, String::new())
     }
 }
+
+// ---------------------------------------------------------------------------
+// 移动端实现：走 FFI 的 call_json_rpc
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "ffi-rpc")]
+mod ffi_impl {
+    use super::*;
+    use exvlan_proto::api::config::{
+        ConfigRpc, GetConfigRequest, GetConfigResponse, PatchConfigRequest, PatchConfigResponse,
+    };
+    use exvlan_proto::api::instance::{
+        GetVpnPortalInfoRequest, GetVpnPortalInfoResponse, VpnPortalRpc,
+    };
+    use exvlan_proto::api::logger::{
+        GetLoggerConfigRequest, GetLoggerConfigResponse, LoggerRpc, SetLoggerConfigRequest,
+        SetLoggerConfigResponse,
+    };
+    use exvlan_proto::rpc_types::error::{Error, Result};
+
+    const SVC_LOGGER: &str = "api.logger.LoggerRpcService";
+    const SVC_CONFIG: &str = "api.config.ConfigRpc";
+    const SVC_VPN_PORTAL: &str = "api.instance.VpnPortalRpc";
+
+    fn call<T: serde::Serialize, R: serde::de::DeserializeOwned>(
+        service: &str,
+        method: &str,
+        payload: &T,
+    ) -> Result<R> {
+        let value = serde_json::to_value(payload)
+            .map_err(|e| Error::ExecutionError(anyhow::anyhow!("序列化请求失败: {e}")))?;
+        let resp = crate::ffi_rpc::call(service, method, "", value)
+            .map_err(|e| Error::ExecutionError(anyhow::anyhow!(e)))?;
+        serde_json::from_value(resp)
+            .map_err(|e| Error::ExecutionError(anyhow::anyhow!("解析响应失败: {e}")))
+    }
+
+    /// 移动端传输：内核在应用进程内，只能经 C ABI 的 JSON-RPC 调用。
+    #[derive(Default)]
+    pub struct FfiTransport;
+
+    #[async_trait::async_trait]
+    impl LoggerRpc for FfiTransport {
+        type Controller = BaseController;
+
+        async fn set_logger_config(
+            &self,
+            _ctrl: Self::Controller,
+            input: SetLoggerConfigRequest,
+        ) -> Result<SetLoggerConfigResponse> {
+            call(SVC_LOGGER, "set_logger_config", &input)
+        }
+
+        async fn get_logger_config(
+            &self,
+            _ctrl: Self::Controller,
+            input: GetLoggerConfigRequest,
+        ) -> Result<GetLoggerConfigResponse> {
+            call(SVC_LOGGER, "get_logger_config", &input)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ConfigRpc for FfiTransport {
+        type Controller = BaseController;
+
+        async fn patch_config(
+            &self,
+            _ctrl: Self::Controller,
+            input: PatchConfigRequest,
+        ) -> Result<PatchConfigResponse> {
+            call(SVC_CONFIG, "patch_config", &input)
+        }
+
+        async fn get_config(
+            &self,
+            _ctrl: Self::Controller,
+            input: GetConfigRequest,
+        ) -> Result<GetConfigResponse> {
+            call(SVC_CONFIG, "get_config", &input)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl VpnPortalRpc for FfiTransport {
+        type Controller = BaseController;
+
+        async fn get_vpn_portal_info(
+            &self,
+            _ctrl: Self::Controller,
+            input: GetVpnPortalInfoRequest,
+        ) -> Result<GetVpnPortalInfoResponse> {
+            call(SVC_VPN_PORTAL, "get_vpn_portal_info", &input)
+        }
+    }
+
+    impl RpcTransport for FfiTransport {
+        fn logger(&self) -> Box<dyn LoggerRpc<Controller = BaseController> + Send> {
+            Box::new(FfiTransport)
+        }
+        fn config(&self) -> Box<dyn ConfigRpc<Controller = BaseController> + Send> {
+            Box::new(FfiTransport)
+        }
+        fn vpn_portal(&self) -> Box<dyn VpnPortalRpc<Controller = BaseController> + Send> {
+            Box::new(FfiTransport)
+        }
+    }
+}
+
+#[cfg(feature = "ffi-rpc")]
+pub use ffi_impl::FfiTransport;

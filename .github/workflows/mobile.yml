@@ -110,6 +110,39 @@ jobs:
           shared-key: "gui-registry"
           cache-targets: "false"
 
+      # P6：把 ARCH（aarch64/armv7/i686/x86_64）映射成 Android ABI 名
+      - name: Resolve kernel ABI
+        id: kabi
+        run: |
+          case "$ARCH" in
+            aarch64) echo "abi=arm64-v8a" >> "$GITHUB_OUTPUT" ;;
+            armv7)   echo "abi=armeabi-v7a" >> "$GITHUB_OUTPUT" ;;
+            i686)    echo "abi=x86" >> "$GITHUB_OUTPUT" ;;
+            x86_64)  echo "abi=x86_64" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::unknown ARCH $ARCH"; exit 1 ;;
+          esac
+
+      # P6：下载本 ABI 的预编译内核库并放进 jniLibs（供后续 studio 不再编内核）
+      - name: Fetch prebuilt kernel lib
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mobile-kernel-${{ steps.kabi.outputs.abi }}
+          path: ./kernel-lib
+
+      - name: Stage kernel lib into jniLibs
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          abi="${{ steps.kabi.outputs.abi }}"
+          if compgen -G "./kernel-lib/*.so" > /dev/null; then
+            mkdir -p "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/$abi"
+            cp ./kernel-lib/*.so "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/$abi/"
+            ls -l "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/$abi/"
+          else
+            echo "::notice::未找到 mobile-kernel-$abi 工件，跳过（studio 仍会自行编译内核）"
+          fi
+
       - name: Build
         run: |
           cd packages/studio
