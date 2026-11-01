@@ -87,10 +87,10 @@ pub(crate) fn push_event(json: String) {
             None => (None, 0),
         }
     };
-    if let Some(cb) = cb {
-        if let Ok(c) = std::ffi::CString::new(json) {
-            unsafe { cb(c.as_ptr(), user_data as *mut std::ffi::c_void) };
-        }
+    if let Some(cb) = cb
+        && let Ok(c) = std::ffi::CString::new(json)
+    {
+        unsafe { cb(c.as_ptr(), user_data as *mut std::ffi::c_void) };
     }
 }
 
