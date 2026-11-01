@@ -7,6 +7,7 @@ mod ffi_kernel;
 mod kernel;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod kernel_update;
+mod ui_state;
 
 use anyhow::Context;
 use exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
@@ -1889,6 +1890,8 @@ pub fn run_gui() -> std::process::ExitCode {
             init_web_client,
             is_web_client_connected,
             get_log_dir_path,
+            ui_state::get_ui_state,
+            ui_state::set_ui_state,
         ])
         .on_window_event(|_win, event| match event {
             #[cfg(not(target_os = "android"))]

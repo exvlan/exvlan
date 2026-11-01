@@ -23,7 +23,7 @@ import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mo
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
 import KernelManager from '~/components/KernelManager.vue'
-import { ensureKernelService, getExvlanVersion, getServiceStatus } from '~/composables/backend'
+import { ensureKernelService, getServiceStatus } from '~/composables/backend'
 import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
 
 const { t, locale } = useI18n()
@@ -103,20 +103,6 @@ async function onUninstallService() {
   });
 }
 
-function stripModeMetadata(mode: Mode) {
-  if (mode.mode !== 'service') {
-    return mode
-  }
-
-  const serviceConfig = { ...mode }
-  delete serviceConfig.installed_core_version
-  return serviceConfig
-}
-
-function modeConfigChanged(next: Mode) {
-  return JSON.stringify(stripModeMetadata(next)) !== JSON.stringify(stripModeMetadata(currentMode.value))
-}
-
 async function onStopService() {
   isModeSaving.value = true
   manualDisconnect.value = true
@@ -156,20 +142,18 @@ async function initWithMode(mode: Mode) {
         toast.add({ severity: 'error', summary: t('error'), detail: t('mode.service_config_empty'), life: 10000 })
         return initWithMode({ ...mode, mode: 'normal' });
       }
+      // 是否（重）装服务只由**服务指纹**决定：内核路径 + 启动参数完全一致时
+      // ensureKernelService 直接返回 current，不会触发授权（历史 bug：用版本号比较，
+      // 而 exvlan_version 现在返回内核版本，导致每次启动都判定需要重装 → 反复弹密码）。
+      mode.config_server_url = mode.config_server_url || undefined
+      await ensureKernelService({
+        config_dir: mode.config_dir,
+        file_log_dir: mode.file_log_dir,
+        file_log_level: mode.file_log_level,
+        rpc_portal: mode.rpc_portal,
+        config_server: mode.config_server_url,
+      })
       let serviceStatus = await getServiceStatus()
-      const coreVersion = await getExvlanVersion()
-      if (serviceStatus === "NotInstalled" || modeConfigChanged(mode) || mode.installed_core_version !== coreVersion) {
-        mode.config_server_url = mode.config_server_url || undefined
-        await initService({
-          config_dir: mode.config_dir,
-          file_log_dir: mode.file_log_dir,
-          file_log_level: mode.file_log_level,
-          rpc_portal: mode.rpc_portal,
-          config_server: mode.config_server_url,
-        })
-        mode.installed_core_version = coreVersion
-        serviceStatus = await getServiceStatus()
-      }
       if (serviceStatus === "Stopped") {
         await setServiceStatus(true)
       }
