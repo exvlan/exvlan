@@ -32,11 +32,8 @@ use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
 
 // 移动端仍以内核库形式在同进程内跑实例（VPN Service 插件）。
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan::common::config::{FileLoggerConfig, LoggingConfig};
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan::common::log;
 #[cfg(target_os = "android")]
-use exvlan::instance::factory::subscribe_native_instance_event;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use exvlan::instance::factory::{NativeInstanceManager, native_instance_manager};
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -44,9 +41,7 @@ use exvlan::proto::rpc::standalone::{runtime_rpc_dialer, runtime_rpc_listener};
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use exvlan::rpc_service::ApiRpcServer;
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan::utils::panic::setup_panic_handler;
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan::web_client::{self, WebClient};
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use exvlan_rpc::exvlan_core::{
     connectivity::protocol::raw::TunnelDialer as _, process_runtime::CoreProcessRuntime,
@@ -684,41 +679,20 @@ async fn is_client_running() -> Result<bool, String> {
 
 #[tauri::command]
 async fn init_web_client(app: AppHandle, url: Option<String>) -> Result<(), String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(target_os = "android")]
     {
-        let mut web_client_guard = WEB_CLIENT.write().await;
+        // P6：不再自建 in-process web client，改用内核 FFI 的 config-server 客户端
         let Some(url) = url else {
-            *web_client_guard = None;
+            let _ = ffi_kernel::stop_config_server();
             return Ok(());
         };
-        let instance_manager = INSTANCE_MANAGER
-            .try_read()
-            .map_err(|_| "Failed to acquire read lock for instance manager")?
-            .clone()
-            .ok_or_else(|| "Instance manager is not available".to_string())?;
-
-        let hooks = Arc::new(manager::GuiHooks { app: app.clone() });
-        let machine_id_state_dir = app
-            .path()
-            .app_data_dir()
-            .with_context(|| "Failed to resolve machine id state directory")
-            .map_err(|e| format!("{:#}", e))?;
-
-        let web_client = web_client::run_web_client(
-            url.as_str(),
-            exvlan::common::MachineIdOptions {
-                explicit_machine_id: None,
-                state_dir: Some(machine_id_state_dir),
-            },
-            None,
-            false,
-            instance_manager,
-            Some(hooks),
-        )
-        .await
-        .with_context(|| "Failed to initialize web client")
-        .map_err(|e| format!("{:#}", e))?;
-        *web_client_guard = Some(web_client);
+        let hostname = "exvlan-android".to_string();
+        ffi_kernel::start_config_server(&url, &hostname, "", false, None, std::ptr::null_mut())?;
+        let _ = app;
+    }
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, url);
     }
     // 桌面端：config-server 同步由内核守护进程负责（`--config-server`），GUI 不再自建 web client。
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -810,7 +784,6 @@ mod manager {
     use async_trait::async_trait;
     use dashmap::{DashMap, DashSet};
     #[cfg(any(target_os = "android", target_os = "ios"))]
-    use exvlan::web_client::WebClientHooks;
     use exvlan_rpc::exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     use exvlan_rpc::exvlan_core::connectivity::protocol::raw::TunnelDialer as _;
@@ -821,43 +794,6 @@ mod manager {
     };
     use exvlan_rpc::exvlan_proto::api::manage::RunNetworkInstanceRequest;
     use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
-
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    pub(super) struct GuiHooks {
-        pub(super) app: AppHandle,
-    }
-
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    #[async_trait]
-    impl WebClientHooks for GuiHooks {
-        async fn pre_run_network_instance(
-            &self,
-            cfg: &exvlan_rpc::exvlan_core::config::toml::TomlConfigLoader,
-        ) -> Result<(), String> {
-            let client_manager = get_client_manager!()?;
-            client_manager
-                .pre_run_network_instance_hook(
-                    &self.app,
-                    cfg,
-                    PersistedConfigSource::from_runtime_source(cfg.get_network_config_source()),
-                )
-                .await
-        }
-
-        async fn post_run_network_instance(&self, instance_id: &uuid::Uuid) -> Result<(), String> {
-            let client_manager = get_client_manager!()?;
-            client_manager
-                .post_run_network_instance_hook(&self.app, instance_id)
-                .await
-        }
-
-        async fn post_remove_network_instances(&self, ids: &[uuid::Uuid]) -> Result<(), String> {
-            let client_manager = get_client_manager!()?;
-            client_manager
-                .post_remote_remove_network_instances_hook(&self.app, ids)
-                .await
-        }
-    }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     #[serde(rename_all = "snake_case")]
@@ -1220,38 +1156,6 @@ mod manager {
             app: &AppHandle,
             instance_id: &uuid::Uuid,
         ) -> Result<(), String> {
-            #[cfg(target_os = "android")]
-            if let Some(instance_manager) = super::INSTANCE_MANAGER.read().await.as_ref() {
-                let instance_uuid = *instance_id;
-                if let Some(instance) = instance_manager.instance(instance_uuid) {
-                    if let Some(mut event_receiver) = subscribe_native_instance_event(&instance) {
-                        let app_clone = app.clone();
-                        let instance_id_clone = *instance_id;
-                        tokio::spawn(async move {
-                            let instance_id_str = instance_id_clone.to_string();
-                            loop {
-                                match event_receiver.recv().await {
-                                    Ok(exvlan::common::global_ctx::GlobalCtxEvent::DhcpIpv4Changed(_, _)) => {
-                                        let _ = app_clone.emit("dhcp_ip_changed", &instance_id_str);
-                                    }
-                                    Ok(exvlan::common::global_ctx::GlobalCtxEvent::ProxyCidrsUpdated(_, _)) => {
-                                        let _ = app_clone.emit("proxy_cidrs_updated", &instance_id_str);
-                                    }
-                                    Ok(_) => {}
-                                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                        break;
-                                    }
-                                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                        let _ = app_clone.emit("event_lagged", &instance_id_str);
-                                        event_receiver = event_receiver.resubscribe();
-                                    }
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-
             self.storage.enabled_networks.insert(*instance_id);
 
             app.emit("post_run_network_instance", instance_id.to_string())
@@ -1868,7 +1772,11 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
 pub fn run_gui() -> std::process::ExitCode {
     // 桌面端不再自动提权：内核以独立 root 守护进程运行，GUI 始终是普通用户。
     #[cfg(any(target_os = "android", target_os = "ios"))]
-    setup_panic_handler();
+    {
+        std::panic::set_hook(Box::new(|info| {
+            eprintln!("[panic] {info}");
+        }));
+    }
 
     let mut builder = tauri::Builder::default();
 
