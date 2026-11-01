@@ -1,0 +1,49 @@
+name: Studio macOS Compile Check
+
+# 快速反馈：只对 macOS 目标做 `cargo check -p exvlan-studio`（~8min）。
+#
+# 目的：`elevate/macos.rs`、`kernel.rs` 等 **macOS 专属代码**在 Linux 上不会被编译，
+# 本地 `cargo check -p exvlan-studio` 发现不了问题（历史上多次在 Studio 构建末尾才炸）。
+# 本作业用 macOS runner 提前暴露。
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-macos-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: cargo check (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        with:
+          toolchain: 1.95
+          rustflags: ""
+
+      - uses: ./.github/actions/setup-protoc
+        with:
+          version: '35.1'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          prefix-key: studio-macos-check
+          shared-key: "studio-macos-check"
+          cache-targets: "false"
+
+      - name: cargo check (exvlan-studio, macOS)
+        run: |
+          set -euo pipefail
+          cargo check -p exvlan-studio --target x86_64-apple-darwin
