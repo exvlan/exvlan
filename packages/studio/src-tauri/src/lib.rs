@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod elevate;
+#[cfg(target_os = "android")]
+mod ffi_kernel;
 mod kernel;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod kernel_update;
