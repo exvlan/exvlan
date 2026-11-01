@@ -177,6 +177,12 @@ jobs:
           fi
 
           echo "bundled kernel occurrences: $hits"
+          # 打印实际落点，便于核对运行时 resource_dir 的相对路径
+          if [[ "$GUI_TARGET" =~ darwin ]]; then
+            find "target/$GUI_TARGET/release/bundle/macos" -name 'exvlan' 2>/dev/null | head -3 | while read -r f; do
+              echo "bundled at: ${f#target/$GUI_TARGET/release/bundle/macos/}"
+            done
+          fi
           if [ "$hits" -lt 1 ]; then
             echo "--- diagnostics ---"
             find "target/$GUI_TARGET/release/bundle" -maxdepth 2 -type f 2>/dev/null | head -20 || true

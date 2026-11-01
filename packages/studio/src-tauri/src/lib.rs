@@ -1663,8 +1663,12 @@ async fn ensure_kernel_service(
     opts: service::ServiceOptions,
 ) -> Result<String, String> {
     if !kernel::is_installed() {
-        let src = kernel::bundled_kernel(&app)
-            .ok_or_else(|| "未找到随包内核资源（resources/kernel/），无法安装内核".to_string())?;
+        let src = kernel::bundled_kernel(&app).ok_or_else(|| {
+            format!(
+                "未找到随包内核（{}）。请确认安装包完整，或从设置页手动指定内核。",
+                kernel::kernel_bin_name()
+            )
+        })?;
         let version = env!("CARGO_PKG_VERSION");
         run_elevated(&["--install-kernel", &src.display().to_string(), version])?;
     }

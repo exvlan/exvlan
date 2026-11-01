@@ -131,12 +131,59 @@ pub fn install_kernel(src: &Path, version: &str) -> anyhow::Result<()> {
 pub fn bundled_kernel(app: &tauri::AppHandle) -> Option<PathBuf> {
     use tauri::Manager as _;
     let dir = app.path().resource_dir().ok()?;
-    let candidate = dir.join("kernel").join(kernel_bin_name());
-    if candidate.is_file() {
-        Some(candidate)
-    } else {
-        None
+    let bin = kernel_bin_name();
+
+    // Tauri 会保留 `bundle.resources` 里的相对路径：
+    //   macOS  → <App>.app/Contents/Resources/resources/kernel/exvlan
+    //   Windows→ <install dir>/resources/kernel/exvlan.exe
+    // 但也可能因打包方式被摊平，这里按优先级全部试一遍。
+    let candidates = [
+        dir.join("kernel").join(bin),
+        dir.join("resources").join("kernel").join(bin),
+        dir.join(bin),
+    ];
+    for path in &candidates {
+        if path.is_file() {
+            return Some(path.clone());
+        }
     }
+
+    // 兜底：在资源目录下有限深度搜索（避免打包布局变化导致彻底不可用）。
+    match find_named(&dir, bin, 4) {
+        Some(path) => Some(path),
+        None => {
+            eprintln!(
+                "[kernel] 未找到随包内核 {}；resource_dir={}，已尝试: {:?}",
+                bin,
+                dir.display(),
+                candidates
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+            );
+            None
+        }
+    }
+}
+
+/// 在 `root` 下有限深度查找指定文件名（用于兼容不同打包布局）。
+fn find_named(root: &Path, name: &str, max_depth: usize) -> Option<PathBuf> {
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        let entries = std::fs::read_dir(&dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                if depth < max_depth {
+                    stack.push((path, depth + 1));
+                }
+            } else if path.file_name().and_then(|n| n.to_str()) == Some(name) {
+                return Some(path);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
