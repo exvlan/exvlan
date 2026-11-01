@@ -454,13 +454,13 @@ fn init_service(opts: Option<service::ServiceOptions>) -> Result<(), String> {
                 let payload = serde_json::to_string(&args).map_err(|e| e.to_string())?;
                 run_elevated(&["--install-service", &payload])?;
             }
-            #[cfg(any(target_os = "android", target_os = "ios"))]
+            #[cfg(target_os = "ios")]
             service::install(args).map_err(|e| format!("{:#}", e))?;
         }
         None => {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             run_elevated(&["--uninstall-service"])?;
-            #[cfg(any(target_os = "android", target_os = "ios"))]
+            #[cfg(target_os = "ios")]
             service::uninstall().map_err(|e| format!("{:#}", e))?;
         }
     }
@@ -473,9 +473,14 @@ fn set_service_status(_enable: bool) -> Result<(), String> {
     {
         run_elevated(&["--service-ctl", if _enable { "start" } else { "stop" }])?;
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    // Android 走 VpnService（无系统服务管理器），无需启停服务。
+    #[cfg(target_os = "ios")]
     {
         service::set_status(_enable).map_err(|e| format!("{:#}", e))?;
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = _enable;
     }
     Ok(())
 }
@@ -713,6 +718,7 @@ async fn init_web_client(app: AppHandle, url: Option<String>) -> Result<(), Stri
         *web_client_guard = Some(web_client);
     }
     // 桌面端：config-server 同步由内核守护进程负责（`--config-server`），GUI 不再自建 web client。
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let _ = (app, url);
     Ok(())
 }
@@ -1584,6 +1590,9 @@ mod service {
 ///
 /// 这些命令只会在通过 `elevate::Command` 以 root 拉起时执行；普通用户直接运行
 /// 同名参数没有任何跳过校验的捷径（写内核目录本身就要 root）。
+///
+/// **仅桌面端**：Android 没有 service 模块。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
     use std::process::ExitCode;
 
