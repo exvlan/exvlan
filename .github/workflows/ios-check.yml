@@ -59,6 +59,41 @@ jobs:
           set -euo pipefail
           cargo check -p exvlan-studio --target aarch64-apple-ios
 
+      # 无签名模拟器包：可用于看 UI / 验证 Rust 侧编译产物。
+      # 注意：NetworkExtension 在模拟器不可用 → **VPN 主链路无法验证**。
+      - name: Setup Node + pnpm
+        run: |
+          set -euo pipefail
+          corepack enable || true
+          node --version || true
+          command -v pnpm || npm i -g pnpm@10
+
+      - name: Init iOS project (no signing)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd packages/studio
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm tauri ios init --ci || true
+
+      - name: Build simulator .app
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd packages/studio
+          pnpm tauri ios build --debug --target aarch64-sim --no-bundle || true
+          find src-tauri/gen/apple -name '*.app' -maxdepth 6 2>/dev/null | head -5
+
+      - name: Upload simulator app (if any)
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-sim-app
+          path: packages/studio/src-tauri/gen/apple/**/*.app
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Summarize
         run: |
-          echo "iOS 仅做编译检查；真机包需要签名（开发者账号 + 证书）。"
+          echo "iOS：编译检查必过；模拟器包为尽力产物（NetworkExtension 模拟器不可用）。"
+          echo "真机/商店包需要 Apple 开发者账号 + 证书 + provisioning profile。"
