@@ -16,5 +16,7 @@ pub mod log;
 #[cfg(feature = "logging")]
 pub mod tracing_rolling_appender;
 
+#[cfg(feature = "ffi-rpc")]
+pub mod ffi_rpc;
 pub mod rpc;
 pub mod service_manager;

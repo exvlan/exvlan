@@ -5,8 +5,9 @@ mod elevate;
 #[cfg(target_os = "android")]
 mod ffi_kernel;
 mod kernel;
+mod ui_state;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-mod kernel_update;
+mod upgrade;
 
 use anyhow::Context;
 use exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
@@ -1724,9 +1725,9 @@ async fn ensure_kernel_service(
 /// 内核更新信息（当前版本 / 最新版本 / 可用版本列表 / 分发源）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
-async fn kernel_update_info(source: Option<String>) -> Result<kernel_update::UpdateInfo, String> {
-    let base = source.unwrap_or_else(kernel_update::base_url_override);
-    kernel_update::check_update(&base, env!("CARGO_PKG_VERSION"))
+async fn kernel_update_info(source: Option<String>) -> Result<upgrade::kernel::UpdateInfo, String> {
+    let base = source.unwrap_or_else(|| upgrade::KERNEL_BASE_URL.to_string());
+    upgrade::kernel::check_update(&base, env!("CARGO_PKG_VERSION"))
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -1735,8 +1736,8 @@ async fn kernel_update_info(source: Option<String>) -> Result<kernel_update::Upd
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn kernel_install_version(version: String, source: Option<String>) -> Result<(), String> {
-    let base = source.unwrap_or_else(kernel_update::base_url_override);
-    kernel_update::install_version(&base, &version, env!("CARGO_PKG_VERSION"))
+    let base = source.unwrap_or_else(|| upgrade::KERNEL_BASE_URL.to_string());
+    upgrade::kernel::install_version(&base, &version, env!("CARGO_PKG_VERSION"))
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -1751,6 +1752,31 @@ async fn kernel_update_info(_source: Option<String>) -> Result<serde_json::Value
 #[tauri::command]
 async fn kernel_install_version(_version: String, _source: Option<String>) -> Result<(), String> {
     Err("移动端内核随应用发布，不支持在线升级".to_string())
+}
+
+/// 应用更新信息（当前版本 / 最新版本 / 更新说明 / 可用版本）。
+#[tauri::command]
+async fn app_update_info(source: Option<String>) -> Result<upgrade::app::AppUpdateInfo, String> {
+    let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
+    upgrade::app::check_update(&base)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 下载应用安装包（已校验 sha256），返回本地路径。
+#[tauri::command]
+async fn app_download_update(version: String, source: Option<String>) -> Result<String, String> {
+    let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
+    upgrade::app::download_installer(&base, &version)
+        .await
+        .map(|p| p.display().to_string())
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 打开已下载的安装包（桌面：DMG/MSI；Android 走系统安装器）。
+#[tauri::command]
+fn app_install_update(path: String) -> Result<(), String> {
+    upgrade::app::install_installer(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
 }
 
 /// 以 root 重新拉起自身执行内部子命令（桌面端）。
@@ -1881,6 +1907,9 @@ pub fn run_gui() -> std::process::ExitCode {
             init_service,
             ensure_kernel_service,
             kernel_update_info,
+            app_update_info,
+            app_download_update,
+            app_install_update,
             kernel_install_version,
             set_service_status,
             get_service_status,
@@ -1889,6 +1918,8 @@ pub fn run_gui() -> std::process::ExitCode {
             init_web_client,
             is_web_client_connected,
             get_log_dir_path,
+            ui_state::get_ui_state,
+            ui_state::set_ui_state,
         ])
         .on_window_event(|_win, event| match event {
             #[cfg(not(target_os = "android"))]

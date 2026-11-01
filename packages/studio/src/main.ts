@@ -5,6 +5,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { routes } from 'vue-router/auto-routes'
 
 import App from '~/App.vue'
+import { hydrateUiState, installPersistHook } from '~/composables/persist'
 import '@exvlan/std/style.css'
 import '~/styles.css'
 
@@ -25,6 +26,10 @@ if (import.meta.env.PROD) {
 }
 
 async function main() {
+  // 先回填后端持久化的 UI 状态（语言/模式/日志级别等），再初始化 i18n
+  await hydrateUiState()
+  installPersistHook()
+
   await I18nUtils.loadLanguageAsync(localStorage.getItem('lang') || 'en')
 
   const app = createApp(App)

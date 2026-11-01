@@ -162,6 +162,14 @@ const searchProtos = (event: { query: string }) => {
     }
 }
 
+// OpenVue 1.1.0 的 AutoComplete 不 emit `update:modelValue`（只在选中时 emit `item-select`），
+// 所以必须同时监听 item-select，否则协议永远停在初始值（表现为“怎么选都是 tcp”）。
+const onProtoSelect = (event: { value: string }) => {
+    if (event?.value) {
+        onProtoChange(event.value)
+    }
+}
+
 const onProtoChange = (newProto: string) => {
     const oldProto = internalValue.value.proto
     const oldDefault = props.protos[oldProto]
@@ -179,7 +187,7 @@ const onProtoChange = (newProto: string) => {
         <InputGroup class="url-input-full w-full min-w-0">
             <AutoComplete :model-value="internalValue.proto" :suggestions="filteredProtos" dropdown
                 class="max-w-32 proto-autocomplete-in-group" @complete="searchProtos"
-                @update:model-value="onProtoChange" />
+                @item-select="onProtoSelect" @update:model-value="onProtoChange" />
             <InputText v-model="internalValue.host" :placeholder="placeholder || '0.0.0.0'" class="grow min-w-0"
                 @focus="onHostFocus" @blur="onHostBlur" />
             <template v-if="!isNoPortProto">
@@ -210,7 +218,7 @@ const onProtoChange = (newProto: string) => {
                 <div class="flex flex-col gap-2">
                     <label>{{ t('tunnel_proto') }}</label>
                     <AutoComplete :model-value="internalValue.proto" :suggestions="filteredProtos" dropdown fluid
-                        @complete="searchProtos" @update:model-value="onProtoChange" />
+                        @complete="searchProtos" @item-select="onProtoSelect" @update:model-value="onProtoChange" />
                 </div>
                 <div class="flex flex-col gap-2">
                     <label>{{ t('web.common.address') || 'Address' }}</label>

@@ -23,13 +23,18 @@ import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mo
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
 import KernelManager from '~/components/KernelManager.vue'
-import { ensureKernelService, getExvlanVersion, getServiceStatus } from '~/composables/backend'
+import { appDownloadUpdate, appInstallUpdate, appUpdateInfo, ensureKernelService, getServiceStatus } from '~/composables/backend'
 import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
 
 const { t, locale } = useI18n()
 const confirm = useConfirm()
 const aboutVisible = ref(false)
 const modeDialogVisible = ref(false)
+const appUpdateDialogVisible = ref(false)
+const appUpdateVersion = ref('')
+const appUpdateNotes = ref('')
+const appUpdating = ref(false)
+
 const currentMode = ref<Mode>({ mode: 'normal' })
 const editingMode = ref<Mode>({ mode: 'normal' })
 const isModeSaving = ref(false)
@@ -66,6 +71,7 @@ async function onModeSave() {
     toast.add({ severity: 'error', summary: t('error'), detail: e, life: 10000 })
     console.error("Error switching mode", e, currentMode.value, editingMode.value)
     await initWithMode(currentMode.value);
+  void maybeCheckAppUpdate();
   }
   finally {
     isModeSaving.value = false
@@ -101,20 +107,6 @@ async function onUninstallService() {
       }
     },
   });
-}
-
-function stripModeMetadata(mode: Mode) {
-  if (mode.mode !== 'service') {
-    return mode
-  }
-
-  const serviceConfig = { ...mode }
-  delete serviceConfig.installed_core_version
-  return serviceConfig
-}
-
-function modeConfigChanged(next: Mode) {
-  return JSON.stringify(stripModeMetadata(next)) !== JSON.stringify(stripModeMetadata(currentMode.value))
 }
 
 async function onStopService() {
@@ -156,20 +148,18 @@ async function initWithMode(mode: Mode) {
         toast.add({ severity: 'error', summary: t('error'), detail: t('mode.service_config_empty'), life: 10000 })
         return initWithMode({ ...mode, mode: 'normal' });
       }
+      // 是否（重）装服务只由**服务指纹**决定：内核路径 + 启动参数完全一致时
+      // ensureKernelService 直接返回 current，不会触发授权（历史 bug：用版本号比较，
+      // 而 exvlan_version 现在返回内核版本，导致每次启动都判定需要重装 → 反复弹密码）。
+      mode.config_server_url = mode.config_server_url || undefined
+      await ensureKernelService({
+        config_dir: mode.config_dir,
+        file_log_dir: mode.file_log_dir,
+        file_log_level: mode.file_log_level,
+        rpc_portal: mode.rpc_portal,
+        config_server: mode.config_server_url,
+      })
       let serviceStatus = await getServiceStatus()
-      const coreVersion = await getExvlanVersion()
-      if (serviceStatus === "NotInstalled" || modeConfigChanged(mode) || mode.installed_core_version !== coreVersion) {
-        mode.config_server_url = mode.config_server_url || undefined
-        await initService({
-          config_dir: mode.config_dir,
-          file_log_dir: mode.file_log_dir,
-          file_log_level: mode.file_log_level,
-          rpc_portal: mode.rpc_portal,
-          config_server: mode.config_server_url,
-        })
-        mode.installed_core_version = coreVersion
-        serviceStatus = await getServiceStatus()
-      }
       if (serviceStatus === "Stopped") {
         await setServiceStatus(true)
       }
@@ -231,6 +221,58 @@ async function ensureLocalKernel(mode: Mode) {
   await ensureKernelService(merged)
 }
 
+/** 应用更新：启动静默检查（24h 节流，已忽略的版本不再打扰）。 */
+async function maybeCheckAppUpdate() {
+  const KEY_LAST = 'upgrade_last_check'
+  const KEY_IGNORED = 'upgrade_ignored_version'
+
+  const last = Number(localStorage.getItem(KEY_LAST) || 0)
+  if (Date.now() - last < 24 * 3600 * 1000) {
+    return
+  }
+
+  try {
+    const info = await appUpdateInfo()
+    localStorage.setItem(KEY_LAST, String(Date.now()))
+    if (!info.available || !info.latest) {
+      return
+    }
+    if (localStorage.getItem(KEY_IGNORED) === info.latest) {
+      return
+    }
+    appUpdateVersion.value = info.latest
+    appUpdateNotes.value = info.notes || ''
+    appUpdateDialogVisible.value = true
+  }
+  catch (e) {
+    // 更新源未同步/离线：静默
+    console.warn('app update check failed', e)
+  }
+}
+
+async function onAppUpdateNow() {
+  if (!appUpdateVersion.value) {
+    return
+  }
+  appUpdating.value = true
+  try {
+    const path = await appDownloadUpdate(appUpdateVersion.value)
+    await appInstallUpdate(path)
+    appUpdateDialogVisible.value = false
+  }
+  catch (e: any) {
+    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 10000 })
+  }
+  finally {
+    appUpdating.value = false
+  }
+}
+
+function onAppUpdateLater() {
+  localStorage.setItem('upgrade_ignored_version', appUpdateVersion.value)
+  appUpdateDialogVisible.value = false
+}
+
 onMounted(async () => {
   const cleanupFns: Array<() => void> = []
 
@@ -254,6 +296,7 @@ onMounted(async () => {
   }
 
   await initWithMode(currentMode.value);
+  void maybeCheckAppUpdate();
 
   if (type() === 'android') {
     setMobileVpnTileActionHandler(handleMobileVpnTileAction)
@@ -528,6 +571,17 @@ const configServerConnectionStatus = computed(() => {
   <div id="root" class="flex flex-col">
     <Dialog v-model:visible="aboutVisible" modal :header="t('about.title')" :style="{ width: '70%' }">
       <About />
+    </Dialog>
+
+    <Dialog v-model:visible="appUpdateDialogVisible" modal :header="t('upgrade.app_version')" :style="{ width: '40vw' }">
+      <div class="flex flex-col gap-2">
+        <p>{{ t('upgrade.new_version', { version: appUpdateVersion }) }}</p>
+        <p v-if="appUpdateNotes" class="text-sm whitespace-pre-wrap text-gray-500">{{ appUpdateNotes }}</p>
+      </div>
+      <template #footer>
+        <Button :label="t('web.common.cancel')" text @click="onAppUpdateLater" />
+        <Button :label="t('upgrade.download_and_install')" :loading="appUpdating" @click="onAppUpdateNow" />
+      </template>
     </Dialog>
     <Dialog v-model:visible="modeDialogVisible" modal :header="t('mode.switch_mode')" :style="{ width: '50vw' }">
       <Message v-if="showAutostartHint" severity="info" :closable="false" class="mb-4">

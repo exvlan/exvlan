@@ -42,6 +42,8 @@ logging = []
 management = ["logging"]
 # RPC 拨号（依赖 exvlan-core 的 connectivity/socket，均为非 feature 门控模块）。
 rpc = []
+# 移动端：经 C ABI 调内核 RPC（需运行时加载 libexvlan_ffi.so）。
+ffi-rpc = []
 # 与工作区其它 crate 对齐：`cargo clippy --features full --all` 会用到。
 full = ["management", "rpc"]
 # 与内核 crate 的 `tracing` feature 对应：启用 tokio-console 后端。
