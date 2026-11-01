@@ -192,35 +192,6 @@ fn find_named(root: &Path, name: &str, max_depth: usize) -> Option<PathBuf> {
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn kernel_paths_are_absolute_and_stable() {
-        let dir = kernel_dir();
-        assert!(dir.is_absolute());
-        assert!(dir.ends_with("core"));
-        assert_eq!(kernel_path(), dir.join(kernel_bin_name()));
-    }
-
-    #[test]
-    fn bin_name_matches_platform() {
-        if cfg!(windows) {
-            assert_eq!(kernel_bin_name(), "exvlan.exe");
-        } else {
-            assert_eq!(kernel_bin_name(), "exvlan");
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn install_rejects_missing_source() {
-        let err = install_kernel(Path::new("/nonexistent/exvlan"), "0").unwrap_err();
-        assert!(err.to_string().contains("不存在"));
-    }
-}
-
 /// 把路径属主改为 `root:wheel`（仅 unix；调用方应已是 root）。
 #[cfg(unix)]
 fn set_root_owner(path: &Path) -> anyhow::Result<()> {
@@ -258,4 +229,33 @@ fn verify_root_owned(path: &Path) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn verify_root_owned(_path: &Path) -> anyhow::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kernel_paths_are_absolute_and_stable() {
+        let dir = kernel_dir();
+        assert!(dir.is_absolute());
+        assert!(dir.ends_with("core"));
+        assert_eq!(kernel_path(), dir.join(kernel_bin_name()));
+    }
+
+    #[test]
+    fn bin_name_matches_platform() {
+        if cfg!(windows) {
+            assert_eq!(kernel_bin_name(), "exvlan.exe");
+        } else {
+            assert_eq!(kernel_bin_name(), "exvlan");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_rejects_missing_source() {
+        let err = install_kernel(Path::new("/nonexistent/exvlan"), "0").unwrap_err();
+        assert!(err.to_string().contains("不存在"));
+    }
 }
