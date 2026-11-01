@@ -1783,6 +1783,39 @@ fn app_install_update(path: String) -> Result<(), String> {
     upgrade::app::install_installer(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
 }
 
+/// Android：把 FFI 事件队列里的事件转发到前端（Rust 侧消费，前端无需轮询）。
+#[cfg(target_os = "android")]
+fn spawn_kernel_event_forwarder(app: AppHandle) {
+    std::thread::spawn(move || {
+        loop {
+            match ffi_kernel::poll_event() {
+                Some(json) => {
+                    let (event, instance) = match serde_json::from_str::<serde_json::Value>(&json) {
+                        Ok(v) => (
+                            v.get("type")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            v.get("instance")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                        ),
+                        Err(_) => continue,
+                    };
+                    let name = match event.as_str() {
+                        "dhcp_ip_changed" => "dhcp_ip_changed",
+                        "proxy_cidrs_updated" => "proxy_cidrs_updated",
+                        _ => continue,
+                    };
+                    let _ = app.emit(name, instance);
+                }
+                None => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    });
+}
+
 /// 以 root 重新拉起自身执行内部子命令（桌面端）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn run_elevated(args: &[&str]) -> Result<(), String> {
@@ -1865,6 +1898,9 @@ pub fn run_gui() -> std::process::ExitCode {
     let app = builder
         .setup(|app| {
             init_gui_logging(app.app_handle());
+
+            #[cfg(target_os = "android")]
+            spawn_kernel_event_forwarder(app.app_handle().clone());
 
             // for tray icon, menu need to be built in js
             #[cfg(not(target_os = "android"))]

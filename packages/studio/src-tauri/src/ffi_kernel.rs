@@ -131,6 +131,23 @@ pub fn attach_tun_fd(inst_name: &str, fd: i32) -> Result<(), String> {
     unsafe { check(set_tun_fd(name.as_ptr(), fd)) }
 }
 
+/// 取一个内核事件（`{"type":"dhcp_ip_changed"|"proxy_cidrs_updated","instance":"..."}`）。
+pub fn poll_event() -> Option<String> {
+    unsafe extern "C" {
+        fn poll_instance_events(out: *mut *const c_char) -> c_int;
+    }
+    let mut out: *const c_char = ptr::null();
+    let rc = unsafe { poll_instance_events(&mut out) };
+    if rc != 1 || out.is_null() {
+        return None;
+    }
+    let text = unsafe { CStr::from_ptr(out) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { free_string(out) };
+    Some(text)
+}
+
 /// 通过内核的 JSON-RPC 桥调用方法（移动端的 RPC 客户端将基于此实现）。
 pub fn json_rpc(
     service: &str,
