@@ -169,9 +169,9 @@ unsafe fn gui_runas(prog: *const i8, argv: *const *const i8) -> io::Result<(Exit
 fn runas_root_gui(cmd: &Command) -> io::Result<(ExitStatus, Vec<u8>)> {
     let exe: OsString = match get_exe_path(&cmd.cmd.get_program()) {
         Some(exe) => exe.into(),
-        None => unsafe {
-            return Ok(mem::transmute(!0));
-        },
+        None => {
+            return Ok((ExitStatus::from_raw(!0), Vec::new()));
+        }
     };
     let prog = make_cstring!(exe);
     let mut args = vec![];
