@@ -19,4 +19,11 @@ pub mod tracing_rolling_appender;
 #[cfg(feature = "ffi-rpc")]
 pub mod ffi_rpc;
 pub mod rpc;
+
+// GUI 侧唯一的内核入口：把所需的共享面统一从这里 re-export，
+// 避免 studio 直接依赖 exvlan-core / exvlan-proto（分层收敛）。
+pub use exvlan_core;
+pub use exvlan_proto;
 pub mod service_manager;
+#[cfg(feature = "gui-client")]
+pub mod transport;

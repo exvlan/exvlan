@@ -22,9 +22,8 @@ serde_json.workspace = true
 
 # 桌面端只依赖「管理/客户端」层的轻量 crate，不再静态链接内核（exvlan）。
 # 移动端（Android / iOS）仍需内核库（tauri-plugin-vpnservice 走进程内实例）。
-exvlan-core = { workspace = true, default-features = false, features = ["management"] }
-exvlan-proto = { workspace = true, features = ["api", "core"] }
-exvlan-rpc = { workspace = true, features = ["logging", "management"] }
+exvlan-rpc = { workspace = true, features = ["logging", "management", "gui-client"] }
+# 注：exvlan-core / exvlan-proto 通过 exvlan-rpc re-export 使用，这里不再直接依赖
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 sha2 = "0.10"
 tempfile.workspace = true

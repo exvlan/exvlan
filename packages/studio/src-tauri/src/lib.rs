@@ -6,29 +6,29 @@ mod elevate;
 mod ffi_kernel;
 mod kernel;
 mod ui_state;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+// upgrade 全平台编译：kernel 子模块在移动端返回“不支持”，app 子模块移动端走 APK 流程。
 mod upgrade;
 
 use anyhow::Context;
-use exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
-use exvlan_core::config::toml::{ConfigLoader, ConfigSource, TomlConfigLoader};
-use exvlan_core::management::config_source_to_rpc;
-use exvlan_core::management::remote_client::{
+use exvlan_rpc::exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
+use exvlan_rpc::exvlan_core::config::toml::{ConfigLoader, ConfigSource, TomlConfigLoader};
+use exvlan_rpc::exvlan_core::management::config_source_to_rpc;
+use exvlan_rpc::exvlan_core::management::remote_client::{
     GetNetworkMetasResponse, ListNetworkInstanceIdsJsonResp, ListNetworkProps, RemoteClientManager,
     Storage,
 };
-use exvlan_proto::api::config::{
+use exvlan_rpc::exvlan_proto::api::config::{
     ConfigPatchAction, ConfigRpc, ConfigRpcClientFactory, VpnPortalClientPatch,
 };
-use exvlan_proto::api::instance::{
+use exvlan_rpc::exvlan_proto::api::instance::{
     GetVpnPortalInfoRequest, InstanceIdentifier, VpnPortalInfo, VpnPortalRpc,
     VpnPortalRpcClientFactory, instance_identifier,
 };
-use exvlan_proto::api::manage::{
+use exvlan_rpc::exvlan_proto::api::manage::{
     CollectNetworkInfoResponse, ValidateConfigResponse, VpnPortalClientConfig, WebClientService,
     WebClientServiceClientFactory,
 };
-use exvlan_proto::rpc_types::controller::BaseController;
+use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
 
 // 移动端仍以内核库形式在同进程内跑实例（VPN Service 插件）。
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -48,7 +48,7 @@ use exvlan::utils::panic::setup_panic_handler;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use exvlan::web_client::{self, WebClient};
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan_core::{
+use exvlan_rpc::exvlan_core::{
     connectivity::protocol::raw::TunnelDialer as _, process_runtime::CoreProcessRuntime,
     socket::SocketListener, tunnel::Tunnel,
 };
@@ -743,8 +743,8 @@ fn init_gui_logging(app: &tauri::AppHandle) {
     let Ok(log_dir) = get_log_dir(app) else {
         return;
     };
-    let config = exvlan_core::config::toml::LoggingConfig::builder()
-        .file_logger(exvlan_core::config::toml::FileLoggerConfig {
+    let config = exvlan_rpc::exvlan_core::config::toml::LoggingConfig::builder()
+        .file_logger(exvlan_rpc::exvlan_core::config::toml::FileLoggerConfig {
             dir: Some(log_dir.to_string_lossy().to_string()),
             level: None,
             file: None,
@@ -811,14 +811,16 @@ mod manager {
     use dashmap::{DashMap, DashSet};
     #[cfg(any(target_os = "android", target_os = "ios"))]
     use exvlan::web_client::WebClientHooks;
-    use exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
+    use exvlan_rpc::exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    use exvlan_core::connectivity::protocol::raw::TunnelDialer as _;
-    use exvlan_core::management::remote_client::PersistentConfig;
-    use exvlan_core::rpc::bidirect::BidirectRpcManager;
-    use exvlan_proto::api::logger::{LoggerRpc, LoggerRpcClientFactory, SetLoggerConfigRequest};
-    use exvlan_proto::api::manage::RunNetworkInstanceRequest;
-    use exvlan_proto::rpc_types::controller::BaseController;
+    use exvlan_rpc::exvlan_core::connectivity::protocol::raw::TunnelDialer as _;
+    use exvlan_rpc::exvlan_core::management::remote_client::PersistentConfig;
+    use exvlan_rpc::exvlan_core::rpc::bidirect::BidirectRpcManager;
+    use exvlan_rpc::exvlan_proto::api::logger::{
+        LoggerRpc, LoggerRpcClientFactory, SetLoggerConfigRequest,
+    };
+    use exvlan_rpc::exvlan_proto::api::manage::RunNetworkInstanceRequest;
+    use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
     pub(super) struct GuiHooks {
@@ -830,7 +832,7 @@ mod manager {
     impl WebClientHooks for GuiHooks {
         async fn pre_run_network_instance(
             &self,
-            cfg: &exvlan_core::config::toml::TomlConfigLoader,
+            cfg: &exvlan_rpc::exvlan_core::config::toml::TomlConfigLoader,
         ) -> Result<(), String> {
             let client_manager = get_client_manager!()?;
             client_manager
@@ -1144,8 +1146,10 @@ mod manager {
             &self,
             app: &AppHandle,
             web_only: bool,
-        ) -> Result<(), exvlan_core::management::remote_client::RemoteClientError<anyhow::Error>>
-        {
+        ) -> Result<
+            (),
+            exvlan_rpc::exvlan_core::management::remote_client::RemoteClientError<anyhow::Error>,
+        > {
             let inst_ids: Vec<uuid::Uuid> = if web_only {
                 self.get_enabled_instances_with_web_like_tun_ids().collect()
             } else {
@@ -1170,7 +1174,7 @@ mod manager {
         pub(super) async fn pre_run_network_instance_hook(
             &self,
             app: &AppHandle,
-            cfg: &exvlan_core::config::toml::TomlConfigLoader,
+            cfg: &exvlan_rpc::exvlan_core::config::toml::TomlConfigLoader,
             source: PersistedConfigSource,
         ) -> Result<(), String> {
             let instance_id = cfg.get_id();
@@ -1296,7 +1300,7 @@ mod manager {
                 .set_logger_config(
                     BaseController::default(),
                     SetLoggerConfigRequest {
-                        level: exvlan_core::management::parse_log_level(&level).into(),
+                        level: exvlan_rpc::exvlan_core::management::parse_log_level(&level).into(),
                     },
                 )
                 .await?;
@@ -1392,7 +1396,7 @@ mod manager {
     #[cfg(test)]
     mod tests {
         use super::{PersistedConfigSource, StoredGuiConfig};
-        use exvlan_proto::api::manage::NetworkConfig;
+        use exvlan_rpc::exvlan_proto::api::manage::NetworkConfig;
 
         #[test]
         fn stored_gui_config_defaults_missing_source_to_legacy() {
