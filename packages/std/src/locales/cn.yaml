@@ -812,3 +812,14 @@ kernel:
   available_versions: 可用版本
   upgrade_to: 升级到 {version}
   install_success: 内核已安装
+
+upgrade:
+  app_version: 应用版本
+  kernel_version: 内核版本
+  unknown: 未知
+  check: 检查更新
+  new_version: "发现新版本 {version}"
+  app_up_to_date: 应用已是最新
+  download_and_install: 下载并安装
+  downloaded: 已下载
+  kernel_hint: 内核版本请在模式对话框中管理

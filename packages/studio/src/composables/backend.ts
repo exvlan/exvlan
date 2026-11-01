@@ -169,6 +169,28 @@ export async function kernelInstallVersion(version: string, source?: string) {
   return await invoke('kernel_install_version', { version, source })
 }
 
+export interface AppUpdateInfo {
+  platform: string
+  current: string
+  latest?: string
+  notes?: string
+  available: boolean
+  versions: string[]
+  source: string
+}
+
+export async function appUpdateInfo(source?: string) {
+  return await invoke<AppUpdateInfo>('app_update_info', { source })
+}
+
+export async function appDownloadUpdate(version: string, source?: string) {
+  return await invoke<string>('app_download_update', { version, source })
+}
+
+export async function appInstallUpdate(path: string) {
+  return await invoke('app_install_update', { path })
+}
+
 export async function getServiceStatus() {
   return await invoke<ServiceStatus>('get_service_status')
 }

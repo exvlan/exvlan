@@ -812,3 +812,14 @@ kernel:
   available_versions: Available versions
   upgrade_to: Upgrade to {version}
   install_success: Kernel installed
+
+upgrade:
+  app_version: App version
+  kernel_version: Kernel version
+  unknown: unknown
+  check: Check for updates
+  new_version: "New version {version} available"
+  app_up_to_date: App is up to date
+  download_and_install: Download & install
+  downloaded: Downloaded
+  kernel_hint: Kernel is managed from the mode dialog
