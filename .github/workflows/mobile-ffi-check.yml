@@ -104,7 +104,7 @@ jobs:
       - name: Build kernel FFI library
         run: |
           set -euo pipefail
-          cargo ndk -p 24 -t "${{ matrix.TARGET }}" -o ./jni-out build --release -p exvlan-ffi
+          cargo ndk -t "${{ matrix.TARGET }}" -o ./jni-out build --release -p exvlan-ffi
           mkdir -p "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/${{ matrix.ABI }}"
           cp ./jni-out/${{ matrix.ABI }}/libexvlan_ffi.so \
              "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/${{ matrix.ABI }}/"
@@ -115,7 +115,7 @@ jobs:
       - name: Build exvlan-studio (android)
         run: |
           set -euo pipefail
-          cargo ndk -p 24 -t "${{ matrix.TARGET }}" -o ./studio-out build -p exvlan-studio
+          cargo ndk -t "${{ matrix.TARGET }}" -o ./studio-out build -p exvlan-studio
           ls -l ./studio-out/${{ matrix.ABI }}/ | head
 
       - name: Assert linkage (DT_NEEDED)
