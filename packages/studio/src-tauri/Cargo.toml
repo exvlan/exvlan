@@ -73,7 +73,8 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-plugin-single-instance = "2.4.4"
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
-exvlan = { workspace = true, default-features = true }
+# P6：移动端不再链接内核 crate；内核以预编译库（libexvlan_ffi.so）+ C ABI 提供。
+exvlan-rpc = { workspace = true, features = ["logging", "management", "gui-client", "ffi-rpc"] }
 tauri-plugin-vpnservice = { path = "../../../exvlan/plugin/vpnservice" }
 
 [package.metadata.cargo-machete]

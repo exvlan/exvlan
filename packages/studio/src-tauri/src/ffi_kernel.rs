@@ -113,14 +113,50 @@ pub fn list_instances(max: usize) -> Result<Vec<String>, String> {
     }
     let mut out = Vec::with_capacity(n as usize);
     for item in buf.iter().take(n as usize) {
-        // 这里只取 key（实例名）；value 由内核在内部释放约定管理。
+        // key（实例名）与 value（实例 id）都由内核分配，取出后必须 free_string。
         if !item.key.is_null() {
             out.push(
                 unsafe { CStr::from_ptr(item.key) }
                     .to_string_lossy()
                     .into_owned(),
             );
+            unsafe { free_string(item.key) };
         }
+        if !item.value.is_null() {
+            unsafe { free_string(item.value) };
+        }
+    }
+    Ok(out)
+}
+
+/// 采集运行中实例的网络信息（实例名, JSON）。
+pub fn collect_running_network_infos(max: usize) -> Result<Vec<(String, String)>, String> {
+    let mut buf: Vec<KeyValuePair> = (0..max)
+        .map(|_| KeyValuePair {
+            key: ptr::null(),
+            value: ptr::null(),
+        })
+        .collect();
+    let n = unsafe { collect_network_infos(buf.as_mut_ptr(), buf.len()) };
+    if n < 0 {
+        return Err(last_error());
+    }
+    let mut out = Vec::with_capacity(n as usize);
+    for item in buf.iter().take(n as usize) {
+        if item.key.is_null() || item.value.is_null() {
+            continue;
+        }
+        let name = unsafe { CStr::from_ptr(item.key) }
+            .to_string_lossy()
+            .into_owned();
+        let info = unsafe { CStr::from_ptr(item.value) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe {
+            free_string(item.key);
+            free_string(item.value);
+        }
+        out.push((name, info));
     }
     Ok(out)
 }
