@@ -34,10 +34,10 @@ get_error_msg / free_string
 | ① CI 产出 per-ABI `libexvlan_ffi.so`（`mobile-kernel.yml`） | ✅ 已验证（arm64-v8a，7 MB） |
 | ①b pipeline 门控（develop/tag/dispatch） | ✅ |
 | ② Rust 绑定层（`ffi_kernel.rs`） | ✅ |
-| ③ 移动端 RPC 换底层 transport → `call_json_rpc` | ⬜ 主要工作量 |
-| ④ FFI 事件回调（回调 + 内部队列） | ⬜ 需改内核 FFI |
-| ⑤ `mobile.yml` 下载 `.so` 注入 `jniLibs`，移除内核编译 | ⬜ |
-| ⑥ 移动作业耗时 25min → ~12min | ⬜ 依赖 ③④⑤ |
+| ③ 移动端 RPC 换底层 transport → `call_json_rpc` | ✅ `RpcTransport` + `TunnelTransport` / `FfiTransport` |
+| ④ FFI 事件回调（回调 + 内部队列） | ✅ `event_api.rs` + Rust 转发线程 + 30s 比对兜底 |
+| ⑤ `mobile.yml` 下载 `.so` 注入 `jniLibs`，移除内核编译 | ✅ 依赖已删除，构建不再编译内核 |
+| ⑥ 移动作业耗时 25min → ~12min | ⏳ 待全量 CI 实测 |
 | ⑦ iOS 无签名编译检查（`ios-check.yml`） | ✅ CI 已验证 |
 | ⑧ `WebClientService` 方案（决策 C） | ✅ 结论：**无需新内核 API** |
 
@@ -54,7 +54,22 @@ client.run_network_instance(BaseController::default(), RunNetworkInstanceRequest
 因此 **Android 侧直接逐个调用现有 FFI 接口即可**，不需要新增「专用对账接口」，
 也不需要放开内核的拒绝分支 —— 内核零改动，API 面最小。
 
-## ③ 的技术要点（下一步实施）
+## ③ 的实际实现（已完成）
+
+`exvlan/rpc` 里新增 `RpcTransport` trait，返回 **typed client**（不是裸 tunnel）：
+
+| 实现 | 场景 | 说明 |
+|---|---|---|
+| `TunnelTransport` | 桌面 | `BidirectRpcManager::run_with_tunnel`（tcp 连本地内核守护进程） |
+| `FfiTransport` | 移动 | `call_json_rpc`（feature `ffi-rpc`），仅实现 GUI 用到的 5 个方法 |
+
+`GUIClientManager` 持有 `transport` 字段，业务代码只依赖 typed client，不再关心底层。
+
+Android 侧同时删掉：ring tunnel、本地 `ApiRpcServer`、`NativeInstanceManager`、
+`WebClient`（改 `ffi_kernel::start_config_server`）、`subscribe_native_instance_event`（改 ④），
+最后删除 `[target.'cfg(android|ios)'] exvlan = {...}` —— **studio 依赖树中已无内核 crate**。
+
+## ③ 的原始设计（存档）
 
 GUI 现在通过 `BidirectRpcManager::run_with_tunnel(tunnel)` 走**二进制 RPC 协议**；
 FFI 只有 `call_json_rpc`（protobuf **JSON** 请求/响应）。所以「换 transport」的实际含义是：
@@ -69,7 +84,16 @@ FFI 只有 `call_json_rpc`（protobuf **JSON** 请求/响应）。所以「换 t
    - `WebClientService` / `LoggerRpc` 等 scoped client
 4. 序列化：`exvlan-proto` 的 prost 消息 → `serde_json`（protobuf JSON 映射）。
 
-## ④ 的技术要点
+## ④ 的实际实现（已完成）
+
+1. 内核 FFI 新增 `register_instance_event_callback` / `poll_instance_events`（`contrib/ffi/src/event_api.rs`）。
+2. 回调只把事件 JSON 入队，不在回调线程做重活。
+3. Rust 侧 `spawn_kernel_event_forwarder`：500ms 轮询 → `app.emit("dhcp_ip_changed"|"proxy_cidrs_updated", 实例名)`。
+4. 兜底：`spawn_network_info_watchdog` 每 30s 调 `collect_network_infos`，比对
+   `virtual_ipv4` / `routes` / `running` 签名（忽略 `peers` 等抖动字段），变化即 emit。
+   队列溢出丢事件时靠它收敛。
+
+## ④ 的原始设计（存档）
 
 1. 内核 FFI 增加：
    ```c
