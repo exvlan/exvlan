@@ -95,7 +95,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          python3 script/release/gen_upgrade_manifests.py \
+          python3 script/gen_upgrade_manifests.py \
             --assets-dir zipped_assets \
             --version "${VERSION#v}" \
             --notes "Exvlan ${VERSION#v}"

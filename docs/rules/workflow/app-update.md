@@ -89,7 +89,7 @@ upgrade::app::install_installer()   → DMG/MSI 交给系统；Android 走 FileP
 
 ## 发版流程要点
 
-1. `release.yml` → `script/release/gen_upgrade_manifests.py` 生成两个清单（任一为空则失败）；
+1. `release.yml` → `script/gen_upgrade_manifests.py` 生成两个清单（任一为空则失败）；
 2. 缺少 `.sig` 时脚本直接失败，避免发出无法验证的更新；
 3. 镜像脚本把安装包/签名/清单同步到 `/upgrade/`；
 4. `tauri.conf.json` 的 `version` 必须等于 tag（`v` 前缀去掉后），否则 updater 判定异常。
