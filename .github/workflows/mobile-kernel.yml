@@ -105,7 +105,7 @@ jobs:
       - name: Build kernel FFI library
         run: |
           set -euo pipefail
-          cargo ndk -t "${{ matrix.TARGET }}" -o ./jni-out \
+          cargo ndk -p 24 -t "${{ matrix.TARGET }}" -o ./jni-out \
             build --release -p exvlan-ffi
           ls -lR ./jni-out
 

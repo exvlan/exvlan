@@ -43,6 +43,9 @@ fn main() {
         }
         println!("cargo:rustc-link-search=native={}", jni_libs.display());
         println!("cargo:rustc-link-lib=dylib=exvlan_ffi");
+        // 内核库对 libc 的引用（如 getifaddrs，API 24+）由 Android 运行时解析，
+        // 链接期不应因 --no-allow-shlib-undefined 报错。
+        println!("cargo:rustc-link-arg=-Wl,--allow-shlib-undefined");
         println!(
             "cargo:rerun-if-changed={}",
             jni_libs.join("libexvlan_ffi.so").display()
