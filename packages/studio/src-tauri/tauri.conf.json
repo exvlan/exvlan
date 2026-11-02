@@ -14,7 +14,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "resources": [
       "resources/kernel/*"
     ]
@@ -25,6 +25,12 @@
   "plugins": {
     "shell": {
       "open": "^.+"
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQxODU0NjUxRTg0NjI5ODUKUldTRktVYm9VVWFGUVl4L2FwNzNhN3lTTmJ1STVrakRHc2lWSkJ0Y2VzaHUrTWw5OVlQTUZxZTkK",
+      "endpoints": [
+        "https://dl.exvlan.era-x.cn/upgrade/latest.json"
+      ]
     }
   },
   "app": {

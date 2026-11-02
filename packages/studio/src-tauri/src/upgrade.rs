@@ -413,6 +413,55 @@ pub mod app {
         Ok(path)
     }
 
+    /// 官方 updater 检查（桌面）：成功返回 Some，未配置/网络失败返回 None（由上层回退自建）。
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    pub async fn check_update_official(app: &tauri::AppHandle) -> Option<AppUpdateInfo> {
+        use tauri_plugin_updater::UpdaterExt;
+
+        let updater = match app.updater() {
+            Ok(u) => u,
+            Err(err) => {
+                eprintln!("[upgrade] 官方 updater 不可用: {err}");
+                return None;
+            }
+        };
+        let found = match updater.check().await {
+            Ok(found) => found,
+            Err(err) => {
+                eprintln!("[upgrade] 官方 updater 检查失败: {err}");
+                return None;
+            }
+        };
+        let current = current_version();
+        let (latest, notes, available) = match found {
+            Some(update) => (Some(update.version), update.body, true),
+            None => (None, None, false),
+        };
+        Some(AppUpdateInfo {
+            platform: platform_key(),
+            current,
+            latest,
+            notes: notes.filter(|n| !n.is_empty()),
+            available,
+            versions: Vec::new(),
+            source: "official".to_string(),
+        })
+    }
+
+    /// 官方 updater 下载并安装（桌面）；调用方负责在成功后重启应用。
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    pub async fn install_official(app: &tauri::AppHandle) -> anyhow::Result<()> {
+        use tauri_plugin_updater::UpdaterExt;
+
+        let update = app
+            .updater()?
+            .check()
+            .await?
+            .context("官方更新源没有可用版本")?;
+        update.download_and_install(|_, _| {}, || {}).await?;
+        Ok(())
+    }
+
     /// 打开安装包（桌面：DMG/MSI；Android 由上层走系统安装器）。
     pub fn install_installer(path: &Path) -> anyhow::Result<()> {
         if !path.is_file() {

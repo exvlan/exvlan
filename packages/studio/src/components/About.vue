@@ -2,8 +2,7 @@
 import pkg from '~/../package.json'
 import { getExvlanVersion } from '~/composables/backend'
 import {
-  appDownloadUpdate,
-  appInstallUpdate,
+  appUpdateApply,
   appUpdateInfo,
   type AppUpdateInfo,
 } from '~/composables/backend'
@@ -45,12 +44,11 @@ async function onDownloadApp() {
   }
   downloading.value = true
   try {
-    const path = await appDownloadUpdate(version)
-    await appInstallUpdate(path)
+    await appUpdateApply(version)
     toast.add({
       severity: 'success',
       summary: t('upgrade.downloaded'),
-      detail: path,
+      detail: version,
       life: 8000,
     })
   }

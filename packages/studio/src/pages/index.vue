@@ -23,7 +23,7 @@ import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mo
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
 import KernelManager from '~/components/KernelManager.vue'
-import { appDownloadUpdate, appInstallUpdate, appUpdateInfo, ensureKernelService, getServiceStatus } from '~/composables/backend'
+import { appUpdateApply, appUpdateInfo, ensureKernelService, getServiceStatus } from '~/composables/backend'
 import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
 
 const { t, locale } = useI18n()
@@ -256,8 +256,7 @@ async function onAppUpdateNow() {
   }
   appUpdating.value = true
   try {
-    const path = await appDownloadUpdate(appUpdateVersion.value)
-    await appInstallUpdate(path)
+    await appUpdateApply(appUpdateVersion.value)
     appUpdateDialogVisible.value = false
   }
   catch (e: any) {
