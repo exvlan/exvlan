@@ -60,27 +60,6 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 static CLIENT_MANAGER: once_cell::sync::Lazy<RwLock<Option<manager::GUIClientManager>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
-type BoxedTunnelListener = Box<dyn SocketListener<Accepted = Box<dyn Tunnel>>>;
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RpcServerKind {
-    Ring,
-    Tcp,
-}
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-struct RpcServer {
-    kind: RpcServerKind,
-    _server: ApiRpcServer<BoxedTunnelListener>,
-    bind_url: Option<url::Url>,
-}
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-static RPC_SERVER: once_cell::sync::Lazy<Mutex<Option<RpcServer>>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(None));
-
 macro_rules! get_client_manager {
     () => {{
         let guard = CLIENT_MANAGER
@@ -593,14 +572,14 @@ async fn init_web_client(app: AppHandle, url: Option<String>) -> Result<(), Stri
 
 #[tauri::command]
 async fn is_web_client_connected() -> Result<bool, String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(target_os = "android")]
     {
-        let web_client_guard = WEB_CLIENT.read().await;
-        if let Some(web_client) = web_client_guard.as_ref() {
-            return Ok(web_client.is_connected());
-        }
+        return Ok(crate::ffi_kernel::config_server_connected());
     }
-    Ok(false)
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(false)
+    }
 }
 
 /// GUI 侧日志初始化：与内核共用 `exvlan-rpc` 的日志栈（控制台 + 滚动文件）。
