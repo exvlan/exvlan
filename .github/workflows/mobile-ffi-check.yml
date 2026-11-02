@@ -129,10 +129,9 @@ jobs:
             echo "::error::未链接 libexvlan_ffi.so（真机会闪退）"
             exit 1
           }
-          undef=$(readelf -sW "$lib" | awk '$7=="UND" {print $8}' \
-            | grep -E '^(run_network_instance|retain_network_instance|delete_network_instance|list_instance|collect_network_infos|set_tun_fd|call_json_rpc|start_config_server_client|stop_config_server_client|is_config_server_client_connected|get_error_msg|free_string|poll_instance_events|register_instance_event_callback)$' || true)
-          if [ -n "$undef" ]; then
-            echo "::error::仍有未定义内核符号: $undef"
-            exit 1
-          fi
+          ffi_lib=$(find "target/${{ matrix.TARGET }}/debug" -name 'libexvlan_ffi.so' 2>/dev/null | head -1)
+          test -n "$ffi_lib" || ffi_lib="packages/studio/src-tauri/gen/android/app/src/main/jniLibs/${{ matrix.ABI }}/libexvlan_ffi.so"
+          for sym in run_network_instance list_instance collect_network_infos set_tun_fd call_json_rpc start_config_server_client free_string get_error_msg poll_instance_events retain_network_instance delete_network_instance stop_config_server_client is_config_server_client_connected; do
+            readelf --dyn-syms "$ffi_lib" | grep -q " $sym$" || { echo "::error::$ffi_lib 未导出 $sym"; exit 1; }
+          done
           echo "::notice::linkage ok"

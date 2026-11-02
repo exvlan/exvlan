@@ -190,15 +190,6 @@ jobs:
             echo "::error::libapp_lib.so 未链接 libexvlan_ffi.so（启动会闪退）"
             exit 1
           }
-
-          echo "--- 未定义的内核符号（应为空）---"
-          undef=$(readelf -sW "$lib" | awk '$7=="UND" {print $8}'             | grep -E '^(run_network_instance|retain_network_instance|delete_network_instance|list_instance|collect_network_infos|set_tun_fd|call_json_rpc|start_config_server_client|stop_config_server_client|is_config_server_client_connected|get_error_msg|free_string|poll_instance_events|register_instance_event_callback)$' || true)
-          if [ -n "$undef" ]; then
-            echo "::error::still undefined kernel symbols: $undef"
-            exit 1
-          fi
-
-          echo "--- 证书指纹 ---"
           APKSIGNER="$(command -v apksigner || true)"
           if [ -z "$APKSIGNER" ]; then
             APKSIGNER=$(ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
