@@ -87,6 +87,18 @@ upgrade::app::install_installer()   → DMG/MSI 交给系统；Android 走 FileP
 前提：AndroidManifest 声明 `REQUEST_INSTALL_PACKAGES`（插件清单已加），
 `file_paths.xml` 覆盖 `cache-path`。首次安装系统会要求用户授予「安装未知应用」权限。
 
+## 文件名约定（踩过的坑）
+
+- **GitHub 会把资产名里的空格换成点**：`EXVlan Studio_x64.dmg` → `EXVlan.Studio_x64.dmg`。
+  清单必须引用上传后的名字，因此生成脚本会先把空格规范化为点。
+- **macOS 的 `.app.tar.gz` 默认不含版本**（`EXVlan Studio.app.tar.gz`）。镜像对 `.gz`
+  用 `immutable` 缓存，同名覆盖会让客户端拿到旧包 → 脚本重命名为 `…_<version>_<arch>.app.tar.gz`。
+- **Windows 安装包里的版本号是 Tauri 自己的一套**（如 `26.104.207-5`），与 `tauri.conf.json`
+  的 `26.410.20706` 不同。这是既有行为（2026-10 起就这么命名），只影响文件名与「应用和功能」
+  里的显示，不影响 updater 版本比较（比较用的是运行时版本）。
+- `release.yml` 的 `Package release assets` 会跳过 `mobile-kernel-*`，避免把裸 `.so`
+  混进 Release 资产（内核已经打进 APK）。
+
 ## 发版流程要点
 
 1. `release.yml` → `script/gen_upgrade_manifests.py` 生成两个清单（任一为空则失败）；

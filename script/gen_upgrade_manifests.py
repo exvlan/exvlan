@@ -85,9 +85,23 @@ def main() -> int:
     base_url = args.base_url if args.base_url.endswith("/") else args.base_url + "/"
     files = sorted(p for p in args.assets_dir.iterdir() if p.is_file())
 
+    # GitHub Release 会把资产名里的空格替换成点（"EXVlan Studio_x.dmg" → "EXVlan.Studio_x.dmg"）。
+    # 清单必须引用「上传后的名字」，因此这里提前做同样的规范化，保证本地名 == 资产名 == 镜像名。
+    for path in list(files):
+        if " " not in path.name or not path.is_file():
+            continue
+        target = path.with_name(path.name.replace(" ", "."))
+        path.rename(target)
+        if path.with_name(path.name + ".sig").is_file():
+            path.with_name(path.name + ".sig").rename(target.with_name(target.name + ".sig"))
+        print(f"[upgrade] 规范化文件名：{path.name} -> {target.name}")
+    files = sorted(p for p in args.assets_dir.iterdir() if p.is_file())
+
     # macOS 的 updater 产物默认叫 "EXVlan Studio.app.tar.gz"（不含版本号）。
     # 镜像对 .gz 用了 immutable 缓存，同名覆盖会让客户端拿到旧包 —— 这里补上版本与架构。
     for path in list(files):
+        if not path.is_file():
+            continue
         if not path.name.lower().endswith(".app.tar.gz") or version in path.name:
             continue
         stem = path.name[: -len(".app.tar.gz")]

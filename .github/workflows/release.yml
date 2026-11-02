@@ -81,7 +81,12 @@ jobs:
           fi
 
           # studio / mobile 安装包与 APK：摊平后原样上传
+          # 注意：pattern `mobile-*` 也会拉到 `mobile-kernel-<abi>`（预编译内核库），
+          # 内核已打在 APK 内，这里跳过，避免把裸 .so 混进 release 资产。
           for d in studio-* mobile-*; do
+            case "$d" in
+              mobile-kernel-*) continue ;;
+            esac
             find "$d" -type f -exec mv {} ../zipped_assets/ \;
           done
 
