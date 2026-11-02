@@ -659,9 +659,7 @@ mod manager {
     use exvlan_rpc::exvlan_core::connectivity::protocol::raw::TunnelDialer as _;
     use exvlan_rpc::exvlan_core::management::remote_client::PersistentConfig;
     use exvlan_rpc::exvlan_core::rpc::bidirect::BidirectRpcManager;
-    use exvlan_rpc::exvlan_proto::api::logger::{
-        LoggerRpc, LoggerRpcClientFactory, SetLoggerConfigRequest,
-    };
+    use exvlan_rpc::exvlan_proto::api::logger::{LoggerRpc, SetLoggerConfigRequest};
     use exvlan_rpc::exvlan_proto::api::manage::RunNetworkInstanceRequest;
     use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
     use std::sync::Arc;
@@ -1592,6 +1590,71 @@ fn spawn_kernel_event_forwarder(app: AppHandle) {
     });
 }
 
+/// 从内核返回的实例信息 JSON 里取出「会影响 VPN 配置」的部分（虚拟 IP / 路由 / 运行状态）。
+///
+/// 不能直接比较整段 JSON：`peers`、`events` 等字段的顺序与内容会频繁抖动。
+#[cfg(target_os = "android")]
+fn network_info_signature(json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let pick = |obj: &serde_json::Value, snake: &str, camel: &str| {
+        obj.get(snake).or_else(|| obj.get(camel)).cloned()
+    };
+    let node_info = pick(&value, "my_node_info", "myNodeInfo").unwrap_or_default();
+    let virtual_ipv4 = pick(&node_info, "virtual_ipv4", "virtualIpv4").unwrap_or_default();
+    let mut routes: Vec<String> = pick(&value, "routes", "routes")
+        .and_then(|r| r.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .map(|r| {
+            // 路由按目标/掩码/代理标记排序，忽略字段顺序抖动
+            let target = r
+                .get("dest")
+                .or_else(|| r.get("destination"))
+                .map(|x| x.to_string())
+                .unwrap_or_default();
+            format!(
+                "{target}|{}",
+                r.get("proxy").map(|x| x.to_string()).unwrap_or_default()
+            )
+        })
+        .collect();
+    routes.sort();
+    let running = pick(&value, "running", "running").unwrap_or_default();
+    Some(format!("{virtual_ipv4}|{running}|{}", routes.join(",")))
+}
+
+/// Android：事件兜底——每 30s 比对实例网络信息（DHCP IP / 路由），有变化就 emit。
+///
+/// FFI 事件队列容量有限，极端情况下会丢事件导致路由不同步；这里用定时比对兜底。
+#[cfg(target_os = "android")]
+fn spawn_network_info_watchdog(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut last: std::collections::HashMap<String, String> = Default::default();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            let infos = match ffi_kernel::collect_running_network_infos(16) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let mut current: std::collections::HashMap<String, String> =
+                std::collections::HashMap::with_capacity(infos.len());
+            for (name, info) in infos {
+                let signature = match network_info_signature(&info) {
+                    Some(sig) => sig,
+                    None => continue,
+                };
+                let changed = last.get(&name) != Some(&signature);
+                if changed {
+                    let _ = app.emit("dhcp_ip_changed", name.clone());
+                }
+                current.insert(name, signature);
+            }
+            // 实例消失时清掉快照，避免下次启动重复判断
+            last = current;
+        }
+    });
+}
+
 /// 以 root 重新拉起自身执行内部子命令（桌面端）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn run_elevated(args: &[&str]) -> Result<(), String> {
@@ -1681,6 +1744,9 @@ pub fn run_gui() -> std::process::ExitCode {
 
             #[cfg(target_os = "android")]
             spawn_kernel_event_forwarder(app.app_handle().clone());
+
+            #[cfg(target_os = "android")]
+            spawn_network_info_watchdog(app.app_handle().clone());
 
             // for tray icon, menu need to be built in js
             #[cfg(not(target_os = "android"))]
