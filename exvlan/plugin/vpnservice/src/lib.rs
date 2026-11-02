@@ -12,8 +12,8 @@ mod mobile;
 #[cfg(mobile)]
 use mobile::Vpnservice;
 
-mod error;
-mod models;
+pub mod error;
+pub mod models;
 
 pub use error::{Error, Result};
 

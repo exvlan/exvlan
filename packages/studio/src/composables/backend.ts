@@ -191,6 +191,11 @@ export async function appInstallUpdate(path: string) {
   return await invoke('app_install_update', { path })
 }
 
+/** 安装应用更新：桌面优先官方 updater（成功后自动重启），失败回退「下载 + 打开安装包」。 */
+export async function appUpdateApply(version: string, source?: string) {
+  return await invoke('app_update_apply', { version, source })
+}
+
 export async function getServiceStatus() {
   return await invoke<ServiceStatus>('get_service_status')
 }

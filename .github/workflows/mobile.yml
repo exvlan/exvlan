@@ -144,6 +144,10 @@ jobs:
           fi
 
       - name: Build
+        env:
+          # 桌面 updater 的签名密钥；移动端构建不需要，但统一注入避免 bundler 误判
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
           cd packages/studio
           pnpm tauri android build --apk --target "$ARCH" --split-per-abi

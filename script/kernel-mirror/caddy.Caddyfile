@@ -3,6 +3,9 @@
 # 目录约定（由 exvlan-kernel-sync.sh 维护）：
 #   /srv/exvlan/core/manifest.json
 #   /srv/exvlan/core/<platform>-v<version>.zip
+#   /srv/exvlan/upgrade/latest.json     （官方 updater）
+#   /srv/exvlan/upgrade/manifest.json   （自建回退）
+#   /srv/exvlan/upgrade/<安装包 + .sig>
 #
 # 说明：
 # - manifest.json 必须实时（客户端据此判断是否有新内核），因此 no-cache。
@@ -19,6 +22,23 @@ dl.exvlan.era-x.cn {
 		header @manifest Cache-Control "no-cache, must-revalidate"
 
 		@assets path_regexp \.zip$
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		header {
+			X-Content-Type-Options nosniff
+			-Server
+		}
+
+		file_server {
+			browse false
+		}
+	}
+
+	handle /upgrade/* {
+		@manifest path /upgrade/manifest.json /upgrade/latest.json
+		header @manifest Cache-Control "no-cache, must-revalidate"
+
+		@assets path_regexp \.(dmg|msi|exe|apk|gz)$
 		header @assets Cache-Control "public, max-age=31536000, immutable"
 
 		header {

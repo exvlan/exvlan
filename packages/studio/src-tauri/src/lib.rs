@@ -1533,28 +1533,99 @@ async fn kernel_install_version(_version: String, _source: Option<String>) -> Re
 }
 
 /// 应用更新信息（当前版本 / 最新版本 / 更新说明 / 可用版本）。
+///
+/// 桌面优先走官方 updater（minisign 校验），失败或指定了 `source` 时回退自建 manifest。
 #[tauri::command]
-async fn app_update_info(source: Option<String>) -> Result<upgrade::app::AppUpdateInfo, String> {
+async fn app_update_info(
+    app: AppHandle,
+    source: Option<String>,
+) -> Result<upgrade::app::AppUpdateInfo, String> {
+    if source.is_none() {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        if let Some(info) = upgrade::app::check_update_official(&app).await {
+            return Ok(info);
+        }
+        let _ = &app;
+    }
     let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
     upgrade::app::check_update(&base)
         .await
         .map_err(|e| format!("{e:#}"))
 }
 
+/// 安装应用更新：桌面优先官方 updater（成功后重启），失败回退「下载并打开安装包」。
+#[tauri::command]
+async fn app_update_apply(
+    app: AppHandle,
+    version: String,
+    source: Option<String>,
+) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if source.is_none() {
+        match upgrade::app::install_official(&app).await {
+            Ok(()) => {
+                app.restart();
+            }
+            Err(err) => eprintln!("[upgrade] 官方 updater 安装失败，回退自建流程: {err:#}"),
+        }
+    }
+    let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
+    let dest = update_download_dir(&app)?;
+    let path = upgrade::app::download_installer(&base, &version, dest.as_deref())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    app_install_update(app, path.display().to_string())
+}
+
 /// 下载应用安装包（已校验 sha256），返回本地路径。
 #[tauri::command]
-async fn app_download_update(version: String, source: Option<String>) -> Result<String, String> {
+async fn app_download_update(
+    app: AppHandle,
+    version: String,
+    source: Option<String>,
+) -> Result<String, String> {
     let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
-    upgrade::app::download_installer(&base, &version)
+    let dest = update_download_dir(&app)?;
+    upgrade::app::download_installer(&base, &version, dest.as_deref())
         .await
         .map(|p| p.display().to_string())
         .map_err(|e| format!("{e:#}"))
 }
 
-/// 打开已下载的安装包（桌面：DMG/MSI；Android 走系统安装器）。
+/// 移动端更新包要落在应用 cache 目录（FileProvider 才能共享给系统安装器）。
+fn update_download_dir(app: &AppHandle) -> Result<Option<std::path::PathBuf>, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let dir = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| format!("无法定位应用缓存目录: {e}"))?
+            .join("upgrade");
+        Ok(Some(dir))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = app;
+        Ok(None)
+    }
+}
+
+/// 打开已下载的安装包（桌面：DMG/MSI；Android 走 FileProvider + 系统安装器）。
 #[tauri::command]
-fn app_install_update(path: String) -> Result<(), String> {
-    upgrade::app::install_installer(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+fn app_install_update(app: AppHandle, path: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_vpnservice::VpnserviceExt;
+        app.vpnservice()
+            .install_apk(tauri_plugin_vpnservice::models::InstallApkRequest { path })
+            .map_err(|e| format!("打开系统安装器失败: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+        upgrade::app::install_installer(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+    }
 }
 
 /// Android：把 FFI 事件队列里的事件转发到前端（Rust 侧消费，前端无需轮询）。
@@ -1738,6 +1809,12 @@ pub fn run_gui() -> std::process::ExitCode {
         builder = builder.plugin(tauri_plugin_vpnservice::init());
     }
 
+    // 桌面：官方 updater（minisign 校验 + 自动替换安装）
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
     let app = builder
         .setup(|app| {
             init_gui_logging(app.app_handle());
@@ -1796,6 +1873,7 @@ pub fn run_gui() -> std::process::ExitCode {
             app_update_info,
             app_download_update,
             app_install_update,
+            app_update_apply,
             kernel_install_version,
             set_service_status,
             get_service_status,

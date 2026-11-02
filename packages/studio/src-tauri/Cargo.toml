@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-studio"
-version = "26.410.20705"
+version = "26.410.20706"
 description = "Exvlan GUI"
 authors = ["you"]
 edition.workspace = true
@@ -71,6 +71,8 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2.4.4"
+# 桌面：官方 updater（签名校验 + 自动替换）；移动端由自建 APK 流程处理。
+tauri-plugin-updater = "2.9.0"
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 # P6：移动端不再链接内核 crate；内核以预编译库（libexvlan_ffi.so）+ C ABI 提供。

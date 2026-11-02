@@ -6,18 +6,23 @@
 # - 原子发布：先落 zip，最后落 manifest.json —— 客户端不会看到指向缺失文件的清单。
 # - 需要 GH_TOKEN（fine-grained：Contents = Read-only），仅当仓库为 private 时必需。
 #
+# 同时同步「应用更新」资产：安装包 + minisign 签名 + upgrade-manifest.json /
+# upgrade-latest.json（后者在目标目录里重命名为 manifest.json / latest.json）。
+#
 # 用法：
 #   GH_TOKEN=xxx DEST=/srv/exvlan/core ./exvlan-kernel-sync.sh
 #
 # 环境变量：
 #   REPO     默认 exvlan/exvlan
 #   DEST     默认 /srv/exvlan/core
+#   UPGRADE_DEST 默认 /srv/exvlan/upgrade（应用更新镜像目录）
 #   KEEP     保留最近多少个版本的 zip（默认 5）
 #   PLATFORMS 以空格分隔的平台名（默认 6 个 GUI 平台）
 set -euo pipefail
 
 REPO="${REPO:-exvlan/exvlan}"
 DEST="${DEST:-/srv/exvlan/core}"
+UPGRADE_DEST="${UPGRADE_DEST:-/srv/exvlan/upgrade}"
 KEEP="${KEEP:-5}"
 PLATFORMS="${PLATFORMS:-macos-x86_64 macos-aarch64 windows-x86_64 windows-arm64 linux-x86_64 linux-aarch64}"
 
@@ -27,6 +32,10 @@ for p in $PLATFORMS; do
   patterns+=(-p "${p}-v*.zip")
 done
 patterns+=(-p 'manifest.json')
+# 应用更新：安装包 + 官方 updater 产物（.app.tar.gz / setup.exe / .sig）+ 清单
+patterns+=(-p '*.dmg' -p '*.msi' -p '*-setup.exe' -p 'app-*-release.apk')
+patterns+=(-p '*.app.tar.gz' -p '*.sig')
+patterns+=(-p 'upgrade-manifest.json' -p 'upgrade-latest.json')
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -74,6 +83,41 @@ if [ -z "$manifests" ]; then
   rm -rf "$stage"
   exit 1
 fi
+
+# 应用更新镜像：先落安装包/签名，最后落清单（原子发布顺序不变）
+upgrade_stage="$UPGRADE_DEST/.staging"
+install -d "$UPGRADE_DEST" "$upgrade_stage"
+
+copied=0
+while IFS= read -r -d '' f; do
+  base="$(basename "$f")"
+  case "$base" in
+    upgrade-manifest.json|upgrade-latest.json|manifest.json) continue ;;
+  esac
+  cp -f "$f" "$upgrade_stage/"
+  copied=$((copied + 1))
+done < <(find "$work" -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \
+  -o -name 'app-*-release.apk' -o -name '*.app.tar.gz' -o -name '*.sig' \) -print0)
+
+if [ "$copied" -gt 0 ]; then
+  mv -f "$upgrade_stage"/* "$UPGRADE_DEST"/
+  echo "[sync] 应用更新资产：$copied 个文件已发布到 $UPGRADE_DEST"
+else
+  echo "[sync] 未发现应用更新资产，跳过 upgrade 镜像" >&2
+fi
+
+# 清单最后落盘，且优先用最新 release 的那份
+newest="$(head -n 1 "$work/tags")"
+for pair in "upgrade-manifest.json:manifest.json" "upgrade-latest.json:latest.json"; do
+  src="${pair%%:*}"; dst="${pair##*:}"
+  if [ -f "$work/$newest/$src" ]; then
+    cp -f "$work/$newest/$src" "$upgrade_stage/$dst"
+  fi
+done
+if [ -f "$upgrade_stage/manifest.json" ] || [ -f "$upgrade_stage/latest.json" ]; then
+  mv -f "$upgrade_stage"/*.json "$UPGRADE_DEST"/ 2>/dev/null || true
+fi
+rm -rf "$upgrade_stage"
 
 python3 "$(dirname "$0")/merge_manifests.py" "$manifests" "$stage/manifest.json"
 mv -f "$stage/manifest.json" "$DEST/manifest.json"

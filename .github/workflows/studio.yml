@@ -150,6 +150,9 @@ jobs:
         env:
           RUSTFLAGS: "-L native=${{ github.workspace }}/packages/studio/src-tauri/"
           CARGO_TERM_COLOR: always
+          # 官方 updater 的 minisign 私钥（tauri.conf.json 里 createUpdaterArtifacts=true 必需）
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           projectPath: ./packages/studio
           args: --verbose --target ${{ matrix.GUI_TARGET }}
@@ -196,13 +199,15 @@ jobs:
       - name: Collect artifact
         run: |
           mkdir -p ./artifacts/
+          # 除安装包外还要收集官方 updater 的产物：macOS 的 .app.tar.gz 与其 .sig，
+          # Windows/Linux 的 .sig（签名随 latest.json 发布）。
           if [[ $GUI_TARGET =~ windows ]]; then
-              find ./target/$GUI_TARGET/release/bundle/ -type f \( -name "*.msi" -o -name "*.exe" \) -exec cp {} ./artifacts/ \; 2>/dev/null || true
+              find ./target/$GUI_TARGET/release/bundle/ -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.sig" \) -exec cp {} ./artifacts/ \; 2>/dev/null || true
           elif [[ $GUI_TARGET =~ darwin ]]; then
-              find ./target/$GUI_TARGET/release/bundle/ -type f -name "*.dmg" -exec cp {} ./artifacts/ \; 2>/dev/null || true
+              find ./target/$GUI_TARGET/release/bundle/ -type f \( -name "*.dmg" -o -name "*.sig" -o -name "*.app.tar.gz" \) -exec cp {} ./artifacts/ \; 2>/dev/null || true
           elif [[ $GUI_TARGET =~ linux ]]; then
               # 扩展匹配：包含 .deb, .rpm 和 .AppImage
-              find ./target/$GUI_TARGET/release/bundle/ -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \) -exec cp {} ./artifacts/ \; 2>/dev/null || true
+              find ./target/$GUI_TARGET/release/bundle/ -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" -o -name "*.sig" \) -exec cp {} ./artifacts/ \; 2>/dev/null || true
           fi
 
           # 打印列表，确保你在日志中能看到到底抓取了哪些文件

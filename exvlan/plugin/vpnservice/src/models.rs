@@ -8,6 +8,13 @@ pub struct PingRequest {
     pub value: Option<String>,
 }
 
+/// 用系统安装器打开已下载的 APK（走 FileProvider，无需存储权限）。
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallApkRequest {
+    pub path: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PingResponse {
