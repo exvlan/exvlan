@@ -6,6 +6,9 @@ HTTPS 端点拉取 `manifest.json` 与对应平台的内核包，因此需要一
 > 主仓为 private，私有仓的 Release 资产下载需要认证，用户端不可能内置 token —— 这就是
 > 引入镜像端点的原因。
 
+> **应用更新与 Magisk 更新也走同一台镜像机**（`/upgrade/`），
+> 部署/升级步骤见 [`mirror-deploy.md`](./mirror-deploy.md)。
+
 ## 拓扑
 
 ```
@@ -27,6 +30,10 @@ GitHub Release（private，CI 产出）
 ```
 
 只镜像 GUI 真正用到的 6 个平台；其余平台仍随 Release 提供，但不进镜像。
+
+同一脚本还会把应用更新资产同步到 `/srv/exvlan/upgrade/`（对外 `/upgrade/`）：
+`latest.json`（官方 updater）、`manifest.json`（自建回退）、`magisk_update.json`（Magisk 在线更新）、
+各平台安装包与 `.sig`、四个 ABI 的 APK、`Exvlan-Magisk-*.zip`。
 
 镜像端的 `manifest.json` 会**合并最近 KEEP 个 release** 的 `versions[]`，
 因此 GUI 能拿到历史版本列表（用于回滚）。每个 Release 自带的 manifest 只含它自己的版本。

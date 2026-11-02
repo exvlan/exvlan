@@ -69,7 +69,9 @@ upgrade::app::install_installer()   → DMG/MSI 交给系统；Android 走 FileP
 |---|---|---|
 | `latest.json` | 官方 updater 清单 | `no-cache` |
 | `manifest.json` | 自建清单 | `no-cache` |
+| `magisk_update.json` | Magisk 管理器在线更新（`module.prop` 的 `updateJson` 指向它） | `no-cache` |
 | 安装包（dmg/msi/exe/apk/app.tar.gz）与 `.sig` | 带版本/内容不可变 | 1 年 immutable |
+| `Exvlan-Magisk-*.zip` | Magisk 模块包 | 1 年 immutable |
 
 同步：`script/kernel-mirror/exvlan-kernel-sync.sh`（systemd timer，15 min）。
 它先落安装包与签名，最后落清单——客户端不会看到指向缺失文件的清单。
@@ -98,6 +100,19 @@ upgrade::app::install_installer()   → DMG/MSI 交给系统；Android 走 FileP
   里的显示，不影响 updater 版本比较（比较用的是运行时版本）。
 - `release.yml` 的 `Package release assets` 会跳过 `mobile-kernel-*`，避免把裸 `.so`
   混进 Release 资产（内核已经打进 APK）。
+
+## Magisk 在线更新
+
+仓库为 private，`raw.githubusercontent.com` 直链对终端用户不可用，因此 `module.prop` 的
+`updateJson` 指向镜像：
+
+```ini
+updateJson=https://dl.exvlan.era-x.cn/upgrade/magisk_update.json
+```
+
+该文件由 `gen_upgrade_manifests.py` 在发版时生成（`version` / `versionCode` / `zipUrl` /
+`changelog`），`versionCode` 规则为 `YY | QMM | Mmpp | 000`（例如 `26.410.20706` →
+`2641020706000`），必须与 `module.prop` 保持一致。
 
 ## 发版流程要点
 

@@ -35,10 +35,10 @@ dl.exvlan.era-x.cn {
 	}
 
 	handle /upgrade/* {
-		@manifest path /upgrade/manifest.json /upgrade/latest.json
+		@manifest path /upgrade/manifest.json /upgrade/latest.json /upgrade/magisk_update.json
 		header @manifest Cache-Control "no-cache, must-revalidate"
 
-		@assets path_regexp \.(dmg|msi|exe|apk|gz)$
+		@assets path_regexp \.(dmg|msi|exe|apk|gz|zip)$
 		header @assets Cache-Control "public, max-age=31536000, immutable"
 
 		header {

@@ -74,6 +74,11 @@ def main() -> int:
     )
     parser.add_argument("--notes", default="")
     parser.add_argument(
+        "--magisk-changelog",
+        default="",
+        help="Magisk 更新说明（写入 magisk_update.json）",
+    )
+    parser.add_argument(
         "--macos-arch",
         default="x86_64",
         choices=["x86_64", "aarch64"],
@@ -153,6 +158,26 @@ def main() -> int:
         "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "platforms": platforms,
     }
+
+    # ---- Magisk 在线更新清单（镜像为 /upgrade/magisk_update.json）----
+    magisk_zip = find_one(files, re.compile(r"^Exvlan-Magisk-.*\.zip$", re.I))
+    if magisk_zip is not None:
+        # versionCode 约定：YY | QMM | Mmpp | 000（与 module.prop 一致）
+        try:
+            major, minor, patch = (int(x) for x in version.split(".")[:3])
+        except ValueError:
+            sys.exit(f"[upgrade] 无法从版本 {version} 推导 magisk versionCode")
+        version_code = int(f"{major:02d}{minor:03d}{patch:05d}000")
+        magisk_update = {
+            "version": version,
+            "versionCode": version_code,
+            "zipUrl": base_url + urllib.parse.quote(magisk_zip.name),
+            "changelog": args.magisk_changelog or args.notes,
+        }
+        (args.assets_dir / "magisk_update.json").write_text(
+            json.dumps(magisk_update, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        print(f"[upgrade] Magisk 更新清单：{magisk_zip.name} versionCode={version_code}")
 
     out_dir = args.assets_dir
     (out_dir / "upgrade-manifest.json").write_text(
