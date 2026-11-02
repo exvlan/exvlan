@@ -37,8 +37,9 @@ APP_PLATFORM_RULES: list[tuple[str, re.Pattern[str]]] = [
 
 # 官方 updater 的平台键（tauri 的 target triple 简写）→ 更新包匹配规则
 UPDATER_TARGET_RULES: list[tuple[str, re.Pattern[str]]] = [
-    ("darwin-x86_64", re.compile(r"^.*_x64.*\.app\.tar\.gz$", re.I)),
-    ("darwin-aarch64", re.compile(r"^.*(aarch64|arm64).*\.app\.tar\.gz$", re.I)),
+    # 注意：macOS 的 .app.tar.gz 文件名里没有架构标记（如 "EXVlan Studio.app.tar.gz"），
+    # 只能由调用方用 --macos-arch 指定，这里用占位符 {macos_arch}。
+    ("darwin-{macos_arch}", re.compile(r"^.*\.app\.tar\.gz$", re.I)),
     ("windows-x86_64", re.compile(r"^.*_x64.*setup\.exe$", re.I)),
     ("windows-arm64", re.compile(r"^.*(aarch64|arm64).*setup\.exe$", re.I)),
     ("linux-x86_64", re.compile(r"^.*_amd64.*\.AppImage$", re.I)),
@@ -72,10 +73,29 @@ def main() -> int:
         help="更新包对外下载前缀（需以 / 结尾）",
     )
     parser.add_argument("--notes", default="")
+    parser.add_argument(
+        "--macos-arch",
+        default="x86_64",
+        choices=["x86_64", "aarch64"],
+        help="macOS 更新包对应的架构（产物名里没有架构标记，需显式给出）",
+    )
     args = parser.parse_args()
 
     version = args.version.lstrip("v")
     base_url = args.base_url if args.base_url.endswith("/") else args.base_url + "/"
+    files = sorted(p for p in args.assets_dir.iterdir() if p.is_file())
+
+    # macOS 的 updater 产物默认叫 "EXVlan Studio.app.tar.gz"（不含版本号）。
+    # 镜像对 .gz 用了 immutable 缓存，同名覆盖会让客户端拿到旧包 —— 这里补上版本与架构。
+    for path in list(files):
+        if not path.name.lower().endswith(".app.tar.gz") or version in path.name:
+            continue
+        stem = path.name[: -len(".app.tar.gz")]
+        target = path.with_name(f"{stem}_{version}_{args.macos_arch}.app.tar.gz")
+        path.rename(target)
+        if path.with_name(path.name + ".sig").is_file():
+            path.with_name(path.name + ".sig").rename(target.with_name(target.name + ".sig"))
+        print(f"[upgrade] 重命名 macOS 更新包：{path.name} -> {target.name}")
     files = sorted(p for p in args.assets_dir.iterdir() if p.is_file())
 
     # ---- 自建 manifest ----
@@ -98,6 +118,7 @@ def main() -> int:
     platforms: dict[str, dict[str, str]] = {}
     missing_sig: list[str] = []
     for target, pattern in UPDATER_TARGET_RULES:
+        target = target.format(macos_arch=args.macos_arch)
         hit = find_one(files, pattern)
         if hit is None:
             continue

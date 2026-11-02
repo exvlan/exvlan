@@ -98,6 +98,7 @@ jobs:
           python3 script/gen_upgrade_manifests.py \
             --assets-dir zipped_assets \
             --version "${VERSION#v}" \
+            --macos-arch x86_64 \
             --notes "Exvlan ${VERSION#v}"
           ls -l zipped_assets/upgrade-*.json
 
