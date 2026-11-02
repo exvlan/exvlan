@@ -393,8 +393,15 @@ pub mod app {
         })
     }
 
-    /// 下载安装包到临时目录（已校验 sha256），返回路径。
-    pub async fn download_installer(base: &str, version: &str) -> anyhow::Result<PathBuf> {
+    /// 下载安装包（已校验 sha256），返回路径。
+    ///
+    /// `dest_dir` 为空时落到系统临时目录；Android 必须传应用 cache 目录，
+    /// 否则 FileProvider 无法共享给系统安装器。
+    pub async fn download_installer(
+        base: &str,
+        version: &str,
+        dest_dir: Option<&std::path::Path>,
+    ) -> anyhow::Result<PathBuf> {
         let base = normalize_base(base, APP_BASE_URL);
         let manifest = fetch_manifest(&base, APP_BASE_URL).await?;
         let platform = platform_key();
@@ -406,7 +413,10 @@ pub mod app {
             .with_context(|| format!("应用 {version} 未提供 {platform} 平台的安装包"))?;
 
         let bytes = download_verified(&base, asset).await?;
-        let dir = std::env::temp_dir().join("exvlan-update");
+        let dir = match dest_dir {
+            Some(dir) => dir.to_path_buf(),
+            None => std::env::temp_dir().join("exvlan-update"),
+        };
         std::fs::create_dir_all(&dir).context("创建更新临时目录失败")?;
         let path = dir.join(&asset.file);
         std::fs::write(&path, &bytes).context("写入安装包失败")?;

@@ -1569,28 +1569,63 @@ async fn app_update_apply(
             Err(err) => eprintln!("[upgrade] 官方 updater 安装失败，回退自建流程: {err:#}"),
         }
     }
-    let _ = &app;
     let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
-    let path = upgrade::app::download_installer(&base, &version)
+    let dest = update_download_dir(&app)?;
+    let path = upgrade::app::download_installer(&base, &version, dest.as_deref())
         .await
         .map_err(|e| format!("{e:#}"))?;
-    upgrade::app::install_installer(&path).map_err(|e| format!("{e:#}"))
+    app_install_update(app, path.display().to_string())
 }
 
 /// 下载应用安装包（已校验 sha256），返回本地路径。
 #[tauri::command]
-async fn app_download_update(version: String, source: Option<String>) -> Result<String, String> {
+async fn app_download_update(
+    app: AppHandle,
+    version: String,
+    source: Option<String>,
+) -> Result<String, String> {
     let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
-    upgrade::app::download_installer(&base, &version)
+    let dest = update_download_dir(&app)?;
+    upgrade::app::download_installer(&base, &version, dest.as_deref())
         .await
         .map(|p| p.display().to_string())
         .map_err(|e| format!("{e:#}"))
 }
 
-/// 打开已下载的安装包（桌面：DMG/MSI；Android 走系统安装器）。
+/// 移动端更新包要落在应用 cache 目录（FileProvider 才能共享给系统安装器）。
+fn update_download_dir(app: &AppHandle) -> Result<Option<std::path::PathBuf>, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let dir = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| format!("无法定位应用缓存目录: {e}"))?
+            .join("upgrade");
+        Ok(Some(dir))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = app;
+        Ok(None)
+    }
+}
+
+/// 打开已下载的安装包（桌面：DMG/MSI；Android 走 FileProvider + 系统安装器）。
 #[tauri::command]
-fn app_install_update(path: String) -> Result<(), String> {
-    upgrade::app::install_installer(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+fn app_install_update(app: AppHandle, path: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_vpnservice::VpnserviceExt;
+        app.vpnservice()
+            .install_apk(tauri_plugin_vpnservice::models::InstallApkRequest { path })
+            .map_err(|e| format!("打开系统安装器失败: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+        upgrade::app::install_installer(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+    }
 }
 
 /// Android：把 FFI 事件队列里的事件转发到前端（Rust 侧消费，前端无需轮询）。

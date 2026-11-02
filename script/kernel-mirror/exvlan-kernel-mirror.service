@@ -9,9 +9,9 @@ Type=oneshot
 User=exvlan-mirror
 EnvironmentFile=/etc/exvlan-kernel-mirror/env
 ExecStart=/usr/local/bin/exvlan-kernel-sync
-# 同步脚本只写 /srv/exvlan/core 与临时目录
+# 同步脚本只写 /srv/exvlan/core、/srv/exvlan/upgrade 与临时目录
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/srv/exvlan/core
+ReadWritePaths=/srv/exvlan/core /srv/exvlan/upgrade

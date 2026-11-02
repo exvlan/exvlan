@@ -12,10 +12,17 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import android.webkit.WebView
+import androidx.core.content.FileProvider
+import java.io.File
 
 @InvokeArg
 class PingArgs {
     var value: String? = null
+}
+
+@InvokeArg
+class InstallApkArgs {
+    var path: String = ""
 }
 
 @InvokeArg
@@ -140,6 +147,32 @@ class VpnServicePlugin(private val activity: Activity) : Plugin(activity) {
         ret.put("routes", TauriVpnService.routes)
         ret.put("dns", TauriVpnService.dns)
         invoke.resolve(ret)
+    }
+
+    @Command
+    fun installApk(invoke: Invoke) {
+        val args = invoke.parseArgs(InstallApkArgs::class.java)
+        try {
+            val apk = File(args.path)
+            if (!apk.isFile) {
+                invoke.reject("APK 不存在: ${args.path}")
+                return
+            }
+            val uri = FileProvider.getUriForFile(
+                activity,
+                "${activity.packageName}.fileprovider",
+                apk,
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(intent)
+            invoke.resolve()
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "打开系统安装器失败")
+        }
     }
 
     @Command

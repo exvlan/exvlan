@@ -66,4 +66,11 @@ impl<R: Runtime> Vpnservice<R> {
             .run_mobile_plugin("consume_vpn_tile_action", payload)
             .map_err(Into::into)
     }
+
+    /// 用系统安装器打开 APK（应用更新的最后一步）。
+    pub fn install_apk(&self, payload: InstallApkRequest) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin::<()>("install_apk", payload)
+            .map_err(Into::into)
+    }
 }

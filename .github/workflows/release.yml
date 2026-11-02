@@ -89,6 +89,18 @@ jobs:
           echo "=== zipped_assets ==="
           ls -lR zipped_assets
 
+      # 应用更新清单：自建 manifest（GUI 回退用）+ 官方 updater latest.json（minisign）。
+      - name: Generate app upgrade manifests
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python3 script/release/gen_upgrade_manifests.py \
+            --assets-dir zipped_assets \
+            --version "${VERSION#v}" \
+            --notes "Exvlan ${VERSION#v}"
+          ls -l zipped_assets/upgrade-*.json
+
       # 汇总各平台内核元数据 + 计算内核包 sha256，产出 manifest.json。
       # 客户端据此判断版本、校验完整性（sha256 针对下载到的 zip 本体）。
       - name: Generate kernel manifest
