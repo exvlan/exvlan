@@ -36,6 +36,8 @@ patterns+=(-p 'manifest.json')
 patterns+=(-p '*.dmg' -p '*.msi' -p '*-setup.exe' -p 'app-*-release.apk')
 patterns+=(-p '*.app.tar.gz' -p '*.sig')
 patterns+=(-p 'upgrade-manifest.json' -p 'upgrade-latest.json')
+# Magisk 在线更新：模块包 + 清单（module.prop 的 updateJson 指向镜像）
+patterns+=(-p 'Exvlan-Magisk-*.zip' -p 'magisk_update.json')
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -68,7 +70,8 @@ install -d "$DEST"
 stage="$DEST/.staging"
 install -d "$stage"
 
-find "$work" -type f -name '*.zip' -exec cp -f {} "$stage/" \;
+# Magisk 模块包属于 /upgrade，这里排除，避免先进 core 再被清理
+find "$work" -type f -name '*.zip' ! -name 'Exvlan-Magisk-*' -exec cp -f {} "$stage/" \;
 if [ -z "$(find "$stage" -maxdepth 1 -name '*.zip' -print -quit)" ]; then
   echo "[sync] 没有下载到任何 zip，保持现状并退出" >&2
   rm -rf "$stage"
@@ -92,12 +95,13 @@ copied=0
 while IFS= read -r -d '' f; do
   base="$(basename "$f")"
   case "$base" in
-    upgrade-manifest.json|upgrade-latest.json|manifest.json) continue ;;
+    upgrade-manifest.json|upgrade-latest.json|manifest.json|magisk_update.json) continue ;;
   esac
   cp -f "$f" "$upgrade_stage/"
   copied=$((copied + 1))
 done < <(find "$work" -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \
-  -o -name 'app-*-release.apk' -o -name '*.app.tar.gz' -o -name '*.sig' \) -print0)
+  -o -name 'app-*-release.apk' -o -name '*.app.tar.gz' -o -name '*.sig' \
+  -o -name 'Exvlan-Magisk-*.zip' \) -print0)
 
 if [ "$copied" -gt 0 ]; then
   mv -f "$upgrade_stage"/* "$UPGRADE_DEST"/
@@ -108,14 +112,15 @@ fi
 
 # 清单最后落盘，且优先用最新 release 的那份
 newest="$(head -n 1 "$work/tags")"
-for pair in "upgrade-manifest.json:manifest.json" "upgrade-latest.json:latest.json"; do
+for pair in "upgrade-manifest.json:manifest.json" "upgrade-latest.json:latest.json" "magisk_update.json:magisk_update.json"; do
   src="${pair%%:*}"; dst="${pair##*:}"
   if [ -f "$work/$newest/$src" ]; then
     cp -f "$work/$newest/$src" "$upgrade_stage/$dst"
   fi
 done
-if [ -f "$upgrade_stage/manifest.json" ] || [ -f "$upgrade_stage/latest.json" ]; then
-  mv -f "$upgrade_stage"/*.json "$UPGRADE_DEST"/ 2>/dev/null || true
+if compgen -G "$upgrade_stage/*.json" > /dev/null; then
+  echo "[sync] 应用更新清单：$(cd "$upgrade_stage" && ls -1 *.json | tr '\n' ' ')"
+  mv -f "$upgrade_stage"/*.json "$UPGRADE_DEST"/
 fi
 rm -rf "$upgrade_stage"
 
