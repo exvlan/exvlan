@@ -35,11 +35,8 @@ use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[cfg(target_os = "android")]
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan::instance::factory::{NativeInstanceManager, native_instance_manager};
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan::proto::rpc::standalone::{runtime_rpc_dialer, runtime_rpc_listener};
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan::rpc_service::ApiRpcServer;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -59,20 +56,6 @@ use tauri::{AppHandle, Emitter, Manager as _};
 
 #[cfg(not(target_os = "android"))]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-static INSTANCE_MANAGER: once_cell::sync::Lazy<RwLock<Option<Arc<NativeInstanceManager>>>> =
-    once_cell::sync::Lazy::new(|| RwLock::new(None));
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-static RPC_RING_UUID: once_cell::sync::Lazy<uuid::Uuid> =
-    once_cell::sync::Lazy::new(uuid::Uuid::new_v4);
-
-/// 移动端用进程内 ring tunnel；桌面端恒为 `()`（一律走 tcp 连本地守护进程）。
-#[cfg(any(target_os = "android", target_os = "ios"))]
-type LocalProcessRuntime = Option<Arc<CoreProcessRuntime>>;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-type LocalProcessRuntime = ();
 
 static CLIENT_MANAGER: once_cell::sync::Lazy<RwLock<Option<manager::GUIClientManager>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));
@@ -97,10 +80,6 @@ struct RpcServer {
 #[cfg(any(target_os = "android", target_os = "ios"))]
 static RPC_SERVER: once_cell::sync::Lazy<Mutex<Option<RpcServer>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-static WEB_CLIENT: once_cell::sync::Lazy<RwLock<Option<WebClient>>> =
-    once_cell::sync::Lazy::new(|| RwLock::new(None));
 
 macro_rules! get_client_manager {
     () => {{
@@ -266,24 +245,18 @@ async fn set_logging_level(level: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn set_tun_fd(fd: i32) -> Result<(), String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(target_os = "android")]
     {
-        let Some(instance_manager) = INSTANCE_MANAGER.read().await.clone() else {
-            return Err("set_tun_fd is not supported in remote mode".to_string());
-        };
-        if let Some(uuid) = get_client_manager!()?
-            .get_enabled_instances_with_tun_ids()
-            .next()
-        {
-            instance_manager
-                .attach_tun_fd(uuid, fd)
-                .map_err(|e| e.to_string())?;
+        // 取第一个实例，把 VpnService 的 TUN fd 交给内核（FFI）
+        let names = crate::ffi_kernel::list_instances(16)?;
+        if let Some(name) = names.first() {
+            crate::ffi_kernel::attach_tun_fd(name, fd)?;
+            return Ok(());
         }
-        return Ok(());
+        return Err("没有运行中的内核实例".to_string());
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(target_os = "android"))]
     {
-        // 桌面端 TUN 由 root 内核守护进程创建，GUI 不再传递 fd。
         let _ = fd;
         Err("TUN 由内核守护进程创建，GUI 不再传递 fd".to_string())
     }
@@ -556,7 +529,7 @@ async fn init_rpc_connection(
 
     let client_manager = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        manager::GUIClientManager::new(Some(client_url.clone()), ()),
+        manager::GUIClientManager::new(Some(client_url.clone())),
     )
     .await
     .map_err(|_| format!("connect rpc timed out: {client_url}"))?
@@ -571,110 +544,28 @@ async fn init_rpc_connection(
 #[tauri::command]
 async fn init_rpc_connection(
     _app: AppHandle,
-    is_normal_mode: bool,
-    url: Option<String>,
+    _is_normal_mode: bool,
+    _url: Option<String>,
 ) -> Result<(), String> {
-    let mut client_manager_guard =
-        tokio::time::timeout(std::time::Duration::from_secs(5), CLIENT_MANAGER.write())
-            .await
-            .map_err(|_| "Failed to acquire write lock for client manager")?;
-    let mut instance_manager_guard = INSTANCE_MANAGER
-        .try_write()
-        .map_err(|_| "Failed to acquire write lock for instance manager")?;
-    let mut rpc_server_guard = RPC_SERVER
-        .try_lock()
-        .map_err(|_| "Failed to acquire lock for rpc server")?;
-
-    let mut client_url = url.clone();
-    let mut local_process_runtime = None;
-    if is_normal_mode {
-        let instance_manager = if let Some(im) = instance_manager_guard.take() {
-            im
-        } else {
-            Arc::new(native_instance_manager())
-        };
-
-        let portal = url.and_then(|s| {
-            let trimmed = s.trim().to_string();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            }
-        });
-
-        let (desired_kind, bind_url, connect_url) = if let Some(portal) = portal {
-            let (bind_url, connect_url) = normalize_normal_mode_rpc_portal(&portal)?;
-            (RpcServerKind::Tcp, Some(bind_url), Some(connect_url))
-        } else {
-            (RpcServerKind::Ring, None, None)
-        };
-
-        let need_restart = rpc_server_guard
-            .as_ref()
-            .map(|x| x.kind != desired_kind || x.bind_url != bind_url)
-            .unwrap_or(true);
-
-        if need_restart {
-            *rpc_server_guard = None;
-
-            let tunnel: BoxedTunnelListener = match desired_kind {
-                RpcServerKind::Ring => instance_manager
-                    .process_runtime()
-                    .bind_ring_tunnel(*RPC_RING_UUID.deref())
-                    .map_err(|error| error.to_string())?,
-                RpcServerKind::Tcp => {
-                    let bind_url = bind_url.as_ref().expect("tcp rpc must have bind url");
-                    Box::new(runtime_rpc_listener(resolve_rpc_bind_url(bind_url).await?))
-                }
-            };
-
-            let rpc_server = ApiRpcServer::from_tunnel(tunnel, instance_manager.clone())
-                .with_rx_timeout(None)
-                .serve()
-                .await
-                .map_err(|e| e.to_string())?;
-            *rpc_server_guard = Some(RpcServer {
-                kind: desired_kind,
-                _server: rpc_server,
-                bind_url,
-            });
-        }
-
-        local_process_runtime = Some(instance_manager.process_runtime());
-        *instance_manager_guard = Some(instance_manager);
-        client_url = connect_url.map(|u| u.to_string());
-    } else {
-        *rpc_server_guard = None;
-    }
-
-    let client_manager = tokio::time::timeout(
-        std::time::Duration::from_millis(1000),
-        manager::GUIClientManager::new(client_url, local_process_runtime),
-    )
-    .await
-    .map_err(|_| "connect remote rpc timed out".to_string())?
-    .with_context(|| "Failed to connect remote rpc")
-    .map_err(|e| format!("{:#}", e))?;
-    *client_manager_guard = Some(client_manager);
-
-    if !is_normal_mode {
-        drop(WEB_CLIENT.write().await.take());
-        if let Some(instance_manager) = instance_manager_guard.take() {
-            instance_manager
-                .retain_network_instances(&[])
-                .await
-                .map_err(|e| e.to_string())?;
-            drop(instance_manager);
-        }
-    }
-
+    // P6：移动端内核在应用进程内，不再自建 ring tunnel / 本地 RPC server，
+    // GUI 通过 FfiTransport 直接经 C ABI 调内核。
+    let mut guard = tokio::time::timeout(std::time::Duration::from_secs(5), CLIENT_MANAGER.write())
+        .await
+        .map_err(|_| "Failed to acquire write lock for client manager")?;
+    *guard = Some(manager::GUIClientManager::new_ffi());
     Ok(())
 }
 
 #[tauri::command]
 async fn is_client_running() -> Result<bool, String> {
-    Ok(get_client_manager!()?.rpc_manager.is_running())
+    #[cfg(target_os = "android")]
+    {
+        return Ok(!crate::ffi_kernel::list_instances(16)?.is_empty());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(get_client_manager!()?.rpc_manager.is_running())
+    }
 }
 
 #[tauri::command]
@@ -794,6 +685,7 @@ mod manager {
     };
     use exvlan_rpc::exvlan_proto::api::manage::RunNetworkInstanceRequest;
     use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
+    use std::sync::Arc;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     #[serde(rename_all = "snake_case")]
@@ -1020,39 +912,44 @@ mod manager {
 
     pub(super) struct GUIClientManager {
         pub(super) storage: GUIStorage,
-        pub(super) rpc_manager: BidirectRpcManager,
+        pub(super) rpc_manager: Arc<BidirectRpcManager>,
+        /// RPC 客户端来源：桌面走 tunnel，移动端走 FFI（call_json_rpc）。
+        pub(super) transport: Box<dyn exvlan_rpc::transport::RpcTransport>,
         pub(super) config_mutation: Mutex<()>,
     }
     impl GUIClientManager {
-        pub async fn new(
-            rpc_url: Option<String>,
-            _local_process_runtime: LocalProcessRuntime,
-        ) -> Result<Self, anyhow::Error> {
-            let tunnel = if let Some(url) = rpc_url {
-                exvlan_rpc::rpc::runtime_rpc_dialer(url.parse()?)
-                    .connect()
-                    .await?
-            } else {
-                #[cfg(any(target_os = "android", target_os = "ios"))]
-                {
-                    _local_process_runtime
-                        .context("local RPC requires a core process runtime")?
-                        .connect_ring_tunnel(*RPC_RING_UUID.deref())?
-                }
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
-                {
-                    anyhow::bail!("desktop 端必须提供 rpc url（本地内核守护进程）")
-                }
-            };
+        /// 桌面：连本地内核守护进程（tcp RPC），transport = TunnelTransport。
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        pub async fn new(rpc_url: Option<String>) -> Result<Self, anyhow::Error> {
+            let url = rpc_url.context("desktop 端必须提供 rpc url（本地内核守护进程）")?;
+            let tunnel = exvlan_rpc::rpc::runtime_rpc_dialer(url.parse()?)
+                .connect()
+                .await?;
 
-            let rpc_manager = BidirectRpcManager::new();
+            let rpc_manager = Arc::new(BidirectRpcManager::new());
             rpc_manager.run_with_tunnel(tunnel);
+            let transport: Box<dyn exvlan_rpc::transport::RpcTransport> =
+                Box::new(exvlan_rpc::transport::TunnelTransport {
+                    rpc_manager: rpc_manager.clone(),
+                });
 
             Ok(Self {
                 storage: GUIStorage::new(),
                 rpc_manager,
+                transport,
                 config_mutation: Mutex::new(()),
             })
+        }
+
+        /// 移动端：内核在应用进程内，transport = FfiTransport（call_json_rpc）。
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        pub fn new_ffi() -> Self {
+            Self {
+                storage: GUIStorage::new(),
+                rpc_manager: Arc::new(BidirectRpcManager::new()),
+                transport: Box::new(exvlan_rpc::transport::FfiTransport),
+                config_mutation: Mutex::new(()),
+            }
         }
 
         pub fn get_enabled_instances_with_tun_ids(&self) -> impl Iterator<Item = uuid::Uuid> + '_ {
@@ -1189,11 +1086,7 @@ mod manager {
         fn get_logger_rpc_client(
             &self,
         ) -> Option<Box<dyn LoggerRpc<Controller = BaseController> + Send>> {
-            Some(
-                self.rpc_manager
-                    .rpc_client()
-                    .scoped_client::<LoggerRpcClientFactory<BaseController>>(1, 1, "".to_string()),
-            )
+            Some(self.transport.logger())
         }
 
         pub(super) async fn set_logging_level(&self, level: String) -> Result<(), anyhow::Error> {
