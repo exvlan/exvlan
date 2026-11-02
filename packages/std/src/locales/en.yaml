@@ -822,4 +822,3 @@ upgrade:
   app_up_to_date: App is up to date
   download_and_install: Download & install
   downloaded: Downloaded
-  kernel_hint: Kernel is managed from the mode dialog

@@ -1,21 +1,24 @@
 name: Mobile FFI Compile Check
 
-# P6 快速反馈：只针对**单个 Android ABI** 编译 `exvlan-studio`（含移动端 FFI 改动）。
+# 快速反馈：针对**单个或全部 Android ABI** 做真实的链接检查。
 #
-# 目的：P6 的 Rust 改动无法在本机验证（缺 Android NDK），全量 pipeline 一轮 ~1.5h；
-# 这里用 ~10–15min 的作业做迭代检查。
+# 与 `cargo check` 不同，这里跑 `cargo build`（会真正链接 cdylib），
+# 并断言 `libapp_lib.so` 的 DT_NEEDED 含 `libexvlan_ffi.so` —— 这正是真机闪退的根因，
+# `cargo check` 与桌面构建都发现不了。
+#
+# 用法：`abi` 传具体 ABI 或 `all`（4 ABI 并行 matrix）。
 
 on:
   workflow_call:
     inputs:
       abi:
-        description: 'Android ABI（默认 arm64-v8a）'
+        description: 'Android ABI 或 all'
         type: string
         default: 'arm64-v8a'
   workflow_dispatch:
     inputs:
       abi:
-        description: 'Android ABI'
+        description: 'Android ABI 或 all'
         default: 'arm64-v8a'
 
 permissions:
@@ -29,22 +32,41 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  matrix:
+    name: Prepare matrix
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.m.outputs.include }}
+    steps:
+      - id: m
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          ALL = [
+              {"ABI": "arm64-v8a",   "TARGET": "aarch64-linux-android"},
+              {"ABI": "armeabi-v7a", "TARGET": "armv7-linux-androideabi"},
+              {"ABI": "x86",         "TARGET": "i686-linux-android"},
+              {"ABI": "x86_64",      "TARGET": "x86_64-linux-android"},
+          ]
+          wanted = os.environ.get("WANT", "arm64-v8a")
+          picked = ALL if wanted == "all" else [e for e in ALL if e["ABI"] == wanted]
+          if not picked:
+              raise SystemExit(f"unknown abi: {wanted}")
+          print("include=" + json.dumps(picked))
+          PY
+        env:
+          WANT: ${{ inputs.abi }}
+
   check:
-    name: cargo check (android ${{ inputs.abi }})
+    name: build (android ${{ matrix.ABI }})
+    needs: matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Resolve target
-        id: t
-        run: |
-          case "${{ inputs.abi }}" in
-            arm64-v8a)   echo "target=aarch64-linux-android" >> "$GITHUB_OUTPUT" ;;
-            armeabi-v7a) echo "target=armv7-linux-androideabi" >> "$GITHUB_OUTPUT" ;;
-            x86)         echo "target=i686-linux-android" >> "$GITHUB_OUTPUT" ;;
-            x86_64)      echo "target=x86_64-linux-android" >> "$GITHUB_OUTPUT" ;;
-            *) echo "::error::未知 ABI ${{ inputs.abi }}"; exit 1 ;;
-          esac
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
@@ -60,8 +82,12 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
         with:
           toolchain: 1.95
-          target: ${{ steps.t.outputs.target }}
+          target: ${{ matrix.TARGET }}
           rustflags: ""
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-ndk
 
       - uses: ./.github/actions/setup-protoc
         with:
@@ -74,7 +100,39 @@ jobs:
           shared-key: "mobile-ffi-check"
           cache-targets: "false"
 
-      - name: cargo check (exvlan-studio, android)
+      # 链接需要 libexvlan_ffi.so（与 mobile.yml 的 jniLibs 布局一致）
+      - name: Build kernel FFI library
         run: |
           set -euo pipefail
-          cargo check -p exvlan-studio --target "${{ steps.t.outputs.target }}"
+          cargo ndk -t "${{ matrix.TARGET }}" -o ./jni-out build --release -p exvlan-ffi
+          mkdir -p "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/${{ matrix.ABI }}"
+          cp ./jni-out/${{ matrix.ABI }}/libexvlan_ffi.so \
+             "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/${{ matrix.ABI }}/"
+          ls -l "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/${{ matrix.ABI }}/"
+
+      # 必须 build 而不是 check：只有链接才会写入 DT_NEEDED。
+      # 用 cargo-ndk 统一设置 linker（避免手写 NDK clang 的 API level）。
+      - name: Build exvlan-studio (android)
+        run: |
+          set -euo pipefail
+          cargo ndk -t "${{ matrix.TARGET }}" -o ./studio-out build -p exvlan-studio
+          ls -l ./studio-out/${{ matrix.ABI }}/ | head
+
+      - name: Assert linkage (DT_NEEDED)
+        run: |
+          set -euo pipefail
+          lib=$(find "target/${{ matrix.TARGET }}/debug" -maxdepth 1 -name 'libapp_lib.so' | head -1)
+          test -n "$lib" || { echo "::error::未找到 libapp_lib.so"; exit 1; }
+          echo "lib=$lib"
+          readelf -d "$lib" | grep NEEDED || true
+          readelf -d "$lib" | grep -q 'libexvlan_ffi.so' || {
+            echo "::error::未链接 libexvlan_ffi.so（真机会闪退）"
+            exit 1
+          }
+          undef=$(readelf -sW "$lib" | awk '$7=="UND" {print $8}' \
+            | grep -E '^(run_network_instance|retain_network_instance|delete_network_instance|list_instance|collect_network_infos|set_tun_fd|call_json_rpc|start_config_server_client|stop_config_server_client|is_config_server_client_connected|get_error_msg|free_string|poll_instance_events|register_instance_event_callback)$' || true)
+          if [ -n "$undef" ]; then
+            echo "::error::仍有未定义内核符号: $undef"
+            exit 1
+          fi
+          echo "::notice::linkage ok"

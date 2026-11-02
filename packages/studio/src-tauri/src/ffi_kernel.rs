@@ -23,6 +23,10 @@ pub struct KeyValuePair {
 
 pub type ConfigServerEventCallback = Option<unsafe extern "C" fn(*const c_char, *mut c_void)>;
 
+// `#[link]` 是必须的：只写 `extern "C"` 时 Rust 生成的 cdylib 允许未定义符号，
+// APK 里虽然带了 .so，但 libapp_lib.so 的 DT_NEEDED 不会包含它 →
+// 启动 dlopen 时符号解析失败，直接 abort（真机闪退）。
+#[link(name = "exvlan_ffi")]
 unsafe extern "C" {
     fn run_network_instance(cfg_str: *const c_char) -> c_int;
     fn retain_network_instance(inst_names: *const *const c_char, length: usize) -> c_int;
