@@ -195,9 +195,10 @@ jobs:
             APKSIGNER=$(ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
           fi
           test -x "${APKSIGNER:-}" || { echo "::error::找不到 apksigner"; exit 1; }
-          cert=$("$APKSIGNER" verify --print-certs "$apk" | grep -m1 'SHA-256 digest' | awk '{print $NF}')
+          cert=$("$APKSIGNER" verify --print-certs "$apk" | grep -m1 'SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')
+          expected=$(printf '%s' "$EXPECTED_CERT_SHA256" | tr 'A-F' 'a-f')
           echo "apk cert sha256 = $cert"
-          [ "$cert" = "$EXPECTED_CERT_SHA256" ] || {
+          [ "$cert" = "$expected" ] || {
             echo "::error::APK 未使用正式 keystore 签名（got $cert），禁止发布"
             exit 1
           }
