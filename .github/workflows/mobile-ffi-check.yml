@@ -132,6 +132,6 @@ jobs:
           ffi_lib=$(find "target/${{ matrix.TARGET }}/debug" -name 'libexvlan_ffi.so' 2>/dev/null | head -1)
           test -n "$ffi_lib" || ffi_lib="packages/studio/src-tauri/gen/android/app/src/main/jniLibs/${{ matrix.ABI }}/libexvlan_ffi.so"
           for sym in run_network_instance list_instance collect_network_infos set_tun_fd call_json_rpc start_config_server_client free_string get_error_msg poll_instance_events retain_network_instance delete_network_instance stop_config_server_client is_config_server_client_connected; do
-            readelf --dyn-syms "$ffi_lib" | grep -q " $sym$" || { echo "::error::$ffi_lib 未导出 $sym"; exit 1; }
+            readelf -W --dyn-syms "$ffi_lib" | grep -q " $sym$" || { echo "::error::$ffi_lib 未导出 $sym"; exit 1; }
           done
           echo "::notice::linkage ok"
