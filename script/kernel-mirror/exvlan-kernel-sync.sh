@@ -125,6 +125,9 @@ fi
 rm -rf "$upgrade_stage"
 
 python3 "$(dirname "$0")/merge_manifests.py" "$manifests" "$stage/manifest.json"
+# Release 自带 manifest 含全部 14 个平台，镜像只托管 PLATFORMS（默认 6 个）：
+# 不裁剪会让 GUI 看到「有更新」但下载 404。
+python3 "$(dirname "$0")/filter_manifest_platforms.py" "$stage/manifest.json" $PLATFORMS
 mv -f "$stage/manifest.json" "$DEST/manifest.json"
 rm -rf "$stage"
 

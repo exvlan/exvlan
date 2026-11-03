@@ -31,6 +31,10 @@ GitHub Release（private，CI 产出）
 
 只镜像 GUI 真正用到的 6 个平台；其余平台仍随 Release 提供，但不进镜像。
 
+> **清单裁剪（必须）**：Release 自带的 `manifest.json` 含全部 14 个平台，
+> 镜像同步的最后一步会用 `filter_manifest_platforms.py` 按 `PLATFORMS` 裁剪，
+> 否则客户端会看到「有更新」但下载对应 zip 时 404。（2026-11 实际踩到）
+
 同一脚本还会把应用更新资产同步到 `/srv/exvlan/upgrade/`（对外 `/upgrade/`）：
 `latest.json`（官方 updater）、`manifest.json`（自建回退）、`magisk_update.json`（Magisk 在线更新）、
 各平台安装包与 `.sig`、四个 ABI 的 APK、`Exvlan-Magisk-*.zip`。
