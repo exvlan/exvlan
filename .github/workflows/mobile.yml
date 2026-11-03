@@ -122,26 +122,46 @@ jobs:
             *) echo "::error::unknown ARCH $ARCH"; exit 1 ;;
           esac
 
-      # P6：下载本 ABI 的预编译内核库并放进 jniLibs（供后续 studio 不再编内核）
+      # P6：下载本 ABI 的预编译内核库并放进 jniLibs（studio 不再编内核）。
+      # 缺库必须直接失败：曾因 continue-on-error 产出一个「库在包里但没链接」的闪退版。
       - name: Fetch prebuilt kernel lib
-        continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: mobile-kernel-${{ steps.kabi.outputs.abi }}
           path: ./kernel-lib
 
       - name: Stage kernel lib into jniLibs
-        continue-on-error: true
         run: |
           set -euo pipefail
           abi="${{ steps.kabi.outputs.abi }}"
-          if compgen -G "./kernel-lib/*.so" > /dev/null; then
-            mkdir -p "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/$abi"
-            cp ./kernel-lib/*.so "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/$abi/"
-            ls -l "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/$abi/"
-          else
-            echo "::notice::未找到 mobile-kernel-$abi 工件，跳过（studio 仍会自行编译内核）"
-          fi
+          test -f ./kernel-lib/libexvlan_ffi.so || {
+            echo "::error::缺少 libexvlan_ffi.so（mobile-kernel-$abi 工件不完整）"
+            exit 1
+          }
+          mkdir -p "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/$abi"
+          # 只放 FFI 库：libexvlan_core.so / libboringtun / libtun 是内核构建的冗余产物，
+          # libexvlan_ffi.so 的 NEEDED 只有 libc/libm/libdl。
+          cp ./kernel-lib/libexvlan_ffi.so "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/$abi/"
+          ls -l "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/$abi/"
+
+      # APK 签名：必须用仓库 secrets 里的正式 keystore。
+      # 历史上仓库里那把 upload-keystore.jks 密码是错的，构建静默回退 debug 签名，
+      # 而 debug keystore 每个 runner 随机生成 → 每次发版签名都不同，无法覆盖安装。
+      - name: Prepare release keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_ALIAS_SECRET: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_PASSWORD_SECRET: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64" || { echo "::error::缺少 ANDROID_KEYSTORE_BASE64"; exit 1; }
+          keystore="$RUNNER_TEMP/exvlan-upload.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$keystore"
+          keytool -list -keystore "$keystore" -storepass "$KEYSTORE_PASSWORD_SECRET" > /dev/null
+          echo "KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+          echo "KEYSTORE_ALIAS=$KEYSTORE_ALIAS_SECRET" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD_SECRET" >> "$GITHUB_ENV"
+          echo "::notice::keystore 已就绪（alias=$KEYSTORE_ALIAS_SECRET）"
 
       - name: Build
         env:
@@ -151,6 +171,38 @@ jobs:
         run: |
           cd packages/studio
           pnpm tauri android build --apk --target "$ARCH" --split-per-abi
+
+      # 硬断言：闪退根因（未链接 FFI）与签名回退都在这里拦下。
+      - name: Verify APK linkage and signature
+        env:
+          EXPECTED_CERT_SHA256: "2556EBD965FA0DEE2C4166011ECE0927E2859EB6F828499048D3A0D144F7FA04"
+        run: |
+          set -euo pipefail
+          apk=$(ls packages/studio/src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk | head -1)
+          echo "APK: $apk"
+          rm -rf /tmp/apkcheck && mkdir -p /tmp/apkcheck
+          unzip -o -q "$apk" 'lib/*/libapp_lib.so' -d /tmp/apkcheck
+          lib=$(find /tmp/apkcheck -name libapp_lib.so | head -1)
+
+          echo "--- NEEDED ---"
+          readelf -d "$lib" | grep NEEDED || true
+          readelf -d "$lib" | grep -q 'libexvlan_ffi.so' || {
+            echo "::error::libapp_lib.so 未链接 libexvlan_ffi.so（启动会闪退）"
+            exit 1
+          }
+          APKSIGNER="$(command -v apksigner || true)"
+          if [ -z "$APKSIGNER" ]; then
+            APKSIGNER=$(ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          fi
+          test -x "${APKSIGNER:-}" || { echo "::error::找不到 apksigner"; exit 1; }
+          cert=$("$APKSIGNER" verify --print-certs "$apk" | grep -m1 'SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')
+          expected=$(printf '%s' "$EXPECTED_CERT_SHA256" | tr 'A-F' 'a-f')
+          echo "apk cert sha256 = $cert"
+          [ "$cert" = "$expected" ] || {
+            echo "::error::APK 未使用正式 keystore 签名（got $cert），禁止发布"
+            exit 1
+          }
+          echo "::notice::APK 链接与签名校验通过"
 
       - name: Collect artifact
         run: |

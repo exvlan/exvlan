@@ -7,6 +7,8 @@ import {
   type AppUpdateInfo,
 } from '~/composables/backend'
 import { useToast } from 'openvue'
+import { type } from '@tauri-apps/plugin-os'
+import KernelManager from '~/components/KernelManager.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -17,9 +19,13 @@ const appInfo = ref<AppUpdateInfo | null>(null)
 const checking = ref(false)
 const downloading = ref(false)
 
-onMounted(async () => {
+const isDesktop = computed(() => type() !== 'android' && type() !== 'ios')
+
+async function loadKernelVersion() {
   kernelVersion.value = await getExvlanVersion().catch(() => '')
-})
+}
+
+onMounted(loadKernelVersion)
 
 async function onCheckApp() {
   checking.value = true
@@ -91,12 +97,17 @@ async function onDownloadApp() {
         <span v-if="appInfo.notes" class="text-sm text-gray-500 whitespace-pre-wrap">{{ appInfo.notes }}</span>
       </div>
 
-      <!-- 内核版本 -->
+      <!-- 内核版本 / 内核更新（桌面：更新源与在线升级都在这里） -->
       <div class="flex flex-wrap items-center gap-3">
         <span class="font-medium">{{ t('upgrade.kernel_version') }}:</span>
         <span>{{ kernelVersion || t('upgrade.unknown') }}</span>
-        <span class="text-sm text-gray-500">{{ t('upgrade.kernel_hint') }}</span>
       </div>
+      <KernelManager
+        v-if="isDesktop"
+        class="mt-4"
+        :show-current="false"
+        @updated="loadKernelVersion"
+      />
     </template>
   </Card>
 </template>

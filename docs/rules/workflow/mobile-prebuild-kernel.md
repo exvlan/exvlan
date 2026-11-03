@@ -116,6 +116,59 @@ FFI 只有 `call_json_rpc`（protobuf **JSON** 请求/响应）。所以「换 t
 ```
 同时从 `packages/studio/src-tauri/Cargo.toml` 移除 android 的 `exvlan` 依赖。
 
+## 坑 1：只放 .so 不链接 → 真机启动闪退（2026-11 实际踩到）
+
+APK 里带了 `libexvlan_ffi.so`，但 `libapp_lib.so` 的 `DT_NEEDED` 里没有它，
+进程启动 `dlopen` 时符号解析失败，直接 abort（表现为「一打开就闪退」，无 Java 栈）。
+
+原因：Rust 侧只写了 `unsafe extern "C" { ... }`，**没有 `#[link(name = "exvlan_ffi")]`**，
+而 cdylib 默认允许未定义符号，`cargo check` 与桌面构建都发现不了。
+
+修法与防线：
+
+1. `ffi_kernel.rs`：extern 块加 `#[link(name = "exvlan_ffi")]`
+2. `build.rs`：android 目标下 `cargo:rustc-link-search=native=gen/android/app/src/main/jniLibs/<abi>`
+   + `cargo:rustc-link-lib=dylib=exvlan_ffi`；缺库时 **panic**
+3. CI 断言（`mobile.yml` + `mobile-ffi-check.yml`）：
+   `readelf -d libapp_lib.so | grep libexvlan_ffi.so`，且 `UND` 不得含内核符号
+4. 快检必须用 `cargo build`（只有链接才写入 DT_NEEDED），`cargo check` 无效
+
+## 坑 2：APK 每次发版签名都不同（2026-11 实际踩到）
+
+`gen/android/keystore.properties` 里的密码与 `upload-keystore.jks` 不匹配 →
+`build.gradle.kts` 静默回退到 `signingConfigs.debug` → AGP 在每个 runner 上
+**随机生成** debug keystore → 每次构建签名不同 → 用户覆盖安装报「签名冲突」。
+
+修法与防线：
+
+1. CI 用 secrets 注入：`ANDROID_KEYSTORE_BASE64` → `$RUNNER_TEMP/*.jks`，
+   导出 `KEYSTORE_PATH` / `KEYSTORE_ALIAS` / `KEYSTORE_PASSWORD`（gradle 优先级：env > properties）
+2. `build.gradle.kts`：release 构建 keystore 不可用直接 `GradleException`（禁止回退 debug）
+3. 仓库不再存 keystore / 明文密码（`.gitignore` 已忽略 `*.jks`、`keystore.properties`）
+4. CI 断言：`apksigner verify --print-certs` 的 SHA-256 == 正式证书
+   `2556EBD965FA0DEE2C4166011ECE0927E2859EB6F828499048D3A0D144F7FA04`
+
+> 教训：这类「构建仍绿但产物不可用」的问题只能靠**产物级断言**拦截，编译通过说明不了任何事。
+
+## P7（未完成）：移动端彻底剥离 `exvlan-core`
+
+现状：`exvlan-rpc` 把 `exvlan-core` 作为**非可选依赖**，移动端因此仍在编译内核
+（`libexvlan_core.so` 775KB + 约 5 分钟编译）。移动作业 25min → 16.3min 的收益到此为止。
+
+要真正剥离，缺口在**客户端管理面**（`RemoteClientManager` 的默认实现都在 core 里）：
+
+1. `exvlan-rpc`：`exvlan-core` 改 optional；`rpc` / `gui-client` feature 依赖 core（仅桌面），
+   `ffi-rpc` 不依赖
+2. 日志：`log/file.rs` 现在用 core 的 `FileLoggerConfig`、`log/management.rs` 用 `LoggingConfigLoader`。
+   在 rpc 内置一份最小配置类型（level/dir/file 名/滚动参数）直接喂 `tracing`，不再依赖 core
+3. studio：新增 `cfg(mobile)` 的 `FfiClientManager`（`GUIStorage` + 全部命令走
+   `ffi_kernel` 的 run/retain/delete/list/attach_tun_fd/collect 与 `call_json_rpc` 的
+   config/patch/logger/vpnportal），替代 core 的 `RemoteClientManager` 默认实现
+4. 移动 target features 收敛为 `logging, ffi-rpc`
+5. CI 断言：`cargo tree -p exvlan-studio --target aarch64-linux-android` 不含 `exvlan-core`
+
+工作量约 400 行，且只能靠 4-ABI 快检 + 真机验证；建议单独一批（20708）做，避免与阻断修复混在一起。
+
 ## 风险
 
 | 风险 | 缓解 |

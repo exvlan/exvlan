@@ -103,8 +103,9 @@ android {
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
                     .toList().toTypedArray()
             )
-            // 仅当 release keystore 实际可加载时使用它（真实发布流水线通过 KEYSTORE_* 提供）；
-            // 否则回退到 debug 签名，保证 CI 能产出可安装 APK 而不因 keystore 密码不匹配而失败。
+            // release 构建必须用正式 keystore（CI 通过 KEYSTORE_PATH/KEYSTORE_ALIAS/KEYSTORE_PASSWORD 注入）。
+            // 曾经这里静默回退 debug 签名，而 debug keystore 每个 runner 随机生成，
+            // 导致每次发版签名都不同、用户无法覆盖安装 —— 现在必须硬失败。
             val releaseSigning = signingConfigs.getByName("release")
             val hasUsableKeystore = run {
                 val store = releaseSigning.storeFile
@@ -121,7 +122,13 @@ android {
                     false
                 }
             }
-            signingConfig = if (hasUsableKeystore) releaseSigning else signingConfigs.getByName("debug")
+            if (!hasUsableKeystore) {
+                throw GradleException(
+                    "release keystore 不可用：请设置 KEYSTORE_PATH / KEYSTORE_ALIAS / KEYSTORE_PASSWORD " +
+                        "(storeFile=${releaseSigning.storeFile})。禁止用 debug 签名产出发布包。"
+                )
+            }
+            signingConfig = releaseSigning
         }
     }
     compileOptions {

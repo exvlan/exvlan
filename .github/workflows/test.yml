@@ -62,6 +62,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # runner 预装内容 + 全 feature 构建很容易打满磁盘（曾多次 No space left on device）
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost /usr/local/lib/node_modules /opt/az \
+                      /usr/local/lib/android /usr/share/swift /usr/local/.ghcup \
+                      /opt/microsoft /usr/local/share/chromium /usr/lib/firefox \
+                      /usr/share/miniconda /usr/lib/mono /usr/local/share/powershell \
+                      /usr/local/go /usr/share/az_* /opt/hostedtoolcache/PyPy || true
+          df -h /
+
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
         with:
@@ -112,10 +123,24 @@ jobs:
           exit 1
 
   test:
-    name: Test
+    name: Test (${{ matrix.package }})
     runs-on: ubuntu-latest
     needs: pre_job
     if: needs.pre_job.outputs.should_skip != 'true'
+    strategy:
+      # 两个包的 --features full 测试产物都很大，分开跑避免单个 runner 磁盘耗尽
+      fail-fast: false
+      matrix:
+        include:
+          # exvlan-core 没有 full feature，只有 exvlan 需要
+          - package: exvlan
+            args: "--features full"
+          - package: exvlan-core
+            args: ""
+    env:
+      # 全 feature 的 debug 产物带调试信息会撑爆 runner 磁盘；测试不需要
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -154,6 +179,10 @@ jobs:
       - name: Run tests
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
-          sudo -E env "PATH=$PATH" EXVLAN_LINUX_BPF_INTEGRATION=required \
-            cargo nextest run --package exvlan --package exvlan-core --features full \
+          # 注意：`sudo -E env "PATH=..." VAR=...` 会重建环境，job 级 env 不会被继承，
+          # 必须在这里显式带上（否则 debug info 仍会打满磁盘）。
+          sudo -E env "PATH=$PATH" \
+            EXVLAN_LINUX_BPF_INTEGRATION=required \
+            CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 \
+            cargo nextest run --package ${{ matrix.package }} ${{ matrix.args }} \
             --test-threads 1 --no-fail-fast --retries 2

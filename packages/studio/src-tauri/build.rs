@@ -21,5 +21,36 @@ fn main() {
         println!("cargo:rustc-link-lib=Packet");
     }
 
+    // Android：内核以预编译库 libexvlan_ffi.so 提供，必须显式链接，
+    // 否则 libapp_lib.so 只在符号表里留下未定义项（DT_NEEDED 缺失）→ 启动即闪退。
+    if target_os == "android" {
+        let abi = match target_arch.as_str() {
+            "aarch64" => "arm64-v8a",
+            "arm" => "armeabi-v7a",
+            "x86" => "x86",
+            "x86_64" => "x86_64",
+            other => panic!("exvlan: 不支持的 Android 架构 {other}"),
+        };
+        let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        let jni_libs = std::path::Path::new(&manifest_dir)
+            .join("gen/android/app/src/main/jniLibs")
+            .join(abi);
+        if !jni_libs.join("libexvlan_ffi.so").is_file() {
+            panic!(
+                "exvlan: 缺少内核预编译库 {}（ci 会从 mobile-kernel-{abi} 工件注入；本地请先放置）",
+                jni_libs.join("libexvlan_ffi.so").display()
+            );
+        }
+        println!("cargo:rustc-link-search=native={}", jni_libs.display());
+        println!("cargo:rustc-link-lib=dylib=exvlan_ffi");
+        // 内核库对 libc 的引用（如 getifaddrs，API 24+）由 Android 运行时解析，
+        // 链接期不应因 --no-allow-shlib-undefined 报错。
+        println!("cargo:rustc-link-arg=-Wl,--allow-shlib-undefined");
+        println!(
+            "cargo:rerun-if-changed={}",
+            jni_libs.join("libexvlan_ffi.so").display()
+        );
+    }
+
     tauri_build::build();
 }

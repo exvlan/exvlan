@@ -17,3 +17,6 @@ key.properties
 
 /.tauri
 /tauri.settings.gradle
+# 签名材料不得入库（CI 从 secrets 注入）
+keystore.properties
+*.jks

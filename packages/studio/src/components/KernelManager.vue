@@ -12,6 +12,9 @@ interface UpdateInfo {
   source: string
 }
 
+const props = withDefaults(defineProps<{ showCurrent?: boolean }>(), { showCurrent: true })
+const emit = defineEmits<{ updated: [] }>()
+
 const { t } = useI18n()
 const toast = useToast()
 
@@ -61,6 +64,7 @@ async function onInstall(version: string) {
     })
     await refreshCurrentVersion()
     await onCheck()
+    emit('updated')
   }
   catch (e: any) {
     toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 10000 })
@@ -75,7 +79,7 @@ async function onInstall(version: string) {
   <div class="flex flex-col gap-3 border-t pt-3">
     <div class="flex items-center justify-between">
       <span class="font-medium">{{ t('kernel.title') }}</span>
-      <span class="text-sm text-gray-500">
+      <span v-if="props.showCurrent" class="text-sm text-gray-500">
         {{ t('kernel.current') }}: {{ currentVersion || t('kernel.unknown') }}
         <template v-if="info?.platform"> · {{ info.platform }}</template>
       </span>

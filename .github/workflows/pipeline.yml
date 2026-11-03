@@ -295,7 +295,48 @@ jobs:
     needs: [core, studio, mobile, publish_sdk, publish_go]
     uses: ./.github/workflows/release.yml
     with:
-      version: ${{ github.ref_name }} # tag 名即为版本号，如 v26.410.20706
+      version: ${{ github.ref_name }} # tag 名即为版本号，如 v26.410.20707
       mark_latest: true
       is_alpha: false
     secrets: inherit
+
+  # 无人值守运维通知：发版 / 失败自动推送到飞书群
+  notify:
+    name: Notify (Feishu)
+    if: always() && github.event_name != 'schedule'
+    needs: [tests, core, studio, mobile]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post result to Feishu
+        env:
+          WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          T: ${{ needs.tests.result }}
+          C: ${{ needs.core.result }}
+          S: ${{ needs.studio.result }}
+          M: ${{ needs.mobile.result }}
+        run: |
+          set -euo pipefail
+          [ -n "${WEBHOOK:-}" ] || { echo "::notice::未配置 FEISHU_WEBHOOK，跳过"; exit 0; }
+          text=$(python3 - <<'PY'
+          import os
+          ref = os.environ["REF"]; sha = os.environ["SHA"][:8]
+          ev = os.environ["EVENT"]; url = os.environ["RUN_URL"]
+          results = {"tests": os.environ["T"], "core": os.environ["C"],
+                     "studio": os.environ["S"], "mobile": os.environ["M"]}
+          bad = [k for k, v in results.items() if v == "failure"]
+          ok = not bad
+          lines = [f"【EXVlan {'✅ 全部通过' if ok else '❌ 有失败'}】{ref} @ {sha}",
+                   f"事件: {ev}",
+                   " · ".join(f"{k}={v}" for k, v in results.items())]
+          if ok and ev == "push" and ref.startswith("v"):
+              lines.append("Release 已发布")
+          lines.append(url)
+          print("\n".join(lines))
+          PY
+          )
+          body=$(python3 -c 'import json,os,sys; print(json.dumps({"msg_type":"text","content":{"text":sys.argv[1]}}))' "$text")
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$body" "$WEBHOOK" -o /dev/null -w 'feishu=%{http_code}\n'
