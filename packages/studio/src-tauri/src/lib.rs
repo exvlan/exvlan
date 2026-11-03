@@ -588,15 +588,16 @@ fn init_gui_logging(app: &tauri::AppHandle) {
     let Ok(log_dir) = get_log_dir(app) else {
         return;
     };
-    let config = exvlan_rpc::exvlan_core::config::toml::LoggingConfig::builder()
-        .file_logger(exvlan_rpc::exvlan_core::config::toml::FileLoggerConfig {
+    let config = exvlan_rpc::log::SimpleLoggingConfig::new(
+        exvlan_rpc::log::ConsoleLoggerConfig::default(),
+        exvlan_rpc::log::FileLoggerConfig {
             dir: Some(log_dir.to_string_lossy().to_string()),
             level: None,
             file: None,
             size_mb: None,
             count: None,
-        })
-        .build();
+        },
+    );
     if let Err(err) = exvlan_rpc::log::init(&config, true) {
         eprintln!("初始化 GUI 日志失败: {err:#}");
     }

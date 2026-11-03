@@ -7,9 +7,9 @@ use log::{Level, LevelFilter};
 use std::sync::atomic::Ordering;
 
 #[cfg(feature = "management")]
-use crate::tracing_rolling_appender::{FileAppenderWrapper, RollingFileAppenderBase};
+use super::config::FileLoggerConfig;
 #[cfg(feature = "management")]
-use exvlan_core::config::toml::FileLoggerConfig;
+use crate::tracing_rolling_appender::{FileAppenderWrapper, RollingFileAppenderBase};
 
 use super::level_rank;
 #[cfg(feature = "management")]

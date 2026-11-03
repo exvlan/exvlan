@@ -24,6 +24,7 @@ pub trait RpcTransport: Send + Sync {
 }
 
 /// 桌面实现：复用 `BidirectRpcManager` 上的 typed client 工厂。
+#[cfg(feature = "rpc")]
 pub struct TunnelTransport {
     pub rpc_manager: Arc<exvlan_core::rpc::bidirect::BidirectRpcManager>,
 }

@@ -1,6 +1,6 @@
 use anyhow::Context as _;
 
-use exvlan_core::config::toml::LoggingConfigLoader;
+use super::config::LoggingConfigLoader;
 
 use super::{FileSink, Logger, TargetFilter, install, parse_level};
 
