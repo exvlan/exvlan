@@ -62,11 +62,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # runner 预装内容占满磁盘，Nix / 全量测试会中途 "No space left on device"
+      # runner 预装内容 + 全 feature 构建很容易打满磁盘（曾多次 No space left on device）
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL \
-                      /usr/local/share/boost /usr/local/lib/node_modules /opt/az || true
+                      /usr/local/share/boost /usr/local/lib/node_modules /opt/az \
+                      /usr/local/lib/android /usr/share/swift /usr/local/.ghcup \
+                      /opt/microsoft /usr/local/share/chromium /usr/lib/firefox || true
           df -h /
 
       - name: Prepare build environment
@@ -123,6 +125,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: pre_job
     if: needs.pre_job.outputs.should_skip != 'true'
+    env:
+      # 全 feature 的 debug 产物带调试信息会撑爆 runner 磁盘；测试不需要
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
