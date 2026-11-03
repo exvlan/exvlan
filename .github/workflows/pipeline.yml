@@ -308,6 +308,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Post result to Feishu
+        # 通知失败绝不能影响流水线结论
+        continue-on-error: true
         env:
           WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           REF: ${{ github.ref_name }}
