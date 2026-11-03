@@ -211,8 +211,21 @@ B3b 把 android 的 `is_client_running` 实现改成「FFI 实例列表非空」
    }
    ```
 
-   类型仍来自 `exvlan_proto`（`NetworkConfig` 在 `exvlan_core::config::api_input`，
-   移动端需要把它换成 `exvlan_proto` 侧的同名结构或加一次转换）——**这是步骤 4 的主要风险点**。
+   **类型不是问题（2026-11 重新核实）**：`exvlan_core::config::api_input::NetworkConfig`
+   只是 `pub type NetworkConfig = exvlan_proto::api::manage::NetworkConfig;` 的别名 ——
+   移动端直接用 `exvlan_proto` 即可，不需要 core 的 1016 行转换逻辑
+   （配置→TOML 的转换发生在内核侧，移动端只是把 NetworkConfig 作为 RPC 载荷发过去）。
+
+   真正需要补的两块：
+   1. `RpcTransport` 增加 `web_client()`（`api.manage.WebClientService`，8 个 RPC：
+      validate_config / run_network_instance / retain_network_instance /
+      collect_network_info / list_network_instance / delete_network_instance /
+      get_network_instance_config / list_network_instance_meta）。
+       `FfiTransport` 每个方法都是 `call("api.manage.WebClientService", "<method>", &input)`，
+       `TunnelTransport` 用 `scoped_client::<WebClientServiceClientFactory<..>>`。
+   2. 移动端本地存储：桌面用 core 的 `Storage`/`PersistentConfig` trait + `GUIConfig`，
+      移动端写一份最小的 JSON 存储（连接列表 + enabled_networks + 上次实例），
+      不再依赖 core 的持久化 trait。
 5. 移动 target features 收敛为 `logging, ffi-rpc`；CI 断言 `cargo tree --target aarch64-linux-android` 无 exvlan-core
 
 验收：4 ABI 快检（真实 build + DT_NEEDED 断言）+ 真机回归（启动/建连/TUN/路由/关于页）。
