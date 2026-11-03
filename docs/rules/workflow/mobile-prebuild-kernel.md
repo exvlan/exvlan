@@ -193,6 +193,26 @@ B3b 把 android 的 `is_client_running` 实现改成「FFI 实例列表非空」
    `handle_get_network_metas` / `handle_patch_vpn_portal_clients` /
    `post_run_network_instance_hook`（+ `set_logger_config` 走 transport.logger()）。
    其余命令在移动端返回「该功能仅桌面端支持」。
+
+   **签名来源**：`exvlan/core/src/management/full/remote_client.rs::RemoteClientManager`
+   （`T = AppHandle`，`E = anyhow::Error`）。桌面实现见 studio 的
+   `impl RemoteClientManager<AppHandle, GUIConfig, anyhow::Error> for GUIClientManager`。
+
+   移动端实现建议用**固有方法**（inherent impl）而非实现该 trait ——
+   trait 在 core 里，实现它就必然依赖 core；而命令层是按名字调用
+   `client_manager.handle_xxx(...)`，固有方法会优先匹配，无需 trait 在作用域。
+
+   ```rust
+   #[cfg(any(target_os = "android", target_os = "ios"))]
+   impl GUIClientManager {
+       pub async fn handle_run_network_instance(&self, _app: AppHandle, cfg: NetworkConfig, save: bool)
+           -> Result<(), anyhow::Error> { /* toml + ffi_kernel::run_instance */ }
+       // ... 其余 11 个
+   }
+   ```
+
+   类型仍来自 `exvlan_proto`（`NetworkConfig` 在 `exvlan_core::config::api_input`，
+   移动端需要把它换成 `exvlan_proto` 侧的同名结构或加一次转换）——**这是步骤 4 的主要风险点**。
 5. 移动 target features 收敛为 `logging, ffi-rpc`；CI 断言 `cargo tree --target aarch64-linux-android` 无 exvlan-core
 
 验收：4 ABI 快检（真实 build + DT_NEEDED 断言）+ 真机回归（启动/建连/TUN/路由/关于页）。
