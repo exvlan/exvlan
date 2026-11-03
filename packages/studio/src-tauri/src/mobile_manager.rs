@@ -477,11 +477,14 @@ impl GUIClientManager {
             .await?;
 
         let running_inst_ids = ret.inst_ids.clone();
+        // 注意：不能用 `common::Uuid: From<String>`（内部是 `parse_str().unwrap()`，
+        // 非法/空 instance_id 会 panic，release 下 `panic = "abort"` 直接闪退）。
         let disabled_inst_ids = self
             .storage
             .all()
             .iter()
-            .map(|cfg| Into::<exvlan_rpc::exvlan_proto::common::Uuid>::into(cfg.inst_id.clone()))
+            .filter_map(|cfg| cfg.inst_id.parse::<uuid::Uuid>().ok())
+            .map(Into::into)
             .filter(|id| !ret.inst_ids.contains(id))
             .collect::<Vec<_>>();
 

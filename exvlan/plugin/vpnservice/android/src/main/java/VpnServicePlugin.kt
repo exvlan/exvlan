@@ -26,6 +26,13 @@ class InstallApkArgs {
 }
 
 @InvokeArg
+class ShareFileArgs {
+    var path: String = ""
+    var mime: String? = null
+    var title: String? = null
+}
+
+@InvokeArg
 class StartVpnArgs {
     var ipv4Addr: String? = null
     var routes: Array<String> = emptyArray()
@@ -172,6 +179,40 @@ class VpnServicePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve()
         } catch (e: Exception) {
             invoke.reject(e.message ?: "打开系统安装器失败")
+        }
+    }
+
+    /**
+     * 用系统分享面板分享应用私有目录里的文件（error.log 等）。
+     * 走 FileProvider，不需要存储权限。
+     */
+    @Command
+    fun shareFile(invoke: Invoke) {
+        val args = invoke.parseArgs(ShareFileArgs::class.java)
+        try {
+            val file = File(args.path)
+            if (!file.isFile) {
+                invoke.reject("文件不存在: ${args.path}")
+                return
+            }
+            val uri = FileProvider.getUriForFile(
+                activity,
+                "${activity.packageName}.fileprovider",
+                file,
+            )
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = args.mime ?: "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val chooser = Intent.createChooser(send, args.title ?: "分享").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(chooser)
+            invoke.resolve()
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "分享失败")
         }
     }
 

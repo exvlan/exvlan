@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod elevate;
+mod error_log;
 #[cfg(target_os = "android")]
 mod ffi_kernel;
 mod kernel;
@@ -76,7 +77,7 @@ fn set_dock_visibility(app: tauri::AppHandle, visible: bool) -> Result<(), Strin
         } else {
             ActivationPolicy::Accessory
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:set_dock_visibility", e))?;
     }
     #[cfg(not(target_os = "macos"))]
     let _ = (app, visible);
@@ -86,7 +87,9 @@ fn set_dock_visibility(app: tauri::AppHandle, visible: bool) -> Result<(), Strin
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 fn parse_network_config(cfg: NetworkConfig) -> Result<String, String> {
-    let toml = cfg.gen_config().map_err(|e| e.to_string())?;
+    let toml = cfg
+        .gen_config()
+        .map_err(|e| error_log::other("cmd:parse_network_config", e))?;
     Ok(toml.dump())
 }
 
@@ -100,8 +103,10 @@ fn parse_network_config(_cfg: NetworkConfig) -> Result<String, String> {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 fn generate_network_config(toml_config: String) -> Result<NetworkConfig, String> {
-    let config = TomlConfigLoader::new_from_str(&toml_config).map_err(|e| e.to_string())?;
-    let cfg = NetworkConfig::new_from_config(&config).map_err(|e| e.to_string())?;
+    let config = TomlConfigLoader::new_from_str(&toml_config)
+        .map_err(|e| error_log::other("cmd:generate_network_config", e))?;
+    let cfg = NetworkConfig::new_from_config(&config)
+        .map_err(|e| error_log::other("cmd:generate_network_config", e))?;
     Ok(cfg)
 }
 
@@ -119,7 +124,9 @@ async fn run_network_instance(
     save: bool,
 ) -> Result<(), String> {
     let client_manager = get_client_manager!()?;
-    let toml_config = cfg.gen_config().map_err(|e| e.to_string())?;
+    let toml_config = cfg
+        .gen_config()
+        .map_err(|e| error_log::other("cmd:run_network_instance", e))?;
     let _mutation = client_manager.config_mutation.lock().await;
     client_manager
         .pre_run_network_instance_hook(&app, &toml_config, manager::PersistedConfigSource::User)
@@ -127,7 +134,7 @@ async fn run_network_instance(
     client_manager
         .handle_run_network_instance(app.clone(), cfg, save)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:run_network_instance", e))?;
     client_manager
         .post_run_network_instance_hook(&app, &toml_config.get_id())
         .await?;
@@ -147,7 +154,7 @@ async fn run_network_instance(
         .clone()
         .unwrap_or_default()
         .parse()
-        .map_err(|e: uuid::Error| e.to_string())?;
+        .map_err(|e: uuid::Error| error_log::other("cmd:run_network_instance", e))?;
     let client_manager = get_client_manager!()?;
     let _mutation = client_manager.config_mutation.lock().await;
     client_manager
@@ -156,7 +163,7 @@ async fn run_network_instance(
     client_manager
         .handle_run_network_instance(app.clone(), cfg, save)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:run_network_instance", e))?;
     client_manager
         .post_run_network_instance_hook(&app, &instance_id)
         .await?;
@@ -170,18 +177,18 @@ async fn collect_network_info(
 ) -> Result<CollectNetworkInfoResponse, String> {
     let instance_id = instance_id
         .parse()
-        .map_err(|e: uuid::Error| e.to_string())?;
+        .map_err(|e: uuid::Error| error_log::other("cmd:collect_network_info", e))?;
     get_client_manager!()?
         .handle_collect_network_info(app, Some(vec![instance_id]))
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| error_log::other("cmd:collect_network_info", e))
 }
 
 #[tauri::command]
 async fn get_vpn_portal_info(instance_id: String) -> Result<Option<VpnPortalInfo>, String> {
     let instance_id = instance_id
         .parse::<uuid::Uuid>()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:get_vpn_portal_info", e))?;
     let client_manager = get_client_manager!()?;
     // 走 transport：桌面 = tunnel，移动端 = FFI（rpc_manager 在移动端没有连接）
     let client = client_manager.transport.vpn_portal();
@@ -195,7 +202,7 @@ async fn get_vpn_portal_info(instance_id: String) -> Result<Option<VpnPortalInfo
             },
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:get_vpn_portal_info", e))?;
     Ok(response.vpn_portal_info)
 }
 
@@ -210,7 +217,7 @@ async fn patch_vpn_portal_clients(
 ) -> Result<(), String> {
     let instance_id = instance_id
         .parse::<uuid::Uuid>()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:patch_vpn_portal_clients", e))?;
     let action = match action.as_str() {
         "add" => ConfigPatchAction::Add,
         "remove" => ConfigPatchAction::Remove,
@@ -239,7 +246,7 @@ async fn patch_vpn_portal_clients(
             }],
         )
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| error_log::other("cmd:patch_vpn_portal_clients", e))
 }
 
 #[tauri::command]
@@ -247,7 +254,7 @@ async fn set_logging_level(level: String) -> Result<(), String> {
     get_client_manager!()?
         .set_logging_level(level.clone())
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:set_logging_level", e))?;
     Ok(())
 }
 
@@ -277,20 +284,20 @@ async fn list_network_instance_ids(
     get_client_manager!()?
         .handle_list_network_instance_ids(app)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| error_log::other("cmd:list_network_instance_ids", e))
 }
 
 #[tauri::command]
 async fn remove_network_instance(app: AppHandle, instance_id: String) -> Result<(), String> {
     let instance_id = instance_id
         .parse()
-        .map_err(|e: uuid::Error| e.to_string())?;
+        .map_err(|e: uuid::Error| error_log::other("cmd:remove_network_instance", e))?;
     let client_manager = get_client_manager!()?;
     let _mutation = client_manager.config_mutation.lock().await;
     client_manager
         .handle_remove_network_instances(app.clone(), vec![instance_id])
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:remove_network_instance", e))?;
     client_manager
         .post_stop_network_instances_hook(&app)
         .await?;
@@ -307,15 +314,17 @@ async fn update_network_config_state(
 ) -> Result<(), String> {
     let instance_id = instance_id
         .parse()
-        .map_err(|e: uuid::Error| e.to_string())?;
+        .map_err(|e: uuid::Error| error_log::other("cmd:update_network_config_state", e))?;
     let client_manager = get_client_manager!()?;
     let _mutation = client_manager.config_mutation.lock().await;
     if !disabled {
         let (cfg, source) = client_manager
             .handle_get_network_config_with_source(app.clone(), instance_id)
             .await
-            .map_err(|e| e.to_string())?;
-        let toml_config = cfg.gen_config().map_err(|e| e.to_string())?;
+            .map_err(|e| error_log::other("cmd:update_network_config_state", e))?;
+        let toml_config = cfg
+            .gen_config()
+            .map_err(|e| error_log::other("cmd:update_network_config_state", e))?;
         client_manager
             .pre_run_network_instance_hook(
                 &app,
@@ -327,7 +336,7 @@ async fn update_network_config_state(
     client_manager
         .handle_update_network_state(app.clone(), instance_id, disabled)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:update_network_config_state", e))?;
 
     if disabled {
         client_manager
@@ -352,14 +361,14 @@ async fn update_network_config_state(
 ) -> Result<(), String> {
     let instance_id = instance_id
         .parse()
-        .map_err(|e: uuid::Error| e.to_string())?;
+        .map_err(|e: uuid::Error| error_log::other("cmd:update_network_config_state", e))?;
     let client_manager = get_client_manager!()?;
     let _mutation = client_manager.config_mutation.lock().await;
     if !disabled {
         let (cfg, source) = client_manager
             .handle_get_network_config_with_source(app.clone(), instance_id)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| error_log::other("cmd:update_network_config_state", e))?;
         client_manager
             .pre_run_network_instance_hook(&app, &cfg, source)
             .await?;
@@ -367,7 +376,7 @@ async fn update_network_config_state(
     client_manager
         .handle_update_network_state(app.clone(), instance_id, disabled)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:update_network_config_state", e))?;
 
     if disabled {
         client_manager
@@ -387,13 +396,13 @@ async fn save_network_config(app: AppHandle, cfg: NetworkConfig) -> Result<(), S
     let instance_id = cfg
         .instance_id()
         .parse()
-        .map_err(|e: uuid::Error| e.to_string())?;
+        .map_err(|e: uuid::Error| error_log::other("cmd:save_network_config", e))?;
     let client_manager = get_client_manager!()?;
     let _mutation = client_manager.config_mutation.lock().await;
     client_manager
         .handle_save_network_config(app, instance_id, cfg)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| error_log::other("cmd:save_network_config", e))
 }
 
 #[tauri::command]
@@ -404,18 +413,18 @@ async fn validate_config(
     get_client_manager!()?
         .handle_validate_config(app, config)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| error_log::other("cmd:validate_config", e))
 }
 
 #[tauri::command]
 async fn get_config(app: AppHandle, instance_id: String) -> Result<NetworkConfig, String> {
     let instance_id = instance_id
         .parse()
-        .map_err(|e: uuid::Error| e.to_string())?;
+        .map_err(|e: uuid::Error| error_log::other("cmd:get_config", e))?;
     let cfg = get_client_manager!()?
         .handle_get_network_config(app, instance_id)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:get_config", e))?;
     Ok(cfg)
 }
 
@@ -430,7 +439,7 @@ async fn load_configs(
     client_manager
         .load_configs(app, configs, enabled_networks)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| error_log::other("cmd:load_configs", e))?;
     Ok(())
 }
 
@@ -442,7 +451,7 @@ async fn get_network_metas(
     get_client_manager!()?
         .handle_get_network_metas(app, instance_ids)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| error_log::other("cmd:get_network_metas", e))
 }
 
 #[cfg(target_os = "android")]
@@ -458,20 +467,23 @@ fn init_service(opts: Option<service::ServiceOptions>) -> Result<(), String> {
         Some(args) => {
             let path = std::path::Path::new(&args.config_dir);
             if !path.exists() {
-                std::fs::create_dir_all(&args.config_dir).map_err(|e| e.to_string())?;
+                std::fs::create_dir_all(&args.config_dir)
+                    .map_err(|e| error_log::other("cmd:init_service", e))?;
             } else if !path.is_dir() {
                 return Err("config_dir exists but is not a directory".to_string());
             }
             let path = std::path::Path::new(&args.file_log_dir);
             if !path.exists() {
-                std::fs::create_dir_all(&args.file_log_dir).map_err(|e| e.to_string())?;
+                std::fs::create_dir_all(&args.file_log_dir)
+                    .map_err(|e| error_log::other("cmd:init_service", e))?;
             } else if !path.is_dir() {
                 return Err("file_log_dir exists but is not a directory".to_string());
             }
 
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
-                let payload = serde_json::to_string(&args).map_err(|e| e.to_string())?;
+                let payload = serde_json::to_string(&args)
+                    .map_err(|e| error_log::other("cmd:init_service", e))?;
                 run_elevated(&["--install-service", &payload])?;
             }
             #[cfg(target_os = "ios")]
@@ -489,6 +501,7 @@ fn init_service(opts: Option<service::ServiceOptions>) -> Result<(), String> {
 
 #[tauri::command]
 fn set_service_status(_enable: bool) -> Result<(), String> {
+    error_log::record("service.ctl", format!("enable={_enable}"));
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         run_elevated(&["--service-ctl", if _enable { "start" } else { "stop" }])?;
@@ -585,6 +598,7 @@ async fn init_rpc_connection(
     .with_context(|| format!("Failed to connect rpc: {client_url}"))
     .map_err(|e| format!("{:#}", e))?;
     *client_manager_guard = Some(client_manager);
+    error_log::record("mode", format!("desktop rpc connected: {client_url}"));
 
     Ok(())
 }
@@ -602,6 +616,7 @@ async fn init_rpc_connection(
         .await
         .map_err(|_| "Failed to acquire write lock for client manager")?;
     *guard = Some(manager::GUIClientManager::new_ffi());
+    error_log::record("mode", "mobile ffi transport ready");
     Ok(())
 }
 
@@ -698,6 +713,96 @@ async fn get_log_dir_path(app: tauri::AppHandle) -> Result<String, String> {
         }
         Err(e) => Err(format!("Failed to get log directory: {}", e)),
     }
+}
+
+/// 安装全局 panic hook：panic 信息先写 `error.log`，再交给默认 hook。
+///
+/// Android release 是 `panic = "abort"`，hook 仍会在 abort 前执行，
+/// 这是崩溃现场唯一的落盘机会。
+fn install_panic_hook() {
+    static INSTALLED: std::sync::Once = std::sync::Once::new();
+    INSTALLED.call_once(|| {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let location = info
+                .location()
+                .map(|l| format!("{}:{}", l.file(), l.line()))
+                .unwrap_or_else(|| "<unknown>".to_string());
+            let thread = std::thread::current()
+                .name()
+                .unwrap_or("<unnamed>")
+                .to_string();
+            error_log::record(
+                "panic",
+                format!("thread={thread} location={location} {info}"),
+            );
+            default_hook(info);
+        }));
+    });
+}
+
+fn sanitize_scope(scope: &str) -> String {
+    let cleaned: String = scope
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-'))
+        .take(48)
+        .collect();
+    if cleaned.is_empty() {
+        "fe:unknown".to_string()
+    } else if cleaned.starts_with("fe:") {
+        cleaned
+    } else {
+        format!("fe:{cleaned}")
+    }
+}
+
+/// 前端异常上报（`window.onerror` / `unhandledrejection` / Vue errorHandler / toast 错误）。
+#[tauri::command]
+fn report_frontend_error(scope: String, message: String, stack: Option<String>) {
+    let scope = sanitize_scope(&scope);
+    let mut text = message;
+    if let Some(stack) = stack.filter(|s| !s.trim().is_empty()) {
+        text.push_str(" | stack=");
+        text.push_str(&stack);
+    }
+    error_log::record(&scope, text);
+}
+
+/// `error.log` 的绝对路径（未初始化时返回错误）。
+#[tauri::command]
+fn error_log_path() -> Result<String, String> {
+    error_log::path()
+        .map(|p| p.display().to_string())
+        .ok_or_else(|| "error.log 尚未初始化".to_string())
+}
+
+/// 读取 `error.log` 尾部（默认 256 KB），用于复制/预览。
+#[tauri::command]
+fn read_error_log(tail_kb: Option<usize>) -> Result<String, String> {
+    let limit = tail_kb.unwrap_or(256).clamp(1, 2048) * 1024;
+    Ok(error_log::tail(limit))
+}
+
+/// 分享 `error.log`：Android 弹系统分享面板；桌面返回路径（前端复制/打开目录）。
+#[tauri::command]
+fn share_error_log(app: AppHandle) -> Result<String, String> {
+    let path = error_log::path().ok_or_else(|| "error.log 尚未初始化".to_string())?;
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_vpnservice::VpnserviceExt;
+        app.vpnservice()
+            .share_file(tauri_plugin_vpnservice::models::ShareFileRequest {
+                path: path.display().to_string(),
+                mime: Some("text/plain".to_string()),
+                title: Some("Exvlan 错误日志".to_string()),
+            })
+            .map_err(|e| error_log::other("share_error_log", e.to_string()))?;
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+    }
+    Ok(path.display().to_string())
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1054,8 +1159,9 @@ mod manager {
         pub(super) fn notify_vpn_stop_if_no_tun(&self, app: &AppHandle) -> Result<(), String> {
             let has_tun = self.get_enabled_instances_with_tun_ids().any(|_| true);
             if !has_tun {
-                app.emit("vpn_service_stop", "")
-                    .map_err(|e| e.to_string())?;
+                app.emit("vpn_service_stop", "").map_err(|e| {
+                    error_log::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
+                })?;
             }
             Ok(())
         }
@@ -1068,7 +1174,9 @@ mod manager {
         ) -> Result<(), String> {
             let instance_id = cfg.get_id();
             app.emit("pre_run_network_instance", instance_id.to_string())
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| {
+                    error_log::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
+                })?;
 
             #[cfg(target_os = "android")]
             if !cfg.get_flags().no_tun {
@@ -1076,12 +1184,22 @@ mod manager {
                     PersistedConfigSource::User | PersistedConfigSource::Legacy => {
                         self.disable_instances_with_tun(app, false)
                             .await
-                            .map_err(|e| e.to_string())?;
+                            .map_err(|e| {
+                                error_log::other(
+                                    "cmd:get_enabled_instances_with_web_like_tun_ids",
+                                    e,
+                                )
+                            })?;
                     }
                     PersistedConfigSource::Web => {
                         self.disable_instances_with_tun(app, true)
                             .await
-                            .map_err(|e| e.to_string())?;
+                            .map_err(|e| {
+                                error_log::other(
+                                    "cmd:get_enabled_instances_with_web_like_tun_ids",
+                                    e,
+                                )
+                            })?;
                         if self.get_enabled_instances_with_tun_ids().next().is_some() {
                             return Err(
                                 "Android only supports one active TUN network; user-managed VPN remains active"
@@ -1096,10 +1214,14 @@ mod manager {
                 .save_config(
                     app,
                     instance_id,
-                    NetworkConfig::new_from_config(cfg).map_err(|e| e.to_string())?,
+                    NetworkConfig::new_from_config(cfg).map_err(|e| {
+                        error_log::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
+                    })?,
                     source,
                 )
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| {
+                    error_log::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
+                })?;
 
             Ok(())
         }
@@ -1112,7 +1234,9 @@ mod manager {
             self.storage.enabled_networks.insert(*instance_id);
 
             app.emit("post_run_network_instance", instance_id.to_string())
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| {
+                    error_log::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
+                })?;
 
             Ok(())
         }
@@ -1126,7 +1250,9 @@ mod manager {
             self.storage
                 .delete_network_configs(app.clone(), ids)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| {
+                    error_log::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
+                })?;
             self.notify_vpn_stop_if_no_tun(app)?;
             Ok(())
         }
@@ -1398,11 +1524,121 @@ mod service {
             display_name: Some("Exvlan Gui Service".to_string()),
             disable_restart_on_failure: false,
         };
-        service
-            .install(&options)
-            .with_context(|| "Failed to install service")?;
+
+        // 19707/20708 实测：服务已注册时 `service_manager.update()` 会先 bootout 再立刻
+        // `launchctl bootstrap`，而 launchd 的注销是异步的，抢跑就返回
+        // `Bootstrap failed: 5: Input/output error`，导致「每次启动都弹授权、每次都失败」。
+        // 这里改为：先彻底注销并**等到 launchctl 真的看不到该 job**，再安装；失败重试。
+        let _ = service.uninstall();
+        wait_until_uninstalled(&service);
+
+        let mut last_error: Option<anyhow::Error> = None;
+        for attempt in 1..=3u32 {
+            match service.install(&options) {
+                Ok(()) => {
+                    last_error = None;
+                    break;
+                }
+                Err(err) => {
+                    crate::error_log::record(
+                        "service.install",
+                        format!("attempt={attempt}/3 {err:#}"),
+                    );
+                    last_error = Some(err);
+                    // 清场后重试（含 launchd 的异步注销窗口）
+                    let _ = service.uninstall();
+                    wait_until_uninstalled(&service);
+                    std::thread::sleep(std::time::Duration::from_millis(300 * u64::from(attempt)));
+                }
+            }
+        }
+
+        if let Some(err) = last_error {
+            crate::error_log::record("service.install.diag", service_diagnostics(&service));
+            return Err(err).with_context(|| "Failed to install service");
+        }
+
         write_marker(&opts)?;
+
+        // 装上了不代表跑起来了：给 launchd 最多 3s，起不来就再 kickstart 一次，
+        // 仍失败则把现场写进 error.log（不阻塞流程，前端会再 start 一次）。
+        if wait_until_running(&service, std::time::Duration::from_secs(3)) {
+            return Ok(());
+        }
+        let _ = service.start();
+        if !wait_until_running(&service, std::time::Duration::from_secs(2)) {
+            crate::error_log::record(
+                "service.install.not_running",
+                format!(
+                    "服务已安装但未进入 Running；{}",
+                    service_diagnostics(&service)
+                ),
+            );
+        }
         Ok(())
+    }
+
+    /// 轮询直到服务「不再注册」（launchd 的 bootout 是异步的）。
+    fn wait_until_uninstalled(service: &exvlan_rpc::service_manager::Service) {
+        use exvlan_rpc::service_manager::ServiceStatus;
+        for _ in 0..20 {
+            match service.status() {
+                Ok(ServiceStatus::NotInstalled) => return,
+                Ok(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                Err(_) => return,
+            }
+        }
+    }
+
+    fn wait_until_running(
+        service: &exvlan_rpc::service_manager::Service,
+        timeout: std::time::Duration,
+    ) -> bool {
+        use exvlan_rpc::service_manager::ServiceStatus;
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match service.status() {
+                Ok(ServiceStatus::Running) => return true,
+                Ok(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                }
+                _ => return false,
+            }
+        }
+    }
+
+    /// 服务安装/启动失败时的现场：launchctl 状态 + plist 内容。
+    fn service_diagnostics(_service: &exvlan_rpc::service_manager::Service) -> String {
+        let label = env!("CARGO_PKG_NAME");
+        let mut parts: Vec<String> = Vec::new();
+
+        #[cfg(target_os = "macos")]
+        {
+            let plist = format!("/Library/LaunchDaemons/{label}.plist");
+            match std::fs::read_to_string(&plist) {
+                Ok(text) => parts.push(format!("plist({plist})={}", text.replace('\n', " | "))),
+                Err(err) => parts.push(format!("plist({plist}) 读取失败: {err}")),
+            }
+            match std::process::Command::new("/bin/launchctl")
+                .args(["print", &format!("system/{label}")])
+                .output()
+            {
+                Ok(out) => parts.push(format!(
+                    "launchctl print status={} stdout={} stderr={}",
+                    out.status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&out.stdout).replace('\n', " | "),
+                    String::from_utf8_lossy(&out.stderr).replace('\n', " | ")
+                )),
+                Err(err) => parts.push(format!("launchctl print 执行失败: {err}")),
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            parts.push(format!("label={label}"));
+        }
+
+        parts.join(" ; ")
     }
 
     pub fn uninstall() -> anyhow::Result<()> {
@@ -1564,8 +1800,10 @@ async fn ensure_kernel_service(
     }
 
     if !service::is_current(&opts) {
-        let payload = serde_json::to_string(&opts).map_err(|e| e.to_string())?;
+        let payload = serde_json::to_string(&opts)
+            .map_err(|e| error_log::other("cmd:ensure_kernel_service", e))?;
         run_elevated(&["--install-service", &payload])?;
+        error_log::record("service.install", "installed by ensure_kernel_service");
         return Ok("installed".to_string());
     }
 
@@ -1595,6 +1833,7 @@ async fn kernel_update_info(source: Option<String>) -> Result<upgrade::kernel::U
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn kernel_install_version(version: String, source: Option<String>) -> Result<(), String> {
+    error_log::record("kernel.install", format!("version={version}"));
     let base = source.unwrap_or_else(|| upgrade::KERNEL_BASE_URL.to_string());
     upgrade::kernel::install_version(&base, &version, env!("CARGO_PKG_VERSION"))
         .await
@@ -1641,6 +1880,7 @@ async fn app_update_apply(
     version: String,
     source: Option<String>,
 ) -> Result<(), String> {
+    error_log::record("update.apply", format!("version={version}"));
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if source.is_none() {
         match upgrade::app::install_official(&app).await {
@@ -1844,7 +2084,7 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
             .collect::<Vec<_>>()
             .join("\n");
     }
-    Err(format!(
+    let message = format!(
         "提权命令失败（exit={}）：{}",
         output.status,
         if detail.is_empty() {
@@ -1852,19 +2092,14 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
         } else {
             detail
         }
-    ))
+    );
+    error_log::record("elevate", format!("args={args:?} {message}"));
+    Err(message)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run_gui() -> std::process::ExitCode {
     // 桌面端不再自动提权：内核以独立 root 守护进程运行，GUI 始终是普通用户。
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        std::panic::set_hook(Box::new(|info| {
-            eprintln!("[panic] {info}");
-        }));
-    }
-
     let mut builder = tauri::Builder::default();
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1898,6 +2133,31 @@ pub fn run_gui() -> std::process::ExitCode {
 
     let app = builder
         .setup(|app| {
+            // 统一错误出口：必须在任何命令/FFI 调用之前就绪。
+            if let Ok(log_dir) = get_log_dir(app.app_handle()) {
+                error_log::init(&log_dir);
+            }
+            install_panic_hook();
+            error_log::record(
+                "boot",
+                format!(
+                    "version={} os={} arch={}",
+                    env!("CARGO_PKG_VERSION"),
+                    std::env::consts::OS,
+                    std::env::consts::ARCH
+                ),
+            );
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            error_log::record(
+                "boot",
+                format!(
+                    "kernel={:?} kernel_version={:?} service={:?}",
+                    kernel::is_installed(),
+                    kernel::installed_version(),
+                    service::status().map(|s| format!("{s:?}")).ok()
+                ),
+            );
+
             init_gui_logging(app.app_handle());
 
             #[cfg(target_os = "android")]
@@ -1963,6 +2223,10 @@ pub fn run_gui() -> std::process::ExitCode {
             init_web_client,
             is_web_client_connected,
             get_log_dir_path,
+            report_frontend_error,
+            error_log_path,
+            read_error_log,
+            share_error_log,
             ui_state::get_ui_state,
             ui_state::set_ui_state,
         ])

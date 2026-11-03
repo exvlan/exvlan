@@ -44,10 +44,76 @@ fn cstring(s: &str, field: &str) -> Result<CString, String> {
     CString::new(s).map_err(|_| format!("{field} 含 NUL 字节"))
 }
 
+struct Job {
+    service: String,
+    method: String,
+    domain: String,
+    payload: serde_json::Value,
+    reply: std::sync::mpsc::Sender<Result<serde_json::Value, String>>,
+}
+
+/// 专用的 FFI 调用线程。
+///
+/// 内核侧的 `call_json_rpc` 内部会用 `Runtime::block_on` 驱动异步 RPC；
+/// 如果直接在当前线程调用，而当前线程正处于 Tauri 的 tokio 运行时上下文里
+/// （所有 `#[tauri::command] async fn` 都是），tokio 会 panic：
+/// `Cannot start a runtime from within a runtime`。移动端 release 又是
+/// `panic = "abort"`，于是表现为**进入页面即闪退**。
+///
+/// 因此凡是「在运行时上下文里」调用，一律转交这个普通线程执行。
+fn worker() -> Option<&'static std::sync::mpsc::Sender<Job>> {
+    static WORKER: std::sync::OnceLock<Option<std::sync::mpsc::Sender<Job>>> =
+        std::sync::OnceLock::new();
+    WORKER
+        .get_or_init(|| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            std::thread::Builder::new()
+                .name("ffi-rpc".to_string())
+                .spawn(move || {
+                    while let Ok(job) = rx.recv() {
+                        let result = call_raw(&job.service, &job.method, &job.domain, job.payload);
+                        let _ = job.reply.send(result);
+                    }
+                })
+                .ok()?;
+            Some(tx)
+        })
+        .as_ref()
+}
+
 /// 调用一个 RPC 方法（protobuf JSON 编码）。
 ///
 /// `domain` 为空字符串表示全局域；实例级方法需传实例 ID。
+///
+/// 线程语义：在 tokio 运行时上下文里会自动转交 `ffi-rpc` 专用线程，
+/// 因为内核侧会嵌套 `block_on`（见 [`worker`]）。
 pub fn call(
+    service: &str,
+    method: &str,
+    domain: &str,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if tokio::runtime::Handle::try_current().is_ok()
+        && let Some(tx) = worker()
+    {
+        let (reply, rx) = std::sync::mpsc::channel();
+        tx.send(Job {
+            service: service.to_string(),
+            method: method.to_string(),
+            domain: domain.to_string(),
+            payload,
+            reply,
+        })
+        .map_err(|_| "FFI 调用线程不可用".to_string())?;
+        return rx
+            .recv()
+            .unwrap_or_else(|_| Err("FFI 调用线程已退出".to_string()));
+    }
+
+    call_raw(service, method, domain, payload)
+}
+
+fn call_raw(
     service: &str,
     method: &str,
     domain: &str,
@@ -93,7 +159,7 @@ pub fn call_as<T: serde::de::DeserializeOwned>(
     serde_json::from_value(value).map_err(|e| format!("反序列化响应失败: {e}"))
 }
 
-/// 已确认可经 FFI 调用的服务名（内核会拒绝 `api.manage.WebClientService`）。
+/// 常用的服务名。
 pub const SVC_LOGGER: &str = "api.logger.LoggerRpcService";
 pub const SVC_CONFIG: &str = "api.config.ConfigRpc";
 pub const SVC_VPN_PORTAL: &str = "api.instance.VpnPortalRpc";

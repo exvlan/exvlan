@@ -757,6 +757,9 @@ config-server:
 client:
   not_running: Unable to connect to remote client.
   retry: Retry
+  startup_failed: Startup failed
+  share_error_log: Share error log
+  retry_startup: Retry connection
 
 acl:
   title: Access Control (ACL)

@@ -22,12 +22,64 @@ import { useToast, useConfirm } from 'openvue'
 import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mode'
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
-import { appUpdateApply, appUpdateInfo, ensureKernelService, getServiceStatus } from '~/composables/backend'
+import {
+  appUpdateApply,
+  appUpdateInfo,
+  getServiceStatus,
+  reportFrontendError,
+  shareErrorLog,
+} from '~/composables/backend'
 import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
 
 const { t, locale } = useI18n()
 const confirm = useConfirm()
 const aboutVisible = ref(false)
+/** 启动/连接失败时保留的错误（顶部横幅展示，不再静默降级模式）。 */
+const startupError = ref('')
+
+/** 补齐 service 模式缺失的默认值（历史版本可能只存了 mode 字段）。 */
+async function normalizeMode(mode: Mode): Promise<Mode> {
+  if (mode.mode !== 'service') {
+    return mode
+  }
+  const svc = mode as unknown as Record<string, any>
+  const saved = loadMode() as unknown as Record<string, any>
+  const configDir = svc.config_dir || saved.config_dir || await join(await appConfigDir(), 'config.d')
+  const logDir = svc.file_log_dir || saved.file_log_dir || await appLogDir()
+  return {
+    ...mode,
+    config_dir: configDir,
+    file_log_dir: logDir,
+    file_log_level: svc.file_log_level || saved.file_log_level || 'info',
+    rpc_portal: svc.rpc_portal || saved.rpc_portal || '127.0.0.1:15999',
+  } as Mode
+}
+
+async function onShareErrorLog() {
+  try {
+    const path = await shareErrorLog()
+    if (type() !== 'android') {
+      await writeText(path)
+      toast.add({ severity: 'info', summary: t('client.share_error_log'), detail: path, life: 6000 })
+    }
+  }
+  catch (e: any) {
+    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 8000 })
+  }
+}
+
+async function retryStartup() {
+  startupError.value = ''
+  try {
+    await ensureLocalKernel(currentMode.value)
+  }
+  catch (e: any) {
+    startupError.value = String(e)
+    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 10000 })
+    return
+  }
+  await initWithMode(currentMode.value)
+}
 const modeDialogVisible = ref(false)
 const appUpdateDialogVisible = ref(false)
 const appUpdateVersion = ref('')
@@ -125,7 +177,8 @@ async function onStopService() {
   }
 }
 
-async function initWithMode(mode: Mode) {
+async function initWithMode(rawMode: Mode) {
+  const mode = await normalizeMode(rawMode)
   const running_inst_ids = (await remoteClient.value.list_network_instance_ids().catch(() => undefined))?.running_inst_ids ?? []
 
   // 新架构：service 与 normal 共用同一个常驻 root 守护进程，
@@ -137,27 +190,25 @@ async function initWithMode(mode: Mode) {
   switch (mode.mode) {
     case 'remote':
       if (!mode.remote_rpc_address) {
-        toast.add({ severity: 'error', summary: t('error'), detail: t('mode.remote_rpc_address_empty'), life: 10000 })
-        return initWithMode({ ...mode, mode: 'normal' });
+        // 不再静默降级为普通模式：保留用户选择，失败原因留在顶部横幅。
+        startupError.value = t('mode.remote_rpc_address_empty')
+        toast.add({ severity: 'error', summary: t('client.startup_failed'), detail: startupError.value, life: 10000 })
+        return
       }
       url = mode.remote_rpc_address
       break;
     case 'service': {
       if (!mode.config_dir || !mode.file_log_dir || !mode.file_log_level || !mode.rpc_portal) {
-        toast.add({ severity: 'error', summary: t('error'), detail: t('mode.service_config_empty'), life: 10000 })
-        return initWithMode({ ...mode, mode: 'normal' });
+        startupError.value = t('mode.service_config_empty')
+        toast.add({ severity: 'error', summary: t('client.startup_failed'), detail: startupError.value, life: 10000 })
+        return
       }
       // 是否（重）装服务只由**服务指纹**决定：内核路径 + 启动参数完全一致时
       // ensureKernelService 直接返回 current，不会触发授权（历史 bug：用版本号比较，
       // 而 exvlan_version 现在返回内核版本，导致每次启动都判定需要重装 → 反复弹密码）。
       mode.config_server_url = mode.config_server_url || undefined
-      await ensureKernelService({
-        config_dir: mode.config_dir,
-        file_log_dir: mode.file_log_dir,
-        file_log_level: mode.file_log_level,
-        rpc_portal: mode.rpc_portal,
-        config_server: mode.config_server_url,
-      })
+      // 与启动时同一个入口：内部会补默认值、按指纹判断是否真的需要提权。
+      await ensureLocalKernel(mode)
       let serviceStatus = await getServiceStatus()
       if (serviceStatus === "Stopped") {
         await setServiceStatus(true)
@@ -177,11 +228,13 @@ async function initWithMode(mode: Mode) {
     } catch (e) {
       if (i === retrys - 1) {
         const errMsg = e instanceof Error ? e.message : String(e)
+        startupError.value = t('mode.rpc_connection_failed', { error: errMsg })
+        void reportFrontendError('fe:rpc-connect', errMsg, e instanceof Error ? e.stack : undefined)
         toast.add({
           severity: 'error',
-          summary: t('error'),
-          detail: t('mode.rpc_connection_failed', { error: errMsg }),
-          life: 1000,
+          summary: t('client.startup_failed'),
+          detail: startupError.value,
+          life: 10000,
         })
         throw e;
       }
@@ -196,6 +249,7 @@ async function initWithMode(mode: Mode) {
   }
   currentMode.value = mode
   saveMode(mode)
+  startupError.value = ''
   clientRunning.value = await isClientRunning()
 }
 
@@ -283,17 +337,28 @@ onMounted(async () => {
   }
 
   cleanupFns.push(await listenGlobalEvents())
-  currentMode.value = loadMode()
+  currentMode.value = await normalizeMode(loadMode())
 
   // 首次安装/升级后会自动装好内核并（重新）注册系统服务；失败不阻塞进入界面。
-  try {
-    await ensureLocalKernel(currentMode.value)
-  } catch (e: any) {
-    console.error("ensure kernel/service failed", e)
-    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 10000 })
+  // service 模式由 initWithMode 内部统一处理，避免同一次启动弹两次授权。
+  if (currentMode.value.mode !== 'service') {
+    try {
+      await ensureLocalKernel(currentMode.value)
+    } catch (e: any) {
+      console.error("ensure kernel/service failed", e)
+      startupError.value = String(e)
+      void reportFrontendError('fe:ensure-kernel', String(e))
+      toast.add({ severity: 'error', summary: t('client.startup_failed'), detail: String(e), life: 10000 })
+    }
   }
 
-  await initWithMode(currentMode.value);
+  try {
+    await initWithMode(currentMode.value)
+  } catch (e: any) {
+    // 保留用户所选模式，只把原因留在顶部横幅与 error.log
+    console.error("initWithMode failed", e)
+    startupError.value ||= String(e)
+  }
   void maybeCheckAppUpdate();
 
   if (type() === 'android') {
@@ -378,6 +443,11 @@ watch(clientRunning, async (newVal, oldVal) => {
 
 onMounted(async () => {
   clientRunning.value = await isClientRunning().catch(() => false)
+  // 直接按上次选择恢复网络，避免「连不上 → 首页显示未选中网络 → 需要手动选」
+  const lastInstanceId = loadLastNetworkInstanceId()
+  if (lastInstanceId) {
+    instanceId.value = lastInstanceId
+  }
   const timer = setInterval(async () => {
     try {
       clientRunning.value = await isClientRunning()
@@ -485,6 +555,11 @@ const setting_menu_items: Ref<MenuItem[]> = ref([
     label: () => t('logging'),
     icon: 'pi pi-file',
     items: [], // Keep this to show it's a parent menu
+  },
+  {
+    label: () => t('client.share_error_log'),
+    icon: 'pi pi-share-alt',
+    command: onShareErrorLog,
   },
   {
     label: () => t('about.title'),
@@ -608,6 +683,14 @@ const configServerConnectionStatus = computed(() => {
     </Dialog>
 
     <Menu ref="log_menu" :model="log_menu_items_popup" :popup="true" />
+
+    <div v-if="startupError"
+      class="flex items-center gap-2 border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
+      <i class="pi pi-exclamation-triangle" />
+      <span class="flex-1 break-all">{{ t('client.startup_failed') }}: {{ startupError }}</span>
+      <Button size="small" :label="t('client.retry_startup')" icon="pi pi-replay" @click="retryStartup" />
+      <Button size="small" text :label="t('client.share_error_log')" icon="pi pi-share-alt" @click="onShareErrorLog" />
+    </div>
 
     <RemoteManagement v-if="clientRunning" class="flex-1 overflow-y-auto" :api="remoteClient"
       :pause-auto-refresh="isModeSaving" v-model:instance-id="instanceId" />

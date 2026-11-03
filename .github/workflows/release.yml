@@ -11,7 +11,7 @@ on:
       version:
         description: "Version for this release"
         type: string
-        default: "v26.410.20708"
+        default: "v26.410.20709"
         required: true
       make_latest:
         description: "Mark this release as latest"
@@ -121,7 +121,7 @@ jobs:
           # 内核 RPC 契约版本；不兼容变更时才 +1
           RPC_SCHEMA = 1
           # GUI 最低版本基线（新架构首发版本）；不要求升级内核时同步升 GUI
-          MIN_STUDIO = "26.410.20708"
+          MIN_STUDIO = "26.410.20709"
 
           assets = {}
           for meta_path in sorted(pathlib.Path("release_assets").glob("core-*/kernel.json")):

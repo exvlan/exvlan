@@ -5,6 +5,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { routes } from 'vue-router/auto-routes'
 
 import App from '~/App.vue'
+import { reportFrontendError } from '~/composables/backend'
 import { hydrateUiState, installPersistHook } from '~/composables/persist'
 import '@exvlan/std/style.css'
 import '~/styles.css'
@@ -33,6 +34,31 @@ async function main() {
   await I18nUtils.loadLanguageAsync(localStorage.getItem('lang') || 'en')
 
   const app = createApp(App)
+
+  // 所有未捕获异常都写进 <日志目录>/error.log，方便用户直接把日志发出来。
+  window.addEventListener('error', (event) => {
+    void reportFrontendError(
+      'fe:window',
+      event.message || String(event.error ?? 'unknown error'),
+      event.error instanceof Error ? event.error.stack : undefined,
+    )
+  })
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason
+    void reportFrontendError(
+      'fe:promise',
+      reason instanceof Error ? reason.message : String(reason ?? 'unhandled rejection'),
+      reason instanceof Error ? reason.stack : undefined,
+    )
+  })
+  app.config.errorHandler = (err, _instance, info) => {
+    console.error(err)
+    void reportFrontendError(
+      `fe:vue:${info}`,
+      err instanceof Error ? err.message : String(err),
+      err instanceof Error ? err.stack : undefined,
+    )
+  }
 
   const router = createRouter({
     history: createWebHistory(),

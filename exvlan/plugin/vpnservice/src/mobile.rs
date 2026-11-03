@@ -73,4 +73,11 @@ impl<R: Runtime> Vpnservice<R> {
             .run_mobile_plugin::<()>("install_apk", payload)
             .map_err(Into::into)
     }
+
+    /// 用系统分享面板分享文件（如 error.log）。
+    pub fn share_file(&self, payload: ShareFileRequest) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin::<()>("share_file", payload)
+            .map_err(Into::into)
+    }
 }
