@@ -176,7 +176,19 @@ B3b 把 android 的 `is_client_running` 实现改成「FFI 实例列表非空」
 4. 移动 target features 收敛为 `logging, ffi-rpc`
 5. CI 断言：`cargo tree -p exvlan-studio --target aarch64-linux-android` 不含 `exvlan-core`
 
-工作量约 400 行，且只能靠 4-ABI 快检 + 真机验证；建议单独一批（20708）做，避免与阻断修复混在一起。
+工作量约 400 行，且只能靠 4-ABI 快检 + 真机验证。
+
+### 落地顺序（下一步从这里开始）
+
+1. `exvlan/rpc/Cargo.toml`：`exvlan-core` 改 optional，`rpc`/`gui-client` 依赖它，`ffi-rpc` 不依赖
+2. `exvlan/rpc/src/log/{file,management}.rs`：把 core 的 `FileLoggerConfig`（level/file/dir/size_mb/count）
+   与 `LoggingConfigLoader` 复制为 rpc 本地类型/ trait；studio 侧做一次转换
+3. `exvlan/rpc/src/{rpc,transport}.rs`：`TunnelTransport` 与拨号器 gate 在 `rpc` feature 后
+4. studio：新增 `cfg(mobile)` 的 `FfiClientManager`（GUIStorage + 命令走 ffi_kernel / call_json_rpc），
+   桌面保留现有 `GUIClientManager`
+5. 移动 target features 收敛为 `logging, ffi-rpc`；CI 断言 `cargo tree --target aarch64-linux-android` 无 exvlan-core
+
+验收：4 ABI 快检（真实 build + DT_NEEDED 断言）+ 真机回归（启动/建连/TUN/路由/关于页）。
 
 ## 风险
 
