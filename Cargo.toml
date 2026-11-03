@@ -109,3 +109,9 @@ strip = true
 inherits = "release"
 opt-level = "z"
 strip = "symbols"
+
+# 测试不需要调试符号：全 feature 的 debug 产物在 CI runner 上会打满磁盘
+# （曾多次 "No space left on device"），关闭后体积降一个量级。
+[profile.test]
+debug = 0
+incremental = false
