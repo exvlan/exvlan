@@ -185,7 +185,14 @@ B3b 把 android 的 `is_client_running` 实现改成「FFI 实例列表非空」
    与 `LoggingConfigLoader` 复制为 rpc 本地类型/ trait；studio 侧做一次转换
 3. `exvlan/rpc/src/{rpc,transport}.rs`：`TunnelTransport` 与拨号器 gate 在 `rpc` feature 后
 4. studio：新增 `cfg(mobile)` 的 `FfiClientManager`（GUIStorage + 命令走 ffi_kernel / call_json_rpc），
-   桌面保留现有 `GUIClientManager`
+   桌面保留现有 `GUIClientManager`。需要覆盖的方法（桌面命令层实际调用的 12 个）：
+   `handle_run_network_instance` / `handle_remove_network_instances` /
+   `handle_list_network_instance_ids` / `handle_collect_network_info` /
+   `handle_get_network_config` / `handle_get_network_config_with_source` /
+   `handle_save_network_config` / `handle_validate_config` / `handle_update_network_state` /
+   `handle_get_network_metas` / `handle_patch_vpn_portal_clients` /
+   `post_run_network_instance_hook`（+ `set_logger_config` 走 transport.logger()）。
+   其余命令在移动端返回「该功能仅桌面端支持」。
 5. 移动 target features 收敛为 `logging, ffi-rpc`；CI 断言 `cargo tree --target aarch64-linux-android` 无 exvlan-core
 
 验收：4 ABI 快检（真实 build + DT_NEEDED 断言）+ 真机回归（启动/建连/TUN/路由/关于页）。
