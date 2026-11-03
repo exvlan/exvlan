@@ -15,7 +15,7 @@ async-trait.workspace = true
 chrono.workspace = true
 console-subscriber = { version = "0.5.0", optional = true }
 log.workspace = true
-exvlan-core = { workspace = true, default-features = false }
+exvlan-core = { workspace = true, default-features = false, optional = true }
 exvlan-proto = { workspace = true, features = ["api", "core"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -41,13 +41,13 @@ macos-ne = []
 # 日志栈（控制台 + 滚动文件）；management 在日志栈之上再开放 init。
 logging = []
 management = ["logging"]
-# RPC 拨号（依赖 exvlan-core 的 connectivity/socket，均为非 feature 门控模块）。
-rpc = []
-# 移动端：经 C ABI 调内核 RPC（需运行时加载 libexvlan_ffi.so）。
+# RPC 拨号（依赖 exvlan-core 的 connectivity/socket）——**仅桌面**。
+rpc = ["dep:exvlan-core"]
+# 移动端：经 C ABI 调内核 RPC（需运行时加载 libexvlan_ffi.so）。不依赖 exvlan-core。
 ffi-rpc = []
-# GUI 所需：打开 exvlan-core 的 management/config 客户端能力。
-# 注意：只能由 GUI 启用，**内核构建不得开启**（否则 feature 统一会污染内核。
-gui-client = ["exvlan-core/management"]
+# GUI 所需：打开 exvlan-core 的 management/config 客户端能力（桌面）。
+# 注意：只能由 GUI 启用，**内核构建不得开启**（否则 feature 统一会污染内核）。
+gui-client = ["rpc", "exvlan-core/management"]
 # 与工作区其它 crate 对齐：`cargo clippy --features full --all` 会用到。
 full = ["management", "rpc"]
 # 与内核 crate 的 `tracing` feature 对应：启用 tokio-console 后端。

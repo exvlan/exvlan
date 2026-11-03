@@ -16,6 +16,8 @@ use tracing::{
     field::{Field, Visit},
 };
 
+mod config;
+pub use config::{ConsoleLoggerConfig, FileLoggerConfig, LoggingConfigLoader, SimpleLoggingConfig};
 mod file;
 #[cfg(feature = "management")]
 mod management;
