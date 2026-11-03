@@ -539,7 +539,13 @@ async fn init_rpc_connection(
 async fn is_client_running() -> Result<bool, String> {
     #[cfg(target_os = "android")]
     {
-        return Ok(!crate::ffi_kernel::list_instances(16)?.is_empty());
+        // 移动端内核在进程内，RPC 走 FFI：只要 GUI 管理器已初始化就算「已连接」。
+        // 不能再用「是否有运行中的实例」判断 —— 那会让 UI 在冷启动时就显示
+        // 「无法连接至远程客户端」，用户没有入口去启动实例。
+        return Ok(CLIENT_MANAGER
+            .try_read()
+            .map(|guard| guard.is_some())
+            .unwrap_or(false));
     }
     #[cfg(not(target_os = "android"))]
     {
