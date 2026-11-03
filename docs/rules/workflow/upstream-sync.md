@@ -222,3 +222,8 @@ git merge-base --is-ancestor upstream/releases/v2.6.4 feature # 期望: 退出�
 | 版本对齐            | `c21eac5d`                                             |
 | squash 提交信息约定 | `69ff75e1`                                             |
 | develop 基点        | `9779923b` `382534d0`                                  |
+
+## 7. 排障入口
+
+GUI 侧所有异常写 `<日志目录>/error.log`（5MB×3、默认脱敏），
+详见 [`error-log.md`](./error-log.md)。
