@@ -17,12 +17,9 @@ use exvlan_rpc::exvlan_core::management::remote_client::{
     GetNetworkMetasResponse, ListNetworkInstanceIdsJsonResp, ListNetworkProps, RemoteClientManager,
     Storage,
 };
-use exvlan_rpc::exvlan_proto::api::config::{
-    ConfigPatchAction, ConfigRpc, ConfigRpcClientFactory, VpnPortalClientPatch,
-};
+use exvlan_rpc::exvlan_proto::api::config::{ConfigPatchAction, ConfigRpc, VpnPortalClientPatch};
 use exvlan_rpc::exvlan_proto::api::instance::{
-    GetVpnPortalInfoRequest, InstanceIdentifier, VpnPortalInfo, VpnPortalRpc,
-    VpnPortalRpcClientFactory, instance_identifier,
+    GetVpnPortalInfoRequest, InstanceIdentifier, VpnPortalInfo, instance_identifier,
 };
 use exvlan_rpc::exvlan_proto::api::manage::{
     CollectNetworkInfoResponse, ValidateConfigResponse, VpnPortalClientConfig, WebClientService,
@@ -152,10 +149,8 @@ async fn get_vpn_portal_info(instance_id: String) -> Result<Option<VpnPortalInfo
         .parse::<uuid::Uuid>()
         .map_err(|e| e.to_string())?;
     let client_manager = get_client_manager!()?;
-    let client = client_manager
-        .rpc_manager
-        .rpc_client()
-        .scoped_client::<VpnPortalRpcClientFactory<BaseController>>(1, 1, "".to_string());
+    // 走 transport：桌面 = tunnel，移动端 = FFI（rpc_manager 在移动端没有连接）
+    let client = client_manager.transport.vpn_portal();
     let response = client
         .get_vpn_portal_info(
             BaseController::default(),
@@ -1146,11 +1141,7 @@ mod manager {
             &self,
             _: AppHandle,
         ) -> Option<Box<dyn ConfigRpc<Controller = BaseController> + Send>> {
-            Some(
-                self.rpc_manager
-                    .rpc_client()
-                    .scoped_client::<ConfigRpcClientFactory<BaseController>>(1, 1, String::new()),
-            )
+            Some(self.transport.config())
         }
 
         fn get_rpc_client(
