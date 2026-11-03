@@ -1391,6 +1391,7 @@ impl LoggingConfigLoader for &LoggingOptions {
 
 // 日志栈已下沉到 `exvlan-rpc`（P7：GUI 侧不再依赖内核的 TOML 配置类型），
 // 内核进程沿用同一实现，这里补一份 rpc 侧的配置适配。
+#[cfg(feature = "logging")]
 impl exvlan_rpc::log::LoggingConfigLoader for LoggingOptions {
     fn get_console_logger_config(&self) -> exvlan_rpc::log::ConsoleLoggerConfig {
         exvlan_rpc::log::ConsoleLoggerConfig {
