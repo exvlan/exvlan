@@ -15,6 +15,17 @@ pub struct InstallApkRequest {
     pub path: String,
 }
 
+/// 用系统分享面板分享一个应用私有目录里的文件（走 FileProvider，无需存储权限）。
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareFileRequest {
+    pub path: String,
+    #[serde(default)]
+    pub mime: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PingResponse {

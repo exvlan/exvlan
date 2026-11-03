@@ -215,3 +215,28 @@ export async function initWebClient(url?: string) {
 export async function isWebClientConnected() {
   return await invoke<boolean>('is_web_client_connected')
 }
+
+/** 前端异常上报：写入 <日志目录>/error.log（scope 建议用 fe:<模块>）。 */
+export async function reportFrontendError(scope: string, message: string, stack?: string) {
+  try {
+    await invoke('report_frontend_error', { scope, message, stack })
+  }
+  catch {
+    // 上报本身失败时不再递归报错
+  }
+}
+
+/** error.log 绝对路径。 */
+export async function errorLogPath() {
+  return await invoke<string>('error_log_path')
+}
+
+/** 读取 error.log 尾部（KB）。 */
+export async function readErrorLog(tailKb?: number) {
+  return await invoke<string>('read_error_log', { tailKb })
+}
+
+/** 分享 error.log：Android 弹系统分享面板；桌面返回路径。 */
+export async function shareErrorLog() {
+  return await invoke<string>('share_error_log')
+}

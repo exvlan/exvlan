@@ -757,6 +757,9 @@ config-server:
 client:
   not_running: 无法连接至远程客户端
   retry: 重试
+  startup_failed: 启动失败
+  share_error_log: 分享错误日志
+  retry_startup: 重试连接
 
 acl:
   title: 访问控制
