@@ -244,3 +244,22 @@ B3b 把 android 的 `is_client_running` 实现改成「FFI 实例列表非空」
 - 无 `gen/apple`、无签名配置、**不在原 CI 矩阵**。
 - 已新增 `ios-check.yml`：macOS runner 上 `cargo check` 设备与模拟器目标（无签名）。
 - 真机/商店包需要：Apple 开发者账号 + 证书 + provisioning profile；NetworkExtension 只能真机验证。
+
+## 落地结果（2026-11，P7 步骤 4-5 已完成）
+
+| 步骤 | 落地内容 |
+|---|---|
+| 4a | `RpcTransport::web_client()`（`api.manage.WebClientService` 8 个 RPC）；`FfiTransport` 走 `call_json_rpc`，`TunnelTransport` 走 `scoped_client` |
+| 4b | studio 新增 `src/mobile_manager.rs`（`#[path] mod manager`）：内存存储 + 事件落盘（`save_configs` / `save_enabled_networks`），12 个管理方法为**固有方法** |
+| 4c | 内核侧补 `call_web_client_json_rpc`，FFI 的 `call_json_rpc` 现在把 `api.manage.WebClientService` 分发到 `ProcessManagementRpc`（此前被显式拒绝） |
+| 5a | studio `Cargo.toml`：`exvlan-rpc` 按平台声明；android 只用 `logging,management,ffi-rpc` |
+| 5b | CI（`mobile.yml` / `mobile-ffi-check.yml`）新增 `cargo tree --target <android> -p exvlan-studio` 不含 `exvlan-core` 的硬断言 |
+
+**踩到的坑（重要）**：
+
+1. `exvlan-rpc` 若写在 `[dependencies]`（而非 target 段），其 `gui-client` feature 会**统一**到 Android 目标，
+   `cargo tree` 仍会看到 `exvlan-core`。必须按平台拆开声明。
+2. `exvlan-proto` 需显式启用 `json-rpc`：桌面端此前靠内核 feature 统一带进来，移动端剥掉内核后就没有了。
+3. 内核 `call_management_json_rpc` 原本对 `api.manage.WebClientService` 直接返回错误，
+   不补 FFI 分发的话，移动端所有实例管理调用都会失败。
+4. 日志配置类型下沉到 `exvlan-rpc` 后，内核（`exvlan`）与 `exvlan-api` 需要补各自 CLI 配置的 rpc 侧适配。

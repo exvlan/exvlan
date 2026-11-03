@@ -1389,6 +1389,26 @@ impl LoggingConfigLoader for &LoggingOptions {
     }
 }
 
+// 日志栈已下沉到 `exvlan-rpc`（P7：GUI 侧不再依赖内核的 TOML 配置类型），
+// 内核进程沿用同一实现，这里补一份 rpc 侧的配置适配。
+impl exvlan_rpc::log::LoggingConfigLoader for LoggingOptions {
+    fn get_console_logger_config(&self) -> exvlan_rpc::log::ConsoleLoggerConfig {
+        exvlan_rpc::log::ConsoleLoggerConfig {
+            level: self.console_log_level.clone(),
+        }
+    }
+
+    fn get_file_logger_config(&self) -> exvlan_rpc::log::FileLoggerConfig {
+        exvlan_rpc::log::FileLoggerConfig {
+            level: self.file_log_level.clone(),
+            dir: self.file_log_dir.clone(),
+            file: None,
+            size_mb: self.file_log_size,
+            count: self.file_log_count,
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn win_service_set_work_dir(service_name: &std::ffi::OsString) -> anyhow::Result<()> {
     use crate::common::constants::WIN_SERVICE_WORK_DIR_REG_KEY;

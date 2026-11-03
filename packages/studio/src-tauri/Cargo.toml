@@ -20,10 +20,10 @@ tauri = { workspace = true, features = ["tray-icon", "image-png", "image-ico", "
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
-# 桌面端只依赖「管理/客户端」层的轻量 crate，不再静态链接内核（exvlan）。
-# 移动端（Android / iOS）仍需内核库（tauri-plugin-vpnservice 走进程内实例）。
-exvlan-rpc = { workspace = true, features = ["logging", "management", "gui-client"] }
-# 注：exvlan-core / exvlan-proto 通过 exvlan-rpc re-export 使用，这里不再直接依赖
+# 注：exvlan-rpc 按平台分别声明（见文件末尾的 target 段）——
+# 桌面需要 `gui-client`（含 exvlan-core），移动端只要 `ffi-rpc`。
+# 若在此处写 `gui-client`，feature 统一会把 exvlan-core 拉回移动端依赖树。
+# exvlan-core / exvlan-proto 通过 exvlan-rpc re-export 使用，这里不再直接依赖
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 sha2 = "0.10"
 tempfile.workspace = true
@@ -70,13 +70,16 @@ thunk-rs = { workspace = true, features = ["win7"] }
 custom-protocol = ["tauri/custom-protocol"]
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# 桌面端只依赖「管理/客户端」层的轻量 crate，不再静态链接内核（exvlan）。
+exvlan-rpc = { workspace = true, features = ["logging", "management", "gui-client"] }
 tauri-plugin-single-instance = "2.4.4"
 # 桌面：官方 updater（签名校验 + 自动替换）；移动端由自建 APK 流程处理。
 tauri-plugin-updater = "2.9.0"
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
-# P6：移动端不再链接内核 crate；内核以预编译库（libexvlan_ffi.so）+ C ABI 提供。
-exvlan-rpc = { workspace = true, features = ["logging", "management", "gui-client", "ffi-rpc"] }
+# P7：移动端不再链接内核 crate；内核以预编译库（libexvlan_ffi.so）+ C ABI 提供。
+# 注意：**不要**加 `gui-client`/`rpc`——那会把 exvlan-core 拉回移动端依赖树。
+exvlan-rpc = { workspace = true, features = ["logging", "management", "ffi-rpc"] }
 tauri-plugin-vpnservice = { path = "../../../exvlan/plugin/vpnservice" }
 
 [package.metadata.cargo-machete]
