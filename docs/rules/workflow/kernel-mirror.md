@@ -84,6 +84,7 @@ sudo chown root:exvlan-mirror /etc/exvlan-kernel-mirror/env
 
 sudo install -m 755 script/kernel-mirror/exvlan-kernel-sync.sh /usr/local/bin/exvlan-kernel-sync
 sudo install -m 755 script/kernel-mirror/merge_manifests.py /usr/local/bin/merge_manifests.py
+sudo install -m 755 script/kernel-mirror/filter_manifest_platforms.py /usr/local/bin/filter_manifest_platforms.py
 sudo install -m 644 script/kernel-mirror/exvlan-kernel-mirror.service /etc/systemd/system/
 sudo install -m 644 script/kernel-mirror/exvlan-kernel-mirror.timer   /etc/systemd/system/
 sudo systemctl daemon-reload
