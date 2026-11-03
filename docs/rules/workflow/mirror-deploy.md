@@ -54,6 +54,8 @@ sudo chmod 600 /etc/exvlan-kernel-mirror/env
 ```bash
 # 在镜像机上，假设仓库已在 /tmp/exvlan
 sudo install -m 755 /tmp/exvlan/script/kernel-mirror/exvlan-kernel-sync.sh /usr/local/bin/exvlan-kernel-sync
+sudo install -m 755 /tmp/exvlan/script/kernel-mirror/merge_manifests.py /usr/local/bin/merge_manifests.py
+sudo install -m 755 /tmp/exvlan/script/kernel-mirror/filter_manifest_platforms.py /usr/local/bin/filter_manifest_platforms.py
 sudo install -m 644 /tmp/exvlan/script/kernel-mirror/exvlan-kernel-mirror.service /etc/systemd/system/
 sudo install -m 644 /tmp/exvlan/script/kernel-mirror/exvlan-kernel-mirror.timer   /etc/systemd/system/
 
