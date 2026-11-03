@@ -9,6 +9,7 @@ use std::sync::Arc;
 use central_network::gateway;
 
 use clap::Parser;
+use exvlan::common::log as exvlan_rpc_log;
 use exvlan::tunnel::websocket::WsTunnelListener;
 use exvlan::{
     common::{
@@ -238,6 +239,25 @@ impl LoggingConfigLoader for &Cli {
 
     fn get_file_logger_config(&self) -> FileLoggerConfig {
         FileLoggerConfig {
+            dir: self.file_log_dir.clone(),
+            level: self.file_log_level.clone(),
+            file: None,
+            size_mb: None,
+            count: None,
+        }
+    }
+}
+
+// 日志栈在 `exvlan-rpc`（P7），API 进程同样需要 rpc 侧配置适配。
+impl exvlan_rpc_log::LoggingConfigLoader for Cli {
+    fn get_console_logger_config(&self) -> exvlan_rpc_log::ConsoleLoggerConfig {
+        exvlan_rpc_log::ConsoleLoggerConfig {
+            level: self.console_log_level.clone(),
+        }
+    }
+
+    fn get_file_logger_config(&self) -> exvlan_rpc_log::FileLoggerConfig {
+        exvlan_rpc_log::FileLoggerConfig {
             dir: self.file_log_dir.clone(),
             level: self.file_log_level.clone(),
             file: None,

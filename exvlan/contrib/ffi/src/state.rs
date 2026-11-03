@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use exvlan::instance::factory::{
-    NativeInstanceManager, NativeProcessManagement, native_instance_manager_with_runtime,
-    native_process_management,
+    NativeInstanceFactory, NativeInstanceManager, NativeProcessManagement,
+    native_instance_manager_with_runtime, native_process_management,
 };
 use tokio::runtime::{Builder, Runtime};
 
@@ -24,6 +24,8 @@ pub(crate) struct FfiContext {
     pub(crate) runtime: Runtime,
     pub(crate) manager: Arc<NativeInstanceManager>,
     pub(crate) process_management: NativeProcessManagement,
+    /// `api.manage.WebClientService` 的 JSON-RPC 分发目标（移动端 GUI 的实例管理面）。
+    pub(crate) web_client_rpc: exvlan_core::management::ProcessManagementRpc<NativeInstanceFactory>,
 }
 
 impl FfiContext {
@@ -35,12 +37,19 @@ impl FfiContext {
         let manager = Arc::new(native_instance_manager_with_runtime(
             runtime.handle().clone(),
         ));
-        let process_management =
-            native_process_management(manager.clone(), Arc::new(FfiOwnedInstanceHooks));
+        let hooks: Arc<dyn exvlan_core::management::InstanceMutationHooks> =
+            Arc::new(FfiOwnedInstanceHooks);
+        let process_management = native_process_management(manager.clone(), hooks.clone());
+        let web_client_rpc = exvlan_core::management::ProcessManagementRpc::new(
+            manager.clone(),
+            hooks,
+            Arc::new(exvlan_core::management::UnsupportedConfigFileStorage),
+        );
         Self {
             runtime,
             manager,
             process_management,
+            web_client_rpc,
         }
     }
 }

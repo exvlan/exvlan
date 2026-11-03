@@ -2804,7 +2804,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2925,7 +2925,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-android-jni"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "android_logger",
  "exvlan",
@@ -2938,7 +2938,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-api"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -2991,7 +2991,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-core"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "aes-gcm 0.11.1",
  "anyhow",
@@ -3059,7 +3059,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-ffi"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "async-trait",
  "exvlan",
@@ -3074,7 +3074,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-ios"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "exvlan-core",
  "exvlan-ffi",
@@ -3086,7 +3086,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-mini"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "anyhow",
  "exvlan",
@@ -3095,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-proto"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3128,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-rpc"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3154,7 +3154,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-studio"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3188,7 +3188,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-uptime"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9666,7 +9666,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-vpnservice"
-version = "26.410.20707"
+version = "26.410.20708"
 dependencies = [
  "serde",
  "tauri",

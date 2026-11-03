@@ -68,23 +68,33 @@ pub(crate) unsafe fn call_json_rpc(
         }
     };
 
-    let response =
-        match ffi_context()
-            .runtime
-            .block_on(exvlan_core::management::call_management_json_rpc(
+    let response = match ffi_context().runtime.block_on(async {
+        // 实例管理面（GUI 移动端）：分发到进程级 ProcessManagementRpc。
+        if service_name == "api.manage.WebClientService" {
+            exvlan_core::management::call_web_client_json_rpc(
+                &ffi_context().web_client_rpc,
+                &method_name,
+                payload,
+            )
+            .await
+        } else {
+            exvlan_core::management::call_management_json_rpc(
                 &ffi_context().manager,
                 Arc::new(exvlan::rpc_service::logger::NativeLoggerControl),
                 &service_name,
                 &method_name,
                 domain_name.as_deref(),
                 payload,
-            )) {
-            Ok(value) => value,
-            Err(err) => {
-                set_error_msg(&format!("RPC Error: {}", err));
-                return -1;
-            }
-        };
+            )
+            .await
+        }
+    }) {
+        Ok(value) => value,
+        Err(err) => {
+            set_error_msg(&format!("RPC Error: {}", err));
+            return -1;
+        }
+    };
     let response_json = match serde_json::to_string(&response) {
         Ok(value) => value,
         Err(err) => {

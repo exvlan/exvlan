@@ -428,7 +428,7 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "management")]
-    use exvlan_core::config::toml::FileLoggerConfig;
+    use super::config::FileLoggerConfig;
 
     struct EnvVarGuard {
         previous: Option<std::ffi::OsString>,

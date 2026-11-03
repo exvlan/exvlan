@@ -3,7 +3,7 @@ name = "exvlan-rpc"
 description = "EXVlan GUI 侧轻量依赖：RPC/服务管理，不含内核运行时"
 homepage = "https://github.com/exvlan/exvlan"
 repository = "https://github.com/exvlan/exvlan"
-version = "26.410.20707"
+version = "26.410.20708"
 edition.workspace = true
 rust-version.workspace = true
 license-file = "../exvlan/LICENSE"
@@ -16,7 +16,7 @@ chrono.workspace = true
 console-subscriber = { version = "0.5.0", optional = true }
 log.workspace = true
 exvlan-core = { workspace = true, default-features = false, optional = true }
-exvlan-proto = { workspace = true, features = ["api", "core"] }
+exvlan-proto = { workspace = true, features = ["api", "core", "json-rpc"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 parking_lot.workspace = true

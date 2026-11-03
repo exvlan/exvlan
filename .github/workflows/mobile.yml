@@ -110,6 +110,18 @@ jobs:
           shared-key: "gui-registry"
           cache-targets: "false"
 
+      # P7：移动端不得再编译内核 crate（依赖树层面硬拦）。
+      - name: Assert no exvlan-core in android dependency tree
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p exvlan-studio --target "${{ matrix.TARGET }}" 2>/dev/null || true)
+          if echo "$tree" | grep -q 'exvlan-core'; then
+            echo "::error::移动端依赖树仍包含 exvlan-core（P7 回归）"
+            echo "$tree" | grep -B4 'exvlan-core'
+            exit 1
+          fi
+          echo "::notice::exvlan-core 不在 android 依赖树中"
+
       # P6：把 ARCH（aarch64/armv7/i686/x86_64）映射成 Android ABI 名
       - name: Resolve kernel ABI
         id: kabi

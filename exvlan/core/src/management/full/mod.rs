@@ -19,6 +19,7 @@ use exvlan_proto::api::manage::WebClientServiceServer;
 #[cfg(feature = "management")]
 use exvlan_proto::{
     api::logger::{LoggerRpc, LoggerRpcServer},
+    api::manage::WebClientService,
     rpc_types::controller::BaseController,
 };
 
@@ -111,6 +112,24 @@ pub(crate) fn register_web_client_rpc<F, H>(
         WebClientServiceServer::new(ProcessManagementRpc::<F>::new(instances, hooks, storage)),
         "",
     );
+}
+
+/// FFI/JNI 的 `WebClientService` 分发入口（实例管理面）。
+///
+/// 与 [`call_management_json_rpc`] 分开：`ProcessManagementRpc` 需要 hooks/storage，
+/// 而 FFI 侧的 context 只持有一份已构造好的 rpc 实例。
+#[cfg(feature = "management")]
+pub async fn call_web_client_json_rpc<F, H>(
+    rpc: &ProcessManagementRpc<F>,
+    method_name: &str,
+    payload: serde_json::Value,
+) -> exvlan_proto::rpc_types::error::Result<serde_json::Value>
+where
+    F: InstanceFactory<Instance = CoreInstance<H>, CreateContext = ()>,
+    F::Error: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static,
+    H: CoreInstanceHost,
+{
+    WebClientService::json_call_method(rpc, BaseController::default(), method_name, payload).await
 }
 
 #[cfg(feature = "management")]

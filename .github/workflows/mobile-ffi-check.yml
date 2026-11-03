@@ -100,6 +100,18 @@ jobs:
           shared-key: "mobile-ffi-check"
           cache-targets: "false"
 
+      # P7：移动端不得再编译内核 crate。这里在依赖层面硬拦（比构建失败更早、原因更清楚）。
+      - name: Assert no exvlan-core in android dependency tree
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p exvlan-studio --target "${{ matrix.TARGET }}" 2>/dev/null || true)
+          if echo "$tree" | grep -q 'exvlan-core'; then
+            echo "::error::移动端依赖树仍包含 exvlan-core（P7 回归：检查 studio 的 android features 是否又加了 gui-client/rpc）"
+            echo "$tree" | grep -B4 'exvlan-core'
+            exit 1
+          fi
+          echo "::notice::exvlan-core 不在 android 依赖树中"
+
       # 链接需要 libexvlan_ffi.so（与 mobile.yml 的 jniLibs 布局一致）
       - name: Build kernel FFI library
         run: |

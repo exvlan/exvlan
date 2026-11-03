@@ -10,42 +10,31 @@ mod ui_state;
 mod upgrade;
 
 use anyhow::Context;
-use exvlan_rpc::exvlan_core::config::api_input::{NetworkConfig, NetworkConfigExt};
-use exvlan_rpc::exvlan_core::config::toml::{ConfigLoader, ConfigSource, TomlConfigLoader};
-use exvlan_rpc::exvlan_core::management::config_source_to_rpc;
-use exvlan_rpc::exvlan_core::management::remote_client::{
-    GetNetworkMetasResponse, ListNetworkInstanceIdsJsonResp, ListNetworkProps, RemoteClientManager,
-    Storage,
-};
-use exvlan_rpc::exvlan_proto::api::config::{ConfigPatchAction, ConfigRpc, VpnPortalClientPatch};
+use exvlan_rpc::exvlan_proto::api::config::{ConfigPatchAction, VpnPortalClientPatch};
 use exvlan_rpc::exvlan_proto::api::instance::{
     GetVpnPortalInfoRequest, InstanceIdentifier, VpnPortalInfo, instance_identifier,
 };
 use exvlan_rpc::exvlan_proto::api::manage::{
-    CollectNetworkInfoResponse, ValidateConfigResponse, VpnPortalClientConfig, WebClientService,
-    WebClientServiceClientFactory,
+    CollectNetworkInfoResponse, NetworkConfig, ValidateConfigResponse, VpnPortalClientConfig,
+    WebClientService,
 };
 use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
 
-// 移动端仍以内核库形式在同进程内跑实例（VPN Service 插件）。
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[cfg(target_os = "android")]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-use exvlan_rpc::exvlan_core::{
-    connectivity::protocol::raw::TunnelDialer as _, process_runtime::CoreProcessRuntime,
-    socket::SocketListener, tunnel::Tunnel,
+// 桌面端专用：内核 crate 提供 TOML 转换、持久化 trait 与隧道拨号（P7 后移动端不再依赖）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use exvlan_rpc::exvlan_core::config::api_input::NetworkConfigExt;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use exvlan_rpc::exvlan_core::config::toml::{ConfigLoader, ConfigSource, TomlConfigLoader};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use exvlan_rpc::exvlan_core::management::config_source_to_rpc;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use exvlan_rpc::exvlan_core::management::remote_client::{
+    GetNetworkMetasResponse, ListNetworkInstanceIdsJsonResp, ListNetworkProps, RemoteClientManager,
+    Storage,
 };
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use manager::{GetNetworkMetasResponse, ListNetworkInstanceIdsJsonResp};
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
-use std::ops::Deref;
-#[cfg(any(target_os = "android", target_os = "ios"))]
-use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
 use uuid::Uuid;
 
@@ -94,12 +83,21 @@ fn set_dock_visibility(app: tauri::AppHandle, visible: bool) -> Result<(), Strin
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 fn parse_network_config(cfg: NetworkConfig) -> Result<String, String> {
     let toml = cfg.gen_config().map_err(|e| e.to_string())?;
     Ok(toml.dump())
 }
 
+/// 移动端没有 TOML 配置编辑器（配置在 GUI 侧就是 `NetworkConfig` 结构）。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+fn parse_network_config(_cfg: NetworkConfig) -> Result<String, String> {
+    Err("TOML 配置编辑仅桌面端支持".to_string())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 fn generate_network_config(toml_config: String) -> Result<NetworkConfig, String> {
     let config = TomlConfigLoader::new_from_str(&toml_config).map_err(|e| e.to_string())?;
@@ -107,6 +105,13 @@ fn generate_network_config(toml_config: String) -> Result<NetworkConfig, String>
     Ok(cfg)
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+fn generate_network_config(_toml_config: String) -> Result<NetworkConfig, String> {
+    Err("TOML 配置编辑仅桌面端支持".to_string())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn run_network_instance(
     app: AppHandle,
@@ -125,6 +130,35 @@ async fn run_network_instance(
         .map_err(|e| e.to_string())?;
     client_manager
         .post_run_network_instance_hook(&app, &toml_config.get_id())
+        .await?;
+    Ok(())
+}
+
+/// 移动端：配置的 TOML 化由内核侧完成，GUI 只传 `NetworkConfig`。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn run_network_instance(
+    app: AppHandle,
+    cfg: NetworkConfig,
+    save: bool,
+) -> Result<(), String> {
+    let instance_id: Uuid = cfg
+        .instance_id
+        .clone()
+        .unwrap_or_default()
+        .parse()
+        .map_err(|e: uuid::Error| e.to_string())?;
+    let client_manager = get_client_manager!()?;
+    let _mutation = client_manager.config_mutation.lock().await;
+    client_manager
+        .pre_run_network_instance_hook(&app, &cfg, manager::PersistedConfigSource::User)
+        .await?;
+    client_manager
+        .handle_run_network_instance(app.clone(), cfg, save)
+        .await
+        .map_err(|e| e.to_string())?;
+    client_manager
+        .post_run_network_instance_hook(&app, &instance_id)
         .await?;
     Ok(())
 }
@@ -264,6 +298,7 @@ async fn remove_network_instance(app: AppHandle, instance_id: String) -> Result<
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn update_network_config_state(
     app: AppHandle,
@@ -287,6 +322,46 @@ async fn update_network_config_state(
                 &toml_config,
                 manager::PersistedConfigSource::from_runtime_source(source),
             )
+            .await?;
+    }
+    client_manager
+        .handle_update_network_state(app.clone(), instance_id, disabled)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if disabled {
+        client_manager
+            .post_stop_network_instances_hook(&app)
+            .await?;
+    } else {
+        client_manager
+            .post_run_network_instance_hook(&app, &instance_id)
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// 移动端：没有 TOML 中间态，直接用 `NetworkConfig` 走前置钩子。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn update_network_config_state(
+    app: AppHandle,
+    instance_id: String,
+    disabled: bool,
+) -> Result<(), String> {
+    let instance_id = instance_id
+        .parse()
+        .map_err(|e: uuid::Error| e.to_string())?;
+    let client_manager = get_client_manager!()?;
+    let _mutation = client_manager.config_mutation.lock().await;
+    if !disabled {
+        let (cfg, source) = client_manager
+            .handle_get_network_config_with_source(app.clone(), instance_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        client_manager
+            .pre_run_network_instance_hook(&app, &cfg, source)
             .await?;
     }
     client_manager
@@ -651,6 +726,7 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod manager {
     use super::*;
     use async_trait::async_trait;
@@ -661,6 +737,7 @@ mod manager {
     use exvlan_rpc::exvlan_core::connectivity::protocol::raw::TunnelDialer as _;
     use exvlan_rpc::exvlan_core::management::remote_client::PersistentConfig;
     use exvlan_rpc::exvlan_core::rpc::bidirect::BidirectRpcManager;
+    use exvlan_rpc::exvlan_proto::api::config::ConfigRpc;
     use exvlan_rpc::exvlan_proto::api::logger::{LoggerRpc, SetLoggerConfigRequest};
     use exvlan_rpc::exvlan_proto::api::manage::RunNetworkInstanceRequest;
     use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
@@ -1137,6 +1214,8 @@ mod manager {
             Ok(())
         }
     }
+    use exvlan_rpc::exvlan_proto::api::manage::WebClientServiceClientFactory;
+
     impl RemoteClientManager<AppHandle, GUIConfig, anyhow::Error> for GUIClientManager {
         fn get_config_rpc_client(
             &self,
@@ -1223,6 +1302,10 @@ mod manager {
         }
     }
 }
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[path = "mobile_manager.rs"]
+mod manager;
 
 #[cfg(not(target_os = "android"))]
 mod service {
