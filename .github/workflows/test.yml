@@ -68,7 +68,9 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL \
                       /usr/local/share/boost /usr/local/lib/node_modules /opt/az \
                       /usr/local/lib/android /usr/share/swift /usr/local/.ghcup \
-                      /opt/microsoft /usr/local/share/chromium /usr/lib/firefox || true
+                      /opt/microsoft /usr/local/share/chromium /usr/lib/firefox \
+                      /usr/share/miniconda /usr/lib/mono /usr/local/share/powershell \
+                      /usr/local/go /usr/share/az_* /opt/hostedtoolcache/PyPy || true
           df -h /
 
       - name: Prepare build environment
@@ -121,10 +123,15 @@ jobs:
           exit 1
 
   test:
-    name: Test
+    name: Test (${{ matrix.package }})
     runs-on: ubuntu-latest
     needs: pre_job
     if: needs.pre_job.outputs.should_skip != 'true'
+    strategy:
+      # 两个包的 --features full 测试产物都很大，分开跑避免单个 runner 磁盘耗尽
+      fail-fast: false
+      matrix:
+        package: [exvlan, exvlan-core]
     env:
       # 全 feature 的 debug 产物带调试信息会撑爆 runner 磁盘；测试不需要
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -168,5 +175,5 @@ jobs:
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo -E env "PATH=$PATH" EXVLAN_LINUX_BPF_INTEGRATION=required \
-            cargo nextest run --package exvlan --package exvlan-core --features full \
+            cargo nextest run --package ${{ matrix.package }} --features full \
             --test-threads 1 --no-fail-fast --retries 2
