@@ -131,7 +131,12 @@ jobs:
       # 两个包的 --features full 测试产物都很大，分开跑避免单个 runner 磁盘耗尽
       fail-fast: false
       matrix:
-        package: [exvlan, exvlan-core]
+        include:
+          # exvlan-core 没有 full feature，只有 exvlan 需要
+          - package: exvlan
+            args: "--features full"
+          - package: exvlan-core
+            args: ""
     env:
       # 全 feature 的 debug 产物带调试信息会撑爆 runner 磁盘；测试不需要
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -174,6 +179,10 @@ jobs:
       - name: Run tests
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
-          sudo -E env "PATH=$PATH" EXVLAN_LINUX_BPF_INTEGRATION=required \
-            cargo nextest run --package ${{ matrix.package }} --features full \
+          # 注意：`sudo -E env "PATH=..." VAR=...` 会重建环境，job 级 env 不会被继承，
+          # 必须在这里显式带上（否则 debug info 仍会打满磁盘）。
+          sudo -E env "PATH=$PATH" \
+            EXVLAN_LINUX_BPF_INTEGRATION=required \
+            CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 \
+            cargo nextest run --package ${{ matrix.package }} ${{ matrix.args }} \
             --test-threads 1 --no-fail-fast --retries 2
