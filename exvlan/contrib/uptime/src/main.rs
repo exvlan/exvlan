@@ -41,8 +41,22 @@ async fn main() -> anyhow::Result<()> {
     // 加载配置
     let config = AppConfig::default();
 
-    // 初始化日志
-    let _ = log::init(&config.logging, false);
+    // 初始化日志（日志栈已在 exvlan-rpc；把本地 LoggingConfig 映射过去）
+    let file = config.logging.file_logger.clone().unwrap_or_default();
+    let console = config.logging.console_logger.clone().unwrap_or_default();
+    let logging_config = exvlan::common::log::SimpleLoggingConfig::new(
+        exvlan::common::log::ConsoleLoggerConfig {
+            level: console.level,
+        },
+        exvlan::common::log::FileLoggerConfig {
+            level: file.level,
+            file: file.file,
+            dir: file.dir,
+            size_mb: file.size_mb,
+            count: file.count,
+        },
+    );
+    let _ = log::init(logging_config, false);
 
     // 解析命令行参数
     let args = Args::parse();
