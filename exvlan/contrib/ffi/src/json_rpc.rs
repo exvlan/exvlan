@@ -181,6 +181,57 @@ mod mobile_sequence_tests {
     }
 
     #[test]
+    fn config_convert_roundtrip() {
+        use exvlan_core::management::call_management_json_rpc;
+        use exvlan_proto::api::manage::NetworkConfig;
+
+        let config = NetworkConfig {
+            instance_id: Some(uuid::Uuid::new_v4().to_string()),
+            network_name: Some("roundtrip".to_string()),
+            network_secret: Some("secret-123".to_string()),
+            hostname: Some("node-a".to_string()),
+            // Standalone：不打洞、不需要 public server，便于做纯格式往返
+            networking_method: Some(2),
+            ..Default::default()
+        };
+
+        let ctx = ffi_context();
+        let to_toml = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ctx.runtime.block_on(call_management_json_rpc(
+                &ctx.manager,
+                Arc::new(exvlan::rpc_service::logger::NativeLoggerControl),
+                "exvlan.internal.ConfigConvert",
+                "config_to_toml",
+                None,
+                serde_json::to_value(&config).unwrap(),
+            ))
+        }))
+        .expect("config_to_toml panicked")
+        .expect("config_to_toml failed");
+        let toml_text = to_toml.as_str().expect("toml should be a string");
+        assert!(toml_text.contains("roundtrip"), "{toml_text}");
+
+        let back = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ctx.runtime.block_on(call_management_json_rpc(
+                &ctx.manager,
+                Arc::new(exvlan::rpc_service::logger::NativeLoggerControl),
+                "exvlan.internal.ConfigConvert",
+                "toml_to_config",
+                None,
+                serde_json::json!({ "tomlConfig": toml_text }),
+            ))
+        }))
+        .expect("toml_to_config panicked")
+        .expect("toml_to_config failed");
+
+        let parsed: NetworkConfig = serde_json::from_value(back).expect("parse config");
+        assert_eq!(parsed.instance_id, config.instance_id);
+        assert_eq!(parsed.network_name, config.network_name);
+        assert_eq!(parsed.network_secret, config.network_secret);
+        assert_eq!(parsed.hostname, config.hostname);
+    }
+
+    #[test]
     fn mobile_home_sequence_does_not_panic() {
         let inst = uuid::Uuid::new_v4();
         let cfg = NetworkConfig {

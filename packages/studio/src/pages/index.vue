@@ -6,8 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-shell'
 import { exit } from '@tauri-apps/plugin-process'
-import { I18nUtils, RemoteManagement, Utils } from "@exvlan/std"
-import type { MenuItem } from 'openvue/menuitem'
+import { RemoteManagement, Utils } from "@exvlan/std"
 import { useTray } from '~/composables/tray'
 import {
   consumePendingMobileVpnTileAction,
@@ -22,6 +21,7 @@ import { useToast, useConfirm } from 'openvue'
 import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mode'
 import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
+import SettingsDialog from '~/components/SettingsDialog.vue'
 import {
   appUpdateApply,
   appUpdateInfo,
@@ -33,7 +33,7 @@ import {
   shareErrorLog,
 } from '~/composables/backend'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const confirm = useConfirm()
 const aboutVisible = ref(false)
 /** 启动/连接失败时保留的错误（顶部横幅展示，不再静默降级模式）。 */
@@ -93,6 +93,36 @@ const currentMode = ref<Mode>({ mode: 'normal' })
 const editingMode = ref<Mode>({ mode: 'normal' })
 const isModeSaving = ref(false)
 const manualDisconnect = ref(false)
+
+const settingsVisible = ref(false)
+const logLevel = ref(localStorage.getItem('log_level') || 'info')
+const runningInstances = ref<string[]>([])
+const vpnRunning = computed(() => runningInstances.value.length > 0)
+
+async function refreshTrayMenu() {
+  await setTrayMenu([
+    await MenuItemShow(t('tray.show')),
+    await MenuItemExit(t('tray.exit')),
+  ])
+}
+
+async function getLogDirPath(): Promise<string> {
+  return await invoke<string>('get_log_dir_path')
+}
+
+async function onOpenLogDir() {
+  await open(await getLogDirPath())
+}
+
+async function onCopyLogDir() {
+  await writeText(await getLogDirPath())
+}
+
+async function onSetLogLevel(level: string) {
+  logLevel.value = level
+  localStorage.setItem('log_level', level)
+  await setLoggingLevel(level)
+}
 
 const configServerDialogVisible = ref(false)
 const configServerConnected = ref(false)
@@ -487,114 +517,25 @@ async function reconnectClient() {
 
 onMounted(async () => {
   window.setTimeout(async () => {
-    await setTrayMenu([
-      await MenuItemShow(t('tray.show')),
-      await MenuItemExit(t('tray.exit')),
-    ])
+    await refreshTrayMenu()
   }, 1000)
+
+  // 底栏「运行」灯：只看是否有实例在跑（5s 一次，未连接时直接清零）
+  const timer = setInterval(async () => {
+    if (!clientRunning.value) {
+      runningInstances.value = []
+      return
+    }
+    try {
+      const resp = await remoteClient.value.list_network_instance_ids()
+      runningInstances.value = (resp.running_inst_ids ?? []).map(Utils.UuidToStr)
+    }
+    catch {
+      runningInstances.value = []
+    }
+  }, 5000)
+  onUnmounted(() => clearInterval(timer))
 })
-
-let current_log_level = 'off'
-
-const log_menu = ref()
-// 从后端获取正确的日志路径
-async function getLogDirPath(): Promise<string> {
-  return await invoke<string>('get_log_dir_path')
-}
-
-const log_menu_items_popup: Ref<MenuItem[]> = ref([
-  ...['off', 'warn', 'info', 'debug', 'trace'].map(level => ({
-    label: () => t(`logging_level_${level}`) + (current_log_level === level ? ' ✓' : ''),
-    command: async () => {
-      current_log_level = level
-      await setLoggingLevel(level)
-    },
-  })),
-  {
-    separator: true,
-  },
-  {
-    label: () => t('logging_open_dir'),
-    icon: 'pi pi-folder-open',
-    command: async () => {
-      // console.log('open log dir', await getLogDirPath())
-      await open(await getLogDirPath())
-    },
-    visible: () => type() !== 'android',
-  },
-  {
-    label: () => t('logging_copy_dir'),
-    icon: 'pi pi-tablet',
-    command: async () => {
-      await writeText(await getLogDirPath())
-    },
-  },
-])
-
-function toggle_log_menu(event: any) {
-  log_menu.value.toggle(event)
-}
-
-function getLabel(item: MenuItem) {
-  return typeof item.label === 'function' ? item.label() : item.label
-}
-
-const setting_menu_items: Ref<MenuItem[]> = ref([
-  {
-    label: () => t('exchange_language'),
-    icon: 'pi pi-language',
-    command: async () => {
-      await I18nUtils.loadLanguageAsync((locale.value === 'en' ? 'cn' : 'en'))
-      await setTrayMenu([
-        await MenuItemShow(t('tray.show')),
-        await MenuItemExit(t('tray.exit')),
-      ])
-    },
-  },
-  {
-    label: () => `${t('mode.switch_mode')}: ${t('mode.' + currentMode.value.mode)}`,
-    icon: 'pi pi-sync',
-    command: openModeDialog,
-    visible: () => type() !== 'android',
-  },
-  {
-    label: () => t('mode.autostart'),
-    icon: 'pi pi-clock',
-    command: openAutostartDialog,
-    visible: () => type() !== 'android',
-  },
-  {
-    label: () => `${t('config-server.title')}${t('config-server.' + configServerConnectionStatus.value)}`,
-    icon: 'pi pi-globe',
-    command: openConfigServerDialog,
-    visible: () => ["normal", "service"].includes(currentMode.value.mode),
-  },
-  {
-    key: 'logging_menu',
-    label: () => t('logging'),
-    icon: 'pi pi-file',
-    items: [], // Keep this to show it's a parent menu
-  },
-  {
-    label: () => t('client.share_error_log'),
-    icon: 'pi pi-share-alt',
-    command: onShareErrorLog,
-  },
-  {
-    label: () => t('about.title'),
-    icon: 'pi pi-at',
-    command: async () => {
-      aboutVisible.value = true
-    },
-  },
-  {
-    label: () => t('exit'),
-    icon: 'pi pi-power-off',
-    command: async () => {
-      await exit(1)
-    },
-  },
-])
 
 async function connectRpcClient(isNormalMode: boolean, url?: string) {
   await initRpcConnection(isNormalMode, url)
@@ -701,8 +642,6 @@ const configServerConnectionStatus = computed(() => {
       </template>
     </Dialog>
 
-    <Menu ref="log_menu" :model="log_menu_items_popup" :popup="true" />
-
     <div v-if="startupError"
       class="flex items-center gap-2 border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
       <i class="pi pi-exclamation-triangle" />
@@ -721,19 +660,40 @@ const configServerConnectionStatus = computed(() => {
         iconPos="left" />
     </div>
 
-    <Menubar :model="setting_menu_items" breakpoint="795px">
-      <template #item="{ item, props }">
-        <a v-if="item.key === 'logging_menu'" v-bind="props.action" @click="toggle_log_menu">
-          <span :class="item.icon" />
-          <span class="p-menubar-item-label">{{ getLabel(item) }}</span>
-          <span class="pi pi-angle-down p-menubar-item-icon text-[9px]"></span>
-        </a>
-        <a v-else v-bind="props.action">
-          <span :class="item.icon" />
-          <span class="p-menubar-item-label">{{ getLabel(item) }}</span>
-        </a>
-      </template>
-    </Menubar>
+    <div class="flex items-center gap-3 px-3 py-2 border-t border-surface-200 dark:border-surface-700">
+      <span class="flex items-center gap-1 text-sm">
+        <i class="pi pi-circle-fill text-[10px]" :class="clientRunning ? 'text-green-500' : 'text-red-500'" />
+        <span class="text-surface-500">
+          {{ clientRunning ? t('settings.rpc_connected') : t('settings.rpc_disconnected') }}
+        </span>
+      </span>
+      <span class="flex items-center gap-1 text-sm">
+        <i class="pi pi-circle-fill text-[10px]" :class="vpnRunning ? 'text-green-500' : 'text-surface-400'" />
+        <span class="text-surface-500">
+          {{ vpnRunning ? t('settings.vpn_running') : t('settings.vpn_stopped') }}
+        </span>
+      </span>
+      <span class="text-sm text-surface-500">{{ t('mode.' + currentMode.mode) }}</span>
+      <span class="flex-1" />
+      <Button icon="pi pi-cog" text rounded :aria-label="t('settings.title')" @click="settingsVisible = true" />
+      <Button icon="pi pi-power-off" text rounded severity="danger" :aria-label="t('exit')" @click="exit(1)" />
+    </div>
+
+    <SettingsDialog
+      v-model:visible="settingsVisible"
+      :mode="currentMode"
+      :client-running="clientRunning"
+      :config-server-status="configServerConnectionStatus"
+      :log-level="logLevel"
+      @open-mode="openModeDialog"
+      @open-autostart="openAutostartDialog"
+      @open-config-server="openConfigServerDialog"
+      @open-log-dir="onOpenLogDir"
+      @copy-log-dir="onCopyLogDir"
+      @share-log="onShareErrorLog"
+      @set-log-level="onSetLogLevel"
+      @changed-language="refreshTrayMenu"
+    />
   </div>
 </template>
 
