@@ -715,6 +715,94 @@ async fn get_log_dir_path(app: tauri::AppHandle) -> Result<String, String> {
     }
 }
 
+/// `error.log` 的候选目录：用户日志目录 → 配置目录下的 logs → 临时目录。
+///
+/// 任何一级不可写（典型：被 root 守护进程写过，属主变成 root）都会自动降级，
+/// 并把失败原因记录下来，避免再出现「日志尚未初始化」这种无从下手的状态。
+fn error_log_candidates(app: &AppHandle) -> Vec<std::path::PathBuf> {
+    use tauri::Manager as _;
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(dir) = app.path().app_log_dir() {
+        out.push(dir);
+    }
+    if let Ok(dir) = app.path().app_config_dir() {
+        out.push(dir.join("logs"));
+    }
+    out.push(std::env::temp_dir().join("exvlan-logs"));
+    out
+}
+
+/// 已初始化则直接返回；否则按候选顺序初始化。
+fn ensure_error_log(app: &AppHandle) -> Option<std::path::PathBuf> {
+    if error_log::is_initialized() {
+        return error_log::path();
+    }
+    error_log::init_best(&error_log_candidates(app))
+}
+
+fn dir_writable(dir: &std::path::Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(format!(".exvlan-write-probe-{}", std::process::id()));
+    match std::fs::write(&probe, b"ok") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// 启动自检行：路径、可写性、HOME、版本、内核/服务状态。
+fn record_boot_line(app: &AppHandle) {
+    use tauri::Manager as _;
+    let log_dir = app.path().app_log_dir().ok();
+    let config_dir = app.path().app_config_dir().ok();
+    let home = std::env::var("HOME").unwrap_or_default();
+    let log_writable = log_dir.as_deref().map(dir_writable);
+    let config_writable = config_dir.as_deref().map(dir_writable);
+
+    let mut line = format!(
+        "version={} os={} arch={} home={home} log_dir={:?} writable={log_writable:?} config_dir={:?} writable={config_writable:?} error_log={:?}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        log_dir.as_ref().map(|p| p.display().to_string()),
+        config_dir.as_ref().map(|p| p.display().to_string()),
+        error_log::path().map(|p| p.display().to_string()),
+    );
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        line.push_str(&format!(
+            " kernel={:?} kernel_version={:?} service={:?}",
+            kernel::is_installed(),
+            kernel::installed_version(),
+            service::status().map(|s| format!("{s:?}")).ok()
+        ));
+        let dirs = service_default_dirs();
+        line.push_str(&format!(
+            " service_config_dir={} service_log_dir={}",
+            dirs.config_dir, dirs.file_log_dir
+        ));
+    }
+
+    error_log::record("boot", line);
+
+    // 目录不可写时单独记一条，方便直接定位
+    if log_writable == Some(false) || config_writable == Some(false) {
+        error_log::record(
+            "boot.permissions",
+            format!(
+                "日志或配置目录不可写（可能被 root 占用）；log_dir={:?} config_dir={:?}",
+                log_dir.as_ref().map(|p| p.display().to_string()),
+                config_dir.as_ref().map(|p| p.display().to_string())
+            ),
+        );
+    }
+}
+
 /// 安装全局 panic hook：panic 信息先写 `error.log`，再交给默认 hook。
 ///
 /// Android release 是 `panic = "abort"`，hook 仍会在 abort 前执行，
@@ -732,10 +820,7 @@ fn install_panic_hook() {
                 .name()
                 .unwrap_or("<unnamed>")
                 .to_string();
-            error_log::record(
-                "panic",
-                format!("thread={thread} location={location} {info}"),
-            );
+            error_log::record_panic(format!("thread={thread} location={location} {info}"));
             default_hook(info);
         }));
     });
@@ -756,6 +841,71 @@ fn sanitize_scope(scope: &str) -> String {
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct DiagnosticsInfo {
+    pub version: String,
+    pub os: String,
+    pub arch: String,
+    pub home: String,
+    pub log_dir: Option<String>,
+    pub log_dir_writable: Option<bool>,
+    pub config_dir: Option<String>,
+    pub config_dir_writable: Option<bool>,
+    pub error_log: Option<String>,
+    pub error_log_size: Option<u64>,
+    pub kernel_installed: Option<bool>,
+    pub kernel_version: Option<String>,
+    pub service_status: Option<String>,
+    pub service_config_dir: Option<String>,
+    pub service_log_dir: Option<String>,
+}
+
+/// 诊断信息：路径、可写性、版本、内核/服务状态（关于页展示 + 一键复制）。
+#[tauri::command]
+fn diagnostics_info(app: AppHandle) -> Result<DiagnosticsInfo, String> {
+    use tauri::Manager as _;
+    let log_dir = app.path().app_log_dir().ok();
+    let config_dir = app.path().app_config_dir().ok();
+    let error_log = ensure_error_log(&app);
+    let size = error_log
+        .as_ref()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len());
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let (kernel_installed, kernel_version, service_status, service_config_dir, service_log_dir) = {
+        let dirs = service_default_dirs();
+        (
+            Some(kernel::is_installed()),
+            kernel::installed_version(),
+            service::status().map(|s| format!("{s:?}")).ok(),
+            Some(dirs.config_dir),
+            Some(dirs.file_log_dir),
+        )
+    };
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let (kernel_installed, kernel_version, service_status, service_config_dir, service_log_dir) =
+        (None, None, None, None, None);
+
+    Ok(DiagnosticsInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        home: std::env::var("HOME").unwrap_or_default(),
+        log_dir_writable: log_dir.as_deref().map(dir_writable),
+        log_dir: log_dir.map(|p| p.display().to_string()),
+        config_dir_writable: config_dir.as_deref().map(dir_writable),
+        config_dir: config_dir.map(|p| p.display().to_string()),
+        error_log: error_log.map(|p| p.display().to_string()),
+        error_log_size: size,
+        kernel_installed,
+        kernel_version,
+        service_status,
+        service_config_dir,
+        service_log_dir,
+    })
+}
+
 /// 前端异常上报（`window.onerror` / `unhandledrejection` / Vue errorHandler / toast 错误）。
 #[tauri::command]
 fn report_frontend_error(scope: String, message: String, stack: Option<String>) {
@@ -770,15 +920,22 @@ fn report_frontend_error(scope: String, message: String, stack: Option<String>) 
 
 /// `error.log` 的绝对路径（未初始化时返回错误）。
 #[tauri::command]
-fn error_log_path() -> Result<String, String> {
-    error_log::path()
-        .map(|p| p.display().to_string())
-        .ok_or_else(|| "error.log 尚未初始化".to_string())
+fn error_log_path(app: AppHandle) -> Result<String, String> {
+    let path = ensure_error_log(&app).ok_or_else(|| {
+        let candidates = error_log_candidates(&app)
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("error.log 无法写入（已尝试: {candidates}）。请检查目录属主是否为当前用户。")
+    })?;
+    Ok(path.display().to_string())
 }
 
 /// 读取 `error.log` 尾部（默认 256 KB），用于复制/预览。
 #[tauri::command]
-fn read_error_log(tail_kb: Option<usize>) -> Result<String, String> {
+fn read_error_log(app: AppHandle, tail_kb: Option<usize>) -> Result<String, String> {
+    ensure_error_log(&app);
     let limit = tail_kb.unwrap_or(256).clamp(1, 2048) * 1024;
     Ok(error_log::tail(limit))
 }
@@ -786,7 +943,14 @@ fn read_error_log(tail_kb: Option<usize>) -> Result<String, String> {
 /// 分享 `error.log`：Android 弹系统分享面板；桌面返回路径（前端复制/打开目录）。
 #[tauri::command]
 fn share_error_log(app: AppHandle) -> Result<String, String> {
-    let path = error_log::path().ok_or_else(|| "error.log 尚未初始化".to_string())?;
+    let path = ensure_error_log(&app).ok_or_else(|| {
+        let candidates = error_log_candidates(&app)
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("error.log 无法写入（已尝试: {candidates}）。请检查目录属主是否为当前用户。")
+    })?;
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_vpnservice::VpnserviceExt;
@@ -1444,6 +1608,9 @@ mod service {
         pub(super) file_log_level: String,
         pub(super) file_log_dir: String,
         pub(super) config_server: Option<String>,
+        /// 旧版用户目录里的内核配置（迁移来源），由 `ensure_kernel_service` 填充。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub(super) migrate_from: Option<String>,
     }
     impl ServiceOptions {
         fn to_args_vec(&self) -> Vec<std::ffi::OsString> {
@@ -1525,6 +1692,11 @@ mod service {
             disable_restart_on_failure: false,
         };
 
+        // 旧版把内核配置放在用户目录（且被 root 写过）：切到系统路径时把配置搬过去。
+        if let Some(from) = opts.migrate_from.as_deref() {
+            migrate_config_dir(from, &opts.config_dir);
+        }
+
         // 19707/20708 实测：服务已注册时 `service_manager.update()` 会先 bootout 再立刻
         // `launchctl bootstrap`，而 launchd 的注销是异步的，抢跑就返回
         // `Bootstrap failed: 5: Input/output error`，导致「每次启动都弹授权、每次都失败」。
@@ -1576,6 +1748,51 @@ mod service {
             );
         }
         Ok(())
+    }
+
+    /// 把旧目录里的内核配置复制到新目录（不删除源目录，避免丢数据）。
+    fn migrate_config_dir(from: &str, to: &str) {
+        let from_path = std::path::Path::new(from);
+        if from == to || !from_path.is_dir() {
+            return;
+        }
+        if let Err(err) = std::fs::create_dir_all(to) {
+            crate::error_log::record("service.migrate", format!("创建 {to} 失败: {err}"));
+            return;
+        }
+
+        let mut copied = 0usize;
+        let mut failed = 0usize;
+        if let Ok(entries) = std::fs::read_dir(from_path) {
+            for entry in entries.flatten() {
+                let src = entry.path();
+                if !src.is_file() {
+                    continue;
+                }
+                let Some(name) = src.file_name() else {
+                    continue;
+                };
+                let dst = std::path::Path::new(to).join(name);
+                // 目标已存在则以目标为准（不覆盖用户现有配置）
+                if dst.exists() {
+                    continue;
+                }
+                match std::fs::copy(&src, &dst) {
+                    Ok(_) => copied += 1,
+                    Err(err) => {
+                        failed += 1;
+                        crate::error_log::record(
+                            "service.migrate",
+                            format!("复制 {} 失败: {err}", src.display()),
+                        );
+                    }
+                }
+            }
+        }
+        crate::error_log::record(
+            "service.migrate",
+            format!("{from} → {to} copied={copied} failed={failed}"),
+        );
     }
 
     /// 轮询直到服务「不再注册」（launchd 的 bootout 是异步的）。
@@ -1696,6 +1913,61 @@ mod service {
     }
 }
 
+/// 服务模式（root 守护进程）的默认配置/日志目录。
+///
+/// **必须是系统路径**：守护进程以 root 运行，如果指向用户目录会把目录属主改成
+/// root，导致 GUI 之后既写不了 `error.log` 也写不了 `ui-state.json`（20709 实测）。
+#[derive(Clone, serde::Serialize)]
+pub struct ServiceDefaultDirs {
+    pub config_dir: String,
+    pub file_log_dir: String,
+}
+
+fn service_default_dirs() -> ServiceDefaultDirs {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        desktop_service_default_dirs()
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        // 移动端没有「服务模式」，命令只为让 generate_handler 全平台统一而存在。
+        ServiceDefaultDirs {
+            config_dir: String::new(),
+            file_log_dir: String::new(),
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn desktop_service_default_dirs() -> ServiceDefaultDirs {
+    #[cfg(target_os = "macos")]
+    {
+        ServiceDefaultDirs {
+            config_dir: "/Library/Application Support/exvlan/config.d".to_string(),
+            file_log_dir: "/Library/Logs/exvlan".to_string(),
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        ServiceDefaultDirs {
+            config_dir: r"C:\ProgramData\exvlan\config.d".to_string(),
+            file_log_dir: r"C:\ProgramData\exvlan\logs".to_string(),
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        ServiceDefaultDirs {
+            config_dir: "/var/lib/exvlan/config.d".to_string(),
+            file_log_dir: "/var/log/exvlan".to_string(),
+        }
+    }
+}
+
+#[tauri::command]
+fn service_default_dirs_cmd() -> ServiceDefaultDirs {
+    service_default_dirs()
+}
+
 /// 提权子命令入口（由 `main.rs` 在解析到内部参数时调用）。
 ///
 /// 这些命令只会在通过 `elevate::Command` 以 root 拉起时执行；普通用户直接运行
@@ -1763,6 +2035,22 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 ExitCode::FAILURE
             }
         },
+        Some("--repair-permissions") => {
+            let payload = args.get(1).cloned().unwrap_or_default();
+            match serde_json::from_str::<RepairPermissionsPayload>(&payload) {
+                Ok(req) => match repair_permissions(&req) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(err) => {
+                        report("repair", &format!("修复权限失败: {err:#}"));
+                        ExitCode::FAILURE
+                    }
+                },
+                Err(err) => {
+                    report("repair", &format!("参数解析失败: {err:#}"));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("--service-ctl") => {
             let enable = args.get(1).map(|s| s.as_str()) == Some("start");
             match service::set_status(enable) {
@@ -1778,6 +2066,106 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
     Some(code)
 }
 
+/// 修复用户目录属主（目录被 root 守护进程写过时会变成 root，用户态无法再写）。
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct RepairPermissionsPayload {
+    pub paths: Vec<String>,
+    pub uid: u32,
+    pub gid: u32,
+}
+
+#[cfg(unix)]
+fn repair_permissions(req: &RepairPermissionsPayload) -> anyhow::Result<()> {
+    fn chown_tree(path: &std::path::Path, uid: u32, gid: u32) -> anyhow::Result<()> {
+        use std::os::unix::ffi::OsStrExt as _;
+        let c = std::ffi::CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| anyhow::anyhow!("路径包含 NUL: {}", path.display()))?;
+        // 先改自己，再递归子项（root 下不受目录权限限制）
+        unsafe {
+            libc::chown(c.as_ptr(), uid, gid);
+        }
+        if path.is_dir()
+            && let Ok(entries) = std::fs::read_dir(path)
+        {
+            for entry in entries.flatten() {
+                chown_tree(&entry.path(), uid, gid)?;
+            }
+        }
+        Ok(())
+    }
+
+    for path in &req.paths {
+        chown_tree(std::path::Path::new(path), req.uid, req.gid)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn repair_permissions(_req: &RepairPermissionsPayload) -> anyhow::Result<()> {
+    Ok(())
+}
+
+/// 用户日志/配置目录不可写时，提权修复一次属主。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn maybe_repair_user_dirs(app: &AppHandle) {
+    use tauri::Manager as _;
+    let log_dir = app.path().app_log_dir().ok();
+    let config_dir = app.path().app_config_dir().ok();
+
+    let log_bad = log_dir.as_deref().map(|d| !dir_writable(d));
+    let config_bad = config_dir.as_deref().map(|d| !dir_writable(d));
+    if log_bad != Some(true) && config_bad != Some(true) {
+        return;
+    }
+
+    let mut paths: Vec<String> = Vec::new();
+    for dir in [log_dir.clone(), config_dir.clone()].into_iter().flatten() {
+        paths.push(dir.display().to_string());
+        // 旧版内核/服务可能还往 config.d 里写过文件
+        paths.push(dir.join("config.d").display().to_string());
+    }
+    if paths.is_empty() {
+        return;
+    }
+
+    #[cfg(unix)]
+    let payload = RepairPermissionsPayload {
+        paths: paths.clone(),
+        uid: unsafe { libc::getuid() },
+        gid: unsafe { libc::getgid() },
+    };
+    #[cfg(not(unix))]
+    let payload = RepairPermissionsPayload {
+        paths: paths.clone(),
+        uid: 0,
+        gid: 0,
+    };
+
+    error_log::record(
+        "repair.start",
+        format!("检测到用户目录不可写，尝试提权修复: {paths:?}"),
+    );
+    let json = match serde_json::to_string(&payload) {
+        Ok(j) => j,
+        Err(err) => {
+            error_log::record("repair.failed", format!("序列化失败: {err}"));
+            return;
+        }
+    };
+    match run_elevated(&["--repair-permissions", &json]) {
+        Ok(()) => {
+            let fixed = log_dir.as_deref().map(dir_writable) == Some(true)
+                && config_dir.as_deref().map(dir_writable) == Some(true);
+            error_log::record("repair.done", format!("fixed={fixed}"));
+            if fixed {
+                // 修好后重新初始化日志（之前可能落到了 fallback 目录）
+                ensure_error_log(app);
+            }
+        }
+        Err(err) => error_log::record("repair.failed", err),
+    }
+}
+
 /// 确保「内核已安装 + 服务定义与当前配置一致」。
 ///
 /// 返回值：`"installed"`（本次新装/重装）或 `"current"`（无需动作）。
@@ -1788,6 +2176,40 @@ async fn ensure_kernel_service(
     app: AppHandle,
     opts: service::ServiceOptions,
 ) -> Result<String, String> {
+    use tauri::Manager as _;
+    let mut opts = opts;
+
+    // 旧版本把守护进程的目录放在用户 home 下 → root 写入后用户再也写不了自己的日志/配置。
+    // 这里统一纠正为系统路径，并记录迁移来源。
+    let user_config = app.path().app_config_dir().ok();
+    let user_log = app.path().app_log_dir().ok();
+    let defaults = service_default_dirs();
+    let is_user_path = |path: &str, base: Option<&std::path::Path>| {
+        base.map(|b| path.starts_with(&*b.display().to_string()))
+            .unwrap_or(false)
+    };
+
+    if opts.config_dir.trim().is_empty() || is_user_path(&opts.config_dir, user_config.as_deref()) {
+        let legacy = user_config.as_ref().map(|d| d.join("config.d"));
+        if let Some(legacy) = legacy
+            && legacy.is_dir()
+            && legacy.display().to_string() != defaults.config_dir
+        {
+            opts.migrate_from = Some(legacy.display().to_string());
+        }
+        if opts.config_dir != defaults.config_dir {
+            error_log::record(
+                "service.config_dir",
+                format!("{} → {}", opts.config_dir, defaults.config_dir),
+            );
+        }
+        opts.config_dir = defaults.config_dir.clone();
+    }
+    if opts.file_log_dir.trim().is_empty() || is_user_path(&opts.file_log_dir, user_log.as_deref())
+    {
+        opts.file_log_dir = defaults.file_log_dir.clone();
+    }
+
     if !kernel::is_installed() {
         let src = kernel::bundled_kernel(&app).ok_or_else(|| {
             format!(
@@ -2133,30 +2555,17 @@ pub fn run_gui() -> std::process::ExitCode {
 
     let app = builder
         .setup(|app| {
+            let handle = app.app_handle().clone();
+
             // 统一错误出口：必须在任何命令/FFI 调用之前就绪。
-            if let Ok(log_dir) = get_log_dir(app.app_handle()) {
-                error_log::init(&log_dir);
-            }
+            // 20709 在 macOS 上踩到日志目录被 root 占用，这里多级兜底 + 自检/修复。
+            ensure_error_log(&handle);
+
             install_panic_hook();
-            error_log::record(
-                "boot",
-                format!(
-                    "version={} os={} arch={}",
-                    env!("CARGO_PKG_VERSION"),
-                    std::env::consts::OS,
-                    std::env::consts::ARCH
-                ),
-            );
+            record_boot_line(&handle);
+
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            error_log::record(
-                "boot",
-                format!(
-                    "kernel={:?} kernel_version={:?} service={:?}",
-                    kernel::is_installed(),
-                    kernel::installed_version(),
-                    service::status().map(|s| format!("{s:?}")).ok()
-                ),
-            );
+            maybe_repair_user_dirs(&handle);
 
             init_gui_logging(app.app_handle());
 
@@ -2224,6 +2633,8 @@ pub fn run_gui() -> std::process::ExitCode {
             is_web_client_connected,
             get_log_dir_path,
             report_frontend_error,
+            diagnostics_info,
+            service_default_dirs_cmd,
             error_log_path,
             read_error_log,
             share_error_log,

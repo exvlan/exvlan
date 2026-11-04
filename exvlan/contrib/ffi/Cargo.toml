@@ -1,6 +1,6 @@
 [package]
 name = "exvlan-ffi"
-version = "26.410.20709"
+version = "26.410.20710"
 edition.workspace = true
 rust-version.workspace = true
 
@@ -29,6 +29,10 @@ log.workspace = true
 
 serde_json.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+# 仅测试用：构造与移动端一致的 protobuf JSON 请求
+exvlan-proto = { workspace = true }
 
 [build-dependencies]
 thunk-rs = { workspace = true, features = ["win7"] }

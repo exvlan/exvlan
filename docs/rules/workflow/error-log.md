@@ -32,6 +32,26 @@
 
 格式：`RFC3339 [scope] message`，多行内容压成 `|` 分隔的一行，便于 grep。
 
+## 目录不可写时的兜底（20710 起）
+
+日志目录按以下顺序尝试，第一个可写即用，并记录降级原因：
+
+1. `app_log_dir()`（平台默认）
+2. `app_config_dir()/logs`
+3. `std::env::temp_dir()/exvlan-logs`
+
+启动时若检测到用户目录不可写（典型：被 root 守护进程写过，属主变成 root），
+会**自动提权修复一次**（`chown -R <user>`），并把结果写进 `error.log`。
+关于页「诊断信息」可查看路径、可写性、服务状态，并一键复制/分享。
+
+> 20709 实测：服务模式的 `--config-dir` / `--file-log-dir` 曾指向用户目录，
+> 而守护进程以 root 运行 → 目录属主变 root → GUI 既写不了 `error.log` 也写不了
+> `ui-state.json`（表现为「日志尚未初始化」+ 语言/模式不持久化）。
+> 20710 起服务默认目录改为系统路径：
+> macOS `/Library/Application Support/exvlan/config.d` + `/Library/Logs/exvlan`；
+> Linux `/var/lib/exvlan/config.d` + `/var/log/exvlan`；Windows `C:\ProgramData\exvlan`。
+> 旧用户目录里的 `config.d` 会在安装服务时复制到新位置（不动源目录）。
+
 ## 轮转与脱敏
 
 - 5 MB × 3 份：`error.log`、`error.log.1`、`error.log.2`（上限约 15 MB）。

@@ -14,11 +14,16 @@ use std::path::PathBuf;
 use tauri::Manager as _;
 
 fn state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("无法定位应用配置目录: {e}"))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建配置目录失败: {e}"))?;
+    let dir = app.path().app_config_dir().map_err(|e| {
+        let msg = format!("无法定位应用配置目录: {e}");
+        crate::error_log::record("ui_state", &msg);
+        msg
+    })?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        let msg = format!("创建配置目录失败（{}）: {e}", dir.display());
+        crate::error_log::record("ui_state", &msg);
+        msg
+    })?;
     Ok(dir.join("ui-state.json"))
 }
 
@@ -37,8 +42,16 @@ fn save_map(app: &tauri::AppHandle, map: &BTreeMap<String, String>) -> Result<()
     let text = serde_json::to_string_pretty(map).map_err(|e| format!("序列化失败: {e}"))?;
     // 原子写：先写临时文件再 rename，避免半截文件
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("写入失败: {e}"))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("替换失败: {e}"))?;
+    if let Err(e) = std::fs::write(&tmp, text) {
+        let msg = format!("写入 {} 失败: {e}", tmp.display());
+        crate::error_log::record("ui_state", &msg);
+        return Err(msg);
+    }
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let msg = format!("替换 {} 失败: {e}", path.display());
+        crate::error_log::record("ui_state", &msg);
+        return Err(msg);
+    }
     Ok(())
 }
 
