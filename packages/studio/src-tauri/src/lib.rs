@@ -1917,15 +1917,29 @@ mod service {
 ///
 /// **必须是系统路径**：守护进程以 root 运行，如果指向用户目录会把目录属主改成
 /// root，导致 GUI 之后既写不了 `error.log` 也写不了 `ui-state.json`（20709 实测）。
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Clone, serde::Serialize)]
 pub struct ServiceDefaultDirs {
     pub config_dir: String,
     pub file_log_dir: String,
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn service_default_dirs() -> ServiceDefaultDirs {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        return desktop_service_default_dirs();
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        // 移动端没有「服务模式」，命令只为让 generate_handler 全平台统一而存在。
+        ServiceDefaultDirs {
+            config_dir: String::new(),
+            file_log_dir: String::new(),
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn desktop_service_default_dirs() -> ServiceDefaultDirs {
     #[cfg(target_os = "macos")]
     {
         ServiceDefaultDirs {
@@ -1949,7 +1963,6 @@ fn service_default_dirs() -> ServiceDefaultDirs {
     }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 fn service_default_dirs_cmd() -> ServiceDefaultDirs {
     service_default_dirs()
