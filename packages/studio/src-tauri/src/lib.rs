@@ -93,11 +93,21 @@ fn parse_network_config(cfg: NetworkConfig) -> Result<String, String> {
     Ok(toml.dump())
 }
 
-/// 移动端没有 TOML 配置编辑器（配置在 GUI 侧就是 `NetworkConfig` 结构）。
+/// 移动端：内核的 `validate_config` 返回的就是 `gen_config().dump()`，
+/// 与桌面端 `parse_network_config` 行为完全一致（导入/导出/编辑器共用）。
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
-fn parse_network_config(_cfg: NetworkConfig) -> Result<String, String> {
-    Err("TOML 配置编辑仅桌面端支持".to_string())
+async fn parse_network_config(cfg: NetworkConfig) -> Result<String, String> {
+    let client_manager = get_client_manager!()?;
+    let client = client_manager.transport.web_client();
+    let resp = client
+        .validate_config(
+            BaseController::default(),
+            exvlan_rpc::exvlan_proto::api::manage::ValidateConfigRequest { config: Some(cfg) },
+        )
+        .await
+        .map_err(|e| error_log::other("cmd:parse_network_config", e.to_string()))?;
+    Ok(resp.toml_config)
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -110,10 +120,18 @@ fn generate_network_config(toml_config: String) -> Result<NetworkConfig, String>
     Ok(cfg)
 }
 
+/// 移动端：TOML → NetworkConfig 走内核内部转换服务（逻辑与桌面端同源）。
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
-fn generate_network_config(_toml_config: String) -> Result<NetworkConfig, String> {
-    Err("TOML 配置编辑仅桌面端支持".to_string())
+fn generate_network_config(toml_config: String) -> Result<NetworkConfig, String> {
+    let value = exvlan_rpc::ffi_rpc::call(
+        "exvlan.internal.ConfigConvert",
+        "toml_to_config",
+        "",
+        serde_json::json!({ "tomlConfig": toml_config }),
+    )
+    .map_err(|e| error_log::other("cmd:generate_network_config", e))?;
+    serde_json::from_value(value).map_err(|e| error_log::other("cmd:generate_network_config", e))
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1608,9 +1626,6 @@ mod service {
         pub(super) file_log_level: String,
         pub(super) file_log_dir: String,
         pub(super) config_server: Option<String>,
-        /// 旧版用户目录里的内核配置（迁移来源），由 `ensure_kernel_service` 填充。
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub(super) migrate_from: Option<String>,
     }
     impl ServiceOptions {
         fn to_args_vec(&self) -> Vec<std::ffi::OsString> {
@@ -1692,10 +1707,9 @@ mod service {
             disable_restart_on_failure: false,
         };
 
-        // 旧版把内核配置放在用户目录（且被 root 写过）：切到系统路径时把配置搬过去。
-        if let Some(from) = opts.migrate_from.as_deref() {
-            migrate_config_dir(from, &opts.config_dir);
-        }
+        // 守护进程启动第一步是初始化文件日志：目录不存在会直接退出（20710 实测
+        // 表现为「launchctl 显示 Running 但 15999 无人监听」）。这里以 root 预建。
+        prepare_runtime_dirs(&opts);
 
         // 19707/20708 实测：服务已注册时 `service_manager.update()` 会先 bootout 再立刻
         // `launchctl bootstrap`，而 launchd 的注销是异步的，抢跑就返回
@@ -1726,73 +1740,82 @@ mod service {
         }
 
         if let Some(err) = last_error {
-            crate::error_log::record("service.install.diag", service_diagnostics(&service));
+            crate::error_log::record("service.install.diag", service_diagnostics(&service, &opts));
             return Err(err).with_context(|| "Failed to install service");
         }
 
         write_marker(&opts)?;
 
-        // 装上了不代表跑起来了：给 launchd 最多 3s，起不来就再 kickstart 一次，
-        // 仍失败则把现场写进 error.log（不阻塞流程，前端会再 start 一次）。
-        if wait_until_running(&service, std::time::Duration::from_secs(3)) {
+        // 装上了不代表能连：以「RPC 端口真的能连上」为准（launchctl 的 Running 会骗人，
+        // 20710 就是守护进程起来即退出、launchd 反复重启，状态一直显示 Running）。
+        if wait_until_listening(&opts.rpc_portal, std::time::Duration::from_secs(6)) {
             return Ok(());
         }
+        // 再 kickstart 一次（首次 bootstrap 的 RunAtLoad 偶尔没触发）
         let _ = service.start();
-        if !wait_until_running(&service, std::time::Duration::from_secs(2)) {
-            crate::error_log::record(
-                "service.install.not_running",
-                format!(
-                    "服务已安装但未进入 Running；{}",
-                    service_diagnostics(&service)
-                ),
-            );
+        if wait_until_listening(&opts.rpc_portal, std::time::Duration::from_secs(4)) {
+            return Ok(());
         }
-        Ok(())
+        let diag = service_diagnostics(&service, &opts);
+        crate::error_log::record("service.install.not_listening", &diag);
+        Err(anyhow::anyhow!(
+            "服务已安装但 RPC 端口 {} 无法连接（守护进程可能启动即退出）。诊断已写入 error.log。",
+            opts.rpc_portal
+        ))
     }
 
-    /// 把旧目录里的内核配置复制到新目录（不删除源目录，避免丢数据）。
-    fn migrate_config_dir(from: &str, to: &str) {
-        let from_path = std::path::Path::new(from);
-        if from == to || !from_path.is_dir() {
-            return;
-        }
-        if let Err(err) = std::fs::create_dir_all(to) {
-            crate::error_log::record("service.migrate", format!("创建 {to} 失败: {err}"));
-            return;
-        }
-
-        let mut copied = 0usize;
-        let mut failed = 0usize;
-        if let Ok(entries) = std::fs::read_dir(from_path) {
-            for entry in entries.flatten() {
-                let src = entry.path();
-                if !src.is_file() {
-                    continue;
-                }
-                let Some(name) = src.file_name() else {
-                    continue;
-                };
-                let dst = std::path::Path::new(to).join(name);
-                // 目标已存在则以目标为准（不覆盖用户现有配置）
-                if dst.exists() {
-                    continue;
-                }
-                match std::fs::copy(&src, &dst) {
-                    Ok(_) => copied += 1,
-                    Err(err) => {
-                        failed += 1;
-                        crate::error_log::record(
-                            "service.migrate",
-                            format!("复制 {} 失败: {err}", src.display()),
-                        );
+    /// 以 root 预建守护进程要用的目录（配置 + 日志），并收紧属主/权限。
+    fn prepare_runtime_dirs(opts: &ServiceOptions) {
+        for dir in [&opts.config_dir, &opts.file_log_dir] {
+            let path = std::path::Path::new(dir);
+            match std::fs::create_dir_all(path) {
+                Ok(()) => {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::ffi::OsStrExt as _;
+                        if let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) {
+                            // root:wheel(0:0)
+                            unsafe {
+                                libc::chown(c.as_ptr(), 0, 0);
+                            }
+                        }
+                        use std::os::unix::fs::PermissionsExt as _;
+                        let _ =
+                            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755));
                     }
+                    crate::error_log::record("service.dirs", format!("ready: {dir}"));
                 }
+                Err(err) => crate::error_log::record(
+                    "service.dirs",
+                    format!("create_dir_all({dir}) failed: {err}"),
+                ),
             }
         }
-        crate::error_log::record(
-            "service.migrate",
-            format!("{from} → {to} copied={copied} failed={failed}"),
-        );
+    }
+
+    /// 轮询直到 RPC 端口真的能建立 TCP 连接。
+    fn wait_until_listening(portal: &str, timeout: std::time::Duration) -> bool {
+        let addr = portal
+            .trim()
+            .trim_start_matches("tcp://")
+            .replace("0.0.0.0", "127.0.0.1");
+        let Ok(sock) = addr.parse::<std::net::SocketAddr>() else {
+            crate::error_log::record("service.listen", format!("invalid rpc portal: {portal}"));
+            return false;
+        };
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if std::net::TcpStream::connect_timeout(&sock, std::time::Duration::from_millis(300))
+                .is_ok()
+            {
+                crate::error_log::record("service.listen", format!("ok: {sock}"));
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
     }
 
     /// 轮询直到服务「不再注册」（launchd 的 bootout 是异步的）。
@@ -1807,27 +1830,31 @@ mod service {
         }
     }
 
-    fn wait_until_running(
-        service: &exvlan_rpc::service_manager::Service,
-        timeout: std::time::Duration,
-    ) -> bool {
-        use exvlan_rpc::service_manager::ServiceStatus;
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            match service.status() {
-                Ok(ServiceStatus::Running) => return true,
-                Ok(_) if std::time::Instant::now() < deadline => {
-                    std::thread::sleep(std::time::Duration::from_millis(150));
-                }
-                _ => return false,
-            }
-        }
-    }
-
     /// 服务安装/启动失败时的现场：launchctl 状态 + plist 内容。
-    fn service_diagnostics(_service: &exvlan_rpc::service_manager::Service) -> String {
+    fn service_diagnostics(
+        _service: &exvlan_rpc::service_manager::Service,
+        opts: &ServiceOptions,
+    ) -> String {
         let label = env!("CARGO_PKG_NAME");
         let mut parts: Vec<String> = Vec::new();
+
+        // 守护进程自己的日志（最能说明「为什么没起来」）
+        let daemon_log = std::path::Path::new(&opts.file_log_dir).join("exvlan.log");
+        match std::fs::read_to_string(&daemon_log) {
+            Ok(text) => {
+                let tail: Vec<&str> = text.lines().rev().take(40).collect();
+                let tail: Vec<&str> = tail.into_iter().rev().collect();
+                parts.push(format!(
+                    "daemon_log({})={}",
+                    daemon_log.display(),
+                    tail.join(" | ")
+                ));
+            }
+            Err(err) => parts.push(format!(
+                "daemon_log({}) 读取失败: {err}",
+                daemon_log.display()
+            )),
+        }
 
         #[cfg(target_os = "macos")]
         {
@@ -1889,6 +1916,25 @@ mod service {
             service.stop().with_context(|| "Failed to stop service")?;
         }
         Ok(())
+    }
+
+    /// 重启服务（停止 → 启动）。
+    pub fn restart() -> anyhow::Result<()> {
+        use exvlan_rpc::service_manager::ServiceStatus;
+        let service =
+            exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        if service.status()? == ServiceStatus::NotInstalled {
+            anyhow::bail!("Service not installed");
+        }
+        let _ = service.stop();
+        service.start().with_context(|| "Failed to start service")?;
+        Ok(())
+    }
+
+    /// 强制重装服务（清指纹 → 重新 install，含 bootout/健康检查）。
+    pub fn reinstall(opts: ServiceOptions) -> anyhow::Result<()> {
+        let _ = std::fs::remove_file(marker_path());
+        install(opts)
     }
 
     pub fn status() -> anyhow::Result<exvlan_rpc::service_manager::ServiceStatus> {
@@ -2051,8 +2097,35 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 }
             }
         }
+        Some("--service-reinstall") => {
+            let payload = args.get(1).cloned().unwrap_or_default();
+            match serde_json::from_str::<service::ServiceOptions>(&payload) {
+                Ok(opts) => match service::reinstall(opts) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(err) => {
+                        report("service", &format!("重装失败: {err:#}"));
+                        ExitCode::FAILURE
+                    }
+                },
+                Err(err) => {
+                    report("service", &format!("参数解析失败: {err:#}"));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("--service-ctl") => {
-            let enable = args.get(1).map(|s| s.as_str()) == Some("start");
+            let action = args.get(1).map(|s| s.as_str()).unwrap_or("start");
+            if action == "restart" {
+                let outcome = service::restart();
+                return Some(match outcome {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(err) => {
+                        report("service", &format!("重启失败: {err:#}"));
+                        ExitCode::FAILURE
+                    }
+                });
+            }
+            let enable = action == "start";
             match service::set_status(enable) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(err) => {
@@ -2166,6 +2239,68 @@ fn maybe_repair_user_dirs(app: &AppHandle) {
     }
 }
 
+/// 守护进程以 root 运行：目录必须是系统路径，且**不沿用**任何旧配置。
+///
+/// 测试阶段不做向后兼容：旧值一律忽略，避免历史脏数据反复污染。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn normalize_service_options(opts: &mut service::ServiceOptions) {
+    let defaults = service_default_dirs();
+    if opts.config_dir != defaults.config_dir {
+        error_log::record(
+            "service.config_dir",
+            format!(
+                "覆盖为系统路径: {} → {}",
+                opts.config_dir, defaults.config_dir
+            ),
+        );
+        opts.config_dir = defaults.config_dir.clone();
+    }
+    if opts.file_log_dir != defaults.file_log_dir {
+        error_log::record(
+            "service.file_log_dir",
+            format!(
+                "覆盖为系统路径: {} → {}",
+                opts.file_log_dir, defaults.file_log_dir
+            ),
+        );
+        opts.file_log_dir = defaults.file_log_dir.clone();
+    }
+}
+
+/// 让已安装内核与 GUI 版本保持一致（不一致就用随包内核覆盖）。
+///
+/// 失败只记录，不阻塞：用户至少还能用当前内核连上。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn ensure_kernel_version(app: &AppHandle) {
+    let want = env!("CARGO_PKG_VERSION");
+    let installed = kernel::installed_version();
+    if !kernel::is_installed() || installed.as_deref() != Some(want) {
+        let Some(src) = kernel::bundled_kernel(app) else {
+            error_log::record(
+                "kernel.auto_update",
+                format!("未找到随包内核（installed={installed:?}），跳过"),
+            );
+            return;
+        };
+        error_log::record(
+            "kernel.auto_update",
+            format!("{installed:?} → {want}（{}）", src.display()),
+        );
+        let args = ["--install-kernel", &src.display().to_string(), want];
+        match run_elevated(&args) {
+            Ok(()) => {
+                error_log::record("kernel.auto_update", format!("done: {want}"));
+            }
+            Err(err) => {
+                // 用户取消授权是正常选择，不当成错误刷屏
+                if !err.contains("已取消") {
+                    error_log::record("kernel.auto_update", format!("failed: {err}"));
+                }
+            }
+        }
+    }
+}
+
 /// 确保「内核已安装 + 服务定义与当前配置一致」。
 ///
 /// 返回值：`"installed"`（本次新装/重装）或 `"current"`（无需动作）。
@@ -2176,50 +2311,12 @@ async fn ensure_kernel_service(
     app: AppHandle,
     opts: service::ServiceOptions,
 ) -> Result<String, String> {
-    use tauri::Manager as _;
     let mut opts = opts;
+    normalize_service_options(&mut opts);
 
-    // 旧版本把守护进程的目录放在用户 home 下 → root 写入后用户再也写不了自己的日志/配置。
-    // 这里统一纠正为系统路径，并记录迁移来源。
-    let user_config = app.path().app_config_dir().ok();
-    let user_log = app.path().app_log_dir().ok();
-    let defaults = service_default_dirs();
-    let is_user_path = |path: &str, base: Option<&std::path::Path>| {
-        base.map(|b| path.starts_with(&*b.display().to_string()))
-            .unwrap_or(false)
-    };
-
-    if opts.config_dir.trim().is_empty() || is_user_path(&opts.config_dir, user_config.as_deref()) {
-        let legacy = user_config.as_ref().map(|d| d.join("config.d"));
-        if let Some(legacy) = legacy
-            && legacy.is_dir()
-            && legacy.display().to_string() != defaults.config_dir
-        {
-            opts.migrate_from = Some(legacy.display().to_string());
-        }
-        if opts.config_dir != defaults.config_dir {
-            error_log::record(
-                "service.config_dir",
-                format!("{} → {}", opts.config_dir, defaults.config_dir),
-            );
-        }
-        opts.config_dir = defaults.config_dir.clone();
-    }
-    if opts.file_log_dir.trim().is_empty() || is_user_path(&opts.file_log_dir, user_log.as_deref())
-    {
-        opts.file_log_dir = defaults.file_log_dir.clone();
-    }
-
-    if !kernel::is_installed() {
-        let src = kernel::bundled_kernel(&app).ok_or_else(|| {
-            format!(
-                "未找到随包内核（{}）。请确认安装包完整，或从设置页手动指定内核。",
-                kernel::kernel_bin_name()
-            )
-        })?;
-        let version = env!("CARGO_PKG_VERSION");
-        run_elevated(&["--install-kernel", &src.display().to_string(), version])?;
-    }
+    // 内核与 GUI 版本保持一致：不一致就直接覆盖（静默，失败不阻塞）。
+    // 版本不一致会让内核侧的修复（日志不致命、目录自建）永远到不了机器上。
+    ensure_kernel_version(&app);
 
     if !service::is_current(&opts) {
         let payload = serde_json::to_string(&opts)
@@ -2239,6 +2336,100 @@ async fn ensure_kernel_service(
     _opts: serde_json::Value,
 ) -> Result<String, String> {
     Ok("current".to_string())
+}
+
+/// 服务自检（只读）：内核/服务状态、RPC 端口连通性、daemon 日志尾部。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+fn service_diagnostics(rpc_portal: Option<String>) -> Result<String, String> {
+    let dirs = service_default_dirs();
+    let portal = rpc_portal.unwrap_or_else(|| "127.0.0.1:15999".to_string());
+    let status = service::status()
+        .map(|s| format!("{s:?}"))
+        .unwrap_or_else(|e| format!("unknown({e})"));
+
+    let reachable = {
+        let addr = portal
+            .trim()
+            .trim_start_matches("tcp://")
+            .replace("0.0.0.0", "127.0.0.1");
+        addr.parse::<std::net::SocketAddr>()
+            .map(|sock| {
+                std::net::TcpStream::connect_timeout(&sock, std::time::Duration::from_millis(500))
+                    .is_ok()
+            })
+            .unwrap_or(false)
+    };
+
+    let daemon_log = std::path::Path::new(&dirs.file_log_dir).join("exvlan.log");
+    let daemon_tail = std::fs::read_to_string(&daemon_log)
+        .map(|text| {
+            text.lines()
+                .rev()
+                .take(30)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_else(|e| format!("(无法读取 {}: {e})", daemon_log.display()));
+
+    let report = format!(
+        "app_version: {}\nos: {} ({})\nkernel_installed: {}\nkernel_version: {}\nservice_status: {}\nrpc_portal: {} (reachable={})\nconfig_dir: {}\nlog_dir: {}\ndaemon_log: {}\n--- daemon log tail ---\n{}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        kernel::is_installed(),
+        kernel::installed_version().unwrap_or_else(|| "-".to_string()),
+        status,
+        portal,
+        reachable,
+        dirs.config_dir,
+        dirs.file_log_dir,
+        daemon_log.display(),
+        daemon_tail,
+    );
+    error_log::record("service.diagnostics", &report);
+    Ok(report)
+}
+
+/// 重启服务（提权）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+fn service_restart() -> Result<(), String> {
+    run_elevated(&["--service-ctl", "restart"])?;
+    error_log::record("service.restart", "done");
+    Ok(())
+}
+
+/// 强制重装服务（提权，含 bootout + 目录预建 + 真连自检）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn service_reinstall(opts: service::ServiceOptions) -> Result<(), String> {
+    let payload =
+        serde_json::to_string(&opts).map_err(|e| error_log::other("cmd:service_reinstall", e))?;
+    run_elevated(&["--service-reinstall", &payload])?;
+    error_log::record("service.reinstall", "done");
+    Ok(())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+fn service_diagnostics(_rpc_portal: Option<String>) -> Result<String, String> {
+    Err("该功能仅桌面端支持".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+fn service_restart() -> Result<(), String> {
+    Err("该功能仅桌面端支持".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+fn service_reinstall(_opts: serde_json::Value) -> Result<(), String> {
+    Err("该功能仅桌面端支持".to_string())
 }
 
 /// 内核更新信息（当前版本 / 最新版本 / 可用版本列表 / 分发源）。
@@ -2627,6 +2818,9 @@ pub fn run_gui() -> std::process::ExitCode {
             kernel_install_version,
             set_service_status,
             get_service_status,
+            service_diagnostics,
+            service_restart,
+            service_reinstall,
             init_rpc_connection,
             is_client_running,
             init_web_client,

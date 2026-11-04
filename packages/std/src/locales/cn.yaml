@@ -108,7 +108,33 @@ magisk_config_saved: 配置已验证并保存，Exvlan 已重新启动
 magisk_config_saved_restart_pending: 配置已验证并保存，Exvlan 守护进程仍在启动
 retain_network_instance: 保留网络实例
 collect_network_infos: 收集网络信息
-settings: 设置
+settings:
+  title: 设置
+  general: 通用
+  network: 网络
+  logging: 日志
+  about: 关于
+  language: 语言
+  mode: 运行模式
+  autostart: 开机启动
+  config_server: 配置服务器
+  kernel: 内核
+  log_level: 日志级别
+  open_log_dir: 打开日志目录
+  copy_log_dir: 复制日志路径
+  share_log: 分享错误日志
+  project: 项目主页
+  copyright: Exvlan © 2026
+  service_check: 服务自检
+  service_check_run: 运行自检
+  service_restart: 重启服务
+  service_reinstall: 重装服务
+  service_result: 自检结果
+  copy: 复制
+  rpc_connected: 内核连接正常
+  rpc_disconnected: 内核未连接
+  vpn_running: 实例运行中
+  vpn_stopped: 未运行
 exchange_language: Switch to English
 logging: 日志
 logging_level_info: 信息

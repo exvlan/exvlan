@@ -145,6 +145,31 @@ where
     F: InstanceFactory<Instance = CoreInstance<H>>,
     H: CoreInstanceHost,
 {
+    // 内部工具服务：GUI（尤其移动端）拿不到 core 时，用它做配置格式转换。
+    // 转换逻辑只有这一份（TomlConfigLoader / NetworkConfigExt），避免多端实现漂移。
+    if service_name == "exvlan.internal.ConfigConvert" {
+        use crate::config::api_input::{NetworkConfig, NetworkConfigExt as _};
+        use crate::config::toml::{ConfigLoader as _, TomlConfigLoader};
+
+        return match method_name {
+            "toml_to_config" => {
+                let toml_text = payload
+                    .get("tomlConfig")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                let cfg = TomlConfigLoader::new_from_str(toml_text)?;
+                let config = NetworkConfig::new_from_config(&cfg)?;
+                serde_json::to_value(config).map_err(|e| anyhow::anyhow!("{e}").into())
+            }
+            "config_to_toml" => {
+                let config: NetworkConfig =
+                    serde_json::from_value(payload).map_err(|e| anyhow::anyhow!("{e}"))?;
+                Ok(serde_json::Value::String(config.gen_config()?.dump()))
+            }
+            other => Err(anyhow::anyhow!("unknown ConfigConvert method: {other}").into()),
+        };
+    }
+
     if service_name == "api.manage.WebClientService" {
         return Err(anyhow::anyhow!(
             "service {service_name} is not exposed through FFI/JNI generic RPC"

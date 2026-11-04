@@ -1540,7 +1540,10 @@ fn win_service_main(arg: Vec<std::ffi::OsString>) {
 
 async fn run_main(cli: Cli) -> anyhow::Result<()> {
     defer!(dump_profile(0););
-    log::init(&cli.logging_options, true)?;
+    // 日志初始化失败不应该阻止内核启动：守护进程起不来会比没有日志严重得多。
+    if let Err(err) = log::init(&cli.logging_options, true) {
+        eprintln!("[exvlan] 初始化日志失败（继续启动）: {err:#}");
+    }
 
     let manager = Arc::new(native_cli_instance_manager().with_config_path(cli.config_dir.clone()));
 

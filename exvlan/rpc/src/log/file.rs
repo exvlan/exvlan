@@ -60,6 +60,10 @@ impl FileSink {
 
         let dir = config.dir.as_deref().unwrap_or(".");
         let file = config.file.as_deref().unwrap_or("exvlan.log");
+        // 日志目录不一定存在（例如服务模式切到新的系统路径）：
+        // 不建目录会让 `build()` 失败 → 上层 `log::init()?` 直接退出进程。
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("failed to create log directory: {dir}"))?;
         let path = std::path::Path::new(dir).join(file);
         let file_appender = RollingFileAppenderBase::builder()
             .filename(path.to_string_lossy().into_owned())

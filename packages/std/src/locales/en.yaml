@@ -108,7 +108,33 @@ magisk_config_saved: Configuration validated and saved; Exvlan restarted
 magisk_config_saved_restart_pending: Configuration validated and saved; the Exvlan supervisor is still starting
 retain_network_instance: Retain Network Instance
 collect_network_infos: Collect Network Infos
-settings: Settings
+settings:
+  title: Settings
+  general: General
+  network: Network
+  logging: Logging
+  about: About
+  language: Language
+  mode: Running mode
+  autostart: Launch at login
+  config_server: Config server
+  kernel: Kernel
+  log_level: Log level
+  open_log_dir: Open log directory
+  copy_log_dir: Copy log path
+  share_log: Share error log
+  project: Project home
+  copyright: Exvlan © 2026
+  service_check: Service check
+  service_check_run: Run check
+  service_restart: Restart service
+  service_reinstall: Reinstall service
+  service_result: Result
+  copy: Copy
+  rpc_connected: Kernel connected
+  rpc_disconnected: Kernel not connected
+  vpn_running: Instance running
+  vpn_stopped: Not running
 exchange_language: 切换中文
 logging: Logging
 logging_level_info: Info

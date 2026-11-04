@@ -273,3 +273,18 @@ export interface DiagnosticsInfo {
 export async function diagnosticsInfo() {
   return await invoke<DiagnosticsInfo>('diagnostics_info')
 }
+
+/** 服务自检（只读）：内核/服务状态、RPC 连通性、daemon 日志尾部。 */
+export async function serviceDiagnostics(rpcPortal?: string) {
+  return await invoke<string>('service_diagnostics', { rpcPortal })
+}
+
+/** 重启服务（提权）。 */
+export async function serviceRestart() {
+  return await invoke('service_restart')
+}
+
+/** 强制重装服务（提权，含目录预建与真连自检）。 */
+export async function serviceReinstall(opts: ServiceOptions) {
+  return await invoke('service_reinstall', { opts })
+}
