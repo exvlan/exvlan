@@ -99,7 +99,9 @@ panic = "unwind"
 debug = 2
 
 [profile.release]
-panic = "abort"
+# 移动端曾出现「一次 panic = 整个应用闪退且无日志」。保留 unwind 才能在
+# `call_json_rpc` 这个 C ABI 边界用 catch_unwind 把 panic 变成普通错误。
+panic = "unwind"
 lto = true
 codegen-units = 1
 opt-level = 3

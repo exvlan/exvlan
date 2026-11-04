@@ -105,9 +105,17 @@ pub fn call(
             reply,
         })
         .map_err(|_| "FFI 调用线程不可用".to_string())?;
+        // 超时兜底：内核侧若卡住（例如等锁），不能让 GUI 命令无限等待（Android 会 ANR）。
         return rx
-            .recv()
-            .unwrap_or_else(|_| Err("FFI 调用线程已退出".to_string()));
+            .recv_timeout(std::time::Duration::from_secs(15))
+            .unwrap_or_else(|err| match err {
+                std::sync::mpsc::RecvTimeoutError::Timeout => {
+                    Err("FFI 调用超时（15s），内核可能无响应".to_string())
+                }
+                std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                    Err("FFI 调用线程已退出".to_string())
+                }
+            });
     }
 
     call_raw(service, method, domain, payload)

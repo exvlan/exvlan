@@ -316,6 +316,15 @@ tray:
   exit: 退出
 
 about:
+  diagnostics: 诊断信息
+  copy_diagnostics: 复制诊断信息
+  writable: 可写
+  not_writable: 不可写（可能被 root 占用）
+  home: 用户主目录
+  log_dir: 日志目录
+  config_dir: 配置目录
+  error_log: 错误日志
+  service_status: 服务状态
   title: 关于
   version: 版本
   author: 作者

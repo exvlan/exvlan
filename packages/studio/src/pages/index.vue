@@ -25,11 +25,13 @@ import ModeSwitcher from '~/components/ModeSwitcher.vue'
 import {
   appUpdateApply,
   appUpdateInfo,
+  diagnosticsInfo,
+  ensureKernelService,
   getServiceStatus,
   reportFrontendError,
+  serviceDefaultDirs,
   shareErrorLog,
 } from '~/composables/backend'
-import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
 
 const { t, locale } = useI18n()
 const confirm = useConfirm()
@@ -44,8 +46,9 @@ async function normalizeMode(mode: Mode): Promise<Mode> {
   }
   const svc = mode as unknown as Record<string, any>
   const saved = loadMode() as unknown as Record<string, any>
-  const configDir = svc.config_dir || saved.config_dir || await join(await appConfigDir(), 'config.d')
-  const logDir = svc.file_log_dir || saved.file_log_dir || await appLogDir()
+  const defaults = await serviceDefaultDirs()
+  const configDir = svc.config_dir || saved.config_dir || defaults.config_dir
+  const logDir = svc.file_log_dir || saved.file_log_dir || defaults.file_log_dir
   return {
     ...mode,
     config_dir: configDir,
@@ -115,6 +118,8 @@ async function onModeSave() {
   }
   isModeSaving.value = true
   try {
+    // 先落盘再连接：连接失败也保留用户选择（20709 之前是连上才保存，失败就丢）。
+    saveMode(editingMode.value)
     await initWithMode(editingMode.value);
     modeDialogVisible.value = false
   }
@@ -264,11 +269,14 @@ async function ensureLocalKernel(mode: Mode) {
   // daemon 参数与模式无关：优先取当前 mode 上的字段（service 模式有），
   // 否则回退到已保存的 app_mode 里的同名字段，最后才用默认值。
   const saved = loadMode() as { config_dir?: string, rpc_portal?: string, file_log_level?: string, file_log_dir?: string }
+  // 默认目录必须是系统路径：守护进程以 root 运行，写用户目录会把属主改成 root，
+  // 之后 GUI 连 error.log / ui-state.json 都写不进去（20709 实测）。
+  const defaults = await serviceDefaultDirs()
   const merged = {
-    config_dir: (mode as any).config_dir || saved.config_dir || await join(await appConfigDir(), 'config.d'),
+    config_dir: (mode as any).config_dir || saved.config_dir || defaults.config_dir,
     rpc_portal: (mode as any).rpc_portal || saved.rpc_portal || '127.0.0.1:15999',
     file_log_level: (mode as any).file_log_level || saved.file_log_level || 'info',
-    file_log_dir: (mode as any).file_log_dir || saved.file_log_dir || await appLogDir(),
+    file_log_dir: (mode as any).file_log_dir || saved.file_log_dir || defaults.file_log_dir,
     config_server: (mode as { config_server_url?: string }).config_server_url,
   }
   await ensureKernelService(merged)
@@ -350,6 +358,17 @@ onMounted(async () => {
       void reportFrontendError('fe:ensure-kernel', String(e))
       toast.add({ severity: 'error', summary: t('client.startup_failed'), detail: String(e), life: 10000 })
     }
+  }
+
+  // 目录被 root 占用时（历史版本守护进程写过用户目录），日志与设置都写不进去。
+  try {
+    const diag = await diagnosticsInfo()
+    if (diag.log_dir_writable === false || diag.config_dir_writable === false) {
+      startupError.value = `日志/配置目录不可写（可能被 root 占用）：${diag.log_dir ?? '-'} / ${diag.config_dir ?? '-'}`
+    }
+  }
+  catch (e) {
+    console.error("diagnostics failed", e)
   }
 
   try {

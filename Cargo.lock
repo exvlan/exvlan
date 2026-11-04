@@ -3064,6 +3064,7 @@ dependencies = [
  "async-trait",
  "exvlan",
  "exvlan-core",
+ "exvlan-proto",
  "log",
  "once_cell",
  "serde_json",

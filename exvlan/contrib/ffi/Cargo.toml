@@ -30,6 +30,10 @@ log.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+# 仅测试用：构造与移动端一致的 protobuf JSON 请求
+exvlan-proto = { workspace = true }
+
 [build-dependencies]
 thunk-rs = { workspace = true, features = ["win7"] }
 

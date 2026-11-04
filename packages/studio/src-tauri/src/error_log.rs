@@ -43,36 +43,73 @@ fn state() -> &'static Mutex<State> {
     })
 }
 
-/// 初始化（幂等）。`dir` 不存在时会被创建。
-pub fn init(dir: impl AsRef<Path>) {
-    let dir = dir.as_ref().to_path_buf();
-    if let Err(err) = std::fs::create_dir_all(&dir) {
-        eprintln!("[error_log] 创建日志目录失败（{}）: {err}", dir.display());
-        return;
-    }
-
-    let path = dir.join(FILE_NAME);
-    let file = match OpenOptions::new().create(true).append(true).open(&path) {
-        Ok(f) => f,
-        Err(err) => {
-            eprintln!("[error_log] 打开 {} 失败: {err}", path.display());
-            return;
+/// 按顺序尝试多个候选目录，把 `error.log` 落到**第一个可写**的位置。
+///
+/// 背景：20709 在 macOS 上踩到 `~/Library/Logs/<id>` 被 root 占用（守护进程写过），
+/// 用户态无法创建文件 → 「error.log 尚未初始化」。这里必须有多级兜底，
+/// 并把每次尝试的结果记录下来，否则连「为什么没日志」都查不到。
+pub fn init_best(candidates: &[PathBuf]) -> Option<PathBuf> {
+    let mut attempts: Vec<String> = Vec::new();
+    for dir in candidates {
+        match open_in(dir) {
+            Ok((file, size)) => {
+                let Ok(mut st) = state().lock() else {
+                    return None;
+                };
+                st.dir = Some(dir.clone());
+                st.file = Some(file);
+                st.size = size;
+                let pending = std::mem::take(&mut st.pending);
+                for line in pending {
+                    st.write_line(&line);
+                }
+                drop(st);
+                let _ = PANIC_PATH.set(dir.join(FILE_NAME));
+                if !attempts.is_empty() {
+                    record("error_log.fallback", attempts.join(" ; "));
+                }
+                return Some(dir.join(FILE_NAME));
+            }
+            Err(err) => attempts.push(format!("{}: {err}", dir.display())),
         }
-    };
-    let size = file.metadata().map(|m| m.len()).unwrap_or_default();
-
-    let Ok(mut st) = state().lock() else {
-        return;
-    };
-    st.dir = Some(dir);
-    st.file = Some(file);
-    st.size = size;
-
-    // 回放初始化前积压的记录
-    let pending = std::mem::take(&mut st.pending);
-    for line in pending {
-        st.write_line(&line);
     }
+    eprintln!("[error_log] 所有候选目录都不可写: {}", attempts.join(" ; "));
+    None
+}
+
+fn open_in(dir: &Path) -> std::io::Result<(File, u64)> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(FILE_NAME);
+    let file = OpenOptions::new().create(true).append(true).open(&path)?;
+    let size = file.metadata().map(|m| m.len()).unwrap_or_default();
+    Ok((file, size))
+}
+
+/// panic 专用的落盘路径（初始化成功后固定）。
+///
+/// panic hook 里**不能**再走 `record()`：如果 panic 恰好发生在持有状态锁的时候，
+/// 会死锁，应用表现为卡死而不是崩溃。这里只做一次无锁的文件追加。
+static PANIC_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// panic hook 专用：无锁追加一行 `[panic]`。
+pub fn record_panic(message: impl Display) {
+    let text = redact(&message.to_string())
+        .replace('\n', " | ")
+        .replace('\r', "");
+    let line = format!("{} [panic] {text}\n", timestamp());
+    match PANIC_PATH.get() {
+        Some(path) => {
+            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+                let _ = f.write_all(line.as_bytes());
+            }
+        }
+        None => eprintln!("{}", line.trim_end()),
+    }
+}
+
+/// 当前是否已初始化。
+pub fn is_initialized() -> bool {
+    state().lock().map(|st| st.file.is_some()).unwrap_or(false)
 }
 
 /// 当前日志文件路径（未初始化时为 `None`）。

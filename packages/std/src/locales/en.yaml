@@ -316,6 +316,15 @@ tray:
   exit: Exit
 
 about:
+  diagnostics: Diagnostics
+  copy_diagnostics: Copy diagnostics
+  writable: Writable
+  not_writable: Not writable (maybe owned by root)
+  home: Home directory
+  log_dir: Log directory
+  config_dir: Config directory
+  error_log: Error log
+  service_status: Service status
   title: About
   version: Version
   author: Author

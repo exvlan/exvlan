@@ -175,7 +175,8 @@ fn call_json_rpc_returns_logger_response() {
 }
 
 #[test]
-fn call_json_rpc_rejects_instance_management_service() {
+fn call_json_rpc_serves_instance_management_service() {
+    // P7 起 `api.manage.WebClientService` 经 FFI 暴露给移动端 GUI（此前是显式拒绝）。
     let service = CString::new("api.manage.WebClientService").unwrap();
     let method = CString::new("list_network_instance").unwrap();
     let payload = CString::new("{}").unwrap();
@@ -191,10 +192,16 @@ fn call_json_rpc_rejects_instance_management_service() {
                 &mut response_ptr,
             )
         },
-        -1
+        0
     );
-    assert!(response_ptr.is_null());
-    assert!(take_last_error().unwrap().contains("not exposed"));
+    assert!(!response_ptr.is_null());
+    let response = unsafe { CStr::from_ptr(response_ptr) }
+        .to_string_lossy()
+        .into_owned();
+    free_string(response_ptr);
+    let response: Value = serde_json::from_str(&response).unwrap();
+    // 没有实例时 pbjson 会省略空的 repeated 字段，这里只确认返回的是对象。
+    assert!(response.is_object(), "unexpected response: {response}");
 }
 
 #[test]

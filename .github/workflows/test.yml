@@ -137,6 +137,9 @@ jobs:
             args: "--features full"
           - package: exvlan-core
             args: ""
+          # FFI 是移动端唯一 RPC 通道：管理面分发、panic 兜底、超时都在这里验证
+          - package: exvlan-ffi
+            args: ""
     env:
       # 全 feature 的 debug 产物带调试信息会撑爆 runner 磁盘；测试不需要
       CARGO_PROFILE_DEV_DEBUG: "0"

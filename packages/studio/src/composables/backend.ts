@@ -240,3 +240,36 @@ export async function readErrorLog(tailKb?: number) {
 export async function shareErrorLog() {
   return await invoke<string>('share_error_log')
 }
+
+export interface ServiceDefaultDirs {
+  config_dir: string
+  file_log_dir: string
+}
+
+/** 服务模式（root 守护进程）的默认目录：系统路径，避免 root 写用户目录。 */
+export async function serviceDefaultDirs() {
+  return await invoke<ServiceDefaultDirs>('service_default_dirs_cmd')
+}
+
+export interface DiagnosticsInfo {
+  version: string
+  os: string
+  arch: string
+  home: string
+  log_dir?: string | null
+  log_dir_writable?: boolean | null
+  config_dir?: string | null
+  config_dir_writable?: boolean | null
+  error_log?: string | null
+  error_log_size?: number | null
+  kernel_installed?: boolean | null
+  kernel_version?: string | null
+  service_status?: string | null
+  service_config_dir?: string | null
+  service_log_dir?: string | null
+}
+
+/** 诊断信息：路径/可写性/版本/内核与服务状态。 */
+export async function diagnosticsInfo() {
+  return await invoke<DiagnosticsInfo>('diagnostics_info')
+}

@@ -3,7 +3,7 @@ import type { ServiceStatus } from '~/composables/backend'
 import type { Mode, NormalMode, RemoteMode, ServiceMode } from '~/composables/mode'
 import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
 import { computed, onMounted, ref, watch } from 'vue'
-import { getServiceStatus } from '~/composables/backend'
+import { getServiceStatus, serviceDefaultDirs } from '~/composables/backend'
 
 const emit = defineEmits(['uninstall-service', 'stop-service'])
 
@@ -24,8 +24,10 @@ function normalizeRpcListenPort(port: unknown): number {
 }
 
 onMounted(async () => {
-  defaultConfigDir.value = await join(await appConfigDir(), 'config.d')
-  defaultLogDir.value = await appLogDir()
+  // 服务模式默认目录是系统路径（root 守护进程不能写用户目录）
+  const defaults = await serviceDefaultDirs().catch(() => null)
+  defaultConfigDir.value = defaults?.config_dir || await join(await appConfigDir(), 'config.d')
+  defaultLogDir.value = defaults?.file_log_dir || await appLogDir()
 
   // the mode watch may have run before these defaults resolved (e.g. when the
   // dialog is opened with service mode preselected), leaving the fields empty.
