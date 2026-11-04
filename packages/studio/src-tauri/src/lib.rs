@@ -1926,7 +1926,7 @@ pub struct ServiceDefaultDirs {
 fn service_default_dirs() -> ServiceDefaultDirs {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        return desktop_service_default_dirs();
+        desktop_service_default_dirs()
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
