@@ -288,3 +288,13 @@ export async function serviceRestart() {
 export async function serviceReinstall(opts: ServiceOptions) {
   return await invoke('service_reinstall', { opts })
 }
+
+/** 上报启动时的模式/上次网络（写进 error.log 的 [boot.ui]）。 */
+export async function reportBootState(mode: string, lastInstance?: string | null, serviceCurrent?: boolean | null) {
+  try {
+    await invoke('report_boot_state', { mode, lastInstance, serviceCurrent })
+  }
+  catch {
+    // 诊断上报失败不影响启动
+  }
+}

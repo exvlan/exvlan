@@ -18,8 +18,8 @@ import { executeVpnTileAction } from '~/composables/mobile_vpn_tile'
 import { GUIRemoteClient } from '~/modules/api'
 
 import { useToast, useConfirm } from 'openvue'
-import { loadMode, saveMode, WebClientConfig, type Mode } from '~/composables/mode'
-import { saveLastNetworkInstanceId, loadLastNetworkInstanceId } from '~/composables/config'
+import { loadMode, saveModeNow, WebClientConfig, type Mode } from '~/composables/mode'
+import { saveLastNetworkInstanceId, saveLastNetworkInstanceIdNow, loadLastNetworkInstanceId } from '~/composables/config'
 import ModeSwitcher from '~/components/ModeSwitcher.vue'
 import SettingsDialog from '~/components/SettingsDialog.vue'
 import {
@@ -28,8 +28,10 @@ import {
   diagnosticsInfo,
   ensureKernelService,
   getServiceStatus,
+  reportBootState,
   reportFrontendError,
   serviceDefaultDirs,
+  serviceReinstall,
   shareErrorLog,
 } from '~/composables/backend'
 
@@ -68,6 +70,35 @@ async function onShareErrorLog() {
   }
   catch (e: any) {
     toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 8000 })
+  }
+}
+
+const reinstalling = ref(false)
+const settingsSection = ref<'general' | 'network' | 'logging' | 'about'>('general')
+
+function openServiceCheck() {
+  settingsSection.value = 'network'
+  settingsVisible.value = true
+}
+
+async function onReinstallService() {
+  reinstalling.value = true
+  try {
+    await serviceReinstall({
+      config_dir: '',
+      rpc_portal: (currentMode.value as any).rpc_portal || '127.0.0.1:15999',
+      file_log_level: (currentMode.value as any).file_log_level || 'info',
+      file_log_dir: '',
+      config_server: (currentMode.value as any).config_server_url,
+    })
+    toast.add({ severity: 'success', summary: t('web.common.success'), detail: t('settings.service_reinstall'), life: 3000 })
+    await retryStartup()
+  }
+  catch (e: any) {
+    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 10000 })
+  }
+  finally {
+    reinstalling.value = false
   }
 }
 
@@ -148,16 +179,18 @@ async function onModeSave() {
   }
   isModeSaving.value = true
   try {
-    // 先落盘再连接：连接失败也保留用户选择（20709 之前是连上才保存，失败就丢）。
-    saveMode(editingMode.value)
+    // 先落盘并等待后端确认，再做连接（连接失败也保留用户选择）。
+    await saveModeNow(editingMode.value)
     await initWithMode(editingMode.value);
     modeDialogVisible.value = false
   }
   catch (e: any) {
-    toast.add({ severity: 'error', summary: t('error'), detail: e, life: 10000 })
+    // 不再用旧模式重新初始化：那会把刚保存的模式写回旧值（历史 bug）。
+    // 保留用户选择，只在横幅/日志里说明原因。
+    startupError.value = String(e)
+    void reportFrontendError('fe:mode-save', String(e))
+    toast.add({ severity: 'error', summary: t('client.startup_failed'), detail: String(e), life: 10000 })
     console.error("Error switching mode", e, currentMode.value, editingMode.value)
-    await initWithMode(currentMode.value);
-  void maybeCheckAppUpdate();
   }
   finally {
     isModeSaving.value = false
@@ -283,9 +316,15 @@ async function initWithMode(rawMode: Mode) {
     initWebClient(mode.config_server_url)
   }
   currentMode.value = mode
-  saveMode(mode)
+  await saveModeNow(mode)
   startupError.value = ''
   clientRunning.value = await isClientRunning()
+
+  // 连接成功后再恢复一次上次网络（不依赖 clientRunning 的 false→true 翻转）
+  const lastId = loadLastNetworkInstanceId()
+  if (lastId && !instanceId.value) {
+    instanceId.value = lastId
+  }
 }
 
 /** 桌面端启动闭环：确保内核已安装、服务定义与当前配置一致（一致时不提权）。 */
@@ -376,6 +415,7 @@ onMounted(async () => {
 
   cleanupFns.push(await listenGlobalEvents())
   currentMode.value = await normalizeMode(loadMode())
+  void reportBootState(currentMode.value.mode, loadLastNetworkInstanceId())
 
   // 首次安装/升级后会自动装好内核并（重新）注册系统服务；失败不阻塞进入界面。
   // service 模式由 initWithMode 内部统一处理，避免同一次启动弹两次授权。
@@ -472,6 +512,7 @@ async function handleMobileVpnTileAction(action: 'start' | 'stop') {
 watch(instanceId, (newVal) => {
   if (newVal) {
     saveLastNetworkInstanceId(newVal);
+    void saveLastNetworkInstanceIdNow(newVal);
   }
 });
 
@@ -647,6 +688,8 @@ const configServerConnectionStatus = computed(() => {
       <i class="pi pi-exclamation-triangle" />
       <span class="flex-1 break-all">{{ t('client.startup_failed') }}: {{ startupError }}</span>
       <Button size="small" :label="t('client.retry_startup')" icon="pi pi-replay" @click="retryStartup" />
+      <Button size="small" text :label="t('settings.service_check')" icon="pi pi-wrench" @click="openServiceCheck" />
+      <Button size="small" text :label="t('settings.service_reinstall')" icon="pi pi-refresh" :loading="reinstalling" @click="onReinstallService" />
       <Button size="small" text :label="t('client.share_error_log')" icon="pi pi-share-alt" @click="onShareErrorLog" />
     </div>
 
@@ -681,6 +724,7 @@ const configServerConnectionStatus = computed(() => {
 
     <SettingsDialog
       v-model:visible="settingsVisible"
+      :initial-section="settingsSection"
       :mode="currentMode"
       :client-running="clientRunning"
       :config-server-status="configServerConnectionStatus"

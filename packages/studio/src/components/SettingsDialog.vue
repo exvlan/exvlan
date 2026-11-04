@@ -15,6 +15,7 @@ const props = defineProps<{
   clientRunning: boolean
   configServerStatus: string
   logLevel: string
+  initialSection?: Section
 }>()
 
 const emit = defineEmits<{
@@ -38,7 +39,13 @@ const isDesktop = computed(() => {
 })
 
 type Section = 'general' | 'network' | 'logging' | 'about'
-const section = ref<Section>('general')
+const section = ref<Section>(props.initialSection ?? 'general')
+
+watch(() => props.initialSection, (next) => {
+  if (next) {
+    section.value = next
+  }
+})
 
 const sections = computed(() => [
   { key: 'general' as const, label: t('settings.general'), icon: 'pi pi-cog' },

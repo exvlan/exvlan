@@ -268,11 +268,13 @@ async fn patch_vpn_portal_clients(
 }
 
 #[tauri::command]
-async fn set_logging_level(level: String) -> Result<(), String> {
+async fn set_logging_level(app: AppHandle, level: String) -> Result<(), String> {
     get_client_manager!()?
         .set_logging_level(level.clone())
         .await
         .map_err(|e| error_log::other("cmd:set_logging_level", e))?;
+    // GUI/内核同进程：本地 logger 也要跟着热更新，否则 exvlan.log 仍是旧级别
+    init_gui_logging_with(&app, Some(&level));
     Ok(())
 }
 
@@ -693,23 +695,70 @@ async fn is_web_client_connected() -> Result<bool, String> {
 
 /// GUI 侧日志初始化：与内核共用 `exvlan-rpc` 的日志栈（控制台 + 滚动文件）。
 fn init_gui_logging(app: &tauri::AppHandle) {
+    init_gui_logging_with(app, None);
+}
+
+/// 初始化 GUI 文件日志。
+///
+/// 默认级别很关键：以前 `level: None` 会被解析成 `Off`，等于**完全没有日志**，
+/// 出问题时拿不到任何内核/peer 现场。现在桌面默认 info、Android 默认 debug。
+fn init_gui_logging_with(app: &tauri::AppHandle, level: Option<&str>) {
     let Ok(log_dir) = get_log_dir(app) else {
         return;
     };
+    let level = level.map(|s| s.to_string()).unwrap_or_else(|| {
+        if cfg!(target_os = "android") {
+            "debug".to_string()
+        } else {
+            "info".to_string()
+        }
+    });
     let config = exvlan_rpc::log::SimpleLoggingConfig::new(
         exvlan_rpc::log::ConsoleLoggerConfig::default(),
         exvlan_rpc::log::FileLoggerConfig {
             dir: Some(log_dir.to_string_lossy().to_string()),
-            level: None,
+            level: Some(level),
             file: None,
-            size_mb: None,
-            count: None,
+            size_mb: Some(100),
+            count: Some(10),
         },
     );
     if let Err(err) = exvlan_rpc::log::init(&config, true) {
         eprintln!("初始化 GUI 日志失败: {err:#}");
+        error_log::record("log.init", format!("{err:#}"));
     }
 }
+
+/// Android：初始化 rustls 的平台证书校验器。
+///
+/// reqwest 0.13 的 rustls 后端固定使用 `rustls-platform-verifier`，而它在 Android
+/// 上必须先注入 JVM + Context，否则第一次 HTTPS 就会 panic
+/// （`Expect rustls-platform-verifier to be initialized`），20709 的闪退即由此而来。
+#[cfg(target_os = "android")]
+fn init_android_tls() {
+    use jni::JavaVM;
+    use jni::objects::JObject;
+
+    let ctx = ndk_context::android_context();
+    // SAFETY: ndk-context 提供的是进程级有效指针（由 Tauri/ndk 初始化）
+    let vm = unsafe { JavaVM::from_raw(ctx.vm().cast()) };
+    let mut env = match vm.attach_current_thread() {
+        Ok(env) => env,
+        Err(err) => {
+            error_log::record("tls", format!("attach current thread failed: {err}"));
+            return;
+        }
+    };
+    // SAFETY: 同上，context 是全局引用
+    let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+    match rustls_platform_verifier::android::init_with_env(&mut env, context) {
+        Ok(()) => error_log::record("tls", "rustls-platform-verifier initialized"),
+        Err(err) => error_log::record("tls", format!("init failed: {err}")),
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn init_android_tls() {}
 
 // 获取日志目录的辅助函数
 fn get_log_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, tauri::Error> {
@@ -838,7 +887,10 @@ fn install_panic_hook() {
                 .name()
                 .unwrap_or("<unnamed>")
                 .to_string();
-            error_log::record_panic(format!("thread={thread} location={location} {info}"));
+            let backtrace = std::backtrace::Backtrace::force_capture();
+            error_log::record_panic(format!(
+                "thread={thread} location={location} {info} | backtrace={backtrace}"
+            ));
             default_hook(info);
         }));
     });
@@ -924,6 +976,15 @@ fn diagnostics_info(app: AppHandle) -> Result<DiagnosticsInfo, String> {
     })
 }
 
+/// 前端启动状态上报（写进 `error.log` 的 `[boot.ui]`，便于对照模式/选网是否恢复）。
+#[tauri::command]
+fn report_boot_state(mode: String, last_instance: Option<String>, service_current: Option<bool>) {
+    error_log::record(
+        "boot.ui",
+        format!("mode={mode} last_instance={last_instance:?} service_current={service_current:?}"),
+    );
+}
+
 /// 前端异常上报（`window.onerror` / `unhandledrejection` / Vue errorHandler / toast 错误）。
 #[tauri::command]
 fn report_frontend_error(scope: String, message: String, stack: Option<String>) {
@@ -958,25 +1019,94 @@ fn read_error_log(app: AppHandle, tail_kb: Option<usize>) -> Result<String, Stri
     Ok(error_log::tail(limit))
 }
 
-/// 分享 `error.log`：Android 弹系统分享面板；桌面返回路径（前端复制/打开目录）。
+/// 打包诊断 zip：error.log + exvlan.log 尾部 + ui-state.json（脱敏）+ 摘要。
+fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    use std::io::Write as _;
+    use tauri::Manager as _;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
+
+    let base = app
+        .path()
+        .app_cache_dir()
+        .or_else(|_| app.path().app_log_dir())
+        .map_err(|e| format!("无法定位缓存目录: {e}"))?
+        .join("diagnostics");
+    std::fs::create_dir_all(&base).map_err(|e| format!("创建诊断目录失败: {e}"))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let path = base.join(format!("exvlan-diagnostics-{stamp}.zip"));
+
+    let file = std::fs::File::create(&path).map_err(|e| format!("创建 zip 失败: {e}"))?;
+    let mut zip = ZipWriter::new(file);
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    // 1) error.log
+    if let Some(log) = error_log::path()
+        && let Ok(text) = std::fs::read_to_string(&log)
+    {
+        let _ = zip.start_file("error.log", opts);
+        let _ = zip.write_all(error_log::redact(&text).as_bytes());
+    }
+
+    // 2) exvlan.log 尾部（内核 peer/握手/TUN 都在这里）
+    if let Ok(dir) = get_log_dir(app) {
+        let kernel_log = dir.join("exvlan.log");
+        if let Ok(text) = std::fs::read_to_string(&kernel_log) {
+            let lines: Vec<&str> = text.lines().rev().take(300).collect();
+            let tail: Vec<&str> = lines.into_iter().rev().collect();
+            let _ = zip.start_file("exvlan.log.tail", opts);
+            let _ = zip.write_all(error_log::redact(&tail.join("\n")).as_bytes());
+        }
+    }
+
+    // 3) ui-state.json（脱敏）
+    if let Ok(dir) = app.path().app_config_dir()
+        && let Ok(text) = std::fs::read_to_string(dir.join("ui-state.json"))
+    {
+        let _ = zip.start_file("ui-state.json", opts);
+        let _ = zip.write_all(error_log::redact(&text).as_bytes());
+    }
+
+    // 4) 摘要
+    let summary = format!(
+        "version: {}\nos: {} ({})\nhome: {}\nlog_dir: {:?}\nconfig_dir: {:?}\nerror_log: {:?}\n",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        std::env::var("HOME").unwrap_or_default(),
+        app.path()
+            .app_log_dir()
+            .ok()
+            .map(|p| p.display().to_string()),
+        app.path()
+            .app_config_dir()
+            .ok()
+            .map(|p| p.display().to_string()),
+        error_log::path().map(|p| p.display().to_string()),
+    );
+    let _ = zip.start_file("summary.txt", opts);
+    let _ = zip.write_all(summary.as_bytes());
+
+    zip.finish().map_err(|e| format!("写入 zip 失败: {e}"))?;
+    Ok(path)
+}
+
+/// 分享诊断包：Android 弹系统分享面板（zip）；桌面返回路径（前端打开目录）。
 #[tauri::command]
 fn share_error_log(app: AppHandle) -> Result<String, String> {
-    let path = ensure_error_log(&app).ok_or_else(|| {
-        let candidates = error_log_candidates(&app)
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("error.log 无法写入（已尝试: {candidates}）。请检查目录属主是否为当前用户。")
-    })?;
+    ensure_error_log(&app);
+    let path = build_diagnostics_zip(&app)?;
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_vpnservice::VpnserviceExt;
         app.vpnservice()
             .share_file(tauri_plugin_vpnservice::models::ShareFileRequest {
                 path: path.display().to_string(),
-                mime: Some("text/plain".to_string()),
-                title: Some("Exvlan 错误日志".to_string()),
+                mime: Some("application/zip".to_string()),
+                title: Some("Exvlan 诊断日志".to_string()),
             })
             .map_err(|e| error_log::other("share_error_log", e.to_string()))?;
     }
@@ -1672,20 +1802,96 @@ mod service {
         parts.join("\u{0}")
     }
 
+    /// 指纹存**用户侧**：由 GUI 自己写、自己读。
+    ///
+    /// 20711 之前存在 root 侧（内核目录），GUI 读不到/读不全时会永远判定
+    /// 「服务需要重装」→ 每次启动都提权弹密码。
     fn marker_path() -> std::path::PathBuf {
-        crate::kernel::kernel_dir().join("service.fingerprint")
+        crate::user_marker_path()
+            .unwrap_or_else(|| crate::kernel::kernel_dir().join("service.fingerprint"))
     }
 
-    /// 当前已安装的服务是否与本配置一致（不需要 root：marker 可读）。
+    /// 当前已安装的服务是否与本配置一致。
+    ///
+    /// 双保险：用户侧指纹 + macOS plist 关键参数交叉校验；
+    /// 不一致时把差异写进 error.log，方便定位「为什么又重装了」。
     pub fn is_current(opts: &ServiceOptions) -> bool {
-        std::fs::read_to_string(marker_path())
-            .map(|s| s == fingerprint(opts))
-            .unwrap_or(false)
+        let expected = fingerprint(opts);
+        let stored = std::fs::read_to_string(marker_path()).unwrap_or_default();
+
+        if stored == expected {
+            if plist_matches(opts) == Some(false) {
+                crate::error_log::record(
+                    "service.fingerprint",
+                    "marker 匹配但 plist 参数不一致，判定需要重装",
+                );
+                return false;
+            }
+            return true;
+        }
+
+        crate::error_log::record(
+            "service.fingerprint",
+            format!(
+                "mismatch expected={:?} stored={:?}",
+                truncate_for_log(&expected, 160),
+                truncate_for_log(&stored, 160)
+            ),
+        );
+        false
+    }
+
+    fn truncate_for_log(s: &str, max: usize) -> String {
+        if s.chars().count() <= max {
+            s.to_string()
+        } else {
+            s.chars().take(max).collect::<String>() + "…"
+        }
+    }
+
+    /// 校验 launchd plist 里的关键参数是否与当前配置一致（非 macOS 返回 None）。
+    fn plist_matches(opts: &ServiceOptions) -> Option<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            let plist = format!("/Library/LaunchDaemons/{}.plist", env!("CARGO_PKG_NAME"));
+            let Ok(text) = std::fs::read_to_string(&plist) else {
+                crate::error_log::record("service.plist", format!("读取 {plist} 失败"));
+                return Some(false);
+            };
+            let expected = [
+                crate::kernel::kernel_path().display().to_string(),
+                opts.config_dir.clone(),
+                opts.rpc_portal.clone(),
+                opts.file_log_dir.clone(),
+            ];
+            for item in expected {
+                if !text.contains(&item) {
+                    crate::error_log::record("service.plist", format!("plist 缺少参数 {item}"));
+                    return Some(false);
+                }
+            }
+            Some(true)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = opts;
+            None
+        }
     }
 
     fn write_marker(opts: &ServiceOptions) -> anyhow::Result<()> {
-        std::fs::write(marker_path(), fingerprint(opts))
-            .map_err(|e| anyhow::anyhow!("写入服务指纹失败: {e}"))
+        let path = marker_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(&path, fingerprint(opts))
+            .map_err(|e| anyhow::anyhow!("写入服务指纹失败（{}）: {e}", path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
+        }
+        Ok(())
     }
 
     pub fn install(opts: ServiceOptions) -> anyhow::Result<()> {
@@ -2081,6 +2287,22 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 ExitCode::FAILURE
             }
         },
+        Some("--provision") => {
+            let payload = args.get(1).cloned().unwrap_or_default();
+            match serde_json::from_str::<ProvisionPayload>(&payload) {
+                Ok(req) => match provision(&req) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(err) => {
+                        report("provision", &format!("初始化失败: {err:#}"));
+                        ExitCode::FAILURE
+                    }
+                },
+                Err(err) => {
+                    report("provision", &format!("参数解析失败: {err:#}"));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("--repair-permissions") => {
             let payload = args.get(1).cloned().unwrap_or_default();
             match serde_json::from_str::<RepairPermissionsPayload>(&payload) {
@@ -2137,6 +2359,32 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
         _ => return None,
     };
     Some(code)
+}
+
+/// 一次提权完成「装内核 + 装服务」，避免首次安装连弹两次密码。
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct ProvisionPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel_src: Option<String>,
+    pub kernel_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<service::ServiceOptions>,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
+    if let Some(src) = req.kernel_src.as_deref() {
+        kernel::install_kernel(std::path::Path::new(src), &req.kernel_version)?;
+        crate::error_log::record(
+            "provision.kernel",
+            format!("installed {}", req.kernel_version),
+        );
+    }
+    if let Some(opts) = req.service.clone() {
+        service::install(opts)?;
+        crate::error_log::record("provision.service", "installed");
+    }
+    Ok(())
 }
 
 /// 修复用户目录属主（目录被 root 守护进程写过时会变成 root，用户态无法再写）。
@@ -2239,6 +2487,19 @@ fn maybe_repair_user_dirs(app: &AppHandle) {
     }
 }
 
+/// 用户侧服务指纹文件的目录（启动时由 setup 写入）。
+static USER_STATE_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn user_marker_path() -> Option<std::path::PathBuf> {
+    USER_STATE_DIR.get().map(|d| d.join("service.fingerprint"))
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn user_marker_path() -> Option<std::path::PathBuf> {
+    None
+}
+
 /// 守护进程以 root 运行：目录必须是系统路径，且**不沿用**任何旧配置。
 ///
 /// 测试阶段不做向后兼容：旧值一律忽略，避免历史脏数据反复污染。
@@ -2267,40 +2528,6 @@ fn normalize_service_options(opts: &mut service::ServiceOptions) {
     }
 }
 
-/// 让已安装内核与 GUI 版本保持一致（不一致就用随包内核覆盖）。
-///
-/// 失败只记录，不阻塞：用户至少还能用当前内核连上。
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn ensure_kernel_version(app: &AppHandle) {
-    let want = env!("CARGO_PKG_VERSION");
-    let installed = kernel::installed_version();
-    if !kernel::is_installed() || installed.as_deref() != Some(want) {
-        let Some(src) = kernel::bundled_kernel(app) else {
-            error_log::record(
-                "kernel.auto_update",
-                format!("未找到随包内核（installed={installed:?}），跳过"),
-            );
-            return;
-        };
-        error_log::record(
-            "kernel.auto_update",
-            format!("{installed:?} → {want}（{}）", src.display()),
-        );
-        let args = ["--install-kernel", &src.display().to_string(), want];
-        match run_elevated(&args) {
-            Ok(()) => {
-                error_log::record("kernel.auto_update", format!("done: {want}"));
-            }
-            Err(err) => {
-                // 用户取消授权是正常选择，不当成错误刷屏
-                if !err.contains("已取消") {
-                    error_log::record("kernel.auto_update", format!("failed: {err}"));
-                }
-            }
-        }
-    }
-}
-
 /// 确保「内核已安装 + 服务定义与当前配置一致」。
 ///
 /// 返回值：`"installed"`（本次新装/重装）或 `"current"`（无需动作）。
@@ -2314,19 +2541,46 @@ async fn ensure_kernel_service(
     let mut opts = opts;
     normalize_service_options(&mut opts);
 
-    // 内核与 GUI 版本保持一致：不一致就直接覆盖（静默，失败不阻塞）。
-    // 版本不一致会让内核侧的修复（日志不致命、目录自建）永远到不了机器上。
-    ensure_kernel_version(&app);
+    // 一次提权完成「内核（版本不一致时覆盖）+ 服务（指纹不一致时重装）」，
+    // 避免首次安装连弹两次密码。
+    let want_version = env!("CARGO_PKG_VERSION");
+    let need_kernel =
+        !kernel::is_installed() || kernel::installed_version().as_deref() != Some(want_version);
+    let need_service = !service::is_current(&opts);
 
-    if !service::is_current(&opts) {
-        let payload = serde_json::to_string(&opts)
-            .map_err(|e| error_log::other("cmd:ensure_kernel_service", e))?;
-        run_elevated(&["--install-service", &payload])?;
-        error_log::record("service.install", "installed by ensure_kernel_service");
-        return Ok("installed".to_string());
+    if !need_kernel && !need_service {
+        return Ok("current".to_string());
     }
 
-    Ok("current".to_string())
+    let kernel_src = if need_kernel {
+        Some(
+            kernel::bundled_kernel(&app)
+                .ok_or_else(|| {
+                    format!(
+                        "未找到随包内核（{}）。请确认安装包完整。",
+                        kernel::kernel_bin_name()
+                    )
+                })?
+                .display()
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
+    let payload = ProvisionPayload {
+        kernel_src,
+        kernel_version: want_version.to_string(),
+        service: need_service.then(|| opts.clone()),
+    };
+    let json = serde_json::to_string(&payload)
+        .map_err(|e| error_log::other("cmd:ensure_kernel_service", e))?;
+    error_log::record(
+        "provision",
+        format!("kernel={need_kernel} service={need_service}"),
+    );
+    run_elevated(&["--provision", &json])?;
+    Ok("installed".to_string())
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -2751,6 +3005,14 @@ pub fn run_gui() -> std::process::ExitCode {
             // 统一错误出口：必须在任何命令/FFI 调用之前就绪。
             // 20709 在 macOS 上踩到日志目录被 root 占用，这里多级兜底 + 自检/修复。
             ensure_error_log(&handle);
+            init_android_tls();
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            if let Ok(dir) = {
+                use tauri::Manager as _;
+                handle.path().app_config_dir()
+            } {
+                let _ = USER_STATE_DIR.set(dir);
+            }
 
             install_panic_hook();
             record_boot_line(&handle);
@@ -2827,6 +3089,7 @@ pub fn run_gui() -> std::process::ExitCode {
             is_web_client_connected,
             get_log_dir_path,
             report_frontend_error,
+            report_boot_state,
             diagnostics_info,
             service_default_dirs_cmd,
             error_log_path,

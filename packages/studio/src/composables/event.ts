@@ -74,6 +74,10 @@ async function onPostRunNetworkInstance(event: Event<unknown>) {
 
 async function onVpnServiceStop(event: Event<unknown>) {
     console.log(`Received event '${EVENTS.VPN_SERVICE_STOP}', raw payload:`, event.payload)
+    // 桌面端也会发这个事件（内核通知「没有 TUN 实例」），但 vpnservice 插件只存在于移动端。
+    if (type() !== 'android') {
+        return;
+    }
     await syncMobileVpnService();
 }
 

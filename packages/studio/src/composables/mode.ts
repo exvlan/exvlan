@@ -30,6 +30,12 @@ export function saveMode(mode: Mode) {
   localStorage.setItem('app_mode', JSON.stringify(mode))
 }
 
+/** 关键路径：写完立即落盘并等待后端确认（退出/切模式时用）。 */
+export async function saveModeNow(mode: Mode) {
+  const { persistUiStateNow } = await import('./persist')
+  await persistUiStateNow('app_mode', JSON.stringify(mode))
+}
+
 export function loadMode(): Mode {
   const modeStr = localStorage.getItem('app_mode')
   if (modeStr) {
