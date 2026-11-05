@@ -740,18 +740,18 @@ fn init_android_tls() {
     use jni::objects::JObject;
 
     let ctx = ndk_context::android_context();
-    // SAFETY: ndk-context 提供的是进程级有效指针（由 Tauri/ndk 初始化）
+    // SAFETY: ndk-context 提供进程级有效的 JVM 指针
     let vm = unsafe { JavaVM::from_raw(ctx.vm().cast()) };
-    let mut env = match vm.attach_current_thread() {
-        Ok(env) => env,
-        Err(err) => {
-            error_log::record("tls", format!("attach current thread failed: {err}"));
-            return;
-        }
-    };
-    // SAFETY: 同上，context 是全局引用
-    let context = unsafe { JObject::from_raw(ctx.context().cast()) };
-    match rustls_platform_verifier::android::init_with_env(&mut env, context) {
+    let raw_context = ctx.context();
+
+    // jni 0.22 的 attach 是「回调式」：在闭包里拿到 &mut Env
+    let outcome = vm.attach_current_thread(|env| {
+        // SAFETY: context 是全局引用，回调期间有效
+        let context = unsafe { JObject::from_raw(env, raw_context.cast()) };
+        rustls_platform_verifier::android::init_with_env(env, context)
+    });
+
+    match outcome {
         Ok(()) => error_log::record("tls", "rustls-platform-verifier initialized"),
         Err(err) => error_log::record("tls", format!("init failed: {err}")),
     }
@@ -2362,6 +2362,7 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
 }
 
 /// 一次提权完成「装内核 + 装服务」，避免首次安装连弹两次密码。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct ProvisionPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
