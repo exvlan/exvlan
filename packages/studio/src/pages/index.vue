@@ -151,6 +151,9 @@ const runningInstances = ref<string[]>([])
 const vpnRunning = computed(() => runningInstances.value.length > 0)
 
 async function refreshTrayMenu() {
+  if (type() === 'android' || type() === 'ios') {
+    return
+  }
   await setTrayMenu([
     await MenuItemShow(t('tray.show')),
     await MenuItemExit(t('tray.exit')),
@@ -486,7 +489,7 @@ onMounted(async () => {
   })
 });
 
-useTray(true)
+useTray(type() !== "android" && type() !== "ios")
 let toast = useToast();
 
 const remoteClient = computed(() => new GUIRemoteClient());

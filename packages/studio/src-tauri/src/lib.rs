@@ -167,6 +167,13 @@ async fn run_network_instance(
     cfg: NetworkConfig,
     save: bool,
 ) -> Result<(), String> {
+    error_log::event(
+        "inst",
+        format!(
+            "run save={save} name={:?} no_tun={:?}",
+            cfg.network_name, cfg.no_tun
+        ),
+    );
     let instance_id: Uuid = cfg
         .instance_id
         .clone()
@@ -280,6 +287,7 @@ async fn set_logging_level(app: AppHandle, level: String) -> Result<(), String> 
 
 #[tauri::command]
 async fn set_tun_fd(fd: i32) -> Result<(), String> {
+    error_log::event("vpn", format!("set_tun_fd fd={fd}"));
     #[cfg(target_os = "android")]
     {
         // 取第一个实例，把 VpnService 的 TUN fd 交给内核（FFI）
@@ -309,6 +317,7 @@ async fn list_network_instance_ids(
 
 #[tauri::command]
 async fn remove_network_instance(app: AppHandle, instance_id: String) -> Result<(), String> {
+    error_log::event("inst", format!("remove {instance_id}"));
     let instance_id = instance_id
         .parse()
         .map_err(|e: uuid::Error| error_log::other("cmd:remove_network_instance", e))?;
@@ -332,6 +341,10 @@ async fn update_network_config_state(
     instance_id: String,
     disabled: bool,
 ) -> Result<(), String> {
+    error_log::event(
+        "inst",
+        format!("update_state {instance_id} disabled={disabled}"),
+    );
     let instance_id = instance_id
         .parse()
         .map_err(|e: uuid::Error| error_log::other("cmd:update_network_config_state", e))?;
@@ -867,7 +880,7 @@ fn record_boot_line(app: &AppHandle) {
         ));
         let gui_log_size = log_dir
             .as_ref()
-            .map(|d| d.join("exvlan.log"))
+            .and_then(|d| newest_kernel_log(d))
             .and_then(|p| std::fs::metadata(p).ok())
             .map(|m| m.len());
         line.push_str(&format!(" exvlan_log_size={gui_log_size:?}"));
@@ -1037,6 +1050,26 @@ fn read_error_log(app: AppHandle, tail_kb: Option<usize>) -> Result<String, Stri
     Ok(error_log::tail(limit))
 }
 
+/// 找到 `<dir>/exvlan.log*` 里最新的一个（tracing 的 daily 轮转会在文件名后加日期）。
+fn newest_kernel_log(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("exvlan.log"))
+                .unwrap_or(false)
+        })
+        .filter_map(|p| {
+            let modified = std::fs::metadata(&p).ok()?.modified().ok()?;
+            Some((modified, p))
+        })
+        .max_by_key(|(t, _)| *t)
+        .map(|(_, p)| p)
+}
+
 /// 打包诊断 zip：error.log + exvlan.log 尾部 + ui-state.json（脱敏）+ 摘要。
 fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     use std::io::Write as _;
@@ -1070,8 +1103,9 @@ fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> 
     }
 
     // 2) exvlan.log 尾部（内核 peer/握手/TUN 都在这里）
-    if let Ok(dir) = get_log_dir(app) {
-        let kernel_log = dir.join("exvlan.log");
+    if let Ok(dir) = get_log_dir(app)
+        && let Some(kernel_log) = newest_kernel_log(&dir)
+    {
         if let Ok(text) = std::fs::read_to_string(&kernel_log) {
             let lines: Vec<&str> = text.lines().rev().take(300).collect();
             let tail: Vec<&str> = lines.into_iter().rev().collect();
