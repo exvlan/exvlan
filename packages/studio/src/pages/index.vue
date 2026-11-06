@@ -28,6 +28,7 @@ import {
   diagnosticsInfo,
   ensureKernelService,
   getServiceStatus,
+  readErrorLog,
   reportBootState,
   reportFrontendError,
   serviceDefaultDirs,
@@ -67,9 +68,28 @@ async function onShareErrorLog() {
       await writeText(path)
       toast.add({ severity: 'info', summary: t('client.share_error_log'), detail: path, life: 6000 })
     }
+    return
   }
   catch (e: any) {
-    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 8000 })
+    // 系统分享不可用（插件命令缺失/无分享目标）：兜底把 error.log 复制到剪贴板
+    console.warn('share diagnostics failed, fallback to clipboard', e)
+    try {
+      const text = await readErrorLog(512)
+      if (text) {
+        await writeText(text)
+        toast.add({
+          severity: 'warn',
+          summary: t('client.share_error_log'),
+          detail: `分享不可用（${String(e)}）；已把 error.log 复制到剪贴板，直接粘贴即可`,
+          life: 12000,
+        })
+        return
+      }
+    }
+    catch (inner) {
+      console.error('clipboard fallback failed', inner)
+    }
+    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 10000 })
   }
 }
 

@@ -336,6 +336,83 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+// ---------------------------------------------------------------------------
+// events.log：GUI 侧事件流（FFI 调用 / VPN 权限 / TUN / 实例启停）
+//
+// 内核自身的 tracing 不一定会落到文件（Android 上尤其），事件流由 GUI 自己记，
+// 保证组网问题至少有调用链可看。
+// ---------------------------------------------------------------------------
+
+pub const EVENTS_FILE: &str = "events.log";
+const EVENTS_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
+struct EventsState {
+    dir: Option<PathBuf>,
+    file: Option<File>,
+    size: u64,
+}
+
+fn events_state() -> &'static Mutex<EventsState> {
+    static STATE: OnceLock<Mutex<EventsState>> = OnceLock::new();
+    STATE.get_or_init(|| {
+        Mutex::new(EventsState {
+            dir: None,
+            file: None,
+            size: 0,
+        })
+    })
+}
+
+pub fn init_events(dir: impl AsRef<Path>) {
+    let dir = dir.as_ref().to_path_buf();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join(EVENTS_FILE);
+    let Ok(file) = OpenOptions::new().create(true).append(true).open(&path) else {
+        return;
+    };
+    let size = file.metadata().map(|m| m.len()).unwrap_or_default();
+    if let Ok(mut st) = events_state().lock() {
+        st.dir = Some(dir);
+        st.file = Some(file);
+        st.size = size;
+    }
+}
+
+/// 记录一条事件（失败静默）。
+pub fn event(scope: &str, message: impl Display) {
+    let text = redact(&message.to_string()).replace('\n', " | ");
+    let line = format!("{} [{scope}] {}\n", timestamp(), truncate(&text, 4096));
+    let Ok(mut st) = events_state().lock() else {
+        return;
+    };
+    let Some(dir) = st.dir.clone() else {
+        return;
+    };
+    if st.size + line.len() as u64 > EVENTS_MAX_BYTES {
+        st.file = None;
+        let base = dir.join(EVENTS_FILE);
+        let _ = std::fs::remove_file(dir.join(format!("{EVENTS_FILE}.2")));
+        let _ = std::fs::rename(
+            dir.join(format!("{EVENTS_FILE}.1")),
+            dir.join(format!("{EVENTS_FILE}.2")),
+        );
+        let _ = std::fs::rename(&base, dir.join(format!("{EVENTS_FILE}.1")));
+        st.file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&base)
+            .ok();
+        st.size = 0;
+    }
+    if let Some(file) = st.file.as_mut()
+        && file.write_all(line.as_bytes()).is_ok()
+    {
+        st.size += line.len() as u64;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

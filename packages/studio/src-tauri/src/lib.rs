@@ -619,6 +619,7 @@ async fn init_rpc_connection(
     .map_err(|e| format!("{:#}", e))?;
     *client_manager_guard = Some(client_manager);
     error_log::record("mode", format!("desktop rpc connected: {client_url}"));
+    error_log::event("mode", format!("desktop rpc connected: {client_url}"));
 
     Ok(())
 }
@@ -637,6 +638,7 @@ async fn init_rpc_connection(
         .map_err(|_| "Failed to acquire write lock for client manager")?;
     *guard = Some(manager::GUIClientManager::new_ffi());
     error_log::record("mode", "mobile ffi transport ready");
+    error_log::event("mode", "mobile ffi transport ready");
     Ok(())
 }
 
@@ -717,7 +719,7 @@ fn init_gui_logging_with(app: &tauri::AppHandle, level: Option<&str>) {
         exvlan_rpc::log::ConsoleLoggerConfig::default(),
         exvlan_rpc::log::FileLoggerConfig {
             dir: Some(log_dir.to_string_lossy().to_string()),
-            level: Some(level),
+            level: Some(level.clone()),
             file: None,
             size_mb: Some(100),
             count: Some(10),
@@ -726,7 +728,17 @@ fn init_gui_logging_with(app: &tauri::AppHandle, level: Option<&str>) {
     if let Err(err) = exvlan_rpc::log::init(&config, true) {
         eprintln!("初始化 GUI 日志失败: {err:#}");
         error_log::record("log.init", format!("{err:#}"));
+        return;
     }
+    // 自检：记录级别与文件路径；文件大小在下次启动的 [boot] 行回报
+    let path = log_dir.join("exvlan.log");
+    let size = std::fs::metadata(&path)
+        .map(|m| m.len())
+        .unwrap_or_default();
+    error_log::record(
+        "log.selftest",
+        format!("level={level} path={} size={size}", path.display()),
+    );
 }
 
 /// Android：初始化 rustls 的平台证书校验器。
@@ -853,6 +865,12 @@ fn record_boot_line(app: &AppHandle) {
             " service_config_dir={} service_log_dir={}",
             dirs.config_dir, dirs.file_log_dir
         ));
+        let gui_log_size = log_dir
+            .as_ref()
+            .map(|d| d.join("exvlan.log"))
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map(|m| m.len());
+        line.push_str(&format!(" exvlan_log_size={gui_log_size:?}"));
     }
 
     error_log::record("boot", line);
@@ -1070,7 +1088,17 @@ fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> 
         let _ = zip.write_all(error_log::redact(&text).as_bytes());
     }
 
-    // 4) 摘要
+    // 4) events.log（GUI 事件流）
+    if let Ok(dir) = get_log_dir(app)
+        && let Ok(text) = std::fs::read_to_string(dir.join("events.log"))
+    {
+        let lines: Vec<&str> = text.lines().rev().take(500).collect();
+        let tail: Vec<&str> = lines.into_iter().rev().collect();
+        let _ = zip.start_file("events.log.tail", opts);
+        let _ = zip.write_all(error_log::redact(&tail.join("\n")).as_bytes());
+    }
+
+    // 5) 摘要
     let summary = format!(
         "version: {}\nos: {} ({})\nhome: {}\nlog_dir: {:?}\nconfig_dir: {:?}\nerror_log: {:?}\n",
         env!("CARGO_PKG_VERSION"),
@@ -3006,6 +3034,9 @@ pub fn run_gui() -> std::process::ExitCode {
             // 统一错误出口：必须在任何命令/FFI 调用之前就绪。
             // 20709 在 macOS 上踩到日志目录被 root 占用，这里多级兜底 + 自检/修复。
             ensure_error_log(&handle);
+            if let Ok(dir) = get_log_dir(&handle) {
+                error_log::init_events(&dir);
+            }
             init_android_tls();
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Ok(dir) = {

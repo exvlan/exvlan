@@ -19,3 +19,13 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# Tauri 移动端插件命令通过反射调用（commands[method.name]），
+# release 开启 minify 后必须保留注解成员，否则会报 "No command xxx found for plugin"。
+-keepclassmembers class * {
+    @app.tauri.annotation.Command <methods>;
+}
+-keepclassmembers class * {
+    @app.tauri.annotation.InvokeArg class *;
+}
+-keep class app.tauri.annotation.** { *; }
+-keep class com.plugin.vpnservice.** { *; }

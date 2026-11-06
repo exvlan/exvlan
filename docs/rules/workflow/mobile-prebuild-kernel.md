@@ -245,7 +245,7 @@ B3b 把 android 的 `is_client_running` 实现改成「FFI 实例列表非空」
 - 已新增 `ios-check.yml`：macOS runner 上 `cargo check` 设备与模拟器目标（无签名）。
 - 真机/商店包需要：Apple 开发者账号 + 证书 + provisioning profile；NetworkExtension 只能真机验证。
 
-## 落地结果（2026-11，P7 步骤 4-5 已完成，随 v26.410.20711 发布）
+## 落地结果（2026-11，P7 步骤 4-5 已完成，随 v26.410.20712 发布）
 
 | 步骤 | 落地内容 |
 |---|---|
@@ -264,5 +264,5 @@ B3b 把 android 的 `is_client_running` 实现改成「FFI 实例列表非空」
    不补 FFI 分发的话，移动端所有实例管理调用都会失败。
 4. 日志配置类型下沉到 `exvlan-rpc` 后，内核（`exvlan`）与 `exvlan-api` 需要补各自 CLI 配置的 rpc 侧适配。
 
-**发布验证（v26.410.20711）**：全量门禁 50 作业全绿；APK 体积
+**发布验证（v26.410.20712）**：全量门禁 50 作业全绿；APK 体积
 arm64 31.7→30.7MB、armeabi-v7a 22.8→22.2MB、x86_64 36.3→35.2MB、x86 35.9→34.6MB。
