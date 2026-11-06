@@ -1105,13 +1105,12 @@ fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> 
     // 2) exvlan.log 尾部（内核 peer/握手/TUN 都在这里）
     if let Ok(dir) = get_log_dir(app)
         && let Some(kernel_log) = newest_kernel_log(&dir)
+        && let Ok(text) = std::fs::read_to_string(&kernel_log)
     {
-        if let Ok(text) = std::fs::read_to_string(&kernel_log) {
-            let lines: Vec<&str> = text.lines().rev().take(300).collect();
-            let tail: Vec<&str> = lines.into_iter().rev().collect();
-            let _ = zip.start_file("exvlan.log.tail", opts);
-            let _ = zip.write_all(error_log::redact(&tail.join("\n")).as_bytes());
-        }
+        let lines: Vec<&str> = text.lines().rev().take(300).collect();
+        let tail: Vec<&str> = lines.into_iter().rev().collect();
+        let _ = zip.start_file("exvlan.log.tail", opts);
+        let _ = zip.write_all(error_log::redact(&tail.join("\n")).as_bytes());
     }
 
     // 3) ui-state.json（脱敏）
