@@ -145,6 +145,10 @@ rust {
 }
 
 dependencies {
+    // Android 上 rustls 的平台证书校验需要这段 Kotlin 组件；缺了会在运行时报
+    // "failed to call native verifier"。版本需与 Cargo.lock 的
+    // rustls-platform-verifier-android 一致（当前 0.2.0）。
+    implementation("rustls:rustls-platform-verifier:0.2.0")
     implementation("androidx.webkit:webkit:1.6.1")
     implementation("androidx.core:core:1.18.0")
     implementation("androidx.core:core-ktx:1.18.0")

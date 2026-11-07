@@ -3183,6 +3183,7 @@ dependencies = [
  "tempfile",
  "thunk-rs",
  "tokio",
+ "tracing",
  "url",
  "uuid",
  "winapi",

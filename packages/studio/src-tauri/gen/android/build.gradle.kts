@@ -13,6 +13,10 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // rustls-platform-verifier 的 Android 原生校验组件（Kotlin/AAR）
+        maven {
+            url = uri("https://github.com/rustls/rustls-platform-verifier/raw/maven-archive/android-release-support/maven/")
+        }
     }
 }
 
