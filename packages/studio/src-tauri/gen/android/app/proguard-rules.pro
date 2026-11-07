@@ -29,3 +29,9 @@
 }
 -keep class app.tauri.annotation.** { *; }
 -keep class com.plugin.vpnservice.** { *; }
+
+# rustls-platform-verifier 通过 JNI 按类名查找这些类（org.rustls.platformverifier.*），
+# AAR 本身不带 consumer rules，release 开 minify 后会被重命名 →
+# 运行时报 "failed to call native verifier"。必须整体保留。
+-keep class org.rustls.platformverifier.** { *; }
+-keepclassmembers class org.rustls.platformverifier.** { *; }
