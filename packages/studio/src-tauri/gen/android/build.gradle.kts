@@ -13,7 +13,11 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        // rustls-platform-verifier 的 Android 原生校验组件（Kotlin/AAR）
+        // rustls 的 Android 平台证书校验 AAR（注意 group 是 org.rustls）。
+        // 必须用 raw.githubusercontent：github.com/.../raw/ 会 302，gradle 解析不到。
+        maven {
+            url = uri("https://raw.githubusercontent.com/rustls/rustls-platform-verifier/maven-archive/android-release-support/maven/")
+        }
     }
 }
 
