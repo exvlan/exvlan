@@ -28,6 +28,7 @@ function buildSections(payload) {
   if (payload.summary) {
     sections.push(['摘要', String(payload.summary)]);
   }
+  sections.push(['网络自检', clip(payload.networkReport, MAX_BODY)]);
   sections.push(['error.log', clip(payload.errorLog, MAX_BODY)]);
   sections.push(['events.log (tail)', clip(payload.eventsTail, MAX_BODY)]);
   sections.push(['exvlan.log (tail)', clip(payload.kernelTail, MAX_BODY)]);

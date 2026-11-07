@@ -357,3 +357,53 @@ pub unsafe extern "C" fn get_error_msg(out: *mut *const c_char) {
 pub extern "C" fn free_string(s: *const c_char) {
     error::free_string(s)
 }
+
+/// 在 FFI 库内部初始化日志。
+///
+/// 为什么需要它：`libexvlan_ffi.so` 与主程序各自静态链接了 `log`/`tracing`，
+/// 全局 logger 是两份独立状态。GUI 注册的文件 logger 在 .so 里不可见，
+/// 内核的 peer/握手/TUN 日志会被直接丢弃。这里让 .so 自己也注册一份，
+/// 写进同一个目录（同一个文件），排查时能按时间对照。
+///
+/// 返回 0 成功，非 0 失败。
+///
+/// # Safety
+/// `dir` 必须是以 NUL 结尾的合法 C 字符串；`level` 可为空指针。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn exvlan_ffi_init_logging(
+    dir: *const std::ffi::c_char,
+    level: *const std::ffi::c_char,
+) -> std::ffi::c_int {
+    use exvlan_rpc::log::{ConsoleLoggerConfig, FileLoggerConfig, SimpleLoggingConfig};
+    use std::ffi::CStr;
+
+    if dir.is_null() {
+        return -1;
+    }
+    let Ok(dir) = unsafe { CStr::from_ptr(dir) }.to_str() else {
+        return -2;
+    };
+    let level = if level.is_null() {
+        None
+    } else {
+        unsafe { CStr::from_ptr(level) }
+            .to_str()
+            .ok()
+            .map(str::to_string)
+    };
+
+    let config = SimpleLoggingConfig::new(
+        ConsoleLoggerConfig::default(),
+        FileLoggerConfig {
+            dir: Some(dir.to_string()),
+            level,
+            file: None,
+            size_mb: Some(100),
+            count: Some(10),
+        },
+    );
+    match exvlan_rpc::log::init(&config, true) {
+        Ok(()) => 0,
+        Err(_) => -3,
+    }
+}

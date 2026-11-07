@@ -33,10 +33,9 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const toast = useToast()
 
-const isDesktop = computed(() => {
-  const platform = type()
-  return platform !== 'android' && platform !== 'ios'
-})
+const platform = type()
+const isMobile = platform === 'android' || platform === 'ios'
+const isDesktop = !isMobile
 
 type Section = 'general' | 'network' | 'logging' | 'about'
 const section = ref<Section>(props.initialSection ?? 'general')
@@ -144,6 +143,14 @@ async function openProjectHome() {
 const netChecking = ref(false)
 const netReport = ref('')
 
+async function copyNetworkReport() {
+  if (!netReport.value) {
+    return
+  }
+  await writeText(netReport.value)
+  toast.add({ severity: 'success', summary: t('web.common.success'), detail: t('settings.copy'), life: 2000 })
+}
+
 async function runNetworkCheck() {
   netChecking.value = true
   try {
@@ -198,12 +205,31 @@ watch(() => props.visible, (visible) => {
 
 <template>
   <Dialog
-    :visible="visible" modal :header="t('settings.title')" :style="{ width: '900px', maxWidth: '96vw' }"
+    :visible="visible" modal :header="t('settings.title')"
+    :style="isMobile
+      ? { width: '100vw', height: '100vh', maxWidth: '100vw', maxHeight: '100vh', margin: 0, borderRadius: 0 }
+      : { width: '900px', maxWidth: '96vw' }"
     @update:visible="emit('update:visible', $event)"
   >
-    <div class="flex" style="min-height: 460px">
+    <div :class="isMobile ? 'flex flex-col' : 'flex'" :style="isMobile ? {} : { minHeight: '460px' }">
       <!-- 左导航（微信式） -->
-      <nav class="flex flex-col gap-1 pr-3 border-r border-surface-200 dark:border-surface-700" style="width: 180px">
+      <!-- 移动端：顶部横向标签 -->
+      <nav v-if="isMobile" class="flex gap-1 mb-3 overflow-x-auto shrink-0">
+        <button
+          v-for="item in sections" :key="item.key" type="button"
+          class="flex items-center gap-1 rounded-full px-3 py-1.5 whitespace-nowrap text-sm"
+          :class="section === item.key
+            ? 'bg-emerald-500 text-white'
+            : 'bg-surface-100 dark:bg-surface-800'"
+          @click="section = item.key; item.key === 'network' && runDiagnostics()"
+        >
+          <i :class="item.icon" />
+          <span>{{ item.label }}</span>
+        </button>
+      </nav>
+
+      <!-- 桌面：左侧导航 -->
+      <nav v-else class="flex flex-col gap-1 pr-3 border-r border-surface-200 dark:border-surface-700" style="width: 180px">
         <button
           v-for="item in sections" :key="item.key" type="button"
           class="flex items-center gap-2 rounded px-3 py-2 text-left transition-colors"
@@ -218,7 +244,7 @@ watch(() => props.visible, (visible) => {
       </nav>
 
       <!-- 右侧内容 -->
-      <div class="flex-1 pl-6 overflow-y-auto" style="max-height: 460px">
+      <div class="flex-1 overflow-y-auto" :class="isMobile ? '' : 'pl-6'" :style="isMobile ? {} : { maxHeight: '460px' }">
         <!-- 通用 -->
         <div v-if="section === 'general'" class="flex flex-col">
           <div class="settings-row">
@@ -275,6 +301,8 @@ watch(() => props.visible, (visible) => {
             </div>
             <Button :label="t('settings.network_check_run')" size="small" severity="secondary"
               :loading="netChecking" @click="runNetworkCheck" />
+            <Button :label="t('settings.copy')" size="small" text icon="pi pi-copy"
+              :disabled="!netReport" @click="copyNetworkReport" />
           </div>
           <pre v-if="netReport" class="text-xs whitespace-pre-wrap break-all bg-surface-100 dark:bg-surface-800 rounded p-2 max-h-64 overflow-y-auto">{{ netReport }}</pre>
 

@@ -15,6 +15,7 @@ ffi-dataplane = ["exvlan/ffi-dataplane", "exvlan-core/proxy-smoltcp-stack"]
 [dependencies]
 exvlan = { workspace = true, default-features = true, features = ["tracing-log"] }
 exvlan-core = { workspace = true, default-features = true }
+exvlan-rpc = { workspace = true, features = ["logging", "management"] }
 
 once_cell.workspace = true
 tokio = { workspace = true, default-features = true, features = [

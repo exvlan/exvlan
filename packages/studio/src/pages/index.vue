@@ -61,6 +61,17 @@ async function normalizeMode(mode: Mode): Promise<Mode> {
   } as Mode
 }
 
+async function onCopyDiagnostics() {
+  try {
+    const text = await readErrorLog(512)
+    await writeText(text || '')
+    toast.add({ severity: 'success', summary: t('web.common.success'), detail: t('settings.copy'), life: 2000 })
+  }
+  catch (e: any) {
+    toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 6000 })
+  }
+}
+
 async function onShareErrorLog() {
   try {
     const path = await shareErrorLog()
@@ -713,6 +724,7 @@ const configServerConnectionStatus = computed(() => {
       <Button size="small" :label="t('client.retry_startup')" icon="pi pi-replay" @click="retryStartup" />
       <Button size="small" text :label="t('settings.service_check')" icon="pi pi-wrench" @click="openServiceCheck" />
       <Button size="small" text :label="t('settings.service_reinstall')" icon="pi pi-refresh" :loading="reinstalling" @click="onReinstallService" />
+      <Button size="small" text :label="t('settings.copy')" icon="pi pi-copy" @click="onCopyDiagnostics" />
       <Button size="small" text :label="t('client.share_error_log')" icon="pi pi-share-alt" @click="onShareErrorLog" />
     </div>
 

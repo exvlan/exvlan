@@ -3065,6 +3065,7 @@ dependencies = [
  "exvlan",
  "exvlan-core",
  "exvlan-proto",
+ "exvlan-rpc",
  "log",
  "once_cell",
  "serde_json",

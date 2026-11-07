@@ -728,6 +728,24 @@ fn init_gui_logging_with(app: &tauri::AppHandle, level: Option<&str>) {
             "info".to_string()
         }
     });
+    #[cfg(target_os = "android")]
+    {
+        // 同一目录再初始化一次 .so 内部的 logger（两份全局状态，必须各注册一份）
+        if let (Ok(dir_c), Ok(level_c)) = (
+            std::ffi::CString::new(log_dir.to_string_lossy().as_bytes()),
+            std::ffi::CString::new(level.as_bytes()),
+        ) {
+            unsafe extern "C" {
+                fn exvlan_ffi_init_logging(
+                    dir: *const std::ffi::c_char,
+                    level: *const std::ffi::c_char,
+                ) -> std::ffi::c_int;
+            }
+            let rc = unsafe { exvlan_ffi_init_logging(dir_c.as_ptr(), level_c.as_ptr()) };
+            error_log::record("log.ffi", format!("exvlan_ffi_init_logging rc={rc}"));
+        }
+    }
+
     let config = exvlan_rpc::log::SimpleLoggingConfig::new(
         exvlan_rpc::log::ConsoleLoggerConfig::default(),
         exvlan_rpc::log::FileLoggerConfig {
@@ -787,13 +805,9 @@ fn init_android_tls() {}
 
 // 获取日志目录的辅助函数
 fn get_log_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, tauri::Error> {
-    if cfg!(target_os = "android") {
-        // Android: cache_dir + logs 子目录
-        app.path().cache_dir().map(|p| p.join("logs"))
-    } else {
-        // 其他平台: 默认日志目录
-        app.path().app_log_dir()
-    }
+    // 所有平台统一用 app_log_dir：`error.log` 本来就在这，events/kernel 也放一起，
+    // 避免 Android 上出现「内部目录 / 外部 cache」两套路径。
+    app.path().app_log_dir()
 }
 
 #[tauri::command]
@@ -1007,9 +1021,8 @@ fn diagnostics_info(app: AppHandle) -> Result<DiagnosticsInfo, String> {
     })
 }
 
-/// 网络自检：实例状态 + 采集信息 + 最近事件/内核日志（排障用）。
-#[tauri::command]
-async fn network_diagnostics(app: AppHandle) -> Result<String, String> {
+/// 生成网络自检文本（供自检命令与诊断上传共用）。
+async fn build_network_report(app: &AppHandle) -> Result<String, String> {
     let mut out = format!(
         "app: {}\nos: {} ({})\n",
         env!("CARGO_PKG_VERSION"),
@@ -1041,7 +1054,7 @@ async fn network_diagnostics(app: AppHandle) -> Result<String, String> {
         out.push_str("client manager not initialized\n");
     }
 
-    if let Ok(dir) = get_log_dir(&app) {
+    if let Ok(dir) = get_log_dir(app) {
         if let Ok(text) = std::fs::read_to_string(dir.join("events.log")) {
             let tail: Vec<&str> = text.lines().rev().take(40).collect();
             out.push_str("--- events ---\n");
@@ -1060,6 +1073,12 @@ async fn network_diagnostics(app: AppHandle) -> Result<String, String> {
 
     error_log::event("diag", "network_diagnostics requested");
     Ok(out)
+}
+
+/// 网络自检：实例状态 + 采集信息 + 最近事件/内核日志（排障用）。
+#[tauri::command]
+async fn network_diagnostics(app: AppHandle) -> Result<String, String> {
+    build_network_report(&app).await
 }
 /// 前端启动状态上报（写进 `error.log` 的 `[boot.ui]`，便于对照模式/选网是否恢复）。
 #[tauri::command]
@@ -1249,6 +1268,8 @@ async fn upload_diagnostics(app: AppHandle) -> Result<String, String> {
         })
         .unwrap_or_default();
 
+    let network_report = build_network_report(&app).await.unwrap_or_default();
+
     let summary = format!(
         "app: {}\nos: {} ({})\nmode: {}\nlog_dir: {:?}",
         env!("CARGO_PKG_VERSION"),
@@ -1269,6 +1290,7 @@ async fn upload_diagnostics(app: AppHandle) -> Result<String, String> {
         "errorLog": error_log::redact(&error_log_text),
         "eventsTail": error_log::redact(&events_tail),
         "kernelTail": error_log::redact(&kernel_tail),
+        "networkReport": error_log::redact(&network_report),
     });
 
     let client = reqwest::Client::builder()
