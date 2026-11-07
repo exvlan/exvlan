@@ -1070,6 +1070,11 @@ fn newest_kernel_log(dir: &std::path::Path) -> Option<std::path::PathBuf> {
         .map(|(_, p)| p)
 }
 
+/// 诊断上传服务（Cloudflare Worker，见 packages/diagnostics）。
+const DIAG_UPLOAD_URL: &str = "https://exvlan-diag.era-x.cn/";
+/// 与 Worker 的 UPLOAD_KEY 一致，仅用于防滥用（拿到也只能往私有仓库灌 issue）。
+const DIAG_UPLOAD_KEY: &str = "5f06999dbefc2508435ed33ea0ccb10d";
+
 /// 打包诊断 zip：error.log + exvlan.log 尾部 + ui-state.json（脱敏）+ 摘要。
 fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     use std::io::Write as _;
@@ -1153,6 +1158,97 @@ fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> 
 
     zip.finish().map_err(|e| format!("写入 zip 失败: {e}"))?;
     Ok(path)
+}
+
+/// 上传诊断到私有仓库（Cloudflare Worker → exvlan/diagnostics issue）。
+#[tauri::command]
+async fn upload_diagnostics(app: AppHandle) -> Result<String, String> {
+    use tauri::Manager as _;
+
+    let error_log_text = error_log::tail(24_000);
+    let events_text = get_log_dir(&app)
+        .ok()
+        .and_then(|d| std::fs::read_to_string(d.join("events.log")).ok())
+        .unwrap_or_default();
+    let events_tail = events_text
+        .lines()
+        .rev()
+        .take(400)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let kernel_tail = get_log_dir(&app)
+        .ok()
+        .and_then(|d| newest_kernel_log(&d))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|text| {
+            text.lines()
+                .rev()
+                .take(300)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+
+    let summary = format!(
+        "app: {}\nos: {} ({})\nmode: {}\nlog_dir: {:?}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        app.path()
+            .app_config_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+        get_log_dir(&app).ok().map(|p| p.display().to_string()),
+    );
+
+    let payload = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "summary": summary,
+        "errorLog": error_log::redact(&error_log_text),
+        "eventsTail": error_log::redact(&events_tail),
+        "kernelTail": error_log::redact(&kernel_tail),
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(40))
+        .build()
+        .map_err(|e| error_log::other("cmd:upload_diagnostics", e))?;
+    let resp = client
+        .post(DIAG_UPLOAD_URL)
+        .header("x-diag-key", DIAG_UPLOAD_KEY)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| error_log::other("cmd:upload_diagnostics", e.to_string()))?;
+
+    let status = resp.status();
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| error_log::other("cmd:upload_diagnostics", e.to_string()))?;
+    if !status.is_success() {
+        return Err(format!("上传失败（HTTP {status}）: {body}"));
+    }
+    let urls = body
+        .get("urls")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    error_log::event("upload", format!("diagnostics uploaded: {urls}"));
+    Ok(urls)
 }
 
 /// 分享诊断包：Android 弹系统分享面板（zip）；桌面返回路径（前端打开目录）。
@@ -3160,6 +3256,7 @@ pub fn run_gui() -> std::process::ExitCode {
             error_log_path,
             read_error_log,
             share_error_log,
+            upload_diagnostics,
             ui_state::get_ui_state,
             ui_state::set_ui_state,
         ])

@@ -1,0 +1,14 @@
+{
+  "name": "@exvlan/diagnostics-worker",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Receives Exvlan diagnostics and files them as issues in exvlan/diagnostics",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.158.0"
+  }
+}

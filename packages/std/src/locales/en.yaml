@@ -122,6 +122,8 @@ settings:
   log_level: Log level
   open_log_dir: Open log directory
   copy_log_dir: Copy log path
+  upload_diag: Upload diagnostics
+  upload_diag_hint: Upload to the private repo and copy the link; falls back to sharing
   share_log: Share error log
   project: Project home
   copyright: Exvlan © 2026

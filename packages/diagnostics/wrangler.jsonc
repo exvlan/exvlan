@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "exvlan-diag",
+  "main": "src/index.js",
+  "compatibility_date": "2026-01-01",
+  "routes": [
+    { "pattern": "diag.exvlan.era-x.cn/*", "zone_name": "era-x.cn" }
+  ]
+}

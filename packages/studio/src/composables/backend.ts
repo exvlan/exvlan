@@ -298,3 +298,8 @@ export async function reportBootState(mode: string, lastInstance?: string | null
     // 诊断上报失败不影响启动
   }
 }
+
+/** 上传诊断到私有仓库（Cloudflare Worker），返回 issue 链接。 */
+export async function uploadDiagnostics() {
+  return await invoke<string>('upload_diagnostics')
+}

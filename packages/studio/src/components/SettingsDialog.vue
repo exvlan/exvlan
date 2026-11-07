@@ -7,7 +7,7 @@ import { useToast } from 'openvue'
 import type { Mode } from '~/composables/mode'
 import About from '~/components/About.vue'
 import KernelManager from '~/components/KernelManager.vue'
-import { serviceDiagnostics, serviceReinstall, serviceRestart } from '~/composables/backend'
+import { serviceDiagnostics, serviceReinstall, serviceRestart, uploadDiagnostics } from '~/composables/backend'
 
 const props = defineProps<{
   visible: boolean
@@ -138,6 +138,38 @@ async function openProjectHome() {
   }
   catch (e: any) {
     toast.add({ severity: 'error', summary: t('error'), detail: String(e), life: 6000 })
+  }
+}
+
+const uploading = ref(false)
+const CONSENT_KEY = 'diag_upload_consent'
+
+async function onUploadDiagnostics() {
+  if (localStorage.getItem(CONSENT_KEY) !== '1') {
+    const ok = window.confirm(
+      '将把诊断日志上传到私有仓库 exvlan/diagnostics（仅维护者可查看）。\n'
+      + '内容已脱敏（不含网络密钥/私钥/token），但会包含网络名、内网 IP、主机名。\n\n继续上传吗？',
+    )
+    if (!ok) {
+      return
+    }
+    localStorage.setItem(CONSENT_KEY, '1')
+  }
+  uploading.value = true
+  try {
+    const urls = await uploadDiagnostics()
+    if (urls) {
+      await writeText(urls)
+      toast.add({ severity: 'success', summary: t('settings.upload_diag'), detail: `已复制链接：${urls}`, life: 12000 })
+    }
+  }
+  catch (e: any) {
+    console.warn('upload diagnostics failed, fallback to share', e)
+    toast.add({ severity: 'warn', summary: t('settings.upload_diag'), detail: `上传失败（${String(e)}），改用分享`, life: 8000 })
+    emit('share-log')
+  }
+  finally {
+    uploading.value = false
   }
 }
 
@@ -278,6 +310,15 @@ watch(() => props.visible, (visible) => {
             </div>
             <Button :label="t('settings.share_log')" size="small" severity="secondary" icon="pi pi-share-alt"
               @click="emit('share-log')" />
+          </div>
+
+          <div class="settings-row">
+            <div class="flex-1">
+              <div class="font-medium">{{ t('settings.upload_diag') }}</div>
+              <div class="text-sm text-surface-500">{{ t('settings.upload_diag_hint') }}</div>
+            </div>
+            <Button :label="t('settings.upload_diag')" size="small" icon="pi pi-cloud-upload"
+              :loading="uploading" @click="onUploadDiagnostics" />
           </div>
         </div>
 
