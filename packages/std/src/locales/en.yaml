@@ -124,6 +124,9 @@ settings:
   copy_log_dir: Copy log path
   upload_diag: Upload diagnostics
   upload_diag_hint: Upload to the private repo and copy the link; falls back to sharing
+  network_check: Network check
+  network_check_hint: Inspect instances, TUN, collect info and recent logs
+  network_check_run: Run check
   share_log: Share error log
   project: Project home
   copyright: Exvlan © 2026

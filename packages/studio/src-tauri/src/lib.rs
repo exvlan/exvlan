@@ -1007,6 +1007,60 @@ fn diagnostics_info(app: AppHandle) -> Result<DiagnosticsInfo, String> {
     })
 }
 
+/// 网络自检：实例状态 + 采集信息 + 最近事件/内核日志（排障用）。
+#[tauri::command]
+async fn network_diagnostics(app: AppHandle) -> Result<String, String> {
+    let mut out = format!(
+        "app: {}\nos: {} ({})\n",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+
+    if let Ok(cm) = get_client_manager!() {
+        match cm.handle_list_network_instance_ids(app.clone()).await {
+            Ok(ids) => {
+                out.push_str(&format!(
+                    "instances: {}\n",
+                    serde_json::to_string(&ids).unwrap_or_default()
+                ));
+            }
+            Err(e) => out.push_str(&format!("list_instances failed: {e}\n")),
+        }
+        match cm.handle_collect_network_info(app.clone(), None).await {
+            Ok(info) => {
+                let text = serde_json::to_string(&info).unwrap_or_default();
+                out.push_str(&format!(
+                    "collect: {}\n",
+                    error_log::redact(&text.chars().take(4000).collect::<String>())
+                ));
+            }
+            Err(e) => out.push_str(&format!("collect failed: {e}\n")),
+        }
+    } else {
+        out.push_str("client manager not initialized\n");
+    }
+
+    if let Ok(dir) = get_log_dir(&app) {
+        if let Ok(text) = std::fs::read_to_string(dir.join("events.log")) {
+            let tail: Vec<&str> = text.lines().rev().take(40).collect();
+            out.push_str("--- events ---\n");
+            out.push_str(&tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
+            out.push('\n');
+        }
+        if let Some(p) = newest_kernel_log(&dir)
+            && let Ok(text) = std::fs::read_to_string(p)
+        {
+            let tail: Vec<&str> = text.lines().rev().take(40).collect();
+            out.push_str("--- kernel ---\n");
+            out.push_str(&tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
+            out.push('\n');
+        }
+    }
+
+    error_log::event("diag", "network_diagnostics requested");
+    Ok(out)
+}
 /// 前端启动状态上报（写进 `error.log` 的 `[boot.ui]`，便于对照模式/选网是否恢复）。
 #[tauri::command]
 fn report_boot_state(mode: String, last_instance: Option<String>, service_current: Option<bool>) {
@@ -3257,6 +3311,7 @@ pub fn run_gui() -> std::process::ExitCode {
             read_error_log,
             share_error_log,
             upload_diagnostics,
+            network_diagnostics,
             ui_state::get_ui_state,
             ui_state::set_ui_state,
         ])

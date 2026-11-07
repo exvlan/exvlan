@@ -7,7 +7,7 @@ import { useToast } from 'openvue'
 import type { Mode } from '~/composables/mode'
 import About from '~/components/About.vue'
 import KernelManager from '~/components/KernelManager.vue'
-import { serviceDiagnostics, serviceReinstall, serviceRestart, uploadDiagnostics } from '~/composables/backend'
+import { networkDiagnostics, serviceDiagnostics, serviceReinstall, serviceRestart, uploadDiagnostics } from '~/composables/backend'
 
 const props = defineProps<{
   visible: boolean
@@ -141,6 +141,22 @@ async function openProjectHome() {
   }
 }
 
+const netChecking = ref(false)
+const netReport = ref('')
+
+async function runNetworkCheck() {
+  netChecking.value = true
+  try {
+    netReport.value = await networkDiagnostics()
+  }
+  catch (e: any) {
+    netReport.value = String(e)
+  }
+  finally {
+    netChecking.value = false
+  }
+}
+
 const uploading = ref(false)
 const CONSENT_KEY = 'diag_upload_consent'
 
@@ -251,6 +267,16 @@ watch(() => props.visible, (visible) => {
             <Button :label="t('settings.service_check_run')" size="small" severity="secondary"
               :loading="checking" @click="runDiagnostics" />
           </div>
+
+          <div class="settings-row">
+            <div class="flex-1">
+              <div class="font-medium">{{ t('settings.network_check') }}</div>
+              <div class="text-sm text-surface-500">{{ t('settings.network_check_hint') }}</div>
+            </div>
+            <Button :label="t('settings.network_check_run')" size="small" severity="secondary"
+              :loading="netChecking" @click="runNetworkCheck" />
+          </div>
+          <pre v-if="netReport" class="text-xs whitespace-pre-wrap break-all bg-surface-100 dark:bg-surface-800 rounded p-2 max-h-64 overflow-y-auto">{{ netReport }}</pre>
 
           <KernelManager v-if="isDesktop" class="mt-2" />
 

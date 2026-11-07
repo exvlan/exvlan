@@ -145,10 +145,10 @@ rust {
 }
 
 dependencies {
-    // 注：rustls 的 Android 校验组件（org.rustls / rustls:*）目前官方 maven-archive
-    // 路径已 404，暂不引入；缺它时 reqwest 的 HTTPS 会报
-    // "failed to call native verifier"，App 侧已降级为「上传失败→分享日志」。
-    // 待上游给出可用的 artifact 坐标后在此补回。
+    // rustls 的 Android 平台证书校验组件（group 是 org.rustls）。
+    // 版本需与 Cargo.lock 的 rustls-platform-verifier-android 一致（0.2.0）。
+    // 缺它会报 "failed to call native verifier"，Android 上所有 HTTPS 失效。
+    implementation("org.rustls:rustls-platform-verifier:0.2.0")
     implementation("androidx.webkit:webkit:1.6.1")
     implementation("androidx.core:core:1.18.0")
     implementation("androidx.core:core-ktx:1.18.0")

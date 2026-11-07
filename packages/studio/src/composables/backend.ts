@@ -303,3 +303,8 @@ export async function reportBootState(mode: string, lastInstance?: string | null
 export async function uploadDiagnostics() {
   return await invoke<string>('upload_diagnostics')
 }
+
+/** 网络自检：实例/采集信息 + 最近事件与内核日志。 */
+export async function networkDiagnostics() {
+  return await invoke<string>('network_diagnostics')
+}
