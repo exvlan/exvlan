@@ -183,9 +183,35 @@ class TauriVpnService : VpnService() {
         dns?.let { builder.addDnsServer(it) }
 
         for (route in routes) {
-            val ipParts = route.split("/")
-            if (ipParts.size != 2) throw IllegalArgumentException("Invalid route cidr string")
-            builder.addRoute(ipParts[0], ipParts[1].toInt())
+            // 前端已做规范化；这里再兜一层，避免单条脏数据让整个 VPN 起不来。
+            val ipParts = route.trim().split("/")
+            val addr = ipParts.getOrNull(0)?.trim()
+            val prefix = ipParts.getOrNull(1)?.toIntOrNull()
+                ?: if (addr?.contains(":") == true) 128 else 32
+            // 只接受数字形式的地址，避免 getByName 触发 DNS 解析。
+            if (addr.isNullOrEmpty() || !addr.matches(Regex("^[0-9a-fA-F:.]+$"))) {
+                println("vpn skip invalid route: $route")
+                continue
+            }
+            try {
+                val inet = InetAddress.getByName(addr)
+                val raw = inet.address
+                val maxBits = raw.size * 8
+                if (prefix !in 0..maxBits) {
+                    println("vpn skip invalid route: $route (prefix $prefix)")
+                    continue
+                }
+                // 主机位清零：内核/Android 期望的是网络地址，避免把 host bits 带进 RTM_NEWROUTE。
+                val masked = raw.copyOf()
+                for (i in masked.indices) {
+                    val keep = (prefix - i * 8).coerceIn(0, 8)
+                    val mask = if (keep == 0) 0 else (0xFF shl (8 - keep)) and 0xFF
+                    masked[i] = (masked[i].toInt() and mask).toByte()
+                }
+                builder.addRoute(InetAddress.getByAddress(masked), prefix)
+            } catch (e: Exception) {
+                println("vpn skip invalid route: $route (${e.message})")
+            }
         }
         
         for (app in disallowedApplications) {

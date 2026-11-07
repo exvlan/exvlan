@@ -217,8 +217,28 @@ impl FileSink {
 #[cfg(feature = "management")]
 fn file_filter(level: LevelFilter) -> anyhow::Result<TargetFilter> {
     if level == LevelFilter::Off {
-        Ok(TargetFilter::off())
-    } else {
-        TargetFilter::from_environment(TargetFilter::with_default(level))
+        return Ok(TargetFilter::off());
     }
+    let mut filter = TargetFilter::with_default(level);
+    if level > LevelFilter::Info {
+        // 第三方 crate 的 DEBUG 会把内核日志淹没（诊断包里 2/3 是 DNS/HTTP 帧），
+        // 只保留 INFO 及以上；RUST_LOG 仍可覆盖。
+        for target in [
+            "hickory_proto",
+            "hickory_resolver",
+            "hickory_client",
+            "hyper",
+            "hyper_util",
+            "h2",
+            "reqwest",
+            "jni",
+            "rustls",
+            "tower",
+            "mio",
+            "quinn",
+        ] {
+            filter = filter.with_target(target, LevelFilter::Info);
+        }
+    }
+    TargetFilter::from_environment(filter)
 }

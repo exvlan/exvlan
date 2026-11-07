@@ -47,6 +47,9 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 static CLIENT_MANAGER: once_cell::sync::Lazy<RwLock<Option<manager::GUIClientManager>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));
 
+/// 最近一次交给内核的 TUN fd（0 表示尚未设置），写进自检便于确认隧道真的挂上了。
+static LAST_TUN_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
 macro_rules! get_client_manager {
     () => {{
         let guard = CLIENT_MANAGER
@@ -287,6 +290,7 @@ async fn set_logging_level(app: AppHandle, level: String) -> Result<(), String> 
 
 #[tauri::command]
 async fn set_tun_fd(fd: i32) -> Result<(), String> {
+    LAST_TUN_FD.store(fd, std::sync::atomic::Ordering::Relaxed);
     error_log::event("vpn", format!("set_tun_fd fd={fd}"));
     #[cfg(target_os = "android")]
     {
@@ -1022,13 +1026,23 @@ fn diagnostics_info(app: AppHandle) -> Result<DiagnosticsInfo, String> {
 }
 
 /// 生成网络自检文本（供自检命令与诊断上传共用）。
-async fn build_network_report(app: &AppHandle) -> Result<String, String> {
+async fn build_network_report(app: &AppHandle, frontend: Option<&str>) -> Result<String, String> {
     let mut out = format!(
-        "app: {}\nos: {} ({})\n",
+        "app: {}\nos: {} ({})\ntun_fd: {}\n",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
-        std::env::consts::ARCH
+        std::env::consts::ARCH,
+        LAST_TUN_FD.load(std::sync::atomic::Ordering::Relaxed),
     );
+
+    // 前端才有 VPN 运行时状态（实际下发的路由、dns、所属实例），由它一并带上来。
+    if let Some(text) = frontend.filter(|s| !s.trim().is_empty()) {
+        out.push_str("--- frontend ---\n");
+        out.push_str(&error_log::redact(text));
+        if !text.ends_with('\n') {
+            out.push('\n');
+        }
+    }
 
     if let Ok(cm) = get_client_manager!() {
         match cm.handle_list_network_instance_ids(app.clone()).await {
@@ -1041,12 +1055,107 @@ async fn build_network_report(app: &AppHandle) -> Result<String, String> {
             Err(e) => out.push_str(&format!("list_instances failed: {e}\n")),
         }
         match cm.handle_collect_network_info(app.clone(), None).await {
-            Ok(info) => {
-                let text = serde_json::to_string(&info).unwrap_or_default();
-                out.push_str(&format!(
-                    "collect: {}\n",
-                    error_log::redact(&text.chars().take(4000).collect::<String>())
-                ));
+            Ok(resp) => {
+                let map = resp.info.map(|m| m.map).unwrap_or_default();
+                if map.is_empty() {
+                    out.push_str("collect: <empty>\n");
+                }
+                for (inst_id, info) in map {
+                    out.push_str(&format!("--- instance {inst_id} ---\n"));
+                    out.push_str(&format!("running: {}\n", info.running));
+                    if let Some(err) = info.error_msg.as_deref().filter(|s| !s.is_empty()) {
+                        out.push_str(&format!("error_msg: {err}\n"));
+                    }
+
+                    if let Some(node) = info.my_node_info.as_ref() {
+                        out.push_str(&format!(
+                            "peer_id: {}\nhostname: {}\nversion: {}\n",
+                            node.peer_id, node.hostname, node.version
+                        ));
+                        if let Some(v4) = node.virtual_ipv4.as_ref() {
+                            let addr = v4
+                                .address
+                                .as_ref()
+                                .map(ToString::to_string)
+                                .unwrap_or_default();
+                            out.push_str(&format!("virtual_ipv4: {addr}/{}\n", v4.network_length));
+                        }
+                        if let Some(ips) = node.ips.as_ref() {
+                            if let Some(p) = ips.public_ipv4.as_ref() {
+                                out.push_str(&format!("public_ipv4: {p}\n"));
+                            }
+                            if let Some(p) = ips.public_ipv6.as_ref() {
+                                out.push_str(&format!("public_ipv6: {p}\n"));
+                            }
+                            let v4s: Vec<String> = ips
+                                .interface_ipv4s
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect();
+                            let v6s: Vec<String> = ips
+                                .interface_ipv6s
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect();
+                            out.push_str(&format!("interface_ipv4: [{}]\n", v4s.join(", ")));
+                            out.push_str(&format!("interface_ipv6: [{}]\n", v6s.join(", ")));
+                        }
+                        if !node.listeners.is_empty() {
+                            let listeners: Vec<String> =
+                                node.listeners.iter().map(ToString::to_string).collect();
+                            out.push_str(&format!("listeners: [{}]\n", listeners.join(", ")));
+                        }
+                    }
+
+                    out.push_str(&format!(
+                        "routes: {} (下发给 VpnService 的以 frontend 段为准)\n",
+                        info.routes.len()
+                    ));
+                    for r in &info.routes {
+                        let v4 = r
+                            .ipv4_addr
+                            .as_ref()
+                            .map(|inet| {
+                                let addr = inet
+                                    .address
+                                    .as_ref()
+                                    .map(ToString::to_string)
+                                    .unwrap_or_default();
+                                format!("{addr}/{}", inet.network_length)
+                            })
+                            .unwrap_or_default();
+                        let v6 = r
+                            .ipv6_addr
+                            .as_ref()
+                            .map(|inet| {
+                                let addr = inet
+                                    .address
+                                    .as_ref()
+                                    .map(ToString::to_string)
+                                    .unwrap_or_default();
+                                format!("{addr}/{}", inet.network_length)
+                            })
+                            .unwrap_or_default();
+                        out.push_str(&format!(
+                            "  peer={} v4={v4} v6={v6} cost={} next_hop={} hostname={} proxy=[{}]\n",
+                            r.peer_id,
+                            r.cost,
+                            r.next_hop_peer_id,
+                            r.hostname,
+                            r.proxy_cidrs.join(", "),
+                        ));
+                    }
+
+                    out.push_str(&format!("peers: {}\n", info.peers.len()));
+                    for p in &info.peers {
+                        out.push_str(&format!(
+                            "  peer={} conns={} direct_conns={}\n",
+                            p.peer_id,
+                            p.conns.len(),
+                            p.directly_connected_conns.len(),
+                        ));
+                    }
+                }
             }
             Err(e) => out.push_str(&format!("collect failed: {e}\n")),
         }
@@ -1056,7 +1165,7 @@ async fn build_network_report(app: &AppHandle) -> Result<String, String> {
 
     if let Ok(dir) = get_log_dir(app) {
         if let Ok(text) = std::fs::read_to_string(dir.join("events.log")) {
-            let tail: Vec<&str> = text.lines().rev().take(40).collect();
+            let tail: Vec<&str> = text.lines().rev().take(512).collect();
             out.push_str("--- events ---\n");
             out.push_str(&tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
             out.push('\n');
@@ -1064,7 +1173,7 @@ async fn build_network_report(app: &AppHandle) -> Result<String, String> {
         if let Some(p) = newest_kernel_log(&dir)
             && let Ok(text) = std::fs::read_to_string(p)
         {
-            let tail: Vec<&str> = text.lines().rev().take(40).collect();
+            let tail: Vec<&str> = text.lines().rev().take(2048).collect();
             out.push_str("--- kernel ---\n");
             out.push_str(&tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
             out.push('\n');
@@ -1075,10 +1184,28 @@ async fn build_network_report(app: &AppHandle) -> Result<String, String> {
     Ok(out)
 }
 
+/// 记录最终下发的 VPN 路由（移动端排查用）。
+#[tauri::command]
+fn log_vpn_routes(routes: Vec<String>) {
+    let mut text = format!("count={} [", routes.len());
+    for (i, r) in routes.iter().enumerate() {
+        if i > 0 {
+            text.push_str(", ");
+        }
+        text.push_str(r);
+        if text.len() > 2048 {
+            text.push_str(", …");
+            break;
+        }
+    }
+    text.push(']');
+    error_log::event("vpn", format!("routes {text}"));
+}
+
 /// 网络自检：实例状态 + 采集信息 + 最近事件/内核日志（排障用）。
 #[tauri::command]
-async fn network_diagnostics(app: AppHandle) -> Result<String, String> {
-    build_network_report(&app).await
+async fn network_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<String, String> {
+    build_network_report(&app, frontend.as_deref()).await
 }
 /// 前端启动状态上报（写进 `error.log` 的 `[boot.ui]`，便于对照模式/选网是否恢复）。
 #[tauri::command]
@@ -1148,8 +1275,29 @@ const DIAG_UPLOAD_URL: &str = "https://exvlan-diag.era-x.cn/";
 /// 与 Worker 的 UPLOAD_KEY 一致，仅用于防滥用（拿到也只能往私有仓库灌 issue）。
 const DIAG_UPLOAD_KEY: &str = "5f06999dbefc2508435ed33ea0ccb10d";
 
-/// 打包诊断 zip：error.log + exvlan.log 尾部 + ui-state.json（脱敏）+ 摘要。
-fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+/// 单份日志进 zip 的上限（压缩后很小，但避免把 10MB 的轮转文件反复读进内存）。
+const DIAG_LOG_CAP: usize = 8 * 1024 * 1024;
+
+/// 读取文件尾部（最多 `cap` 字节，保证从行首开始，避免截断出半个字符）。
+fn read_capped(path: &std::path::Path, cap: usize) -> Option<String> {
+    let mut bytes = std::fs::read(path).ok()?;
+    let truncated = bytes.len() > cap;
+    if truncated {
+        bytes = bytes.split_off(bytes.len() - cap);
+    }
+    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    if truncated && let Some(pos) = text.find('\n') {
+        text = text[pos + 1..].to_owned();
+    }
+    Some(text)
+}
+
+/// 打包诊断 zip：error.log + 内核日志 + events.log + 网络自检 + ui-state + 摘要。
+/// 传入 `network_report` 时一并写入（上传场景会用前端状态生成完整版）。
+fn build_diagnostics_zip(
+    app: &AppHandle,
+    network_report: &str,
+) -> Result<std::path::PathBuf, String> {
     use std::io::Write as _;
     use tauri::Manager as _;
     use zip::ZipWriter;
@@ -1172,26 +1320,38 @@ fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> 
     let mut zip = ZipWriter::new(file);
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    // 1) error.log
+    // 1) error.log（完整当前文件，脱敏）
     if let Some(log) = error_log::path()
-        && let Ok(text) = std::fs::read_to_string(&log)
+        && let Some(text) = read_capped(&log, DIAG_LOG_CAP)
     {
         let _ = zip.start_file("error.log", opts);
         let _ = zip.write_all(error_log::redact(&text).as_bytes());
     }
 
-    // 2) exvlan.log 尾部（内核 peer/握手/TUN 都在这里）
+    // 2) 内核日志（peer/握手/TUN/路由都在这里；取尾部但远大于自检行数）
     if let Ok(dir) = get_log_dir(app)
         && let Some(kernel_log) = newest_kernel_log(&dir)
-        && let Ok(text) = std::fs::read_to_string(&kernel_log)
+        && let Some(text) = read_capped(&kernel_log, DIAG_LOG_CAP)
     {
-        let lines: Vec<&str> = text.lines().rev().take(300).collect();
-        let tail: Vec<&str> = lines.into_iter().rev().collect();
-        let _ = zip.start_file("exvlan.log.tail", opts);
-        let _ = zip.write_all(error_log::redact(&tail.join("\n")).as_bytes());
+        let _ = zip.start_file("exvlan.log", opts);
+        let _ = zip.write_all(error_log::redact(&text).as_bytes());
     }
 
-    // 3) ui-state.json（脱敏）
+    // 3) events.log（GUI 事件流：VPN 路由、诊断请求都在这里）
+    if let Ok(dir) = get_log_dir(app)
+        && let Some(text) = read_capped(&dir.join("events.log"), DIAG_LOG_CAP)
+    {
+        let _ = zip.start_file("events.log", opts);
+        let _ = zip.write_all(error_log::redact(&text).as_bytes());
+    }
+
+    // 4) 网络自检（结构化：实例/节点/路由/接口/VPN 状态）
+    if !network_report.trim().is_empty() {
+        let _ = zip.start_file("network-report.txt", opts);
+        let _ = zip.write_all(error_log::redact(network_report).as_bytes());
+    }
+
+    // 5) ui-state.json（脱敏）
     if let Ok(dir) = app.path().app_config_dir()
         && let Ok(text) = std::fs::read_to_string(dir.join("ui-state.json"))
     {
@@ -1199,17 +1359,7 @@ fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> 
         let _ = zip.write_all(error_log::redact(&text).as_bytes());
     }
 
-    // 4) events.log（GUI 事件流）
-    if let Ok(dir) = get_log_dir(app)
-        && let Ok(text) = std::fs::read_to_string(dir.join("events.log"))
-    {
-        let lines: Vec<&str> = text.lines().rev().take(500).collect();
-        let tail: Vec<&str> = lines.into_iter().rev().collect();
-        let _ = zip.start_file("events.log.tail", opts);
-        let _ = zip.write_all(error_log::redact(&tail.join("\n")).as_bytes());
-    }
-
-    // 5) 摘要
+    // 6) 摘要
     let summary = format!(
         "version: {}\nos: {} ({})\nhome: {}\nlog_dir: {:?}\nconfig_dir: {:?}\nerror_log: {:?}\n",
         env!("CARGO_PKG_VERSION"),
@@ -1233,45 +1383,20 @@ fn build_diagnostics_zip(app: &AppHandle) -> Result<std::path::PathBuf, String> 
     Ok(path)
 }
 
-/// 上传诊断到私有仓库（Cloudflare Worker → exvlan/diagnostics issue）。
+/// 上传诊断到私有仓库（Cloudflare Worker → exvlan/diagnostics issue + KV 里的完整 zip）。
 #[tauri::command]
-async fn upload_diagnostics(app: AppHandle) -> Result<String, String> {
+async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<String, String> {
     use tauri::Manager as _;
 
-    let error_log_text = error_log::tail(24_000);
-    let events_text = get_log_dir(&app)
-        .ok()
-        .and_then(|d| std::fs::read_to_string(d.join("events.log")).ok())
+    let network_report = build_network_report(&app, frontend.as_deref())
+        .await
         .unwrap_or_default();
-    let events_tail = events_text
-        .lines()
-        .rev()
-        .take(400)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n");
-    let kernel_tail = get_log_dir(&app)
-        .ok()
-        .and_then(|d| newest_kernel_log(&d))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|text| {
-            text.lines()
-                .rev()
-                .take(300)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_default();
-
-    let network_report = build_network_report(&app).await.unwrap_or_default();
+    let zip_path = build_diagnostics_zip(&app, &network_report)?;
+    let zip_bytes = std::fs::read(&zip_path).map_err(|e| format!("读取诊断包失败: {e}"))?;
+    let zip_size = zip_bytes.len();
 
     let summary = format!(
-        "app: {}\nos: {} ({})\nmode: {}\nlog_dir: {:?}",
+        "app: {}\nos: {} ({})\nmode: {}\nlog_dir: {:?}\nzip: {} bytes",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,
@@ -1280,27 +1405,27 @@ async fn upload_diagnostics(app: AppHandle) -> Result<String, String> {
             .map(|p| p.display().to_string())
             .unwrap_or_default(),
         get_log_dir(&app).ok().map(|p| p.display().to_string()),
+        zip_size,
     );
 
-    let payload = serde_json::json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "os": std::env::consts::OS,
-        "arch": std::env::consts::ARCH,
-        "summary": summary,
-        "errorLog": error_log::redact(&error_log_text),
-        "eventsTail": error_log::redact(&events_tail),
-        "kernelTail": error_log::redact(&kernel_tail),
-        "networkReport": error_log::redact(&network_report),
-    });
-
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(40))
+        .timeout(std::time::Duration::from_secs(90))
         .build()
         .map_err(|e| error_log::other("cmd:upload_diagnostics", e))?;
+    let mut upload_url = url::Url::parse(&format!("{DIAG_UPLOAD_URL}zip"))
+        .map_err(|e| error_log::other("cmd:upload_diagnostics", e.to_string()))?;
+    upload_url
+        .query_pairs_mut()
+        .append_pair("version", env!("CARGO_PKG_VERSION"))
+        .append_pair("os", std::env::consts::OS)
+        .append_pair("arch", std::env::consts::ARCH)
+        .append_pair("summary", summary.as_str());
+
     let resp = client
-        .post(DIAG_UPLOAD_URL)
+        .post(upload_url)
         .header("x-diag-key", DIAG_UPLOAD_KEY)
-        .json(&payload)
+        .header("content-type", "application/zip")
+        .body(zip_bytes)
         .send()
         .await
         .map_err(|e| error_log::other("cmd:upload_diagnostics", e.to_string()))?;
@@ -1313,25 +1438,28 @@ async fn upload_diagnostics(app: AppHandle) -> Result<String, String> {
     if !status.is_success() {
         return Err(format!("上传失败（HTTP {status}）: {body}"));
     }
-    let urls = body
-        .get("urls")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .unwrap_or_default();
-    error_log::event("upload", format!("diagnostics uploaded: {urls}"));
-    Ok(urls)
+
+    let mut links = Vec::new();
+    if let Some(arr) = body.get("urls").and_then(|v| v.as_array()) {
+        links.extend(arr.iter().filter_map(|v| v.as_str()).map(str::to_owned));
+    }
+    if let Some(zip_url) = body.get("zipUrl").and_then(|v| v.as_str()) {
+        links.push(format!("zip: {zip_url}"));
+    }
+    let text = links.join("\n");
+    error_log::event(
+        "upload",
+        format!("diagnostics uploaded ({} bytes): {text}", zip_size),
+    );
+    Ok(text)
 }
 
 /// 分享诊断包：Android 弹系统分享面板（zip）；桌面返回路径（前端打开目录）。
 #[tauri::command]
-fn share_error_log(app: AppHandle) -> Result<String, String> {
+async fn share_error_log(app: AppHandle) -> Result<String, String> {
     ensure_error_log(&app);
-    let path = build_diagnostics_zip(&app)?;
+    let report = build_network_report(&app, None).await.unwrap_or_default();
+    let path = build_diagnostics_zip(&app, &report)?;
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_vpnservice::VpnserviceExt;
@@ -3334,6 +3462,7 @@ pub fn run_gui() -> std::process::ExitCode {
             share_error_log,
             upload_diagnostics,
             network_diagnostics,
+            log_vpn_routes,
             ui_state::get_ui_state,
             ui_state::set_ui_state,
         ])

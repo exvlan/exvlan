@@ -138,6 +138,12 @@ impl TargetFilter {
         Self::with_default(LevelFilter::Off)
     }
 
+    /// 给指定 target 单独设级别（用于压制第三方 crate 的 DEBUG 噪音）。
+    pub(super) fn with_target(mut self, target: &str, level: LevelFilter) -> Self {
+        self.targets.push((target.into(), level));
+        self
+    }
+
     fn with_default(default: LevelFilter) -> Self {
         Self {
             default,
