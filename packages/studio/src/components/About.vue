@@ -49,6 +49,11 @@ const diagnosticsText = computed(() => {
 
 async function loadDiagnostics() {
   diagnostics.value = await diagnosticsInfo().catch(() => null);
+  // 应用版本优先取 Rust 侧的构建版本串（含预览渠道与 short sha），
+  // package.json 的 version 只是标准版本，无法区分预览构建。
+  if (diagnostics.value?.version) {
+    appVersion.value = diagnostics.value.version;
+  }
 }
 
 /* ---------------- 最近一次诊断上传（设置页写 localStorage，这里展示） ---------------- */

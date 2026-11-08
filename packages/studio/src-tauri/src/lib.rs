@@ -58,6 +58,15 @@ static LAST_TUN_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32:
 /// 与系统路径、helper 命名保持一致。
 pub const SERVICE_LABEL: &str = "era.exvlan.studio";
 
+/// 构建版本串：`<标准版本>[-<channel>.<n>][+<sha6>]`。
+///
+/// 由 CI 的 `script/ci/build-version.sh` 通过 `EXVLAN_BUILD_VERSION` 注入；
+/// 本地构建没有该变量时回落到 crate 版本。
+pub const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 /// 正式版才置 `true`：首次正式版启动、新服务健康后清理旧版本残留。
 ///
 /// preview 期间必须保持 `false`——旧目录/旧 plist/旧快照全部保留，
@@ -81,7 +90,7 @@ fn exvlan_version() -> Result<String, String> {
     if let Some(version) = kernel::installed_version() {
         return Ok(version);
     }
-    Ok(env!("CARGO_PKG_VERSION").to_string())
+    Ok(BUILD_VERSION.to_string())
 }
 
 #[tauri::command]
@@ -889,7 +898,7 @@ fn record_boot_line(app: &AppHandle) {
 
     let mut line = format!(
         "version={} os={} arch={} home={home} log_dir={:?} writable={log_writable:?} config_dir={:?} writable={config_writable:?} error_log={:?}",
-        env!("CARGO_PKG_VERSION"),
+        BUILD_VERSION,
         std::env::consts::OS,
         std::env::consts::ARCH,
         log_dir.as_ref().map(|p| p.display().to_string()),
@@ -1021,7 +1030,7 @@ fn diagnostics_info(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         (None, None, None, None, None);
 
     Ok(DiagnosticsInfo {
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: BUILD_VERSION.to_string(),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         home: std::env::var("HOME").unwrap_or_default(),
@@ -1043,7 +1052,7 @@ fn diagnostics_info(app: AppHandle) -> Result<DiagnosticsInfo, String> {
 async fn build_network_report(app: &AppHandle, frontend: Option<&str>) -> Result<String, String> {
     let mut out = format!(
         "app: {}\nos: {} ({})\ntun_fd: {}\n",
-        env!("CARGO_PKG_VERSION"),
+        BUILD_VERSION,
         std::env::consts::OS,
         std::env::consts::ARCH,
         LAST_TUN_FD.load(std::sync::atomic::Ordering::Relaxed),
@@ -1476,7 +1485,7 @@ fn build_diagnostics_zip(
     // 6) 摘要
     let summary = format!(
         "version: {}\nos: {} ({})\nhome: {}\nlog_dir: {:?}\nconfig_dir: {:?}\nerror_log: {:?}\n",
-        env!("CARGO_PKG_VERSION"),
+        BUILD_VERSION,
         std::env::consts::OS,
         std::env::consts::ARCH,
         std::env::var("HOME").unwrap_or_default(),
@@ -1511,7 +1520,7 @@ async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<
 
     let summary = format!(
         "app: {}\nos: {} ({})\nmode: {}\nlog_dir: {:?}\nzip: {} bytes",
-        env!("CARGO_PKG_VERSION"),
+        BUILD_VERSION,
         std::env::consts::OS,
         std::env::consts::ARCH,
         app.path()
@@ -1530,7 +1539,7 @@ async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<
         .map_err(|e| error_log::other("cmd:upload_diagnostics", e.to_string()))?;
     upload_url
         .query_pairs_mut()
-        .append_pair("version", env!("CARGO_PKG_VERSION"))
+        .append_pair("version", BUILD_VERSION)
         .append_pair("os", std::env::consts::OS)
         .append_pair("arch", std::env::consts::ARCH)
         .append_pair("summary", summary.as_str());
@@ -3395,7 +3404,7 @@ fn service_diagnostics(rpc_portal: Option<String>) -> Result<String, String> {
 
     let report = format!(
         "app_version: {}\nos: {} ({})\nkernel_installed: {}\nkernel_version: {}\nservice_status: {}\nrpc_portal: {} (reachable={})\nconfig_dir: {}\nlog_dir: {}\ndaemon_log: {}\n--- daemon log tail ---\n{}",
-        env!("CARGO_PKG_VERSION"),
+        BUILD_VERSION,
         std::env::consts::OS,
         std::env::consts::ARCH,
         kernel::is_installed(),
