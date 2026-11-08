@@ -2,11 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod elevate;
-mod logger;
 #[cfg(target_os = "android")]
 mod ffi;
 mod helper;
 mod kernel;
+mod logger;
 mod networks;
 mod paths;
 mod prefs;
@@ -1782,7 +1782,10 @@ async fn diag_token() -> Result<String, String> {
         let client = match build_upload_client(use_proxy, &ipv4, &host) {
             Ok(c) => c,
             Err(err) => {
-                logger::record("upload", format!("token {label} client build failed: {err}"));
+                logger::record(
+                    "upload",
+                    format!("token {label} client build failed: {err}"),
+                );
                 continue;
             }
         };
@@ -1797,7 +1800,10 @@ async fn diag_token() -> Result<String, String> {
             }
             Err(err) => logger::record(
                 "upload",
-                format!("token {label} failed in {}ms: {err}", started.elapsed().as_millis()),
+                format!(
+                    "token {label} failed in {}ms: {err}",
+                    started.elapsed().as_millis()
+                ),
             ),
         }
     }
@@ -1816,7 +1822,10 @@ async fn diag_token() -> Result<String, String> {
             }
             Err(err) => logger::record(
                 "upload",
-                format!("token C(curl) failed in {}ms: {err}", started.elapsed().as_millis()),
+                format!(
+                    "token C(curl) failed in {}ms: {err}",
+                    started.elapsed().as_millis()
+                ),
             ),
         }
     }
@@ -1847,7 +1856,10 @@ async fn upload_with_fallback(
             }
             Err(err) => logger::record(
                 "upload",
-                format!("try A(direct) failed in {}ms: {err}", started.elapsed().as_millis()),
+                format!(
+                    "try A(direct) failed in {}ms: {err}",
+                    started.elapsed().as_millis()
+                ),
             ),
         },
         Err(err) => logger::record("upload", format!("try A client build failed: {err}")),
@@ -1865,7 +1877,10 @@ async fn upload_with_fallback(
             }
             Err(err) => logger::record(
                 "upload",
-                format!("try B(proxy) failed in {}ms: {err}", started.elapsed().as_millis()),
+                format!(
+                    "try B(proxy) failed in {}ms: {err}",
+                    started.elapsed().as_millis()
+                ),
             ),
         },
         Err(err) => logger::record("upload", format!("try B client build failed: {err}")),
@@ -1884,7 +1899,10 @@ async fn upload_with_fallback(
             }
             Err(err) => logger::record(
                 "upload",
-                format!("try C(curl) failed in {}ms: {err}", started.elapsed().as_millis()),
+                format!(
+                    "try C(curl) failed in {}ms: {err}",
+                    started.elapsed().as_millis()
+                ),
             ),
         }
     }
@@ -2366,9 +2384,7 @@ mod manager {
         ) -> Result<(), String> {
             let instance_id = cfg.get_id();
             app.emit("pre_run_network_instance", instance_id.to_string())
-                .map_err(|e| {
-                    logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
-                })?;
+                .map_err(|e| logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e))?;
 
             #[cfg(target_os = "android")]
             if !cfg.get_flags().no_tun {
@@ -2377,20 +2393,14 @@ mod manager {
                         self.disable_instances_with_tun(app, false)
                             .await
                             .map_err(|e| {
-                                logger::other(
-                                    "cmd:get_enabled_instances_with_web_like_tun_ids",
-                                    e,
-                                )
+                                logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
                             })?;
                     }
                     PersistedConfigSource::Web => {
                         self.disable_instances_with_tun(app, true)
                             .await
                             .map_err(|e| {
-                                logger::other(
-                                    "cmd:get_enabled_instances_with_web_like_tun_ids",
-                                    e,
-                                )
+                                logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
                             })?;
                         if self.get_enabled_instances_with_tun_ids().next().is_some() {
                             return Err(
@@ -2411,9 +2421,7 @@ mod manager {
                     })?,
                     source,
                 )
-                .map_err(|e| {
-                    logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
-                })?;
+                .map_err(|e| logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e))?;
 
             Ok(())
         }
@@ -2426,9 +2434,7 @@ mod manager {
             self.storage.enabled_networks.insert(*instance_id);
 
             app.emit("post_run_network_instance", instance_id.to_string())
-                .map_err(|e| {
-                    logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
-                })?;
+                .map_err(|e| logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e))?;
 
             Ok(())
         }
@@ -2442,9 +2448,7 @@ mod manager {
             self.storage
                 .delete_network_configs(app.clone(), ids)
                 .await
-                .map_err(|e| {
-                    logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e)
-                })?;
+                .map_err(|e| logger::other("cmd:get_enabled_instances_with_web_like_tun_ids", e))?;
             self.notify_vpn_stop_if_no_tun(app)?;
             Ok(())
         }
@@ -3022,11 +3026,13 @@ mod service {
                         }
                         use std::os::unix::fs::PermissionsExt as _;
                         // 配置目录只允许 root（含网络密钥）；日志目录保持可读，便于分享与诊断。
-                        let mode = if dir == &opts.config_dir { 0o700 } else { 0o755 };
-                        let _ = std::fs::set_permissions(
-                            path,
-                            std::fs::Permissions::from_mode(mode),
-                        );
+                        let mode = if dir == &opts.config_dir {
+                            0o700
+                        } else {
+                            0o755
+                        };
+                        let _ =
+                            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
                     }
                     crate::logger::record("service.dirs", format!("ready: {dir}"));
                 }
