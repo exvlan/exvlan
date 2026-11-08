@@ -38,7 +38,6 @@ harness = false
 exvlan-core.workspace = true
 exvlan-proto = { workspace = true, features = ["api", "core"] }
 exvlan-rpc.workspace = true
-git-version = "0.3.9"
 
 tracing.workspace = true
 log = { workspace = true, features = ["std"] }
@@ -372,7 +371,12 @@ jemalloc-prof = [
   "jemalloc-sys/profiling",
   "jemalloc-sys/stats",
 ]
-tracing = ["tokio/tracing", "dep:console-subscriber", "dep:tracing-subscriber", "exvlan-rpc/tracing"]
+tracing = [
+  "tokio/tracing",
+  "dep:console-subscriber",
+  "dep:tracing-subscriber",
+  "exvlan-rpc/tracing",
+]
 tracing-log = ["tracing/log", "exvlan-core/tracing-log"]
 logging = ["exvlan-rpc/logging", "exvlan-rpc/management"]
 dns-resolver = ["dep:hickory-proto", "dep:hickory-resolver"]

@@ -93,6 +93,9 @@ jobs:
         run: |
           echo "GIT_DESC=$(git log -1 --format=%cd.%h --date=format:%Y-%m-%d_%H:%M:%S)" >> $GITHUB_ENV
 
+      - name: Compute build version
+        run: bash script/ci/build-version.sh
+
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
         with:

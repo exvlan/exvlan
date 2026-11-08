@@ -77,6 +77,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    println!(
+        "cargo:rustc-env=EXVLAN_BUILD_VERSION={}",
+        build_version()
+    );
+
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     // enable thunk-rs when target os is windows and arch is x86_64 or i686
@@ -89,4 +94,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     check_locale();
     Ok(())
+}
+
+/// 构建版本串：`<标准版本>[-<channel>.<n>][+<sha6>]`。
+///
+/// CI 通过 `EXVLAN_BUILD_VERSION` 注入（tag `v26.410.20712-pre.8` →
+/// `26.410.20712-pre.8+abc123`）；本地构建回落到
+/// `<CARGO_PKG_VERSION>+<git short sha 6>`。
+///
+/// 刻意不使用 `git describe`：仓库里存在 `v*` tag 时它返回 tag 名，
+/// 再被前缀拼接会得到 `26.410.20711-v26.410.20711` 这类重复串。
+fn build_version() -> String {
+    println!("cargo:rerun-if-env-changed=EXVLAN_BUILD_VERSION");
+    if let Ok(injected) = env::var("EXVLAN_BUILD_VERSION") {
+        let injected = injected.trim();
+        if !injected.is_empty() {
+            return injected.to_string();
+        }
+    }
+
+    let base = env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    match git_short_sha() {
+        Some(sha) => format!("{base}+{sha}"),
+        None => base,
+    }
+}
+
+/// 当前提交的 6 位短 sha（非 git 工作区/无 git 时返回 `None`）。
+fn git_short_sha() -> Option<String> {
+    let manifest = env::var("CARGO_MANIFEST_DIR").ok()?;
+    let out = std::process::Command::new("git")
+        .args(["-C", &manifest, "rev-parse", "--short=6", "HEAD"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if sha.is_empty() { None } else { Some(sha) }
 }
