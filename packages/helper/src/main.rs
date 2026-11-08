@@ -388,13 +388,26 @@ fn apply_payload(staging: &Path, owner_uid: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Tauri 的 `.sig` 是「整个 minisign 签名文件的 base64」；也兼容原始文本。
+fn decode_signature_text(text: &str) -> String {
+    use base64::Engine as _;
+    let trimmed = text.trim();
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(trimmed) else {
+        return trimmed.to_string();
+    };
+    match String::from_utf8(bytes) {
+        Ok(decoded) if decoded.contains("untrusted comment:") => decoded,
+        _ => trimmed.to_string(),
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn verify_minisign(file: &Path, signature: &Path) -> anyhow::Result<()> {
     let public_key =
         minisign_verify::PublicKey::from_base64(MINISIGN_PUBKEY).context("解析内置公钥失败")?;
     let signature_text = std::fs::read_to_string(signature)?;
-    let signature =
-        minisign_verify::Signature::decode(&signature_text).context("解析签名文件失败")?;
+    let signature = minisign_verify::Signature::decode(&decode_signature_text(&signature_text))
+        .context("解析签名文件失败")?;
     let data = std::fs::read(file)?;
     public_key
         .verify(&data, &signature, false)
@@ -481,3 +494,22 @@ fn client(_request: Request) -> ExitCode {
 // 让非 macOS 编译时 `PathBuf` 等导入不被判为未使用。
 #[allow(dead_code)]
 fn _unused(_: PathBuf) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_tauri_base64_signature() {
+        use base64::Engine as _;
+        let inner = "untrusted comment: signature from tauri secret key\nRUSFexample\n";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(inner);
+        assert_eq!(decode_signature_text(&encoded), inner);
+    }
+
+    #[test]
+    fn keeps_plain_text_signature() {
+        let plain = "untrusted comment: signature\nRUSFexample\n";
+        assert_eq!(decode_signature_text(plain), plain.trim());
+    }
+}
