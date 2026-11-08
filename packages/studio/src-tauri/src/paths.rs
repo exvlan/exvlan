@@ -21,8 +21,6 @@ pub struct SystemPaths {
     pub core: PathBuf,
     /// 系统日志目录。
     pub logs: PathBuf,
-    /// 运行时状态目录（socket）；非 Unix 平台为 `None`。
-    pub run: Option<PathBuf>,
 }
 
 pub fn system() -> SystemPaths {
@@ -33,7 +31,6 @@ pub fn system() -> SystemPaths {
             config: data.join("config"),
             core: data.join("core"),
             logs: PathBuf::from("/Library/Logs").join(APP_ID),
-            run: Some(PathBuf::from("/var/run").join(APP_ID)),
         }
     }
     #[cfg(target_os = "windows")]
@@ -43,7 +40,6 @@ pub fn system() -> SystemPaths {
             config: data.join("config"),
             core: data.join("core"),
             logs: data.join("logs"),
-            run: None,
         }
     }
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -52,24 +48,13 @@ pub fn system() -> SystemPaths {
             config: PathBuf::from("/var/lib").join(APP_ID).join("config"),
             core: PathBuf::from("/opt").join(APP_ID).join("core"),
             logs: PathBuf::from("/var/log").join(APP_ID),
-            run: Some(PathBuf::from("/var/run").join(APP_ID)),
         }
     }
-}
-
-/// 服务（内核）日志文件。
-pub fn kernel_log() -> PathBuf {
-    system().logs.join("exvlan.log")
 }
 
 /// helper 日志文件（系统日志根下，与内核日志同级）。
 pub fn helper_log() -> PathBuf {
     system().logs.join("helper.log")
-}
-
-/// helper 的 UNIX socket（仅 macOS 有 helper）。
-pub fn helper_socket() -> Option<PathBuf> {
-    system().run.map(|dir| dir.join("helper.sock"))
 }
 
 /// 服务（内核daemon）的 launchd plist（仅 macOS）。
@@ -78,6 +63,7 @@ pub fn service_plist(label: &str) -> Option<PathBuf> {
     Some(PathBuf::from("/Library/LaunchDaemons").join(format!("{label}.plist")))
 }
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 pub fn service_plist(_label: &str) -> Option<PathBuf> {
     None
 }
@@ -87,6 +73,7 @@ pub fn helper_bin() -> Option<PathBuf> {
     Some(PathBuf::from("/Library/PrivilegedHelperTools").join(format!("{APP_ID}.helper")))
 }
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 pub fn helper_bin() -> Option<PathBuf> {
     None
 }
@@ -96,6 +83,7 @@ pub fn helper_plist() -> Option<PathBuf> {
     Some(PathBuf::from("/Library/LaunchDaemons").join(format!("{APP_ID}.helper.plist")))
 }
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 pub fn helper_plist() -> Option<PathBuf> {
     None
 }
@@ -105,6 +93,7 @@ pub fn helper_version_file() -> Option<PathBuf> {
     Some(PathBuf::from("/Library/PrivilegedHelperTools").join(format!("{APP_ID}.helper.version")))
 }
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 pub fn helper_version_file() -> Option<PathBuf> {
     None
 }

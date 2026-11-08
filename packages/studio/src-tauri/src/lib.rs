@@ -1833,10 +1833,37 @@ async fn diag_token() -> Result<String, String> {
     Err("无法获取上传 token（直连/代理/curl 均失败）".to_string())
 }
 
-/// A 直连 → B 系统代理 → C 系统 curl（token 已在调用方取好）。
+/// 上传一次（A 直连 → B 系统代理 → C 系统 curl）。
 async fn upload_with_fallback(
     url: &url::Url,
     body: Vec<u8>,
+    zip_path: &std::path::Path,
+) -> Result<serde_json::Value, String> {
+    let mut refreshed = false;
+    loop {
+        match upload_once(url, &body, zip_path).await {
+            Ok(json) => return Ok(json),
+            Err(err) => {
+                // token 绑定 IP 且 10 分钟过期：切网/超时后服务端会返回 401，
+                // 这里作废缓存并重试一次（只重试一次，避免打转）。
+                let auth_failed =
+                    err.contains("401") || err.contains("expired") || err.contains("ip-mismatch");
+                if !refreshed && auth_failed {
+                    invalidate_token();
+                    refreshed = true;
+                    logger::record("upload", format!("token 失效，重取后重试: {err}"));
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    }
+}
+
+/// 单轮上传：A 直连 → B 系统代理 → C 系统 curl。
+async fn upload_once(
+    url: &url::Url,
+    body: &[u8],
     zip_path: &std::path::Path,
 ) -> Result<serde_json::Value, String> {
     let host = url.host_str().unwrap_or_default().to_string();
@@ -1846,7 +1873,7 @@ async fn upload_with_fallback(
 
     let started = std::time::Instant::now();
     match build_upload_client(false, &ipv4, &host) {
-        Ok(client) => match try_upload(&client, url, &body, &token).await {
+        Ok(client) => match try_upload(&client, url, body, &token).await {
             Ok(json) => {
                 logger::record(
                     "upload",
@@ -1867,7 +1894,7 @@ async fn upload_with_fallback(
 
     let started = std::time::Instant::now();
     match build_upload_client(true, &ipv4, &host) {
-        Ok(client) => match try_upload(&client, url, &body, &token).await {
+        Ok(client) => match try_upload(&client, url, body, &token).await {
             Ok(json) => {
                 logger::record(
                     "upload",
@@ -3024,15 +3051,13 @@ mod service {
                                 libc::chown(c.as_ptr(), 0, 0);
                             }
                         }
-                        use std::os::unix::fs::PermissionsExt as _;
                         // 配置目录只允许 root（含网络密钥）；日志目录保持可读，便于分享与诊断。
                         let mode = if dir == &opts.config_dir {
                             0o700
                         } else {
                             0o755
                         };
-                        let _ =
-                            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+                        crate::paths::ensure_dir_mode(path, mode);
                     }
                     crate::logger::record("service.dirs", format!("ready: {dir}"));
                 }

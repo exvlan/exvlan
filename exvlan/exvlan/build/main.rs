@@ -77,10 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!(
-        "cargo:rustc-env=EXVLAN_BUILD_VERSION={}",
-        build_version()
-    );
+    println!("cargo:rustc-env=EXVLAN_BUILD_VERSION={}", build_version());
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();

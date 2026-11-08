@@ -34,11 +34,18 @@ git push origin v26.410.20712-pre.8
 
 ## 3. Worker 部署与冒烟
 
+本机只有 `cf` CLI 的 OAuth 登录态，而 `cf workers versions create` 要求
+`cloudflare.config.ts`（读不了 `wrangler.jsonc`）。Worker 是单文件无 import，
+直接用 Cloudflare API 上传：
+
 ```bash
 cd packages/diagnostics
-cf workers versions create --dry-run      # 先验证能否吃 wrangler.jsonc
-cf workers versions create
-# 切流量（按 cf 输出选择对应 deployments 命令）
+
+# 一次性：设置签名密钥（值不要进仓库，也不要写进日志）
+openssl rand -hex 32 | bash deploy.sh --set-secret TOKEN_SECRET
+
+# 部署代码与 bindings（KV + 两个 ratelimit）
+bash deploy.sh
 ```
 
 部署后立即冒烟（**全过才发预览包**）：
