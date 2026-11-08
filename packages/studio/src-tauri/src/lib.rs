@@ -1522,9 +1522,24 @@ fn build_diagnostics_zip(
 }
 
 /// 上传诊断到私有仓库（Cloudflare Worker → exvlan/diagnostics issue + KV 里的完整 zip）。
+///
+/// 三层兜底，任一层成功即返回：
+/// A 直连（`no_proxy` + IPv4 优先 + 固定 resolve）→ B 允许系统代理 → C 系统 `curl`。
+///
+/// 每层都写 `[upload]` 日志（含耗时），失败时错误文本带上 zip 路径，
+/// 前端据此提示并复制路径 —— 不再出现「点了没反应」。
 #[tauri::command]
 async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<String, String> {
     use tauri::Manager as _;
+
+    let started = std::time::Instant::now();
+    error_log::record(
+        "upload",
+        format!(
+            "start frontend={}B url={DIAG_UPLOAD_URL}zip",
+            frontend.as_deref().map(str::len).unwrap_or(0)
+        ),
+    );
 
     let network_report = build_network_report(&app, frontend.as_deref())
         .await
@@ -1532,6 +1547,14 @@ async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<
     let zip_path = build_diagnostics_zip(&app, &network_report)?;
     let zip_bytes = std::fs::read(&zip_path).map_err(|e| format!("读取诊断包失败: {e}"))?;
     let zip_size = zip_bytes.len();
+    error_log::record(
+        "upload",
+        format!(
+            "zip ok path={} size={zip_size}B in {}ms",
+            zip_path.display(),
+            started.elapsed().as_millis()
+        ),
+    );
 
     let summary = format!(
         "app: {}\nos: {} ({})\nmode: {}\nlog_dir: {:?}\nzip: {} bytes",
@@ -1546,10 +1569,6 @@ async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<
         zip_size,
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
-        .build()
-        .map_err(|e| error_log::other("cmd:upload_diagnostics", e))?;
     let mut upload_url = url::Url::parse(&format!("{DIAG_UPLOAD_URL}zip"))
         .map_err(|e| error_log::other("cmd:upload_diagnostics", e.to_string()))?;
     upload_url
@@ -1559,37 +1578,244 @@ async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<
         .append_pair("arch", std::env::consts::ARCH)
         .append_pair("summary", summary.as_str());
 
-    let resp = client
-        .post(upload_url)
-        .header("x-diag-key", DIAG_UPLOAD_KEY)
-        .header("content-type", "application/zip")
-        .body(zip_bytes)
-        .send()
-        .await
-        .map_err(|e| error_log::other("cmd:upload_diagnostics", e.to_string()))?;
+    // 外层看门狗：无论哪一层卡住，60s 内必须给出结果。
+    let body = zip_bytes;
+    let upload_url_for_task = upload_url.clone();
+    let zip_path_for_task = zip_path.clone();
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        upload_with_fallback(&upload_url_for_task, body, &zip_path_for_task),
+    )
+    .await;
 
-    let status = resp.status();
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| error_log::other("cmd:upload_diagnostics", e.to_string()))?;
-    if !status.is_success() {
-        return Err(format!("上传失败（HTTP {status}）: {body}"));
-    }
+    let body_json = match outcome {
+        Ok(Ok(json)) => json,
+        Ok(Err(err)) => {
+            error_log::record(
+                "upload",
+                format!("failed in {}ms: {err}", started.elapsed().as_millis()),
+            );
+            return Err(format!(
+                "上传失败：{err}；诊断包已保存在 {}",
+                zip_path.display()
+            ));
+        }
+        Err(_) => {
+            error_log::record(
+                "upload",
+                format!("failed in {}ms: 总超时 60s", started.elapsed().as_millis()),
+            );
+            return Err(format!(
+                "上传超时（60s）；诊断包已保存在 {}",
+                zip_path.display()
+            ));
+        }
+    };
 
     let mut links = Vec::new();
-    if let Some(arr) = body.get("urls").and_then(|v| v.as_array()) {
+    if let Some(arr) = body_json.get("urls").and_then(|v| v.as_array()) {
         links.extend(arr.iter().filter_map(|v| v.as_str()).map(str::to_owned));
     }
-    if let Some(zip_url) = body.get("zipUrl").and_then(|v| v.as_str()) {
+    if let Some(zip_url) = body_json.get("zipUrl").and_then(|v| v.as_str()) {
         links.push(format!("zip: {zip_url}"));
     }
     let text = links.join("\n");
     error_log::event(
         "upload",
-        format!("diagnostics uploaded ({} bytes): {text}", zip_size),
+        format!(
+            "diagnostics uploaded ({zip_size} bytes, {}ms): {text}",
+            started.elapsed().as_millis()
+        ),
     );
     Ok(text)
+}
+
+/// 解析上传目标地址（IPv4 优先，避免 IPv6 黑洞导致连接挂住）。
+async fn resolve_upload_addrs(
+    host: &str,
+    port: u16,
+) -> (Vec<std::net::IpAddr>, Vec<std::net::IpAddr>) {
+    match tokio::net::lookup_host((host, port)).await {
+        Ok(iter) => {
+            let (mut v4, mut v6) = (Vec::new(), Vec::new());
+            for addr in iter {
+                match addr.ip() {
+                    std::net::IpAddr::V4(_) => v4.push(addr.ip()),
+                    std::net::IpAddr::V6(_) => v6.push(addr.ip()),
+                }
+            }
+            error_log::record("upload", format!("resolve host={host} v4={v4:?} v6={v6:?}"));
+            (v4, v6)
+        }
+        Err(err) => {
+            error_log::record("upload", format!("resolve host={host} failed: {err}"));
+            (Vec::new(), Vec::new())
+        }
+    }
+}
+
+/// 构造上传用 client。`use_proxy=false` 时显式绕过系统代理。
+fn build_upload_client(
+    use_proxy: bool,
+    ipv4: &[std::net::IpAddr],
+    host: &str,
+) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .connect_timeout(std::time::Duration::from_secs(5));
+    if !use_proxy {
+        builder = builder.no_proxy();
+    }
+    if !ipv4.is_empty() {
+        let addrs: Vec<std::net::SocketAddr> = ipv4
+            .iter()
+            .map(|ip| std::net::SocketAddr::new(*ip, 443))
+            .collect();
+        builder = builder.resolve_to_addrs(host, &addrs);
+    }
+    builder.build().map_err(|e| e.to_string())
+}
+
+async fn try_upload(
+    client: &reqwest::Client,
+    url: &url::Url,
+    body: &[u8],
+) -> Result<serde_json::Value, String> {
+    let resp = client
+        .post(url.clone())
+        .header("x-diag-key", DIAG_UPLOAD_KEY)
+        .header("content-type", "application/zip")
+        .body(body.to_vec())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("HTTP {status}: {json}"));
+    }
+    Ok(json)
+}
+
+/// A 直连 → B 系统代理 → C 系统 curl。
+async fn upload_with_fallback(
+    url: &url::Url,
+    body: Vec<u8>,
+    zip_path: &std::path::Path,
+) -> Result<serde_json::Value, String> {
+    let host = url.host_str().unwrap_or_default().to_string();
+    let port = url.port_or_known_default().unwrap_or(443);
+    let (ipv4, _ipv6) = resolve_upload_addrs(&host, port).await;
+
+    let started = std::time::Instant::now();
+    match build_upload_client(false, &ipv4, &host) {
+        Ok(client) => match try_upload(&client, url, &body).await {
+            Ok(json) => {
+                error_log::record(
+                    "upload",
+                    format!("try A(direct) ok in {}ms", started.elapsed().as_millis()),
+                );
+                return Ok(json);
+            }
+            Err(err) => error_log::record(
+                "upload",
+                format!(
+                    "try A(direct) failed in {}ms: {err}",
+                    started.elapsed().as_millis()
+                ),
+            ),
+        },
+        Err(err) => error_log::record("upload", format!("try A client build failed: {err}")),
+    }
+
+    let started = std::time::Instant::now();
+    match build_upload_client(true, &ipv4, &host) {
+        Ok(client) => match try_upload(&client, url, &body).await {
+            Ok(json) => {
+                error_log::record(
+                    "upload",
+                    format!("try B(proxy) ok in {}ms", started.elapsed().as_millis()),
+                );
+                return Ok(json);
+            }
+            Err(err) => error_log::record(
+                "upload",
+                format!(
+                    "try B(proxy) failed in {}ms: {err}",
+                    started.elapsed().as_millis()
+                ),
+            ),
+        },
+        Err(err) => error_log::record("upload", format!("try B client build failed: {err}")),
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let started = std::time::Instant::now();
+        match curl_upload(url.as_str(), zip_path).await {
+            Ok(json) => {
+                error_log::record(
+                    "upload",
+                    format!("try C(curl) ok in {}ms", started.elapsed().as_millis()),
+                );
+                return Ok(json);
+            }
+            Err(err) => error_log::record(
+                "upload",
+                format!(
+                    "try C(curl) failed in {}ms: {err}",
+                    started.elapsed().as_millis()
+                ),
+            ),
+        }
+    }
+
+    Err("直连 / 系统代理 / curl 均失败".to_string())
+}
+
+/// 兜底通道：调用系统 curl 上传同一个 zip（桌面端实测可用）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn curl_upload(url: &str, zip_path: &std::path::Path) -> Result<serde_json::Value, String> {
+    let out = tokio::process::Command::new("curl")
+        .args(["-sS", "--max-time", "60", "-X", "POST", url])
+        .arg("-H")
+        .arg(format!("x-diag-key: {DIAG_UPLOAD_KEY}"))
+        .arg("-H")
+        .arg("content-type: application/zip")
+        .arg("--data-binary")
+        .arg(format!("@{}", zip_path.display()))
+        .output()
+        .await
+        .map_err(|e| format!("spawn curl: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "curl exit {:?}: {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("parse curl body: {e}"))
+}
+
+/// 打开诊断包目录（上传失败时前端兜底：路径已复制，用户可一键打开）。
+#[tauri::command]
+fn open_diagnostics_dir(app: AppHandle) -> Result<String, String> {
+    let dir = diagnostics_output_dir(&app)?;
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = std::process::Command::new("explorer");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return Err("移动端请使用系统的「分享」入口".to_string());
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        cmd.arg(&dir);
+        cmd.spawn().map_err(|e| format!("打开目录失败: {e}"))?;
+        Ok(dir.display().to_string())
+    }
 }
 
 /// 分享诊断包：Android 弹系统分享面板（zip）；桌面返回路径（前端打开目录）。
@@ -3931,6 +4157,7 @@ pub fn run_gui() -> std::process::ExitCode {
             get_log_dir_path,
             report_frontend_error,
             log_diag_step,
+            open_diagnostics_dir,
             report_boot_state,
             diagnostics_info,
             service_default_dirs_cmd,

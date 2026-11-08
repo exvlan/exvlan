@@ -12,6 +12,7 @@ import {
   listNetworkInstanceIds,
   logDiagStep,
   networkDiagnostics,
+  openDiagnosticsDir,
   serviceDiagnostics,
   serviceReinstall,
   serviceRestart,
@@ -269,6 +270,19 @@ function resolveUploadConsent(ok: boolean) {
   consentResolve = null;
 }
 
+async function onOpenDiagnosticsDir() {
+  try {
+    await openDiagnosticsDir();
+  } catch (e: any) {
+    toast.add({
+      severity: "warn",
+      summary: t("settings.upload_diag"),
+      detail: String(e),
+      life: 8000,
+    });
+  }
+}
+
 async function onUploadDiagnostics() {
   diagStep("upload_click");
   if (!(await askUploadConsent())) {
@@ -297,15 +311,19 @@ async function onUploadDiagnostics() {
       });
     }
   } catch (e: any) {
-    diagStep("invoke_failed", `${Date.now() - started}ms ${String(e)}`);
-    console.warn("upload diagnostics failed, fallback to share", e);
+    const detail = String(e);
+    diagStep("invoke_failed", `${Date.now() - started}ms ${detail}`);
+    // 失败兜底：Rust 侧把 zip 路径写进错误文本，这里复制到剪贴板并提示。
+    const zipPath = /已保存在 (.+)$/.exec(detail)?.[1]?.trim();
+    if (zipPath) {
+      await writeText(zipPath).catch(() => {});
+    }
     toast.add({
       severity: "warn",
       summary: t("settings.upload_diag"),
-      detail: `上传失败（${String(e)}），改用分享`,
-      life: 8000,
+      detail: zipPath ? `${detail}\n\n路径已复制到剪贴板` : detail,
+      life: 15000,
     });
-    emit("share-log");
   } finally {
     uploading.value = false;
   }
@@ -599,13 +617,22 @@ watch(
               <div class="font-medium">{{ t("settings.upload_diag") }}</div>
               <div class="text-sm text-surface-500">{{ t("settings.upload_diag_hint") }}</div>
             </div>
-            <Button
-              :label="t('settings.upload_diag')"
-              size="small"
-              icon="pi pi-cloud-upload"
-              :loading="uploading"
-              @click="onUploadDiagnostics"
-            />
+            <div class="flex items-center gap-2">
+              <Button
+                :label="t('settings.open_diag_dir')"
+                size="small"
+                severity="secondary"
+                text
+                @click="onOpenDiagnosticsDir"
+              />
+              <Button
+                :label="t('settings.upload_diag')"
+                size="small"
+                icon="pi pi-cloud-upload"
+                :loading="uploading"
+                @click="onUploadDiagnostics"
+              />
+            </div>
           </div>
         </div>
 

@@ -363,6 +363,11 @@ export async function logDiagStep(step: string, detail?: string) {
   }
 }
 
+/** 打开诊断包所在目录（上传失败时的兜底入口）。 */
+export async function openDiagnosticsDir() {
+  return await invoke<string>("open_diagnostics_dir");
+}
+
 /** 网络自检：实例/采集信息 + 最近事件与内核日志。 */
 export async function networkDiagnostics(frontendState?: string) {
   return await invoke<string>("network_diagnostics", { frontend: frontendState });
