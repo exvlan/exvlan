@@ -176,3 +176,29 @@ pub fn stale_paths() -> Vec<PathBuf> {
         ]
     }
 }
+
+/// 收紧文件权限（Unix）：密钥类文件（prefs / networks / 提权日志）用 0600。
+pub fn restrict_file(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+/// 设置目录权限（Unix）。`mode` 用八进制字面量，如 `0o700`。
+pub fn ensure_dir_mode(path: &std::path::Path, mode: u32) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+    }
+}

@@ -286,6 +286,7 @@ fn save_value(app: &tauri::AppHandle, value: &Value) -> Result<(), String> {
     let text = toml::to_string_pretty(&file).map_err(|e| format!("序列化 networks 失败: {e}"))?;
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, &text).map_err(|e| format!("写入 {} 失败: {e}", tmp.display()))?;
+    crate::paths::restrict_file(&tmp);
     std::fs::rename(&tmp, &path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         format!("替换 {} 失败: {e}", path.display())

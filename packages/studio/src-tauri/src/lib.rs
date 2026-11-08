@@ -2871,8 +2871,12 @@ mod service {
                             }
                         }
                         use std::os::unix::fs::PermissionsExt as _;
-                        let _ =
-                            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755));
+                        // 配置目录只允许 root（含网络密钥）；日志目录保持可读，便于分享与诊断。
+                        let mode = if dir == &opts.config_dir { 0o700 } else { 0o755 };
+                        let _ = std::fs::set_permissions(
+                            path,
+                            std::fs::Permissions::from_mode(mode),
+                        );
                     }
                     crate::logger::record("service.dirs", format!("ready: {dir}"));
                 }
