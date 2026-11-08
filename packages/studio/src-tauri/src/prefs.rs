@@ -60,8 +60,8 @@ struct DiagSection {
     updated_at: Option<String>,
 }
 
-/// Linux 的 state 目录（XDG）。
-#[cfg(all(unix, not(target_os = "macos")))]
+/// Linux 的 state 目录（XDG）。Android/iOS 走 app_config_dir，不用这里。
+#[cfg(target_os = "linux")]
 fn linux_state_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("XDG_STATE_HOME").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(dir).join(APP_DIR));
@@ -77,14 +77,14 @@ fn linux_state_dir() -> Option<PathBuf> {
 
 /// 偏好文件路径（不创建目录）。
 pub fn prefs_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(target_os = "linux")]
     {
         let _ = app;
         linux_state_dir()
             .map(|d| d.join(FILE_NAME))
             .ok_or_else(|| "无法定位 $XDG_STATE_HOME / $HOME".to_string())
     }
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    #[cfg(not(target_os = "linux"))]
     {
         let dir = app
             .path()

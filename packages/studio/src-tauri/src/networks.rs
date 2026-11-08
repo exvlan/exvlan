@@ -30,7 +30,7 @@ const FILE_NAME: &str = "networks.toml";
 const SCHEMA: i64 = 1;
 
 /// Linux 的配置目录（XDG_CONFIG_HOME）。
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
 fn linux_config_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(dir).join(APP_DIR));
@@ -47,16 +47,16 @@ pub fn networks_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
             .app_config_dir()
             .map_err(|e| format!("无法定位应用目录: {e}"))?
             .join("config");
-        return Ok(dir.join(FILE_NAME));
+        Ok(dir.join(FILE_NAME))
     }
-    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
+    #[cfg(target_os = "linux")]
     {
         let _ = app;
         linux_config_dir()
             .map(|d| d.join(FILE_NAME))
             .ok_or_else(|| "无法定位 $XDG_CONFIG_HOME / $HOME".to_string())
     }
-    #[cfg(not(any(unix, target_os = "android")))]
+    #[cfg(not(any(target_os = "android", target_os = "linux")))]
     {
         let dir = app
             .path()
