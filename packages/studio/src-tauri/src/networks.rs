@@ -269,7 +269,7 @@ pub fn migrate_networks(app: tauri::AppHandle, networks: String) -> Result<bool,
         return Ok(false);
     }
     save_value(&app, &value)?;
-    crate::error_log::record(
+    crate::logger::record(
         "networks",
         "migrated localStorage networkList → networks.toml",
     );
@@ -305,7 +305,7 @@ pub fn get_networks(app: tauri::AppHandle) -> Result<String, String> {
         return Ok("[]".to_string());
     };
     let file: NetworksFile = toml::from_str(&text).map_err(|e| {
-        crate::error_log::record("networks", format!("解析 {} 失败: {e}", path.display()));
+        crate::logger::record("networks", format!("解析 {} 失败: {e}", path.display()));
         format!("networks.toml 解析失败: {e}")
     })?;
     serde_json::to_string(&decode(&file)).map_err(|e| format!("序列化失败: {e}"))

@@ -78,14 +78,14 @@ pub fn init_best(candidates: &[PathBuf]) -> Option<PathBuf> {
                 drop(st);
                 let _ = PANIC_PATH.set(dir.join(FILE_NAME));
                 if !attempts.is_empty() {
-                    record("error_log.fallback", attempts.join(" ; "));
+                    record("logger.fallback", attempts.join(" ; "));
                 }
                 return Some(dir.join(FILE_NAME));
             }
             Err(err) => attempts.push(format!("{}: {err}", dir.display())),
         }
     }
-    eprintln!("[error_log] 所有候选目录都不可写: {}", attempts.join(" ; "));
+    eprintln!("[logger] 所有候选目录都不可写: {}", attempts.join(" ; "));
     None
 }
 
@@ -189,7 +189,7 @@ impl State {
                 self.file = Some(file);
                 self.size = size;
             }
-            Err(err) => eprintln!("[error_log] 重新打开 {} 失败: {err}", dir.display()),
+            Err(err) => eprintln!("[logger] 重新打开 {} 失败: {err}", dir.display()),
         }
     }
 
@@ -228,7 +228,7 @@ impl State {
                 self.file = Some(f);
                 self.size = 0;
             }
-            Err(err) => eprintln!("[error_log] 轮转后重新打开 {} 失败: {err}", base.display()),
+            Err(err) => eprintln!("[logger] 轮转后重新打开 {} 失败: {err}", base.display()),
         }
     }
 }

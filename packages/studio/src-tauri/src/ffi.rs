@@ -7,7 +7,7 @@
 //! - 所有函数返回 `0` 成功 / `-1` 失败；失败时用 `get_error_msg` 取原因。
 //! - 字符串均为 UTF-8 C 字符串；`call_json_rpc` 的输出需用 `free_string` 释放。
 //!
-//! 目前仅提供绑定与安全的 Rust 包装，尚未替换现有调用点（见 `P6` 计划）。
+//! 已全面接入：TUN fd 传递、事件轮询、实例信息采集、config-server 均经由本模块。
 
 #![cfg(target_os = "android")]
 #![allow(dead_code)]

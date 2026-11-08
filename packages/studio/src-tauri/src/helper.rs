@@ -5,7 +5,7 @@
 
 #![allow(dead_code)]
 
-/// 必须与 `packages/helper` 的 `HELPER_VERSION` 保持一致。
+/// 必须与 `packages/studio/helper` 的 `HELPER_VERSION` 保持一致。
 pub const HELPER_VERSION: u32 = 1;
 
 #[cfg(target_os = "macos")]
@@ -152,7 +152,7 @@ mod imp {
         let staging = std::env::temp_dir().join(format!(
             "era-exvlan-update-{}-{}",
             std::process::id(),
-            crate::error_log::timestamp().replace(':', "-")
+            crate::logger::timestamp().replace(':', "-")
         ));
         std::fs::create_dir_all(&staging)?;
         #[cfg(unix)]
@@ -201,7 +201,7 @@ mod imp {
         while started.elapsed() < timeout {
             match status() {
                 Ok(s) => {
-                    crate::error_log::record(
+                    crate::logger::record(
                         "helper.health",
                         format!("ok in {}ms: {s}", started.elapsed().as_millis()),
                     );
@@ -223,7 +223,7 @@ mod imp {
                 text
             })
             .unwrap_or_default();
-        crate::error_log::record(
+        crate::logger::record(
             "helper.health",
             format!(
                 "failed after {}ms: {last} | launchctl: {print} | log tail: {}",

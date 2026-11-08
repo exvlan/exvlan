@@ -109,7 +109,7 @@ fn load(app: &tauri::AppHandle) -> Prefs {
     match toml::from_str::<Prefs>(&text) {
         Ok(prefs) => prefs,
         Err(err) => {
-            crate::error_log::record("prefs", format!("解析 {} 失败: {err}", path.display()));
+            crate::logger::record("prefs", format!("解析 {} 失败: {err}", path.display()));
             Prefs::default()
         }
     }
@@ -180,7 +180,7 @@ fn migrate_legacy(app: &tauri::AppHandle) -> Option<Prefs> {
     let legacy = dir.join("ui-state.json");
     if !legacy.is_file() && dir.join("ui-state.json.bak").is_file() {
         // 7.1 曾把它改名为 .bak；按约定只记录、不自动恢复。
-        crate::error_log::record(
+        crate::logger::record(
             "prefs",
             "found ui-state.json.bak (7.1 damage); snapshot not restored (rollback only)",
         );
@@ -207,7 +207,7 @@ fn migrate_legacy(app: &tauri::AppHandle) -> Option<Prefs> {
         let _ = std::fs::rename(&legacy, dir.join("ui-state.json.bak"));
     } else {
         // preview 期间**保留** ui-state.json（回退到旧版本仍可读取）。
-        crate::error_log::record("prefs", format!("snapshot kept: {}", legacy.display()));
+        crate::logger::record("prefs", format!("snapshot kept: {}", legacy.display()));
     }
     Some(prefs)
 }
@@ -222,10 +222,10 @@ fn load_or_migrate(app: &tauri::AppHandle) -> Prefs {
     if let Some(prefs) = migrate_legacy(app) {
         match save(app, &prefs) {
             Ok(()) => {
-                crate::error_log::record("prefs", "migrated ui-state.json → prefs.toml");
+                crate::logger::record("prefs", "migrated ui-state.json → prefs.toml");
                 return prefs;
             }
-            Err(err) => crate::error_log::record("prefs", format!("迁移失败: {err}")),
+            Err(err) => crate::logger::record("prefs", format!("迁移失败: {err}")),
         }
     }
     Prefs::default()
@@ -263,7 +263,7 @@ pub fn set_ui_state(
     let mut prefs = load_or_migrate(&app);
     set_key(&mut prefs, &key, value);
     if key == "diag_last_upload" {
-        prefs.diag.updated_at = Some(crate::error_log::timestamp());
+        prefs.diag.updated_at = Some(crate::logger::timestamp());
     }
     save(&app, &prefs)
 }

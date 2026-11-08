@@ -3,7 +3,7 @@ name = "exvlan-helper"
 version = "26.410.20712"
 edition.workspace = true
 rust-version.workspace = true
-license-file = "../../exvlan/LICENSE"
+license-file = "../../../exvlan/LICENSE"
 description = "EXVlan privileged helper (macOS): installs signed kernel updates without re-prompting"
 
 [[bin]]
