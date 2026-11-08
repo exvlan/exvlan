@@ -19,7 +19,7 @@ use std::sync::{Mutex, OnceLock};
 
 /// 磁盘文件名。
 pub const FILE_NAME: &str = "error.log";
-const MAX_BYTES: u64 = 5 * 1024 * 1024;
+const MAX_BYTES: u64 = 16 * 1024 * 1024;
 const KEEP_FILES: usize = 3;
 const BUFFER_LIMIT: usize = 200;
 const MAX_MESSAGE_BYTES: usize = 8 * 1024;
@@ -29,6 +29,8 @@ struct State {
     file: Option<File>,
     size: u64,
     pending: Vec<String>,
+    /// 上次尝试重新打开文件的时间（避免每写一行都去 open 一次）。
+    last_reopen: Option<std::time::Instant>,
 }
 
 fn state() -> &'static Mutex<State> {
@@ -39,8 +41,20 @@ fn state() -> &'static Mutex<State> {
             file: None,
             size: 0,
             pending: Vec::new(),
+            last_reopen: None,
         })
     })
+}
+
+/// 取状态锁；即使锁被毒化也继续使用内部状态。
+///
+/// 一次 panic 不能让日志通道永久静默 —— 那会让「用户报错时我们什么都看不到」
+/// 这种最难排查的情况反复发生。
+fn lock_state() -> std::sync::MutexGuard<'static, State> {
+    match state().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
 }
 
 /// 按顺序尝试多个候选目录，把 `error.log` 落到**第一个可写**的位置。
@@ -53,9 +67,7 @@ pub fn init_best(candidates: &[PathBuf]) -> Option<PathBuf> {
     for dir in candidates {
         match open_in(dir) {
             Ok((file, size)) => {
-                let Ok(mut st) = state().lock() else {
-                    return None;
-                };
+                let mut st = lock_state();
                 st.dir = Some(dir.clone());
                 st.file = Some(file);
                 st.size = size;
@@ -109,16 +121,12 @@ pub fn record_panic(message: impl Display) {
 
 /// 当前是否已初始化。
 pub fn is_initialized() -> bool {
-    state().lock().map(|st| st.file.is_some()).unwrap_or(false)
+    lock_state().file.is_some()
 }
 
 /// 当前日志文件路径（未初始化时为 `None`）。
 pub fn path() -> Option<PathBuf> {
-    state()
-        .lock()
-        .ok()
-        .and_then(|st| st.dir.clone())
-        .map(|d| d.join(FILE_NAME))
+    lock_state().dir.clone().map(|d| d.join(FILE_NAME))
 }
 
 /// 读取最近 `max_bytes` 字节（给「复制/分享日志」用）。
@@ -140,19 +148,51 @@ pub fn record(scope: &str, message: impl Display) {
     let text = text.replace('\n', " | ").replace('\r', "");
     let line = format!("{} [{scope}] {text}\n", timestamp());
 
-    match state().lock() {
-        Ok(mut st) if st.file.is_some() => st.write_line(&line),
-        Ok(mut st) => {
-            if st.pending.len() >= BUFFER_LIMIT {
-                st.pending.remove(0);
-            }
-            st.pending.push(line);
-        }
-        Err(_) => eprintln!("{}", line.trim_end()),
+    let mut st = lock_state();
+    // 句柄丢失（轮转失败/文件被删/权限变化）时按 30s 节流重试重新打开。
+    if st.file.is_none() && st.dir.is_some() {
+        st.try_reopen();
+    }
+    if st.file.is_some() {
+        st.write_line(&line);
+        return;
+    }
+
+    let uninitialized = st.dir.is_none();
+    if st.pending.len() >= BUFFER_LIMIT {
+        st.pending.remove(0);
+    }
+    st.pending.push(line.clone());
+    drop(st);
+
+    // 已初始化却写不进去：至少让事件日志留痕（它用的是另一把锁）。
+    if !uninitialized {
+        event("log-fallback", line.trim_end());
     }
 }
 
 impl State {
+    /// 重新打开日志文件（30s 节流）。
+    fn try_reopen(&mut self) {
+        let Some(dir) = self.dir.clone() else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_reopen
+            && now.duration_since(last) < std::time::Duration::from_secs(30)
+        {
+            return;
+        }
+        self.last_reopen = Some(now);
+        match open_in(&dir) {
+            Ok((file, size)) => {
+                self.file = Some(file);
+                self.size = size;
+            }
+            Err(err) => eprintln!("[error_log] 重新打开 {} 失败: {err}", dir.display()),
+        }
+    }
+
     fn write_line(&mut self, line: &str) {
         // 轮转：写之前先判断，保证单文件不超过上限
         let line_len = line.len() as u64;

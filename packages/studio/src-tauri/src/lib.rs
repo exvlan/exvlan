@@ -2531,8 +2531,9 @@ mod service {
                 "info".into(),
                 "--file-log-dir".into(),
                 self.file_log_dir.clone().into(),
+                // 统一 16MB × 3（GUI 侧 error.log 同参数，便于对照时序）
                 "--file-log-size".into(),
-                "32".into(),
+                "16".into(),
                 "--file-log-count".into(),
                 "3".into(),
                 "--daemon".into(),
