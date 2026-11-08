@@ -10,8 +10,10 @@ import { useTray } from "~/composables/tray";
 import {
   consumePendingMobileVpnTileAction,
   initMobileVpnService,
+  mobileVpnPermissionDenied,
   mobileVpnRunning,
   mobileVpnSyncing,
+  scheduleVpnAutoSync,
   setMobileVpnTileActionHandler,
   syncMobileVpnService,
 } from "~/composables/mobile_vpn";
@@ -179,6 +181,17 @@ const vpnRunning = computed(() => runningInstances.value.length > 0);
 /** 移动端：实例在跑但 VpnService 没起来（内核通了、流量却没进隧道）。 */
 const isMobileDevice = computed(() => type() === "android" || type() === "ios");
 const vpnBannerDismissed = ref(false);
+// 实例起来但 VpnService 没接管时自动补启动（1s/3s/9s 退避，最多 3 次）。
+watch(runningInstances, (list) => {
+  if (!isMobileDevice.value || list.length === 0) {
+    return;
+  }
+  if (manualDisconnect.value || mobileVpnRunning.value) {
+    return;
+  }
+  scheduleVpnAutoSync("instances-changed");
+});
+
 const showVpnNotRunningBanner = computed(
   () =>
     isMobileDevice.value &&
@@ -901,7 +914,11 @@ const configServerConnectionStatus = computed(() => {
       class="flex items-center gap-2 border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
     >
       <i class="pi pi-exclamation-circle" />
-      <span class="flex-1">{{ t("settings.vpn_not_connected_hint") }}</span>
+      <span class="flex-1">{{
+        mobileVpnPermissionDenied
+          ? t("settings.vpn_need_permission")
+          : t("settings.vpn_not_connected_hint")
+      }}</span>
       <Button
         size="small"
         :label="t('settings.vpn_start_now')"

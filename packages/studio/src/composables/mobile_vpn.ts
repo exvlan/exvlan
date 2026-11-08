@@ -13,6 +13,7 @@ import {
   collectNetworkInfo,
   getConfig,
   listNetworkInstanceIds,
+  logDiagStep,
   logVpnRoutes,
   setTunFd,
 } from "./backend";
@@ -43,6 +44,8 @@ let vpnTileActionQueue: Promise<void> = Promise.resolve();
 /** 供 UI 直接绑定的 VPN 运行态（实例在跑但 VPN 没起来 = 需要提示）。 */
 export const mobileVpnRunning = ref(false);
 export const mobileVpnSyncing = ref(false);
+/** 上次启动是否因为用户拒绝 VPN 授权而失败（横幅文案据此切换）。 */
+export const mobileVpnPermissionDenied = ref(false);
 
 const curVpnStatus: vpnStatus = {
   running: false,
@@ -262,8 +265,10 @@ async function doStartVpn(
     if (start_ret?.errorMsg === "need_prepare") {
       const granted = await requestVpnPermission();
       if (!granted) {
+        mobileVpnPermissionDenied.value = true;
         throw new Error("vpn_permission_denied");
       }
+      mobileVpnPermissionDenied.value = false;
       start_ret = await start_vpn(request);
       console.log("start vpn retry response", JSON.stringify(start_ret));
     }
@@ -665,4 +670,53 @@ export async function syncMobileVpnService() {
   }
 
   await onNetworkInstanceChange("");
+}
+
+/* ---------------- 实例起来后自动接管流量 ---------------- */
+
+const AUTO_SYNC_DELAYS_MS = [1000, 3000, 9000];
+let autoSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let autoSyncAttempts = 0;
+
+/**
+ * 实例在跑但 VpnService 没接管时，按 1s / 3s / 9s 退避补启动。
+ *
+ * 历史 bug：`syncMobileVpnService()` 只在挂载时调用一次，实例晚于它 ready
+ * （冷启动、内核重启、peer 建连慢）就永远停在「运行中但未接管流量」。
+ */
+export function scheduleVpnAutoSync(reason = "instances-changed") {
+  if (mobileVpnRunning.value || mobileVpnSyncing.value) {
+    return;
+  }
+  if (autoSyncTimer || autoSyncAttempts >= AUTO_SYNC_DELAYS_MS.length) {
+    return;
+  }
+  const delay = AUTO_SYNC_DELAYS_MS[autoSyncAttempts];
+  autoSyncTimer = setTimeout(async () => {
+    autoSyncTimer = null;
+    autoSyncAttempts += 1;
+    try {
+      await syncMobileVpnService();
+    } catch (e) {
+      console.warn("vpn auto sync failed", e);
+    }
+    logDiagStep(
+      "vpn_auto_sync",
+      `attempt=${autoSyncAttempts} running=${mobileVpnRunning.value} reason=${reason}`,
+    );
+    if (mobileVpnRunning.value) {
+      autoSyncAttempts = 0;
+    } else {
+      scheduleVpnAutoSync(reason);
+    }
+  }, delay);
+}
+
+/** 用户主动断开/重新连上网络时重置退避计数。 */
+export function resetVpnAutoSync() {
+  if (autoSyncTimer) {
+    clearTimeout(autoSyncTimer);
+    autoSyncTimer = null;
+  }
+  autoSyncAttempts = 0;
 }

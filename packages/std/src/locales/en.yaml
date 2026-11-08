@@ -126,6 +126,7 @@ settings:
   upload_diag_hint: Upload to the private repo and copy the link; falls back to sharing
   upload_consent: "Uploads redacted diagnostics to the private repository exvlan/diagnostics (maintainers only).\n\nIncludes: versions, network name, LAN IPs, hostnames, recent logs.\nExcludes: network secret, private keys, tokens (auto-redacted).\nLinks expire in 3 days.\n\nThis prompt will not appear again."
   open_diag_dir: Open diagnostics folder
+  vpn_need_permission: "VPN permission was denied: allow it in the system prompt, or grant it in Settings → Network → VPN"
   network_check: Network check
   network_check_hint: Inspect instances, TUN, collect info and recent logs
   network_check_run: Run check
