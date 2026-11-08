@@ -16,6 +16,7 @@ import {
   syncMobileVpnService,
 } from "~/composables/mobile_vpn";
 import { executeVpnTileAction } from "~/composables/mobile_vpn_tile";
+import { dedupeNetworkInstances } from "~/composables/instance_dedupe";
 import { GUIRemoteClient } from "~/modules/api";
 
 import { useToast, useConfirm } from "openvue";
@@ -554,6 +555,9 @@ onMounted(async () => {
     void setLoggingLevel(logLevel.value).catch((e) => {
       console.warn("apply log level failed", e);
     });
+    void dedupeNetworkInstances().catch((e) => {
+      console.warn("dedupe network instances failed", e);
+    });
   } catch (e: any) {
     // 保留用户所选模式，只把原因留在顶部横幅与 error.log
     console.error("initWithMode failed", e);
@@ -638,6 +642,9 @@ watch(clientRunning, async (newVal, oldVal) => {
     if (lastInstanceId) {
       instanceId.value = lastInstanceId;
     }
+    void dedupeNetworkInstances().catch((e) => {
+      console.warn("dedupe network instances failed", e);
+    });
   }
 });
 
