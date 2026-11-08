@@ -1073,119 +1073,141 @@ async fn build_network_report(app: &AppHandle, frontend: Option<&str>) -> Result
     }
 
     if let Ok(cm) = get_client_manager!() {
-        match cm.handle_list_network_instance_ids(app.clone()).await {
-            Ok(ids) => {
+        // 采集类 RPC 一律加超时：坏实例会把 RPC 永久挂住，
+        // 进而让「上传诊断」永远不会返回（历史 bug：点了没反应）。
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            cm.handle_list_network_instance_ids(app.clone()),
+        )
+        .await
+        {
+            Ok(Ok(ids)) => {
                 out.push_str(&format!(
                     "instances: {}\n",
                     serde_json::to_string(&ids).unwrap_or_default()
                 ));
             }
-            Err(e) => out.push_str(&format!("list_instances failed: {e}\n")),
+            Ok(Err(e)) => out.push_str(&format!("list_instances failed: {e}\n")),
+            Err(_) => out.push_str("list_instances timeout (3s)\n"),
         }
-        match cm.handle_collect_network_info(app.clone(), None).await {
-            Ok(resp) => {
-                let map = resp.info.map(|m| m.map).unwrap_or_default();
-                if map.is_empty() {
-                    out.push_str("collect: <empty>\n");
-                }
-                for (inst_id, info) in map {
-                    out.push_str(&format!("--- instance {inst_id} ---\n"));
-                    out.push_str(&format!("running: {}\n", info.running));
-                    if let Some(err) = info.error_msg.as_deref().filter(|s| !s.is_empty()) {
-                        out.push_str(&format!("error_msg: {err}\n"));
-                    }
 
-                    if let Some(node) = info.my_node_info.as_ref() {
-                        out.push_str(&format!(
-                            "peer_id: {}\nhostname: {}\nversion: {}\n",
-                            node.peer_id, node.hostname, node.version
-                        ));
-                        if let Some(v4) = node.virtual_ipv4.as_ref() {
-                            let addr = v4
+        {
+            // 采集同样加超时：坏实例会让 RPC 永久挂住，进而让上传永不返回。
+            let mut collected: Vec<_> = Vec::new();
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                cm.handle_collect_network_info(app.clone(), None),
+            )
+            .await
+            {
+                Ok(Ok(resp)) => {
+                    if let Some(map) = resp.info.map(|m| m.map) {
+                        collected.extend(map);
+                    }
+                }
+                Ok(Err(e)) => out.push_str(&format!("collect failed: {e}\n")),
+                Err(_) => out.push_str("collect timeout (5s): 实例采集已跳过\n"),
+            }
+
+            if collected.is_empty() {
+                out.push_str("collect: <empty>\n");
+            }
+            for (inst_id, info) in collected {
+                out.push_str(&format!("--- instance {inst_id} ---\n"));
+                out.push_str(&format!("running: {}\n", info.running));
+                if let Some(err) = info.error_msg.as_deref().filter(|s| !s.is_empty()) {
+                    out.push_str(&format!("error_msg: {err}\n"));
+                }
+
+                if let Some(node) = info.my_node_info.as_ref() {
+                    out.push_str(&format!(
+                        "peer_id: {}\nhostname: {}\nversion: {}\n",
+                        node.peer_id, node.hostname, node.version
+                    ));
+                    if let Some(v4) = node.virtual_ipv4.as_ref() {
+                        let addr = v4
+                            .address
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_default();
+                        out.push_str(&format!("virtual_ipv4: {addr}/{}\n", v4.network_length));
+                    }
+                    if let Some(ips) = node.ips.as_ref() {
+                        if let Some(p) = ips.public_ipv4.as_ref() {
+                            out.push_str(&format!("public_ipv4: {p}\n"));
+                        }
+                        if let Some(p) = ips.public_ipv6.as_ref() {
+                            out.push_str(&format!("public_ipv6: {p}\n"));
+                        }
+                        let v4s: Vec<String> = ips
+                            .interface_ipv4s
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect();
+                        let v6s: Vec<String> = ips
+                            .interface_ipv6s
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect();
+                        out.push_str(&format!("interface_ipv4: [{}]\n", v4s.join(", ")));
+                        out.push_str(&format!("interface_ipv6: [{}]\n", v6s.join(", ")));
+                    }
+                    if !node.listeners.is_empty() {
+                        let listeners: Vec<String> =
+                            node.listeners.iter().map(ToString::to_string).collect();
+                        out.push_str(&format!("listeners: [{}]\n", listeners.join(", ")));
+                    }
+                }
+
+                out.push_str(&format!(
+                    "routes: {} (下发给 VpnService 的以 frontend 段为准)\n",
+                    info.routes.len()
+                ));
+                for r in &info.routes {
+                    let v4 = r
+                        .ipv4_addr
+                        .as_ref()
+                        .map(|inet| {
+                            let addr = inet
                                 .address
                                 .as_ref()
                                 .map(ToString::to_string)
                                 .unwrap_or_default();
-                            out.push_str(&format!("virtual_ipv4: {addr}/{}\n", v4.network_length));
-                        }
-                        if let Some(ips) = node.ips.as_ref() {
-                            if let Some(p) = ips.public_ipv4.as_ref() {
-                                out.push_str(&format!("public_ipv4: {p}\n"));
-                            }
-                            if let Some(p) = ips.public_ipv6.as_ref() {
-                                out.push_str(&format!("public_ipv6: {p}\n"));
-                            }
-                            let v4s: Vec<String> = ips
-                                .interface_ipv4s
-                                .iter()
+                            format!("{addr}/{}", inet.network_length)
+                        })
+                        .unwrap_or_default();
+                    let v6 = r
+                        .ipv6_addr
+                        .as_ref()
+                        .map(|inet| {
+                            let addr = inet
+                                .address
+                                .as_ref()
                                 .map(ToString::to_string)
-                                .collect();
-                            let v6s: Vec<String> = ips
-                                .interface_ipv6s
-                                .iter()
-                                .map(ToString::to_string)
-                                .collect();
-                            out.push_str(&format!("interface_ipv4: [{}]\n", v4s.join(", ")));
-                            out.push_str(&format!("interface_ipv6: [{}]\n", v6s.join(", ")));
-                        }
-                        if !node.listeners.is_empty() {
-                            let listeners: Vec<String> =
-                                node.listeners.iter().map(ToString::to_string).collect();
-                            out.push_str(&format!("listeners: [{}]\n", listeners.join(", ")));
-                        }
-                    }
-
+                                .unwrap_or_default();
+                            format!("{addr}/{}", inet.network_length)
+                        })
+                        .unwrap_or_default();
                     out.push_str(&format!(
-                        "routes: {} (下发给 VpnService 的以 frontend 段为准)\n",
-                        info.routes.len()
+                        "  peer={} v4={v4} v6={v6} cost={} next_hop={} hostname={} proxy=[{}]\n",
+                        r.peer_id,
+                        r.cost,
+                        r.next_hop_peer_id,
+                        r.hostname,
+                        r.proxy_cidrs.join(", "),
                     ));
-                    for r in &info.routes {
-                        let v4 = r
-                            .ipv4_addr
-                            .as_ref()
-                            .map(|inet| {
-                                let addr = inet
-                                    .address
-                                    .as_ref()
-                                    .map(ToString::to_string)
-                                    .unwrap_or_default();
-                                format!("{addr}/{}", inet.network_length)
-                            })
-                            .unwrap_or_default();
-                        let v6 = r
-                            .ipv6_addr
-                            .as_ref()
-                            .map(|inet| {
-                                let addr = inet
-                                    .address
-                                    .as_ref()
-                                    .map(ToString::to_string)
-                                    .unwrap_or_default();
-                                format!("{addr}/{}", inet.network_length)
-                            })
-                            .unwrap_or_default();
-                        out.push_str(&format!(
-                            "  peer={} v4={v4} v6={v6} cost={} next_hop={} hostname={} proxy=[{}]\n",
-                            r.peer_id,
-                            r.cost,
-                            r.next_hop_peer_id,
-                            r.hostname,
-                            r.proxy_cidrs.join(", "),
-                        ));
-                    }
+                }
 
-                    out.push_str(&format!("peers: {}\n", info.peers.len()));
-                    for p in &info.peers {
-                        out.push_str(&format!(
-                            "  peer={} conns={} direct_conns={}\n",
-                            p.peer_id,
-                            p.conns.len(),
-                            p.directly_connected_conns.len(),
-                        ));
-                    }
+                out.push_str(&format!("peers: {}\n", info.peers.len()));
+                for p in &info.peers {
+                    out.push_str(&format!(
+                        "  peer={} conns={} direct_conns={}\n",
+                        p.peer_id,
+                        p.conns.len(),
+                        p.directly_connected_conns.len(),
+                    ));
                 }
             }
-            Err(e) => out.push_str(&format!("collect failed: {e}\n")),
         }
     } else {
         out.push_str("client manager not initialized\n");
