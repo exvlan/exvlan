@@ -62,6 +62,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # 路径守卫：绝对路径字面量只允许出现在 paths.rs（见 docs/paths.md）
+      - name: Check path literals
+        run: bash script/ci/check-paths.sh
+
       # runner 预装内容 + 全 feature 构建很容易打满磁盘（曾多次 No space left on device）
       - name: Free disk space
         run: |

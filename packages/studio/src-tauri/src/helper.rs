@@ -62,8 +62,12 @@ mod imp {
         if !src.is_file() {
             bail!("随包 helper 不存在: {}", src.display());
         }
-        std::fs::create_dir_all("/Library/PrivilegedHelperTools").ok();
-        std::fs::create_dir_all("/Library/LaunchDaemons").ok();
+        if let Some(parent) = helper_bin().parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        if let Some(parent) = helper_plist_path().parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
         // helper 日志目录（系统日志根）
         std::fs::create_dir_all(crate::paths::system().logs).ok();
 
@@ -106,7 +110,7 @@ mod imp {
     }
 
     fn strip_quarantine(path: &Path) {
-        let _ = std::process::Command::new("/usr/bin/xattr")
+        let _ = std::process::Command::new("xattr")
             .args(["-d", "com.apple.quarantine"])
             .arg(path)
             .output();

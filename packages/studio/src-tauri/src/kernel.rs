@@ -29,22 +29,6 @@ pub fn kernel_dir() -> PathBuf {
     crate::paths::system().core
 }
 
-/// 20711 及更早的内核目录（迁移用）。
-pub fn legacy_kernel_dir() -> PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        PathBuf::from("/Library/Application Support/exvlan/core")
-    }
-    #[cfg(target_os = "windows")]
-    {
-        PathBuf::from(r"C:\ProgramData\exvlan\core")
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        PathBuf::from("/opt/exvlan/core")
-    }
-}
-
 /// 当前内核二进制路径（服务管理器应当指向这里）。
 pub fn kernel_path() -> PathBuf {
     kernel_dir().join(kernel_bin_name())
