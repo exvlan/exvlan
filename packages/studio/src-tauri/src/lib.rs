@@ -1475,13 +1475,22 @@ fn build_diagnostics_zip(
         let _ = zip.write_all(logger::redact(&text).as_bytes());
     }
 
-    // 4) 网络自检（结构化：实例/节点/路由/接口/VPN 状态）
+    // 4) helper.log（特权 helper：安装/apply/自更新/授权失败都记在这里）
+    {
+        let helper_log = crate::paths::helper_log();
+        if let Some(text) = read_capped(&helper_log, DIAG_LOG_CAP) {
+            let _ = zip.start_file("helper.log", opts);
+            let _ = zip.write_all(logger::redact(&text).as_bytes());
+        }
+    }
+
+    // 5) 网络自检（结构化：实例/节点/路由/接口/VPN 状态）
     if !network_report.trim().is_empty() {
         let _ = zip.start_file("network-report.txt", opts);
         let _ = zip.write_all(logger::redact(network_report).as_bytes());
     }
 
-    // 5) ui-state.json（脱敏）
+    // 6) ui-state.json（脱敏）
     if let Ok(dir) = app.path().app_config_dir()
         && let Ok(text) = std::fs::read_to_string(dir.join("ui-state.json"))
     {
@@ -1489,7 +1498,7 @@ fn build_diagnostics_zip(
         let _ = zip.write_all(logger::redact(&text).as_bytes());
     }
 
-    // 6) 摘要
+    // 7) 摘要
     let summary = format!(
         "version: {}\nos: {} ({})\nhome: {}\nlog_dir: {:?}\nconfig_dir: {:?}\nerror_log: {:?}\n",
         BUILD_VERSION,
