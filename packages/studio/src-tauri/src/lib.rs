@@ -3383,6 +3383,8 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
     if let Some(src) = req.helper_src.as_deref() {
         crate::helper::install_from(std::path::Path::new(src), req.owner_uid)?;
         crate::error_log::record("provision.helper", "installed");
+        // 启动竞态：bootstrap 后 socket 还没 bind，这里轮询 3s 再判定。
+        crate::helper::verify_healthy(std::time::Duration::from_secs(3));
     }
     Ok(())
 }

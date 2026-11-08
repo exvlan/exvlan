@@ -185,6 +185,7 @@ fn plist() -> String {
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Interactive</string>
+  <key>ThrottleInterval</key><integer>10</integer>
   <key>StandardOutPath</key><string>/var/log/{HELPER_LABEL}.log</string>
   <key>StandardErrorPath</key><string>/var/log/{HELPER_LABEL}.log</string>
 </dict>

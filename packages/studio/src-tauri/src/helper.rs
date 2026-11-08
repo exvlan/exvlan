@@ -115,6 +115,7 @@ mod imp {
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Interactive</string>
+  <key>ThrottleInterval</key><integer>10</integer>
   <key>StandardOutPath</key><string>/var/log/{HELPER_LABEL}.log</string>
   <key>StandardErrorPath</key><string>/var/log/{HELPER_LABEL}.log</string>
 </dict>
@@ -175,6 +176,59 @@ mod imp {
         Ok(())
     }
 
+    /// 安装后健康检查：轮询 `--status`（socket 连通即视为健康）。
+    ///
+    /// 刚 bootstrap 完的几百毫秒内 socket 还没 bind，`--status` 会报
+    /// `Connection refused`；这只算「还没起来」，不能当成安装失败。
+    /// 真正超时才把 `launchctl print` 与 helper 日志尾部写进 error.log。
+    pub fn verify_healthy(timeout: std::time::Duration) {
+        let started = std::time::Instant::now();
+        let mut last = String::new();
+        while started.elapsed() < timeout {
+            match status() {
+                Ok(s) => {
+                    crate::error_log::record(
+                        "helper.health",
+                        format!("ok in {}ms: {s}", started.elapsed().as_millis()),
+                    );
+                    return;
+                }
+                Err(e) => last = e,
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+
+        let print = std::process::Command::new("/bin/launchctl")
+            .args(["print", &format!("system/{HELPER_LABEL}")])
+            .output()
+            .map(|o| {
+                let mut text = String::from_utf8_lossy(&o.stdout).into_owned();
+                if text.len() > 1500 {
+                    text.truncate(1500);
+                }
+                text
+            })
+            .unwrap_or_default();
+        crate::error_log::record(
+            "helper.health",
+            format!(
+                "failed after {}ms: {last} | launchctl: {print} | log tail: {}",
+                timeout.as_millis(),
+                helper_log_tail(4096)
+            ),
+        );
+    }
+
+    /// helper 日志尾部（仅用于健康检查失败时落盘）。
+    fn helper_log_tail(max: usize) -> String {
+        let path = format!("/var/log/{HELPER_LABEL}.log");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return format!("(无法读取 {path})");
+        };
+        let start = bytes.len().saturating_sub(max);
+        String::from_utf8_lossy(&bytes[start..]).replace('\n', " | ")
+    }
+
     /// 查询 helper 状态（诊断用）。
     pub fn status() -> Result<String, String> {
         if !is_installed() {
@@ -214,10 +268,12 @@ mod imp {
     pub fn status() -> Result<String, String> {
         Ok("unsupported".to_string())
     }
+
+    pub fn verify_healthy(_timeout: std::time::Duration) {}
 }
 
 #[allow(unused_imports)]
-pub use imp::{apply_bundled, bundled_helper, install_from, is_installed, status};
+pub use imp::{apply_bundled, bundled_helper, install_from, is_installed, status, verify_healthy};
 
 /// 当前进程 uid（供提权安装使用）。
 pub fn current_uid() -> u32 {
