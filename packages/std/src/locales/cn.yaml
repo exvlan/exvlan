@@ -124,6 +124,7 @@ settings:
   copy_log_dir: 复制日志路径
   upload_diag: 上传诊断
   upload_diag_hint: 一键上传到私有仓库并复制链接；失败自动改用分享
+  upload_consent: "将上传已脱敏的诊断日志到私有仓库 exvlan/diagnostics（仅维护者可查看）。\n\n包含：版本、网络名、内网 IP、主机名、最近日志。\n不含：网络密钥、私钥、token（已自动脱敏）。\n链接 3 天后过期。\n\n确认后不再提示。"
   network_check: 网络自检
   network_check_hint: 检查实例、TUN、采集信息与最近日志
   network_check_run: 开始自检

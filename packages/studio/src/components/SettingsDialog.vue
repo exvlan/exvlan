@@ -224,17 +224,38 @@ async function runNetworkCheck() {
 
 const uploading = ref(false);
 const CONSENT_KEY = "diag_upload_consent";
+const consentVisible = ref(false);
+let consentResolve: ((ok: boolean) => void) | null = null;
+
+/**
+ * 首次上传前的确认。
+ *
+ * 不能用 `window.confirm`：macOS 的 WKWebView（wry）没有实现
+ * `runJavaScriptConfirmPanelWithMessage`，调用会**同步返回 false 且不显示任何界面**，
+ * 表现为「点上传完全没反应、连 loading 都没有」。
+ */
+function askUploadConsent(): Promise<boolean> {
+  if (localStorage.getItem(CONSENT_KEY) === "1") {
+    return Promise.resolve(true);
+  }
+  consentVisible.value = true;
+  return new Promise<boolean>((resolve) => {
+    consentResolve = resolve;
+  });
+}
+
+function resolveUploadConsent(ok: boolean) {
+  consentVisible.value = false;
+  if (ok) {
+    localStorage.setItem(CONSENT_KEY, "1");
+  }
+  consentResolve?.(ok);
+  consentResolve = null;
+}
 
 async function onUploadDiagnostics() {
-  if (localStorage.getItem(CONSENT_KEY) !== "1") {
-    const ok = window.confirm(
-      "将把诊断日志上传到私有仓库 exvlan/diagnostics（仅维护者可查看）。\n" +
-        "内容已脱敏（不含网络密钥/私钥/token），但会包含网络名、内网 IP、主机名。\n\n继续上传吗？",
-    );
-    if (!ok) {
-      return;
-    }
-    localStorage.setItem(CONSENT_KEY, "1");
+  if (!(await askUploadConsent())) {
+    return;
   }
   uploading.value = true;
   try {
@@ -585,6 +606,25 @@ watch(
         </div>
         <div class="text-xs text-surface-400">{{ t("settings.copyright") }}</div>
       </div>
+    </template>
+  </Dialog>
+
+  <!-- 诊断上传首次确认：应用内对话框（window.confirm 在 macOS WKWebView 中无效） -->
+  <Dialog
+    v-model:visible="consentVisible"
+    modal
+    :header="t('settings.upload_diag')"
+    :style="{ width: '30rem', maxWidth: '92vw' }"
+  >
+    <p class="text-sm leading-relaxed whitespace-pre-line">{{ t("settings.upload_consent") }}</p>
+    <template #footer>
+      <Button
+        :label="t('web.common.cancel')"
+        severity="secondary"
+        text
+        @click="resolveUploadConsent(false)"
+      />
+      <Button :label="t('web.common.confirm')" @click="resolveUploadConsent(true)" />
     </template>
   </Dialog>
 </template>
