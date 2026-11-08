@@ -15,7 +15,9 @@ mod imp {
     use std::path::{Path, PathBuf};
     use tauri::Manager as _;
 
+    const HELPER_LABEL: &str = "era.exvlan.studio.helper";
     const HELPER_BIN: &str = "/Library/PrivilegedHelperTools/era.exvlan.studio.helper";
+    const HELPER_PLIST: &str = "/Library/LaunchDaemons/era.exvlan.studio.helper.plist";
     const HELPER_VERSION_FILE: &str =
         "/Library/PrivilegedHelperTools/era.exvlan.studio.helper.version";
 
@@ -43,22 +45,82 @@ mod imp {
     }
 
     /// 安装 helper（由提权子进程以 root 调用；`src` 是随包 helper 的绝对路径）。
+    ///
+    /// 直接复制 + 写 plist + bootstrap（不执行随包二进制，避免 quarantine 干扰），
+    /// 与 ClashBar / Clash Verge 的安装脚本一致。
     pub fn install_from(src: &Path, owner_uid: u32) -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt as _;
+
         if !src.is_file() {
             bail!("随包 helper 不存在: {}", src.display());
         }
-        let out = std::process::Command::new(src)
-            .arg("--install")
-            .arg(owner_uid.to_string())
+        std::fs::create_dir_all("/Library/PrivilegedHelperTools").ok();
+        std::fs::create_dir_all("/Library/LaunchDaemons").ok();
+
+        std::fs::copy(src, HELPER_BIN).with_context(|| format!("复制 helper 到 {HELPER_BIN}"))?;
+        std::fs::set_permissions(HELPER_BIN, std::fs::Permissions::from_mode(0o755))?;
+        strip_quarantine(HELPER_BIN);
+
+        std::fs::write(HELPER_PLIST, helper_plist())
+            .with_context(|| format!("写入 {HELPER_PLIST}"))?;
+        std::fs::set_permissions(HELPER_PLIST, std::fs::Permissions::from_mode(0o644))?;
+        strip_quarantine(HELPER_PLIST);
+
+        let _ = std::process::Command::new("/bin/launchctl")
+            .args(["bootout", &format!("system/{HELPER_LABEL}")])
+            .output();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let out = std::process::Command::new("/bin/launchctl")
+            .args(["bootstrap", "system", HELPER_PLIST])
             .output()
-            .with_context(|| format!("执行 {} --install 失败", src.display()))?;
+            .context("执行 launchctl bootstrap")?;
         if !out.status.success() {
-            bail!(
-                "helper 安装失败: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if !stderr.contains("already") && !stderr.contains("Input/output error") {
+                bail!("launchctl bootstrap 失败: {}", stderr.trim());
+            }
         }
+        let _ = std::process::Command::new("/bin/launchctl")
+            .args(["kickstart", "-k", &format!("system/{HELPER_LABEL}")])
+            .output();
+
+        std::fs::write(
+            HELPER_VERSION_FILE,
+            format!("{HELPER_VERSION} {owner_uid}\n"),
+        )?;
+        std::fs::set_permissions(HELPER_VERSION_FILE, std::fs::Permissions::from_mode(0o644))?;
         Ok(())
+    }
+
+    fn strip_quarantine(path: &str) {
+        let _ = std::process::Command::new("/usr/bin/xattr")
+            .args(["-d", "com.apple.quarantine"])
+            .arg(path)
+            .output();
+    }
+
+    fn helper_plist() -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{HELPER_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{HELPER_BIN}</string>
+    <string>--daemon</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>/var/log/{HELPER_LABEL}.log</string>
+  <key>StandardErrorPath</key><string>/var/log/{HELPER_LABEL}.log</string>
+</dict>
+</plist>
+"#
+        )
     }
 
     /// 把随包的已签名内核交给 helper（当前用户执行，无需提权）。
