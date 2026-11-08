@@ -2409,6 +2409,8 @@ mod service {
 
         // 20712 路径规范化：先把旧目录**复制**过来（旧目录保留，便于回退）。
         migrate_legacy_layout(&opts);
+        // 旧服务与新版抢同一个 RPC/TUN 端口，必须先停；失败时恢复（见下）。
+        let legacy_backup = stop_legacy_service();
 
         // 守护进程启动第一步是初始化文件日志：目录不存在会直接退出（20710 实测
         // 表现为「launchctl 显示 Running 但 15999 无人监听」）。这里以 root 预建。
@@ -2444,6 +2446,7 @@ mod service {
 
         if let Some(err) = last_error {
             crate::error_log::record("service.install.diag", service_diagnostics(&service, &opts));
+            restore_legacy_service(&legacy_backup);
             return Err(err).with_context(|| "Failed to install service");
         }
 
@@ -2452,8 +2455,6 @@ mod service {
         // 装上了不代表能连：以「RPC 端口真的能连上」为准（launchctl 的 Running 会骗人，
         // 20710 就是守护进程起来即退出、launchd 反复重启，状态一直显示 Running）。
         if wait_until_listening(&opts.rpc_portal, std::time::Duration::from_secs(6)) {
-            // 新服务已健康：这时才停旧 label（失败也不影响新服务）。
-            remove_legacy_service();
             if crate::ENABLE_LEGACY_CLEANUP {
                 cleanup_legacy_layout();
             }
@@ -2466,39 +2467,52 @@ mod service {
         }
         let diag = service_diagnostics(&service, &opts);
         crate::error_log::record("service.install.not_listening", &diag);
+        restore_legacy_service(&legacy_backup);
         Err(anyhow::anyhow!(
             "服务已安装但 RPC 端口 {} 无法连接（守护进程可能启动即退出）。诊断已写入 error.log。",
             opts.rpc_portal
         ))
     }
 
-    /// 以 root 预建守护进程要用的目录（配置 + 日志），并收紧属主/权限。
     /// 卸载旧 label（`exvlan-studio`），避免新旧两个守护进程并存。
+    /// preview 期间**不删除**旧服务定义：只停掉（释放端口），plist 改名保留。
     ///
-    /// preview 期间**不删除**旧服务定义：只 `bootout` 停掉（避免端口冲突），
-    /// plist 改名为 `*.pre-7.2` 保留，方便回退到旧版本。
-    fn remove_legacy_service() {
+    /// 旧服务和新服务抢同一个 RPC/TUN 端口，必须先停；若新服务安装失败，
+    /// 用 [`restore_legacy_service`] 把旧服务拉回来。
+    #[derive(Default)]
+    struct LegacyBackup {
+        #[cfg(target_os = "macos")]
+        plist: Option<(std::path::PathBuf, std::path::PathBuf)>,
+    }
+
+    fn stop_legacy_service() -> LegacyBackup {
         const LEGACY: &str = "exvlan-studio";
+        #[allow(unused_mut)]
+        let mut backup = LegacyBackup::default();
         if SERVICE_LABEL == LEGACY {
-            return;
+            return backup;
         }
 
         #[cfg(target_os = "macos")]
         {
+            let label = format!("system/{LEGACY}");
             let _ = std::process::Command::new("/bin/launchctl")
-                .args(["bootout", &format!("system/{LEGACY}")])
+                .args(["bootout", &label])
                 .output();
-            let plist = format!("/Library/LaunchDaemons/{LEGACY}.plist");
-            let backup = format!("{plist}.pre-7.2");
-            if std::path::Path::new(&plist).is_file() && !std::path::Path::new(&backup).exists() {
-                match std::fs::rename(&plist, &backup) {
-                    Ok(()) => crate::error_log::record(
-                        "service.migrate",
-                        format!("bootout {LEGACY}; plist → {backup}"),
-                    ),
+            let plist = std::path::PathBuf::from(format!("/Library/LaunchDaemons/{LEGACY}.plist"));
+            let bak = std::path::PathBuf::from(format!("{}.pre-7.2", plist.display()));
+            if plist.is_file() && !bak.exists() {
+                match std::fs::rename(&plist, &bak) {
+                    Ok(()) => {
+                        crate::error_log::record(
+                            "service.migrate",
+                            format!("bootout {LEGACY}; plist → {}", bak.display()),
+                        );
+                        backup.plist = Some((plist, bak));
+                    }
                     Err(err) => crate::error_log::record(
                         "service.migrate",
-                        format!("rename {plist} failed: {err}"),
+                        format!("rename {} failed: {err}", plist.display()),
                     ),
                 }
             }
@@ -2506,7 +2520,6 @@ mod service {
 
         #[cfg(target_os = "windows")]
         {
-            // 停掉并禁止自启，但保留服务定义（回退时可重新启用）。
             let _ = std::process::Command::new("sc")
                 .args(["stop", LEGACY])
                 .output();
@@ -2523,6 +2536,43 @@ mod service {
                 .output();
             crate::error_log::record("service.migrate", format!("disabled legacy {LEGACY}"));
         }
+
+        backup
+    }
+
+    /// 新服务安装失败时，把旧服务恢复回去（回退保障）。
+    #[allow(unused_variables)]
+    fn restore_legacy_service(backup: &LegacyBackup) {
+        const LEGACY: &str = "exvlan-studio";
+
+        #[cfg(target_os = "macos")]
+        if let Some((plist, bak)) = &backup.plist {
+            let _ = std::fs::rename(bak, plist);
+            let _ = std::process::Command::new("/bin/launchctl")
+                .args(["bootstrap", "system", &plist.display().to_string()])
+                .output();
+            crate::error_log::record("service.migrate", "restored legacy service");
+            return;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("sc")
+                .args(["config", LEGACY, "start=", "auto"])
+                .output();
+            let _ = std::process::Command::new("sc")
+                .args(["start", LEGACY])
+                .output();
+        }
+
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            let _ = std::process::Command::new("systemctl")
+                .args(["enable", "--now", LEGACY])
+                .output();
+        }
+
+        let _ = LEGACY;
     }
 
     /// 把 `from` 目录里的文件**复制**到 `to`（目标已存在则跳过）。
@@ -2613,6 +2663,7 @@ mod service {
         }
     }
 
+    /// 以 root 预建守护进程要用的目录（配置 + 日志），并收紧属主/权限。
     fn prepare_runtime_dirs(opts: &ServiceOptions) {
         for dir in [&opts.config_dir, &opts.file_log_dir] {
             let path = std::path::Path::new(dir);
