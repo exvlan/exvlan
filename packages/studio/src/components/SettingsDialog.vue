@@ -164,7 +164,8 @@ const LAST_UPLOAD_KEY = "diag_last_upload";
 
 /** 前端才有的关键信息：配置摘要 + VPN 运行时状态（实际下发的 routes / dns / 所属实例）。 */
 async function buildFrontendState(): Promise<string> {
-  const lines = [mobileVpnDiagnostics()];
+  // 桌面端没有 VpnService，VPN 段由 Rust 侧输出 n/a，这里不再重复。
+  const lines = isMobile ? [mobileVpnDiagnostics()] : [];
   try {
     const ids = await listNetworkInstanceIds();
     const list = [...(ids.running_inst_ids ?? []), ...(ids.disabled_inst_ids ?? [])]

@@ -504,6 +504,10 @@ function onAppUpdateLater() {
 onMounted(async () => {
   const cleanupFns: Array<() => void> = [];
 
+  // `logLevel` 的初始值在模块加载时读取，此时 main.ts 的 prefs 回填还没执行；
+  // 这里再读一次，保证 UI 与 prefs.toml 一致。
+  logLevel.value = localStorage.getItem("log_level") || "info";
+
   if (type() === "android") {
     try {
       await initMobileVpnService();
