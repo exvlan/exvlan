@@ -354,6 +354,15 @@ export async function uploadDiagnostics(frontendState?: string) {
   return await invoke<string>("upload_diagnostics", { frontend: frontendState });
 }
 
+/** 诊断链路埋点：写 events.log（失败静默）。 */
+export async function logDiagStep(step: string, detail?: string) {
+  try {
+    await invoke("log_diag_step", { step, detail });
+  } catch {
+    // 埋点失败不影响主流程
+  }
+}
+
 /** 网络自检：实例/采集信息 + 最近事件与内核日志。 */
 export async function networkDiagnostics(frontendState?: string) {
   return await invoke<string>("network_diagnostics", { frontend: frontendState });

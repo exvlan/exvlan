@@ -10,6 +10,7 @@ import KernelManager from "~/components/KernelManager.vue";
 import {
   getConfig,
   listNetworkInstanceIds,
+  logDiagStep,
   networkDiagnostics,
   serviceDiagnostics,
   serviceReinstall,
@@ -17,6 +18,11 @@ import {
   uploadDiagnostics,
 } from "~/composables/backend";
 import { mobileVpnDiagnostics } from "~/composables/mobile_vpn";
+
+/** 诊断链路埋点：写 events.log，失败静默（埋点不能影响主流程）。 */
+function diagStep(step: string, detail?: string) {
+  void logDiagStep(step, detail);
+}
 
 const props = defineProps<{
   visible: boolean;
@@ -163,17 +169,27 @@ async function openProjectHome() {
 const LAST_UPLOAD_KEY = "diag_last_upload";
 
 /** 前端才有的关键信息：配置摘要 + VPN 运行时状态（实际下发的 routes / dns / 所属实例）。 */
+/** 给任意 Promise 加超时，避免「采集 RPC 卡住 → 整个上传永远不返回」。 */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
 async function buildFrontendState(): Promise<string> {
   // 桌面端没有 VpnService，VPN 段由 Rust 侧输出 n/a，这里不再重复。
   const lines = isMobile ? [mobileVpnDiagnostics()] : [];
   try {
-    const ids = await listNetworkInstanceIds();
+    const ids = await withTimeout(listNetworkInstanceIds(), 5000, "listNetworkInstanceIds");
     const list = [...(ids.running_inst_ids ?? []), ...(ids.disabled_inst_ids ?? [])]
       .map((id) => (typeof id === "string" ? id : Utils.UuidToStr(id as any)))
       .filter((id) => id.length > 0);
     lines.push(`--- config (${list.length}) ---`);
     for (const id of list) {
-      const cfg = await getConfig(id).catch(() => null);
+      const cfg = await withTimeout(getConfig(id), 3000, `getConfig ${id}`).catch(() => null);
       if (!cfg) {
         lines.push(`instance: ${id} (config unavailable)`);
         continue;
@@ -254,12 +270,22 @@ function resolveUploadConsent(ok: boolean) {
 }
 
 async function onUploadDiagnostics() {
+  diagStep("upload_click");
   if (!(await askUploadConsent())) {
+    diagStep("upload_consent_declined");
     return;
   }
+  diagStep("upload_consent_ok");
   uploading.value = true;
+  const started = Date.now();
   try {
-    const urls = await uploadDiagnostics(await buildFrontendState());
+    const state = await withTimeout(buildFrontendState(), 8000, "buildFrontendState").catch((e) => {
+      diagStep("frontend_state_failed", String(e));
+      return "";
+    });
+    diagStep("invoke_start", `state=${state.length}B`);
+    const urls = await uploadDiagnostics(state);
+    diagStep("invoke_done", `${Date.now() - started}ms`);
     if (urls) {
       localStorage.setItem(LAST_UPLOAD_KEY, JSON.stringify({ at: new Date().toISOString(), urls }));
       await writeText(urls);
@@ -271,6 +297,7 @@ async function onUploadDiagnostics() {
       });
     }
   } catch (e: any) {
+    diagStep("invoke_failed", `${Date.now() - started}ms ${String(e)}`);
     console.warn("upload diagnostics failed, fallback to share", e);
     toast.add({
       severity: "warn",

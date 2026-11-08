@@ -1254,6 +1254,21 @@ fn report_frontend_error(scope: String, message: String, stack: Option<String>) 
     error_log::record(&scope, text);
 }
 
+/// 前端诊断链路埋点：写入 `events.log`。
+///
+/// 「点了没反应」这类问题在 `error.log` 里看不到（没有错误发生），
+/// 所以把关键节点单独打点，用于判断卡在哪一步。
+#[tauri::command]
+fn log_diag_step(step: String, detail: Option<String>) {
+    let detail = detail.unwrap_or_default();
+    let message = if detail.trim().is_empty() {
+        step
+    } else {
+        format!("{step} {detail}")
+    };
+    error_log::event("fe:diag", message);
+}
+
 /// `error.log` 的绝对路径（未初始化时返回错误）。
 #[tauri::command]
 fn error_log_path(app: AppHandle) -> Result<String, String> {
@@ -3915,6 +3930,7 @@ pub fn run_gui() -> std::process::ExitCode {
             is_web_client_connected,
             get_log_dir_path,
             report_frontend_error,
+            log_diag_step,
             report_boot_state,
             diagnostics_info,
             service_default_dirs_cmd,
