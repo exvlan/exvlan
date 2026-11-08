@@ -102,8 +102,8 @@ magisk_status_restarting: Restarting
 magisk_save_restart: Save and Restart
 magisk_command_args_warning: Startup argument mode is active, so the module ignores config.toml. Remove config/command_args before saving configuration here.
 magisk_invalid_module_directory: KernelSU returned an invalid module directory
-magisk_load_failed: 'Failed to load module configuration: {error}'
-magisk_save_failed: 'Failed to save module configuration: {error}'
+magisk_load_failed: "Failed to load module configuration: {error}"
+magisk_save_failed: "Failed to save module configuration: {error}"
 magisk_config_saved: Configuration validated and saved; Exvlan restarted
 magisk_config_saved_restart_pending: Configuration validated and saved; the Exvlan supervisor is still starting
 retain_network_instance: Retain Network Instance
@@ -140,6 +140,9 @@ settings:
   rpc_disconnected: Kernel not connected
   vpn_running: Instance running
   vpn_stopped: Not running
+  vpn_not_connected: VPN not started
+  vpn_not_connected_hint: The instance is running but traffic is not going through the tunnel (VPN service is not running)
+  vpn_start_now: Start now
 exchange_language: 切换中文
 logging: Logging
 logging_level_info: Info
@@ -153,7 +156,7 @@ vpn_tile_no_network: No configured network
 vpn_tile_no_network_description: Configure a network in Exvlan before using the VPN tile.
 vpn_tile_started: VPN network started
 vpn_tile_stopped: VPN network stopped
-vpn_tile_action_failed: 'VPN tile action failed: {error}'
+vpn_tile_action_failed: "VPN tile action failed: {error}"
 disable_auto_launch: Disable Launch on Reboot
 enable_auto_launch: Enable Launch on Reboot
 hide_dock_icon: Hide Dock Icon
@@ -162,9 +165,9 @@ exit: Exit
 use_latency_first: Latency First Mode
 show_node_details: Show Node Details
 hide_node_details: Hide Node Details
-chips_placeholder: 'e.g: {0}, select from the dropdown after input'
-hostname_placeholder: 'Leave blank and default to host name: {0}'
-dev_name_placeholder: 'Note: When multiple networks use the same TUN interface name at the same time, there will be a conflict when setting the TUN''s IP. Leave blank to automatically generate a random name.'
+chips_placeholder: "e.g: {0}, select from the dropdown after input"
+hostname_placeholder: "Leave blank and default to host name: {0}"
+dev_name_placeholder: "Note: When multiple networks use the same TUN interface name at the same time, there will be a conflict when setting the TUN's IP. Leave blank to automatically generate a random name."
 off_text: Press to disable
 on_text: Press to enable
 show_config: Show Config
@@ -361,7 +364,7 @@ about:
   author: Author
   homepage: Homepage
   license: License
-  description: 'Exvlan is a simple, safe and decentralized VPN networking solution implemented with the Rust language and Tokio framework.'
+  description: "Exvlan is a simple, safe and decentralized VPN networking solution implemented with the Rust language and Tokio framework."
   check_update: Check Update
 
 event:
@@ -472,7 +475,7 @@ web:
     confirm_password: Confirm Password
     submit: Register
     login: Back to Login
-  
+
   main:
     dashboard: Dashboard
     device_list: Device List
@@ -503,7 +506,7 @@ web:
     machine_id: Machine ID
     unknown_location: Unknown Location
     central_networks: Joined Networks
-    
+
   device_management:
     edit_network: Edit Network
     export_config: Export Config

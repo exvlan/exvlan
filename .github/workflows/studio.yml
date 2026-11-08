@@ -84,7 +84,7 @@ jobs:
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
       GUI_TARGET: ${{ matrix.GUI_TARGET }}
-    needs: [ pre_job, prepare_matrix ]
+    needs: [pre_job, prepare_matrix]
     if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -131,6 +131,29 @@ jobs:
           fi
           chmod +x packages/studio/src-tauri/resources/kernel/exvlan || true
           ls -l packages/studio/src-tauri/resources/kernel/
+
+      # helper（macOS）：独立小二进制，随包安装；首次授权一次，之后升级不再弹密码。
+      - name: Build privileged helper (macOS)
+        if: ${{ contains(matrix.GUI_TARGET, 'darwin') }}
+        run: |
+          set -euo pipefail
+          cargo build --release -p exvlan-helper --target "$GUI_TARGET"
+          mkdir -p packages/studio/src-tauri/resources/helper
+          cp "target/$GUI_TARGET/release/exvlan-helper" packages/studio/src-tauri/resources/helper/
+          chmod +x packages/studio/src-tauri/resources/helper/exvlan-helper
+          ls -l packages/studio/src-tauri/resources/helper/
+
+      # 内核签名：helper 只安装 minisign 校验通过的包（复用 updater 私钥，无需新 secret）。
+      - name: Sign kernel for privileged helper (macOS)
+        if: ${{ contains(matrix.GUI_TARGET, 'darwin') }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          set -euo pipefail
+          cd packages/studio
+          pnpm tauri signer sign src-tauri/resources/kernel/exvlan
+          ls -l src-tauri/resources/kernel/
 
       - name: copy correct DLLs (Windows)
         if: ${{ contains(matrix.GUI_TARGET, 'windows') }}

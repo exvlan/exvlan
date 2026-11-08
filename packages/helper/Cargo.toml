@@ -1,0 +1,20 @@
+[package]
+name = "exvlan-helper"
+version = "26.410.20712"
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../exvlan/LICENSE"
+description = "EXVlan privileged helper (macOS): installs signed kernel updates without re-prompting"
+
+[[bin]]
+name = "exvlan-helper"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+minisign-verify = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

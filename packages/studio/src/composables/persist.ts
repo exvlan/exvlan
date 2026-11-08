@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from "@tauri-apps/api/core";
 
 /**
  * UI 状态后端持久化。
@@ -10,43 +10,58 @@ import { invoke } from '@tauri-apps/api/core'
  * 这样无需改动 std / 各业务模块里已有的写入代码。
  */
 
-const nativeSet = Storage.prototype.setItem
-const nativeRemove = Storage.prototype.removeItem
+const nativeSet = Storage.prototype.setItem;
+const nativeRemove = Storage.prototype.removeItem;
+
+/** 后端 `prefs.toml` 是唯一权威：这些键启动时**无条件**覆盖 localStorage。 */
+const AUTHORITATIVE_KEYS = new Set([
+  "app_mode",
+  "lang",
+  "log_level",
+  "last_network_instance_id",
+  "diag_last_upload",
+]);
 
 /**
  * 从后端回填 localStorage（使用原生 setItem，避免触发写穿）。
  *
- * **只补缺失键**：后端文件可能是旧值（例如上次写穿没完成），
- * 若无条件覆盖，就会把 WebView 里较新的值（模式/上次网络）冲掉，
- * 表现为「切了模式，重启又变回去」。
+ * - 关键键（模式/语言/日志级别/上次网络）：**后端值覆盖前端**，避免「切了模式，
+ *   重启又变回去」；
+ * - 其它键：只补缺失，避免把 WebView 里更新但还没落盘的值冲掉。
+ *
+ * 后端不可用时会写 error.log（以前只 console.warn，排查不到）。
  */
 export async function hydrateUiState(): Promise<void> {
   try {
-    const state = await invoke<Record<string, string>>('get_ui_state')
-    const restored: string[] = []
+    const state = await invoke<Record<string, string>>("get_ui_state");
+    const restored: string[] = [];
     for (const [key, value] of Object.entries(state ?? {})) {
-      if (localStorage.getItem(key) === null) {
-        nativeSet.call(localStorage, key, value)
-        restored.push(key)
+      const current = localStorage.getItem(key);
+      const shouldWrite = current === null || (AUTHORITATIVE_KEYS.has(key) && current !== value);
+      if (shouldWrite) {
+        nativeSet.call(localStorage, key, value);
+        restored.push(key);
       }
     }
-    console.info('[ui-state] hydrated(missing only):', restored.join(',') || '(none)')
-  }
-  catch (e) {
-    // 后端不可用（如 Web 控制台）时静默降级为纯 localStorage
-    console.warn('hydrateUiState failed:', e)
+    console.info("[prefs] hydrated:", restored.join(",") || "(none)");
+  } catch (e) {
+    console.warn("hydrateUiState failed:", e);
+    void invoke("report_frontend_error", {
+      scope: "fe:prefs",
+      message: `hydrateUiState failed: ${String(e)}`,
+    }).catch(() => {});
   }
 }
 
 /** 把一次写入推给后端（fire-and-forget，但失败会上报 error.log）。 */
 function pushToBackend(key: string, value: string | null): void {
-  void invoke('set_ui_state', { key, value }).catch((e) => {
-    console.warn('set_ui_state failed:', key, e)
-    void invoke('report_frontend_error', {
-      scope: 'fe:ui-state',
+  void invoke("set_ui_state", { key, value }).catch((e) => {
+    console.warn("set_ui_state failed:", key, e);
+    void invoke("report_frontend_error", {
+      scope: "fe:ui-state",
       message: `set_ui_state(${key}) failed: ${e}`,
-    }).catch(() => {})
-  })
+    }).catch(() => {});
+  });
 }
 
 /**
@@ -54,19 +69,18 @@ function pushToBackend(key: string, value: string | null): void {
  * 否则下次启动会被旧的后端值覆盖（历史 bug）。
  */
 export async function persistUiStateNow(key: string, value: string | null): Promise<void> {
-  nativeSet.call(localStorage, key, value ?? '')
+  nativeSet.call(localStorage, key, value ?? "");
   if (value === null) {
-    nativeRemove.call(localStorage, key)
+    nativeRemove.call(localStorage, key);
   }
   try {
-    await invoke('set_ui_state', { key, value })
-  }
-  catch (e) {
-    console.warn('set_ui_state(now) failed:', key, e)
-    void invoke('report_frontend_error', {
-      scope: 'fe:ui-state',
+    await invoke("set_ui_state", { key, value });
+  } catch (e) {
+    console.warn("set_ui_state(now) failed:", key, e);
+    void invoke("report_frontend_error", {
+      scope: "fe:ui-state",
       message: `set_ui_state(now) ${key} failed: ${e}`,
-    }).catch(() => {})
+    }).catch(() => {});
   }
 }
 
@@ -76,11 +90,11 @@ export async function persistUiStateNow(key: string, value: string | null): Prom
  */
 export function installPersistHook(): void {
   Storage.prototype.setItem = function (key: string, value: string) {
-    nativeSet.call(this, key, value)
-    pushToBackend(key, value)
-  }
+    nativeSet.call(this, key, value);
+    pushToBackend(key, value);
+  };
   Storage.prototype.removeItem = function (key: string) {
-    nativeRemove.call(this, key)
-    pushToBackend(key, null)
-  }
+    nativeRemove.call(this, key);
+    pushToBackend(key, null);
+  };
 }

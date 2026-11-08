@@ -42,6 +42,7 @@ declare global {
   const getCurrentWatcher: typeof import("vue").getCurrentWatcher;
   const getExvlanVersion: typeof import("./composables/backend").getExvlanVersion;
   const getNetworkMetas: typeof import("./composables/backend").getNetworkMetas;
+  const getNetworks: typeof import("./composables/backend").getNetworks;
   const getRoutesForVpn: typeof import("./composables/mobile_vpn").getRoutesForVpn;
   const getServiceStatus: typeof import("./composables/backend").getServiceStatus;
   const getVpnPortalInfo: typeof import("./composables/backend").getVpnPortalInfo;
@@ -73,8 +74,12 @@ declare global {
   const mapStores: typeof import("pinia").mapStores;
   const mapWritableState: typeof import("pinia").mapWritableState;
   const markRaw: typeof import("vue").markRaw;
+  const migrateNetworks: typeof import("./composables/backend").migrateNetworks;
   const mobileVpnDiagnostics: typeof import("./composables/mobile_vpn").mobileVpnDiagnostics;
+  const mobileVpnRunning: typeof import("./composables/mobile_vpn").mobileVpnRunning;
+  const mobileVpnSyncing: typeof import("./composables/mobile_vpn").mobileVpnSyncing;
   const networkDiagnostics: typeof import("./composables/backend").networkDiagnostics;
+  const networksPath: typeof import("./composables/backend").networksPath;
   const nextTick: typeof import("vue").nextTick;
   const normalizeConfigSource: typeof import("./composables/config_source").normalizeConfigSource;
   const onActivated: typeof import("vue").onActivated;
@@ -97,6 +102,7 @@ declare global {
   const onWatcherCleanup: typeof import("vue").onWatcherCleanup;
   const parseNetworkConfig: typeof import("./composables/backend").parseNetworkConfig;
   const persistUiStateNow: typeof import("./composables/persist").persistUiStateNow;
+  const prefsPath: typeof import("./composables/backend").prefsPath;
   const prepareVpnService: typeof import("./composables/mobile_vpn").prepareVpnService;
   const provide: typeof import("vue").provide;
   const reactive: typeof import("vue").reactive;
@@ -122,6 +128,7 @@ declare global {
   const setLoggingLevel: typeof import("./composables/backend").setLoggingLevel;
   const setMapStoreSuffix: typeof import("pinia").setMapStoreSuffix;
   const setMobileVpnTileActionHandler: typeof import("./composables/mobile_vpn").setMobileVpnTileActionHandler;
+  const setNetworks: typeof import("./composables/backend").setNetworks;
   const setServiceStatus: typeof import("./composables/backend").setServiceStatus;
   const setTrayMenu: typeof import("./composables/tray").setTrayMenu;
   const setTrayRunState: typeof import("./composables/tray").setTrayRunState;
@@ -273,6 +280,7 @@ declare module "vue" {
     readonly getNetworkMetas: UnwrapRef<
       (typeof import("./composables/backend"))["getNetworkMetas"]
     >;
+    readonly getNetworks: UnwrapRef<(typeof import("./composables/backend"))["getNetworks"]>;
     readonly getRoutesForVpn: UnwrapRef<
       (typeof import("./composables/mobile_vpn"))["getRoutesForVpn"]
     >;
@@ -330,12 +338,22 @@ declare module "vue" {
     readonly mapStores: UnwrapRef<(typeof import("pinia"))["mapStores"]>;
     readonly mapWritableState: UnwrapRef<(typeof import("pinia"))["mapWritableState"]>;
     readonly markRaw: UnwrapRef<(typeof import("vue"))["markRaw"]>;
+    readonly migrateNetworks: UnwrapRef<
+      (typeof import("./composables/backend"))["migrateNetworks"]
+    >;
     readonly mobileVpnDiagnostics: UnwrapRef<
       (typeof import("./composables/mobile_vpn"))["mobileVpnDiagnostics"]
+    >;
+    readonly mobileVpnRunning: UnwrapRef<
+      (typeof import("./composables/mobile_vpn"))["mobileVpnRunning"]
+    >;
+    readonly mobileVpnSyncing: UnwrapRef<
+      (typeof import("./composables/mobile_vpn"))["mobileVpnSyncing"]
     >;
     readonly networkDiagnostics: UnwrapRef<
       (typeof import("./composables/backend"))["networkDiagnostics"]
     >;
+    readonly networksPath: UnwrapRef<(typeof import("./composables/backend"))["networksPath"]>;
     readonly nextTick: UnwrapRef<(typeof import("vue"))["nextTick"]>;
     readonly normalizeConfigSource: UnwrapRef<
       (typeof import("./composables/config_source"))["normalizeConfigSource"]
@@ -366,6 +384,7 @@ declare module "vue" {
     readonly persistUiStateNow: UnwrapRef<
       (typeof import("./composables/persist"))["persistUiStateNow"]
     >;
+    readonly prefsPath: UnwrapRef<(typeof import("./composables/backend"))["prefsPath"]>;
     readonly prepareVpnService: UnwrapRef<
       (typeof import("./composables/mobile_vpn"))["prepareVpnService"]
     >;
@@ -417,6 +436,7 @@ declare module "vue" {
     readonly setMobileVpnTileActionHandler: UnwrapRef<
       (typeof import("./composables/mobile_vpn"))["setMobileVpnTileActionHandler"]
     >;
+    readonly setNetworks: UnwrapRef<(typeof import("./composables/backend"))["setNetworks"]>;
     readonly setServiceStatus: UnwrapRef<
       (typeof import("./composables/backend"))["setServiceStatus"]
     >;

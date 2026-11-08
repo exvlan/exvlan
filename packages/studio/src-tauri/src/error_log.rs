@@ -305,7 +305,7 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// `2026-11-03T12:34:56.789Z`
-fn timestamp() -> String {
+pub(crate) fn timestamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();

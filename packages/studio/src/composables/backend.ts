@@ -136,8 +136,34 @@ export async function getConfig(instanceId: string) {
   return NetworkTypes.normalizeNetworkConfig(config);
 }
 
+/** 读取网络列表（`networks.toml` 的 JSON 表示）。 */
+export async function getNetworks(): Promise<string> {
+  return await invoke<string>("get_networks");
+}
+
+/** 写入网络列表（入参是 JSON 字符串）。 */
+export async function setNetworks(networks: string) {
+  return await invoke("set_networks", { networks });
+}
+
+/** 把旧 localStorage 的 networkList 迁移到 networks.toml（只迁移一次）。 */
+export async function migrateNetworks(networks: string) {
+  return await invoke<boolean>("migrate_networks", { networks });
+}
+
+/** 偏好/网络文件路径（诊断面板显示用）。 */
+export async function prefsPath() {
+  return await invoke<string>("prefs_path_cmd");
+}
+export async function networksPath() {
+  return await invoke<string>("networks_path_cmd");
+}
+
 export async function sendConfigs(enabledNetworks: string[]) {
-  const networkList = parseStoredConfigs(localStorage.getItem("networkList"));
+  const fromBackend = await getNetworks().catch(() => "");
+  const raw =
+    fromBackend && fromBackend !== "[]" ? fromBackend : localStorage.getItem("networkList");
+  const networkList = parseStoredConfigs(raw);
   return await invoke("load_configs", {
     configs: networkList.map(({ config, source }) => ({
       config: NetworkTypes.toBackendNetworkConfig(config),

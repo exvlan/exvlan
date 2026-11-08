@@ -398,8 +398,8 @@ pub unsafe extern "C" fn exvlan_ffi_init_logging(
             dir: Some(dir.to_string()),
             level,
             file: None,
-            size_mb: Some(100),
-            count: Some(10),
+            size_mb: Some(32),
+            count: Some(3),
         },
     );
     match exvlan_rpc::log::init(&config, true) {

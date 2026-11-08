@@ -5,8 +5,10 @@ mod elevate;
 mod error_log;
 #[cfg(target_os = "android")]
 mod ffi_kernel;
+mod helper;
 mod kernel;
-mod ui_state;
+mod networks;
+mod prefs;
 // upgrade 全平台编译：kernel 子模块在移动端返回“不支持”，app 子模块移动端走 APK 流程。
 mod upgrade;
 
@@ -49,6 +51,12 @@ static CLIENT_MANAGER: once_cell::sync::Lazy<RwLock<Option<manager::GUIClientMan
 
 /// 最近一次交给内核的 TUN fd（0 表示尚未设置），写进自检便于确认隧道真的挂上了。
 static LAST_TUN_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// 桌面服务（launchd / systemd / Windows 服务）的稳定标识。
+///
+/// 20711 之前用的是 crate 名 `exvlan-studio`；20712 起统一为反向域名，
+/// 与系统路径、helper 命名保持一致。
+pub const SERVICE_LABEL: &str = "era.exvlan.studio";
 
 macro_rules! get_client_manager {
     () => {{
@@ -756,8 +764,8 @@ fn init_gui_logging_with(app: &tauri::AppHandle, level: Option<&str>) {
             dir: Some(log_dir.to_string_lossy().to_string()),
             level: Some(level.clone()),
             file: None,
-            size_mb: Some(100),
-            count: Some(10),
+            size_mb: Some(32),
+            count: Some(3),
         },
     );
     if let Err(err) = exvlan_rpc::log::init(&config, true) {
@@ -1035,6 +1043,11 @@ async fn build_network_report(app: &AppHandle, frontend: Option<&str>) -> Result
         LAST_TUN_FD.load(std::sync::atomic::Ordering::Relaxed),
     );
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        out.push_str("--- vpn ---\nn/a (desktop: TUN 由系统守护进程创建)\n");
+    }
+
     // 前端才有 VPN 运行时状态（实际下发的路由、dns、所属实例），由它一并带上来。
     if let Some(text) = frontend.filter(|s| !s.trim().is_empty()) {
         out.push_str("--- frontend ---\n");
@@ -1292,6 +1305,64 @@ fn read_capped(path: &std::path::Path, cap: usize) -> Option<String> {
     Some(text)
 }
 
+/// 诊断 zip 的输出目录：逐个候选探测「能否真的写文件」。
+///
+/// 背景：macOS 上 `~/Library/Caches/<id>` 可能被 root 写过（曾用 sudo 启动过 App），
+/// 直接 `create_dir_all` 会 EACCES，而旧代码只做了一次字符串回退。
+fn diagnostics_output_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    use tauri::Manager as _;
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    // ① error.log 所在目录：能追加 error.log 就一定能在这里建文件
+    if let Some(log) = error_log::path()
+        && let Some(dir) = log.parent()
+    {
+        candidates.push(dir.join("diagnostics"));
+    }
+    if let Ok(dir) = app.path().app_cache_dir() {
+        candidates.push(dir.join("diagnostics"));
+    }
+    if let Ok(dir) = app.path().app_config_dir() {
+        candidates.push(dir.join("diagnostics"));
+    }
+    candidates.push(std::env::temp_dir().join("era.exvlan.studio-diagnostics"));
+    candidates.push(std::path::PathBuf::from(
+        "/tmp/era.exvlan.studio-diagnostics",
+    ));
+
+    let mut attempts: Vec<String> = Vec::new();
+    for dir in candidates {
+        match probe_writable(&dir) {
+            Ok(()) => {
+                if !attempts.is_empty() {
+                    error_log::record(
+                        "diag.dir",
+                        format!(
+                            "fallback → {}; 失败候选: {}",
+                            dir.display(),
+                            attempts.join(" ; ")
+                        ),
+                    );
+                }
+                return Ok(dir);
+            }
+            Err(err) => attempts.push(format!("{}: {err}", dir.display())),
+        }
+    }
+    let detail = attempts.join(" ; ");
+    error_log::record("diag.dir", format!("所有候选目录不可写: {detail}"));
+    Err(format!("无法创建诊断目录（{detail}）"))
+}
+
+/// 建目录 + 写探针文件，确认真的可写。
+fn probe_writable(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let probe = dir.join(".write-probe");
+    std::fs::write(&probe, b"ok")?;
+    let _ = std::fs::remove_file(&probe);
+    Ok(())
+}
+
 /// 打包诊断 zip：error.log + 内核日志 + events.log + 网络自检 + ui-state + 摘要。
 /// 传入 `network_report` 时一并写入（上传场景会用前端状态生成完整版）。
 fn build_diagnostics_zip(
@@ -1303,13 +1374,7 @@ fn build_diagnostics_zip(
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
 
-    let base = app
-        .path()
-        .app_cache_dir()
-        .or_else(|_| app.path().app_log_dir())
-        .map_err(|e| format!("无法定位缓存目录: {e}"))?
-        .join("diagnostics");
-    std::fs::create_dir_all(&base).map_err(|e| format!("创建诊断目录失败: {e}"))?;
+    let base = diagnostics_output_dir(app)?;
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -1459,21 +1524,34 @@ async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<
 async fn share_error_log(app: AppHandle) -> Result<String, String> {
     ensure_error_log(&app);
     let report = build_network_report(&app, None).await.unwrap_or_default();
-    let path = build_diagnostics_zip(&app, &report)?;
+
+    // zip 建不出来（目录不可写/磁盘满）时降级为分享原始 error.log，
+    // 而不是让「分享」整体失败。
+    let (path, mime, title) = match build_diagnostics_zip(&app, &report) {
+        Ok(path) => (path, "application/zip", "Exvlan 诊断日志"),
+        Err(err) => {
+            error_log::record("share", format!("zip failed: {err}; fallback to error.log"));
+            match error_log::path() {
+                Some(path) => (path, "text/plain", "Exvlan error.log"),
+                None => return Err(err),
+            }
+        }
+    };
+
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_vpnservice::VpnserviceExt;
         app.vpnservice()
             .share_file(tauri_plugin_vpnservice::models::ShareFileRequest {
                 path: path.display().to_string(),
-                mime: Some("application/zip".to_string()),
-                title: Some("Exvlan 诊断日志".to_string()),
+                mime: Some(mime.to_string()),
+                title: Some(title.to_string()),
             })
             .map_err(|e| error_log::other("share_error_log", e.to_string()))?;
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = &app;
+        let _ = (&app, mime, title);
     }
     Ok(path.display().to_string())
 }
@@ -2108,6 +2186,7 @@ mod manager;
 
 #[cfg(not(target_os = "android"))]
 mod service {
+    use crate::SERVICE_LABEL;
     use anyhow::Context;
 
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -2125,10 +2204,16 @@ mod service {
                 self.config_dir.clone().into(),
                 "--rpc-portal".into(),
                 self.rpc_portal.clone().into(),
+                // 固定 info：用户选的级别由 GUI 连接后通过 `set_logging_level` 热更新，
+                // 不进入服务启动参数（否则改日志级别会改变指纹 → 又弹一次授权）。
                 "--file-log-level".into(),
-                self.file_log_level.clone().into(),
+                "info".into(),
                 "--file-log-dir".into(),
                 self.file_log_dir.clone().into(),
+                "--file-log-size".into(),
+                "32".into(),
+                "--file-log-count".into(),
+                "3".into(),
                 "--daemon".into(),
             ];
 
@@ -2214,7 +2299,7 @@ mod service {
     fn plist_matches(opts: &ServiceOptions) -> Option<bool> {
         #[cfg(target_os = "macos")]
         {
-            let plist = format!("/Library/LaunchDaemons/{}.plist", env!("CARGO_PKG_NAME"));
+            let plist = format!("/Library/LaunchDaemons/{SERVICE_LABEL}.plist");
             let Ok(text) = std::fs::read_to_string(&plist) else {
                 crate::error_log::record("service.plist", format!("读取 {plist} 失败"));
                 return Some(false);
@@ -2256,8 +2341,7 @@ mod service {
     }
 
     pub fn install(opts: ServiceOptions) -> anyhow::Result<()> {
-        let service =
-            exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let service = exvlan_rpc::service_manager::Service::new(SERVICE_LABEL.to_string())?;
         // 服务执行的是内核仓库中的二进制（root-owned），而不是 app 内的 GUI 二进制。
         let program = crate::kernel::kernel_path();
         if !program.is_file() {
@@ -2273,6 +2357,10 @@ mod service {
             display_name: Some("Exvlan Gui Service".to_string()),
             disable_restart_on_failure: false,
         };
+
+        // 20712 路径规范化：旧 label / 旧系统目录一次性迁移（本次以 root 执行）。
+        remove_legacy_service();
+        migrate_legacy_layout(&opts);
 
         // 守护进程启动第一步是初始化文件日志：目录不存在会直接退出（20710 实测
         // 表现为「launchctl 显示 Running 但 15999 无人监听」）。这里以 root 预建。
@@ -2311,7 +2399,7 @@ mod service {
             return Err(err).with_context(|| "Failed to install service");
         }
 
-        write_marker(&opts)?;
+        // 指纹由 GUI 进程写入（提权子进程没有 Tauri 上下文，写不到用户目录）。
 
         // 装上了不代表能连：以「RPC 端口真的能连上」为准（launchctl 的 Running 会骗人，
         // 20710 就是守护进程起来即退出、launchd 反复重启，状态一直显示 Running）。
@@ -2332,6 +2420,93 @@ mod service {
     }
 
     /// 以 root 预建守护进程要用的目录（配置 + 日志），并收紧属主/权限。
+    /// 卸载旧 label（`exvlan-studio`），避免新旧两个守护进程并存。
+    fn remove_legacy_service() {
+        use exvlan_rpc::service_manager::ServiceStatus;
+        if SERVICE_LABEL == "exvlan-studio" {
+            return;
+        }
+        let Ok(legacy) = exvlan_rpc::service_manager::Service::new("exvlan-studio".to_string())
+        else {
+            return;
+        };
+        match legacy.status() {
+            Ok(ServiceStatus::NotInstalled) => {}
+            Ok(_) => {
+                let _ = legacy.uninstall();
+                crate::error_log::record("service.migrate", "removed legacy label exvlan-studio");
+            }
+            Err(err) => crate::error_log::record(
+                "service.migrate",
+                format!("legacy status failed: {err:#}"),
+            ),
+        }
+    }
+
+    /// 把 `from` 目录里的文件搬到 `to`（目标已存在则跳过）。
+    fn move_dir_contents(from: &std::path::Path, to: &std::path::Path) {
+        if !from.is_dir() {
+            return;
+        }
+        let _ = std::fs::create_dir_all(to);
+        let Ok(entries) = std::fs::read_dir(from) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let src = entry.path();
+            let dst = to.join(entry.file_name());
+            if dst.exists() || !src.is_file() {
+                continue;
+            }
+            match std::fs::rename(&src, &dst) {
+                Ok(()) => crate::error_log::record(
+                    "service.migrate",
+                    format!("{} → {}", src.display(), dst.display()),
+                ),
+                Err(err) => crate::error_log::record(
+                    "service.migrate",
+                    format!("move {} failed: {err}", src.display()),
+                ),
+            }
+        }
+    }
+
+    /// 旧系统目录 → 新系统目录（配置 / 内核 / 日志）。
+    fn migrate_legacy_layout(opts: &ServiceOptions) {
+        let config_new = std::path::Path::new(&opts.config_dir);
+        let log_new = std::path::Path::new(&opts.file_log_dir);
+
+        #[cfg(target_os = "macos")]
+        {
+            let base = std::path::Path::new("/Library/Application Support/exvlan");
+            move_dir_contents(&base.join("config.d"), config_new);
+            move_dir_contents(&base.join("core"), &crate::kernel::kernel_dir());
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let base = std::path::Path::new(r"C:\ProgramData\exvlan");
+            move_dir_contents(&base.join("config.d"), config_new);
+            move_dir_contents(&base.join("core"), &crate::kernel::kernel_dir());
+            move_dir_contents(&base.join("logs"), log_new);
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            move_dir_contents(std::path::Path::new("/var/lib/exvlan/config.d"), config_new);
+            move_dir_contents(
+                std::path::Path::new("/opt/exvlan/core"),
+                &crate::kernel::kernel_dir(),
+            );
+            move_dir_contents(std::path::Path::new("/var/log/exvlan"), log_new);
+        }
+    }
+
+    /// GUI 侧写入服务指纹（提权成功后调用）。
+    pub fn mark_current(opts: &ServiceOptions) {
+        if let Err(err) = write_marker(opts) {
+            crate::error_log::record("service.marker", format!("{err:#}"));
+        }
+    }
+
     fn prepare_runtime_dirs(opts: &ServiceOptions) {
         for dir in [&opts.config_dir, &opts.file_log_dir] {
             let path = std::path::Path::new(dir);
@@ -2402,7 +2577,7 @@ mod service {
         _service: &exvlan_rpc::service_manager::Service,
         opts: &ServiceOptions,
     ) -> String {
-        let label = env!("CARGO_PKG_NAME");
+        let label = SERVICE_LABEL;
         let mut parts: Vec<String> = Vec::new();
 
         // 守护进程自己的日志（最能说明「为什么没起来」）
@@ -2454,8 +2629,7 @@ mod service {
 
     pub fn uninstall() -> anyhow::Result<()> {
         use exvlan_rpc::service_manager::ServiceStatus;
-        let service =
-            exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let service = exvlan_rpc::service_manager::Service::new(SERVICE_LABEL.to_string())?;
         // 幂等：本来就没装 → 视为成功（切模式/重复点击不该报错）
         if service.status()? == ServiceStatus::NotInstalled {
             return Ok(());
@@ -2466,7 +2640,7 @@ mod service {
 
     pub fn set_status(enable: bool) -> anyhow::Result<()> {
         use exvlan_rpc::service_manager::*;
-        let service = Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let service = Service::new(SERVICE_LABEL.to_string())?;
         let status = service.status()?;
         // 幂等：目标状态已达成时直接成功
         if (enable && status == ServiceStatus::Running)
@@ -2488,13 +2662,33 @@ mod service {
     /// 重启服务（停止 → 启动）。
     pub fn restart() -> anyhow::Result<()> {
         use exvlan_rpc::service_manager::ServiceStatus;
-        let service =
-            exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let service = exvlan_rpc::service_manager::Service::new(SERVICE_LABEL.to_string())?;
         if service.status()? == ServiceStatus::NotInstalled {
             anyhow::bail!("Service not installed");
         }
-        let _ = service.stop();
-        service.start().with_context(|| "Failed to start service")?;
+
+        // macOS：`launchctl kickstart -k` 是原子的「杀掉并重启」，不会出现
+        // stop 尚未生效就 start → "Service is already running" 的假失败。
+        #[cfg(target_os = "macos")]
+        {
+            let out = std::process::Command::new("/bin/launchctl")
+                .args(["kickstart", "-k", &format!("system/{SERVICE_LABEL}")])
+                .output()
+                .with_context(|| "启动 launchctl 失败")?;
+            if !out.status.success() {
+                anyhow::bail!(
+                    "launchctl kickstart 失败: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+            }
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = service.stop();
+            service.start().with_context(|| "Failed to start service")?;
+        }
         Ok(())
     }
 
@@ -2505,8 +2699,7 @@ mod service {
     }
 
     pub fn status() -> anyhow::Result<exvlan_rpc::service_manager::ServiceStatus> {
-        let service =
-            exvlan_rpc::service_manager::Service::new(env!("CARGO_PKG_NAME").to_string())?;
+        let service = exvlan_rpc::service_manager::Service::new(SERVICE_LABEL.to_string())?;
         service.status()
     }
 
@@ -2556,22 +2749,22 @@ fn desktop_service_default_dirs() -> ServiceDefaultDirs {
     #[cfg(target_os = "macos")]
     {
         ServiceDefaultDirs {
-            config_dir: "/Library/Application Support/exvlan/config.d".to_string(),
-            file_log_dir: "/Library/Logs/exvlan".to_string(),
+            config_dir: "/Library/Application Support/era.exvlan.studio/config".to_string(),
+            file_log_dir: "/Library/Logs/era.exvlan.studio".to_string(),
         }
     }
     #[cfg(target_os = "windows")]
     {
         ServiceDefaultDirs {
-            config_dir: r"C:\ProgramData\exvlan\config.d".to_string(),
-            file_log_dir: r"C:\ProgramData\exvlan\logs".to_string(),
+            config_dir: r"C:\ProgramData\era.exvlan.studio\config".to_string(),
+            file_log_dir: r"C:\ProgramData\era.exvlan.studio\logs".to_string(),
         }
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         ServiceDefaultDirs {
-            config_dir: "/var/lib/exvlan/config.d".to_string(),
-            file_log_dir: "/var/log/exvlan".to_string(),
+            config_dir: "/var/lib/era.exvlan.studio/config".to_string(),
+            file_log_dir: "/var/log/era.exvlan.studio".to_string(),
         }
     }
 }
@@ -2731,6 +2924,12 @@ pub struct ProvisionPayload {
     pub kernel_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<service::ServiceOptions>,
+    /// 随包 helper 路径（macOS；为空表示不需要安装）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helper_src: Option<String>,
+    /// 安装者 uid（helper 只接受该用户的请求）。
+    #[serde(default)]
+    pub owner_uid: u32,
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2745,6 +2944,10 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
     if let Some(opts) = req.service.clone() {
         service::install(opts)?;
         crate::error_log::record("provision.service", "installed");
+    }
+    if let Some(src) = req.helper_src.as_deref() {
+        crate::helper::install_from(std::path::Path::new(src), req.owner_uid)?;
+        crate::error_log::record("provision.helper", "installed");
     }
     Ok(())
 }
@@ -2888,6 +3091,14 @@ fn normalize_service_options(opts: &mut service::ServiceOptions) {
         );
         opts.file_log_dir = defaults.file_log_dir.clone();
     }
+
+    // 日志级别必须归一化：不同页面曾分别传 `info` / `off`，导致服务指纹来回变化、
+    // 每次启动都被判「需要重装」→ 反复弹授权。
+    let level = opts.file_log_level.trim().to_ascii_lowercase();
+    opts.file_log_level = match level.as_str() {
+        "off" | "error" | "warn" | "info" | "debug" | "trace" => level,
+        _ => "info".to_string(),
+    };
 }
 
 /// 确保「内核已安装 + 服务定义与当前配置一致」。
@@ -2909,9 +3120,27 @@ async fn ensure_kernel_service(
     let need_kernel =
         !kernel::is_installed() || kernel::installed_version().as_deref() != Some(want_version);
     let need_service = !service::is_current(&opts);
+    // helper 仅 macOS 存在；其它平台恒为 false，否则每次启动都会判定「需要安装」
+    // → 反复提权。
+    #[cfg(target_os = "macos")]
+    let need_helper = !helper::is_installed();
+    #[cfg(not(target_os = "macos"))]
+    let need_helper = false;
 
-    if !need_kernel && !need_service {
+    if !need_kernel && !need_service && !need_helper {
         return Ok("current".to_string());
+    }
+
+    // 只需换内核、且 helper 已就绪 → 交给 helper，**不弹授权**。
+    #[cfg(target_os = "macos")]
+    if need_kernel && !need_service && !need_helper {
+        match helper::apply_bundled(&app) {
+            Ok(()) => {
+                error_log::record("helper.apply", format!("kernel → {want_version}"));
+                return Ok("installed".to_string());
+            }
+            Err(err) => error_log::record("helper.apply", format!("{err:#}（回退提权）")),
+        }
     }
 
     let kernel_src = if need_kernel {
@@ -2930,10 +3159,17 @@ async fn ensure_kernel_service(
         None
     };
 
+    let helper_src = if need_helper {
+        helper::bundled_helper(&app).map(|p| p.display().to_string())
+    } else {
+        None
+    };
     let payload = ProvisionPayload {
         kernel_src,
         kernel_version: want_version.to_string(),
         service: need_service.then(|| opts.clone()),
+        helper_src,
+        owner_uid: helper::current_uid(),
     };
     let json = serde_json::to_string(&payload)
         .map_err(|e| error_log::other("cmd:ensure_kernel_service", e))?;
@@ -2942,6 +3178,9 @@ async fn ensure_kernel_service(
         format!("kernel={need_kernel} service={need_service}"),
     );
     run_elevated(&["--provision", &json])?;
+    // 指纹必须由 GUI（当前用户）写入：提权子进程没有 Tauri 上下文，
+    // 之前写到 root 侧目录，导致 GUI 永远读不到 → 每次启动都重装服务。
+    service::mark_current(&opts);
     Ok("installed".to_string())
 }
 
@@ -3006,6 +3245,12 @@ fn service_diagnostics(rpc_portal: Option<String>) -> Result<String, String> {
         daemon_log.display(),
         daemon_tail,
     );
+    let mut report = report;
+    report.push_str(&format!(
+        "[helper] installed={} status={}\n",
+        helper::is_installed(),
+        helper::status().unwrap_or_else(|e| e)
+    ));
     error_log::record("service.diagnostics", &report);
     Ok(report)
 }
@@ -3023,9 +3268,12 @@ fn service_restart() -> Result<(), String> {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn service_reinstall(opts: service::ServiceOptions) -> Result<(), String> {
+    let mut opts = opts;
+    normalize_service_options(&mut opts);
     let payload =
         serde_json::to_string(&opts).map_err(|e| error_log::other("cmd:service_reinstall", e))?;
     run_elevated(&["--service-reinstall", &payload])?;
+    service::mark_current(&opts);
     error_log::record("service.reinstall", "done");
     Ok(())
 }
@@ -3278,9 +3526,45 @@ fn spawn_network_info_watchdog(app: AppHandle) {
 
 /// 以 root 重新拉起自身执行内部子命令（桌面端）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(target_os = "macos")]
+fn run_elevated(args: &[&str]) -> Result<(), String> {
+    fn shell_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+    fn apple_escape(value: &str) -> String {
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
+    let exe = std::env::current_exe().map_err(|e| format!("无法定位自身可执行文件: {e}"))?;
+    let mut command = shell_quote(&exe.display().to_string());
+    for arg in args {
+        command.push(' ');
+        command.push_str(&shell_quote(arg));
+    }
+    let script = format!(
+        "do shell script \"{}\" with administrator privileges with prompt \"Exvlan 需要系统权限（仅首次安装/升级）\"",
+        apple_escape(&command)
+    );
+    let out = std::process::Command::new("/usr/bin/osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|e| format!("无法启动 osascript: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if stderr.contains("-128") || stderr.to_lowercase().contains("cancel") {
+        return Err("已取消管理员授权".to_string());
+    }
+    error_log::record("elevate", format!("args={args:?} osascript: {stderr}"));
+    Err(format!("提权命令失败（osascript）: {stderr}"))
+}
+
+#[cfg(not(target_os = "macos"))]
 fn run_elevated(args: &[&str]) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("无法定位自身可执行文件: {e}"))?;
     let mut cmd = std::process::Command::new(exe);
+    #[cfg(not(target_os = "macos"))]
     cmd.args(args);
     let output = match elevate::Command::new(cmd).output() {
         Ok(out) => out,
@@ -3463,8 +3747,13 @@ pub fn run_gui() -> std::process::ExitCode {
             upload_diagnostics,
             network_diagnostics,
             log_vpn_routes,
-            ui_state::get_ui_state,
-            ui_state::set_ui_state,
+            prefs::get_ui_state,
+            prefs::set_ui_state,
+            prefs::prefs_path_cmd,
+            networks::get_networks,
+            networks::set_networks,
+            networks::migrate_networks,
+            networks::networks_path_cmd,
         ])
         .on_window_event(|_win, event| match event {
             #[cfg(not(target_os = "android"))]

@@ -8,16 +8,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": [
-      "icons/icon.png",
-      "icons/icon.rgba",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
+    "icon": ["icons/icon.png", "icons/icon.rgba", "icons/icon.icns", "icons/icon.ico"],
     "createUpdaterArtifacts": true,
-    "resources": [
-      "resources/kernel/*"
-    ]
+    "resources": ["resources/kernel/*", "resources/helper/*"]
   },
   "productName": "EXVlan Studio",
   "version": "26.410.20712",
@@ -28,9 +21,7 @@
     },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQxODU0NjUxRTg0NjI5ODUKUldTRktVYm9VVWFGUVl4L2FwNzNhN3lTTmJ1STVrakRHc2lWSkJ0Y2VzaHUrTWw5OVlQTUZxZTkK",
-      "endpoints": [
-        "https://dl.exvlan.era-x.cn/upgrade/latest.json"
-      ]
+      "endpoints": ["https://dl.exvlan.era-x.cn/upgrade/latest.json"]
     }
   },
   "app": {

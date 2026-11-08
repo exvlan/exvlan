@@ -63,7 +63,75 @@ fn resolve_machine_id_state_file(state_dir: Option<&Path>) -> anyhow::Result<Pat
         Some(dir) => dir.to_path_buf(),
         None => default_machine_id_state_dir()?,
     };
-    Ok(state_dir.join("machine_id"))
+    let path = state_dir.join("machine_id");
+    migrate_legacy_machine_id(&path);
+    Ok(path)
+}
+
+/// 20712 路径规范化：旧目录的 `machine_id` 仍在时，先搬到新位置。
+///
+/// 必须保留原值，否则节点在网络里会以新的 peer_id 出现。
+fn migrate_legacy_machine_id(new_path: &Path) {
+    if new_path.exists() {
+        return;
+    }
+    let Some(old_path) = legacy_machine_id_file() else {
+        return;
+    };
+    if old_path == new_path || !old_path.is_file() {
+        return;
+    }
+    if let Some(dir) = new_path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::copy(&old_path, new_path);
+}
+
+/// 旧版 machine_id 路径（仅 Windows / Linux 发生过改名）。
+#[allow(clippy::needless_return)]
+fn legacy_machine_id_file() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let local_app_data = non_empty_os_string(env::var_os("LOCALAPPDATA"))?;
+        return Some(
+            PathBuf::from(local_app_data)
+                .join("exvlan")
+                .join("machine_id"),
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(path) = non_empty_os_string(env::var_os("XDG_DATA_HOME")) {
+            return Some(PathBuf::from(path).join("exvlan").join("machine_id"));
+        }
+        let home = non_empty_os_string(env::var_os("HOME"))?;
+        return Some(
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("exvlan")
+                .join("machine_id"),
+        );
+    }
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "linux")))]
+    {
+        let home = non_empty_os_string(env::var_os("HOME"))?;
+        return Some(
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("exvlan")
+                .join("machine_id"),
+        );
+    }
+    #[cfg(not(any(unix, target_os = "windows")))]
+    {
+        None
+    }
+    #[cfg(target_os = "macos")]
+    {
+        None
+    }
 }
 
 fn non_empty_os_string(value: Option<OsString>) -> Option<OsString> {
@@ -76,17 +144,17 @@ fn default_linux_machine_id_state_dir(
     home: Option<OsString>,
 ) -> PathBuf {
     if let Some(path) = non_empty_os_string(xdg_data_home) {
-        return PathBuf::from(path).join("exvlan");
+        return PathBuf::from(path).join("era.exvlan.studio");
     }
 
     if let Some(home) = non_empty_os_string(home) {
         return PathBuf::from(home)
             .join(".local")
             .join("share")
-            .join("exvlan");
+            .join("era.exvlan.studio");
     }
 
-    PathBuf::from("/var/lib/exvlan")
+    PathBuf::from("/var/lib/era.exvlan.studio")
 }
 
 fn default_machine_id_state_dir() -> anyhow::Result<PathBuf> {
@@ -107,12 +175,15 @@ fn default_machine_id_state_dir() -> anyhow::Result<PathBuf> {
             let local_app_data = non_empty_os_string(env::var_os("LOCALAPPDATA")).ok_or_else(|| {
                 anyhow::anyhow!("LOCALAPPDATA is not set, cannot resolve machine id state directory")
             })?;
-            Ok(PathBuf::from(local_app_data).join("exvlan"))
+            Ok(PathBuf::from(local_app_data).join("era.exvlan.studio"))
         },
         target_os = "freebsd" => {
             let home = non_empty_os_string(env::var_os("HOME"))
                 .ok_or_else(|| anyhow::anyhow!("HOME is not set, cannot resolve machine id state directory"))?;
-            Ok(PathBuf::from(home).join(".local").join("share").join("exvlan"))
+            Ok(PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("era.exvlan.studio"))
         },
         target_os = "android" => {
             anyhow::bail!("machine id state directory must be provided explicitly on Android");
@@ -540,7 +611,7 @@ mod tests {
                 Some(OsString::from("/tmp/xdg")),
                 Some(OsString::from("/tmp/home"))
             ),
-            PathBuf::from("/tmp/xdg").join("exvlan")
+            PathBuf::from("/tmp/xdg").join("era.exvlan.studio")
         );
         assert_eq!(
             default_linux_machine_id_state_dir(
@@ -550,11 +621,11 @@ mod tests {
             PathBuf::from("/tmp/home")
                 .join(".local")
                 .join("share")
-                .join("exvlan")
+                .join("era.exvlan.studio")
         );
         assert_eq!(
             default_linux_machine_id_state_dir(Some(OsString::new()), Some(OsString::new())),
-            PathBuf::from("/var/lib/exvlan")
+            PathBuf::from("/var/lib/era.exvlan.studio")
         );
     }
 

@@ -2,9 +2,9 @@
 //! 自身不再链接内核。
 //!
 //! 落盘位置（root-owned，普通用户不可写）：
-//! - macOS:  `/Library/Application Support/exvlan/core/exvlan`
-//! - Windows: `C:\ProgramData\exvlan\core\exvlan.exe`
-//! - Linux:   `/opt/exvlan/core/exvlan`
+//! - macOS:  `/Library/Application Support/era.exvlan.studio/core/exvlan`
+//! - Windows: `C:\ProgramData\era.exvlan.studio\core\exvlan.exe`
+//! - Linux:   `/opt/era.exvlan.studio/core/exvlan`
 //!
 //! 同目录下的 `version` 记录当前版本号（纯文本）。
 
@@ -26,6 +26,22 @@ pub fn kernel_bin_name() -> &'static str {
 
 /// 内核仓库目录（需 root 写入）。
 pub fn kernel_dir() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from("/Library/Application Support/era.exvlan.studio/core")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        PathBuf::from(r"C:\ProgramData\era.exvlan.studio\core")
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        PathBuf::from("/opt/era.exvlan.studio/core")
+    }
+}
+
+/// 20711 及更早的内核目录（迁移用）。
+pub fn legacy_kernel_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         PathBuf::from("/Library/Application Support/exvlan/core")

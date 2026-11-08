@@ -102,8 +102,8 @@ magisk_status_restarting: 正在重启
 magisk_save_restart: 保存并重启
 magisk_command_args_warning: 当前启用了启动参数模式，模块会忽略 config.toml。请先删除 config/command_args，才能在此保存配置。
 magisk_invalid_module_directory: KernelSU 返回了无效的模块目录
-magisk_load_failed: '加载模块配置失败：{error}'
-magisk_save_failed: '保存模块配置失败：{error}'
+magisk_load_failed: "加载模块配置失败：{error}"
+magisk_save_failed: "保存模块配置失败：{error}"
 magisk_config_saved: 配置已验证并保存，Exvlan 已重新启动
 magisk_config_saved_restart_pending: 配置已验证并保存，Exvlan 守护进程仍在启动
 retain_network_instance: 保留网络实例
@@ -140,6 +140,9 @@ settings:
   rpc_disconnected: 内核未连接
   vpn_running: 实例运行中
   vpn_stopped: 未运行
+  vpn_not_connected: VPN 未启动
+  vpn_not_connected_hint: 实例在运行，但流量没有进入隧道（VPN 服务未启动）
+  vpn_start_now: 立即启动
 exchange_language: Switch to English
 logging: 日志
 logging_level_info: 信息
@@ -153,7 +156,7 @@ vpn_tile_no_network: 没有已配置的网络
 vpn_tile_no_network_description: 请先在 Exvlan 中配置网络，再使用 VPN 快捷磁贴。
 vpn_tile_started: VPN 网络已启动
 vpn_tile_stopped: VPN 网络已停止
-vpn_tile_action_failed: 'VPN 磁贴操作失败：{error}'
+vpn_tile_action_failed: "VPN 磁贴操作失败：{error}"
 disable_auto_launch: 关闭开机自启
 enable_auto_launch: 开启开机自启
 hide_dock_icon: 隐藏 Dock 图标
@@ -162,7 +165,7 @@ exit: 退出
 chips_placeholder: 例如： {0}, 输入后在下拉框中选择生效
 show_node_details: 显示节点详细信息
 hide_node_details: 隐藏节点详细信息
-hostname_placeholder: '留空默认为主机名: {0}'
+hostname_placeholder: "留空默认为主机名: {0}"
 dev_name_placeholder: 注意：当多个网络同时使用相同的TUN接口名称时，将会在设置TUN的IP时产生冲突，留空以自动生成随机名称
 off_text: 点击关闭
 on_text: 点击开启
@@ -306,7 +309,7 @@ socks5_help: |
 
 exit_nodes: 出口节点列表
 exit_nodes_help: 转发所有流量的出口节点，虚拟IPv4地址，优先级由列表顺序决定
-  
+
 port_forwards: 端口转发
 port_forwards_help: "将本地端口转发到虚拟网络中的远程端口。例如：udp://0.0.0.0:12345/10.126.126.1:23456，表示将本地UDP端口12345转发到虚拟网络中的10.126.126.1:23456。可以指定多个。"
 port_forwards_bind_addr: "绑定地址，如：0.0.0.0"
@@ -472,7 +475,7 @@ web:
     confirm_password: 确认密码
     submit: 注册
     login: 返回登录
-  
+
   main:
     dashboard: 仪表盘
     device_list: 设备列表

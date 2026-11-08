@@ -19,6 +19,7 @@ tauri = { workspace = true, features = ["tray-icon", "image-png", "image-ico", "
 
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+toml.workspace = true
 
 # 注：exvlan-rpc 按平台分别声明（见文件末尾的 target 段）——
 # 桌面需要 `gui-client`（含 exvlan-core），移动端只要 `ffi-rpc`。

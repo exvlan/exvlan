@@ -40,6 +40,10 @@ let vpnPermissionRequest: Promise<boolean> | null = null;
 let vpnTileActionHandler: ((action: VpnTileAction) => Promise<void>) | undefined;
 let vpnTileActionQueue: Promise<void> = Promise.resolve();
 
+/** 供 UI 直接绑定的 VPN 运行态（实例在跑但 VPN 没起来 = 需要提示）。 */
+export const mobileVpnRunning = ref(false);
+export const mobileVpnSyncing = ref(false);
+
 const curVpnStatus: vpnStatus = {
   running: false,
   ipv4Addr: undefined,
@@ -165,6 +169,7 @@ function resetVpnConfigStatus() {
 
 function syncVpnStatusFromNative(status: Awaited<ReturnType<typeof get_vpn_status>>) {
   curVpnStatus.running = status?.running ?? false;
+  mobileVpnRunning.value = curVpnStatus.running;
   if (!curVpnStatus.running) {
     activeVpnInstanceId = undefined;
     resetVpnConfigStatus();
@@ -227,6 +232,7 @@ async function doStopVpn(force = false) {
 
   activeVpnInstanceId = undefined;
   resetVpnConfigStatus();
+  mobileVpnRunning.value = false;
 }
 
 async function doStartVpn(
@@ -245,36 +251,43 @@ async function doStartVpn(
     ipv4Addr: `${ipv4Addr}/${cidr}`,
     routes,
     dns,
-    disallowedApplications: ["com.kkrainbow.exvlan"],
+    disallowedApplications: ["era.exvlan.studio"],
     mtu: 1300,
   };
 
-  let start_ret = await start_vpn(request);
-  console.log("start vpn response", JSON.stringify(start_ret));
-  if (start_ret?.errorMsg === "need_prepare") {
-    const granted = await requestVpnPermission();
-    if (!granted) {
-      throw new Error("vpn_permission_denied");
+  mobileVpnSyncing.value = true;
+  try {
+    let start_ret = await start_vpn(request);
+    console.log("start vpn response", JSON.stringify(start_ret));
+    if (start_ret?.errorMsg === "need_prepare") {
+      const granted = await requestVpnPermission();
+      if (!granted) {
+        throw new Error("vpn_permission_denied");
+      }
+      start_ret = await start_vpn(request);
+      console.log("start vpn retry response", JSON.stringify(start_ret));
     }
-    start_ret = await start_vpn(request);
-    console.log("start vpn retry response", JSON.stringify(start_ret));
-  }
 
-  if (start_ret?.errorMsg?.length) {
-    throw new Error(start_ret.errorMsg);
-  }
-  await waitVpnStatus(true, 3);
+    if (start_ret?.errorMsg?.length) {
+      throw new Error(start_ret.errorMsg);
+    }
+    await waitVpnStatus(true, 3);
 
-  curVpnStatus.ipv4Addr = ipv4Addr;
-  curVpnStatus.ipv4Cidr = cidr;
-  curVpnStatus.routes = routes;
-  curVpnStatus.dns = dns;
-  activeVpnInstanceId = instanceId;
+    curVpnStatus.ipv4Addr = ipv4Addr;
+    curVpnStatus.ipv4Cidr = cidr;
+    curVpnStatus.routes = routes;
+    curVpnStatus.dns = dns;
+    activeVpnInstanceId = instanceId;
+    mobileVpnRunning.value = true;
+  } finally {
+    mobileVpnSyncing.value = false;
+  }
 }
 
 async function onVpnServiceStart(payload: any) {
   console.log("vpn service start", JSON.stringify(payload));
   curVpnStatus.running = true;
+  mobileVpnRunning.value = true;
   if (payload.fd) {
     await setTunFd(payload.fd).catch((e) => {
       console.error("set tun fd failed", e);
@@ -285,6 +298,7 @@ async function onVpnServiceStart(payload: any) {
 async function onVpnServiceStop(payload: any) {
   console.log("vpn service stop", JSON.stringify(payload));
   curVpnStatus.running = false;
+  mobileVpnRunning.value = false;
   activeVpnInstanceId = undefined;
   resetVpnConfigStatus();
 }
