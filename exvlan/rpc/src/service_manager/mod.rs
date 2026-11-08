@@ -2,8 +2,6 @@ use std::ffi::OsString;
 use std::fmt::Write;
 use std::path::PathBuf;
 
-use service_manager::ServiceManager as _;
-
 #[derive(Debug)]
 pub struct ServiceInstallOptions {
     pub program: PathBuf,
@@ -18,27 +16,8 @@ pub struct ServiceInstallOptions {
 
 pub type ServiceStatus = service_manager::ServiceStatus;
 
-trait ServiceManager: service_manager::ServiceManager {
-    fn update(&self, ctx: service_manager::ServiceInstallCtx) -> std::io::Result<()>;
-}
-impl ServiceManager for service_manager::TypedServiceManager {
-    fn update(&self, ctx: service_manager::ServiceInstallCtx) -> std::io::Result<()> {
-        let status = self.status(service_manager::ServiceStatusCtx {
-            label: ctx.label.clone(),
-        })?;
-        if status == ServiceStatus::Running {
-            self.stop(service_manager::ServiceStopCtx {
-                label: ctx.label.clone(),
-            })?;
-        }
-        if status != ServiceStatus::NotInstalled {
-            self.uninstall(service_manager::ServiceUninstallCtx {
-                label: ctx.label.clone(),
-            })?;
-        }
-        self.install(ctx)
-    }
-}
+trait ServiceManager: service_manager::ServiceManager {}
+impl ServiceManager for service_manager::TypedServiceManager {}
 
 pub struct Service {
     label: service_manager::ServiceLabel,
@@ -95,13 +74,17 @@ impl Service {
             disable_restart_on_failure: options.disable_restart_on_failure,
         };
 
-        if self.status()? != service_manager::ServiceStatus::NotInstalled {
-            self.service_manager
-                .update(ctx)
-                .map_err(|e| anyhow::anyhow!("failed to update service: {:?}", e))?;
-            tracing::info!("Service updated successfully! Service Name: {}", self.label);
-            return Ok(());
-        }
+        // 永远走「干净安装」：先彻底注销（忽略错误），等 launchd 真正放手，再 bootstrap。
+        //
+        // 不能走 service-manager 的 status()/update() 路径：新版 macOS 的
+        // `launchctl print` 对不存在的服务返回 **113**（而不是 64），会被误判成错误；
+        // 更早的行为是「看到 Running 就 update，而 update 里再查已经查不到」→ 永远装不上。
+        let _ = self
+            .service_manager
+            .uninstall(service_manager::ServiceUninstallCtx {
+                label: self.label.clone(),
+            });
+        std::thread::sleep(std::time::Duration::from_millis(250));
 
         self.service_manager
             .install(ctx)
@@ -140,9 +123,23 @@ impl Service {
         let ctx = service_manager::ServiceStatusCtx {
             label: self.label.clone(),
         };
-        let status = self.service_manager.status(ctx)?;
-
-        Ok(status)
+        match self.service_manager.status(ctx) {
+            Ok(status) => Ok(status),
+            // launchctl 对「不存在的服务」在不同 macOS 上返回 64 或 113；
+            // 统一当作 NotInstalled，避免 UI/等待循环把它当成致命错误。
+            Err(err) => {
+                let text = err.to_string();
+                if text.contains("Could not find service")
+                    || text.contains("exit code 64")
+                    || text.contains("exit code 113")
+                    || text.contains("not found")
+                {
+                    Ok(service_manager::ServiceStatus::NotInstalled)
+                } else {
+                    Err(err.into())
+                }
+            }
+        }
     }
 
     pub fn start(&self) -> Result<(), anyhow::Error> {

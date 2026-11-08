@@ -5,7 +5,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import { routes } from "vue-router/auto-routes";
 
 import App from "~/App.vue";
-import { migrateNetworks, reportFrontendError } from "~/composables/backend";
+import { legacyCleanupEnabled, migrateNetworks, reportFrontendError } from "~/composables/backend";
 import { hydrateUiState, installPersistHook } from "~/composables/persist";
 import "@exvlan/std/style.css";
 import "~/styles.css";
@@ -41,8 +41,12 @@ async function migrateLocalNetworks(): Promise<void> {
       return;
     }
     if (await migrateNetworks(raw)) {
-      localStorage.removeItem("networkList");
       console.info("[networks] migrated localStorage → networks.toml");
+    }
+    // preview 默认保留快照；只有正式版（清理模式）才删除。
+    if (await legacyCleanupEnabled().catch(() => false)) {
+      localStorage.removeItem("networkList");
+      console.info("[networks] stable release: localStorage snapshot removed");
     }
   } catch (e) {
     console.warn("migrate networks failed:", e);

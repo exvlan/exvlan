@@ -58,6 +58,12 @@ static LAST_TUN_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32:
 /// 与系统路径、helper 命名保持一致。
 pub const SERVICE_LABEL: &str = "era.exvlan.studio";
 
+/// 正式版才置 `true`：首次正式版启动、新服务健康后清理旧版本残留。
+///
+/// preview 期间必须保持 `false`——旧目录/旧 plist/旧快照全部保留，
+/// 保证任何时候都能回退到上一个版本。
+pub const ENABLE_LEGACY_CLEANUP: bool = false;
+
 macro_rules! get_client_manager {
     () => {{
         let guard = CLIENT_MANAGER
@@ -1183,9 +1189,7 @@ async fn build_network_report(app: &AppHandle, frontend: Option<&str>) -> Result
             out.push_str(&tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
             out.push('\n');
         }
-        if let Some(p) = newest_kernel_log(&dir)
-            && let Ok(text) = std::fs::read_to_string(p)
-        {
+        if let Some(text) = kernel_log_text(&dir, 8 * 1024 * 1024) {
             let tail: Vec<&str> = text.lines().rev().take(2048).collect();
             out.push_str("--- kernel ---\n");
             out.push_str(&tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
@@ -1281,6 +1285,52 @@ fn newest_kernel_log(dir: &std::path::Path) -> Option<std::path::PathBuf> {
         })
         .max_by_key(|(t, _)| *t)
         .map(|(_, p)| p)
+}
+
+/// 读取内核日志尾部：跨 `.log` / `.log.1` / `.log.2`…（按 mtime 从新到旧），
+/// 跳过 0 字节文件。刚发生轮转时也不会得到空内容。
+fn kernel_log_text(dir: &std::path::Path, max_bytes: usize) -> Option<String> {
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("exvlan.log"))
+                .unwrap_or(false)
+        })
+        .filter_map(|p| {
+            let meta = std::fs::metadata(&p).ok()?;
+            if meta.len() == 0 {
+                return None;
+            }
+            Some((meta.modified().ok()?, p))
+        })
+        .collect();
+    if files.is_empty() {
+        return None;
+    }
+    files.sort_by_key(|(time, _)| std::cmp::Reverse(*time));
+
+    let mut out = String::new();
+    for (_, path) in files {
+        let Some(text) = read_capped(&path, max_bytes) else {
+            continue;
+        };
+        if out.is_empty() {
+            out = text;
+        } else {
+            out = format!("{text}\n{out}");
+        }
+        if out.len() >= max_bytes {
+            break;
+        }
+    }
+    if out.len() > max_bytes {
+        out = out.split_off(out.len() - max_bytes);
+    }
+    Some(out)
 }
 
 /// 诊断上传服务（Cloudflare Worker，见 packages/diagnostics）。
@@ -1395,8 +1445,7 @@ fn build_diagnostics_zip(
 
     // 2) 内核日志（peer/握手/TUN/路由都在这里；取尾部但远大于自检行数）
     if let Ok(dir) = get_log_dir(app)
-        && let Some(kernel_log) = newest_kernel_log(&dir)
-        && let Some(text) = read_capped(&kernel_log, DIAG_LOG_CAP)
+        && let Some(text) = kernel_log_text(&dir, DIAG_LOG_CAP)
     {
         let _ = zip.start_file("exvlan.log", opts);
         let _ = zip.write_all(error_log::redact(&text).as_bytes());
@@ -2358,8 +2407,7 @@ mod service {
             disable_restart_on_failure: false,
         };
 
-        // 20712 路径规范化：旧 label / 旧系统目录一次性迁移（本次以 root 执行）。
-        remove_legacy_service();
+        // 20712 路径规范化：先把旧目录**复制**过来（旧目录保留，便于回退）。
         migrate_legacy_layout(&opts);
 
         // 守护进程启动第一步是初始化文件日志：目录不存在会直接退出（20710 实测
@@ -2404,6 +2452,11 @@ mod service {
         // 装上了不代表能连：以「RPC 端口真的能连上」为准（launchctl 的 Running 会骗人，
         // 20710 就是守护进程起来即退出、launchd 反复重启，状态一直显示 Running）。
         if wait_until_listening(&opts.rpc_portal, std::time::Duration::from_secs(6)) {
+            // 新服务已健康：这时才停旧 label（失败也不影响新服务）。
+            remove_legacy_service();
+            if crate::ENABLE_LEGACY_CLEANUP {
+                cleanup_legacy_layout();
+            }
             return Ok(());
         }
         // 再 kickstart 一次（首次 bootstrap 的 RunAtLoad 偶尔没触发）
@@ -2421,30 +2474,61 @@ mod service {
 
     /// 以 root 预建守护进程要用的目录（配置 + 日志），并收紧属主/权限。
     /// 卸载旧 label（`exvlan-studio`），避免新旧两个守护进程并存。
+    ///
+    /// preview 期间**不删除**旧服务定义：只 `bootout` 停掉（避免端口冲突），
+    /// plist 改名为 `*.pre-7.2` 保留，方便回退到旧版本。
     fn remove_legacy_service() {
-        use exvlan_rpc::service_manager::ServiceStatus;
-        if SERVICE_LABEL == "exvlan-studio" {
+        const LEGACY: &str = "exvlan-studio";
+        if SERVICE_LABEL == LEGACY {
             return;
         }
-        let Ok(legacy) = exvlan_rpc::service_manager::Service::new("exvlan-studio".to_string())
-        else {
-            return;
-        };
-        match legacy.status() {
-            Ok(ServiceStatus::NotInstalled) => {}
-            Ok(_) => {
-                let _ = legacy.uninstall();
-                crate::error_log::record("service.migrate", "removed legacy label exvlan-studio");
+
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("/bin/launchctl")
+                .args(["bootout", &format!("system/{LEGACY}")])
+                .output();
+            let plist = format!("/Library/LaunchDaemons/{LEGACY}.plist");
+            let backup = format!("{plist}.pre-7.2");
+            if std::path::Path::new(&plist).is_file() && !std::path::Path::new(&backup).exists() {
+                match std::fs::rename(&plist, &backup) {
+                    Ok(()) => crate::error_log::record(
+                        "service.migrate",
+                        format!("bootout {LEGACY}; plist → {backup}"),
+                    ),
+                    Err(err) => crate::error_log::record(
+                        "service.migrate",
+                        format!("rename {plist} failed: {err}"),
+                    ),
+                }
             }
-            Err(err) => crate::error_log::record(
-                "service.migrate",
-                format!("legacy status failed: {err:#}"),
-            ),
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // 停掉并禁止自启，但保留服务定义（回退时可重新启用）。
+            let _ = std::process::Command::new("sc")
+                .args(["stop", LEGACY])
+                .output();
+            let _ = std::process::Command::new("sc")
+                .args(["config", LEGACY, "start=", "disabled"])
+                .output();
+            crate::error_log::record("service.migrate", format!("stopped legacy {LEGACY}"));
+        }
+
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            let _ = std::process::Command::new("systemctl")
+                .args(["disable", "--now", LEGACY])
+                .output();
+            crate::error_log::record("service.migrate", format!("disabled legacy {LEGACY}"));
         }
     }
 
-    /// 把 `from` 目录里的文件搬到 `to`（目标已存在则跳过）。
-    fn move_dir_contents(from: &std::path::Path, to: &std::path::Path) {
+    /// 把 `from` 目录里的文件**复制**到 `to`（目标已存在则跳过）。
+    ///
+    /// preview 期间必须保留旧目录：回退到旧版本时仍然可用。
+    fn copy_dir_contents(from: &std::path::Path, to: &std::path::Path) {
         if !from.is_dir() {
             return;
         }
@@ -2458,14 +2542,14 @@ mod service {
             if dst.exists() || !src.is_file() {
                 continue;
             }
-            match std::fs::rename(&src, &dst) {
-                Ok(()) => crate::error_log::record(
+            match std::fs::copy(&src, &dst) {
+                Ok(_) => crate::error_log::record(
                     "service.migrate",
-                    format!("{} → {}", src.display(), dst.display()),
+                    format!("copy {} → {}", src.display(), dst.display()),
                 ),
                 Err(err) => crate::error_log::record(
                     "service.migrate",
-                    format!("move {} failed: {err}", src.display()),
+                    format!("copy {} failed: {err}", src.display()),
                 ),
             }
         }
@@ -2479,25 +2563,47 @@ mod service {
         #[cfg(target_os = "macos")]
         {
             let base = std::path::Path::new("/Library/Application Support/exvlan");
-            move_dir_contents(&base.join("config.d"), config_new);
-            move_dir_contents(&base.join("core"), &crate::kernel::kernel_dir());
+            copy_dir_contents(&base.join("config.d"), config_new);
+            copy_dir_contents(&base.join("core"), &crate::kernel::kernel_dir());
         }
         #[cfg(target_os = "windows")]
         {
             let base = std::path::Path::new(r"C:\ProgramData\exvlan");
-            move_dir_contents(&base.join("config.d"), config_new);
-            move_dir_contents(&base.join("core"), &crate::kernel::kernel_dir());
-            move_dir_contents(&base.join("logs"), log_new);
+            copy_dir_contents(&base.join("config.d"), config_new);
+            copy_dir_contents(&base.join("core"), &crate::kernel::kernel_dir());
+            copy_dir_contents(&base.join("logs"), log_new);
         }
         #[cfg(all(unix, not(target_os = "macos")))]
         {
-            move_dir_contents(std::path::Path::new("/var/lib/exvlan/config.d"), config_new);
-            move_dir_contents(
+            copy_dir_contents(std::path::Path::new("/var/lib/exvlan/config.d"), config_new);
+            copy_dir_contents(
                 std::path::Path::new("/opt/exvlan/core"),
                 &crate::kernel::kernel_dir(),
             );
-            move_dir_contents(std::path::Path::new("/var/log/exvlan"), log_new);
+            copy_dir_contents(std::path::Path::new("/var/log/exvlan"), log_new);
         }
+    }
+
+    /// 正式版：删除旧版本残留（preview 不会走到这里）。
+    fn cleanup_legacy_layout() {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::fs::remove_dir_all("/Library/Application Support/exvlan");
+            let _ = std::fs::remove_dir_all("/Library/Logs/exvlan");
+            let _ = std::fs::remove_file("/Library/LaunchDaemons/exvlan-studio.plist.pre-7.2");
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::fs::remove_dir_all(r"C:\ProgramData\exvlan");
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            let _ = std::fs::remove_dir_all("/var/lib/exvlan");
+            let _ = std::fs::remove_dir_all("/opt/exvlan");
+            let _ = std::fs::remove_dir_all("/var/log/exvlan");
+            let _ = std::fs::remove_file("/etc/systemd/system/exvlan-studio.service");
+        }
+        crate::error_log::record("service.cleanup", "legacy layout removed (stable release)");
     }
 
     /// GUI 侧写入服务指纹（提权成功后调用）。
@@ -2772,6 +2878,12 @@ fn desktop_service_default_dirs() -> ServiceDefaultDirs {
 #[tauri::command]
 fn service_default_dirs_cmd() -> ServiceDefaultDirs {
     service_default_dirs()
+}
+
+/// 正式版（`ENABLE_LEGACY_CLEANUP=true`）才让前端删掉 localStorage 快照。
+#[tauri::command]
+fn legacy_cleanup_enabled() -> bool {
+    ENABLE_LEGACY_CLEANUP
 }
 
 /// 提权子命令入口（由 `main.rs` 在解析到内部参数时调用）。
@@ -3746,6 +3858,7 @@ pub fn run_gui() -> std::process::ExitCode {
             report_boot_state,
             diagnostics_info,
             service_default_dirs_cmd,
+            legacy_cleanup_enabled,
             error_log_path,
             read_error_log,
             share_error_log,

@@ -151,6 +151,11 @@ export async function migrateNetworks(networks: string) {
   return await invoke<boolean>("migrate_networks", { networks });
 }
 
+/** 正式版（清理模式）才让前端删除 localStorage 快照。 */
+export async function legacyCleanupEnabled(): Promise<boolean> {
+  return await invoke<boolean>("legacy_cleanup_enabled");
+}
+
 /** 偏好/网络文件路径（诊断面板显示用）。 */
 export async function prefsPath() {
   return await invoke<string>("prefs_path_cmd");

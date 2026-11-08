@@ -381,9 +381,26 @@ fn apply_payload(staging: &Path, owner_uid: u32) -> anyhow::Result<()> {
             std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
         }
         let _ = std::fs::rename(&tmp, platform::HELPER_BIN);
+
+        // 版本文件跟随新 helper（否则 GUI 会一直认为 helper 不是当前版本）。
+        if let Ok(version) = std::fs::read_to_string(staging.join("helper_version")) {
+            let owner = recorded_owner_uid().unwrap_or(0);
+            let _ = std::fs::write(
+                platform::HELPER_VERSION_FILE,
+                format!("{} {owner}\n", version.trim()),
+            );
+        }
     }
 
     kickstart_service()?;
+
+    // helper 自更新后让 launchd 用新二进制重启自己（放最后，当前进程随时可能被替换）。
+    if staging.join("helper").is_file() {
+        let _ = std::process::Command::new("/bin/launchctl")
+            .args(["kickstart", "-k", &format!("system/{HELPER_LABEL}")])
+            .output();
+    }
+
     let _ = std::fs::remove_dir_all(staging);
     Ok(())
 }

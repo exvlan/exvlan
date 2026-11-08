@@ -63,6 +63,7 @@ declare global {
   const isWebClientConnected: typeof import("./composables/backend").isWebClientConnected;
   const kernelInstallVersion: typeof import("./composables/backend").kernelInstallVersion;
   const kernelUpdateInfo: typeof import("./composables/backend").kernelUpdateInfo;
+  const legacyCleanupEnabled: typeof import("./composables/backend").legacyCleanupEnabled;
   const listNetworkInstanceIds: typeof import("./composables/backend").listNetworkInstanceIds;
   const listenGlobalEvents: typeof import("./composables/event").listenGlobalEvents;
   const loadLastNetworkInstanceId: typeof import("./composables/config").loadLastNetworkInstanceId;
@@ -320,6 +321,9 @@ declare module "vue" {
     >;
     readonly kernelUpdateInfo: UnwrapRef<
       (typeof import("./composables/backend"))["kernelUpdateInfo"]
+    >;
+    readonly legacyCleanupEnabled: UnwrapRef<
+      (typeof import("./composables/backend"))["legacyCleanupEnabled"]
     >;
     readonly listNetworkInstanceIds: UnwrapRef<
       (typeof import("./composables/backend"))["listNetworkInstanceIds"]

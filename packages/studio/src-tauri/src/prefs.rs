@@ -178,6 +178,13 @@ fn set_key(prefs: &mut Prefs, key: &str, value: Option<String>) {
 fn migrate_legacy(app: &tauri::AppHandle) -> Option<Prefs> {
     let dir = app.path().app_config_dir().ok()?;
     let legacy = dir.join("ui-state.json");
+    if !legacy.is_file() && dir.join("ui-state.json.bak").is_file() {
+        // 7.1 曾把它改名为 .bak；按约定只记录、不自动恢复。
+        crate::error_log::record(
+            "prefs",
+            "found ui-state.json.bak (7.1 damage); snapshot not restored (rollback only)",
+        );
+    }
     let text = std::fs::read_to_string(&legacy).ok()?;
     let map: BTreeMap<String, String> = serde_json::from_str(&text).ok()?;
     if map.is_empty() {
@@ -196,7 +203,12 @@ fn migrate_legacy(app: &tauri::AppHandle) -> Option<Prefs> {
         prefs.diag.last_upload_url = urls;
         prefs.diag.updated_at = at;
     }
-    let _ = std::fs::rename(&legacy, dir.join("ui-state.json.bak"));
+    if crate::ENABLE_LEGACY_CLEANUP {
+        let _ = std::fs::rename(&legacy, dir.join("ui-state.json.bak"));
+    } else {
+        // preview 期间**保留** ui-state.json（回退到旧版本仍可读取）。
+        crate::error_log::record("prefs", format!("snapshot kept: {}", legacy.display()));
+    }
     Some(prefs)
 }
 

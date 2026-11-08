@@ -153,7 +153,8 @@ jobs:
           set -euo pipefail
           cd packages/studio
           pnpm tauri signer sign src-tauri/resources/kernel/exvlan
-          ls -l src-tauri/resources/kernel/
+          pnpm tauri signer sign src-tauri/resources/helper/exvlan-helper
+          ls -l src-tauri/resources/kernel/ src-tauri/resources/helper/
 
       - name: copy correct DLLs (Windows)
         if: ${{ contains(matrix.GUI_TARGET, 'windows') }}

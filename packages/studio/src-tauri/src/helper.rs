@@ -149,6 +149,17 @@ mod imp {
         std::fs::copy(&sig, staging.join("kernel.sig"))?;
         std::fs::write(staging.join("version"), env!("CARGO_PKG_VERSION"))?;
 
+        // helper 自更新：升级包内带新 helper + 签名时一并交给 root 侧替换，
+        // 这样连 helper 版本升级也不需要再提权。
+        if let Some(helper) = bundled_helper(app) {
+            let helper_sig = helper.with_extension("sig");
+            if helper_sig.is_file() {
+                std::fs::copy(&helper, staging.join("helper"))?;
+                std::fs::copy(&helper_sig, staging.join("helper.sig"))?;
+                std::fs::write(staging.join("helper_version"), HELPER_VERSION.to_string())?;
+            }
+        }
+
         let out = std::process::Command::new(HELPER_BIN)
             .arg("--apply")
             .arg(&staging)
