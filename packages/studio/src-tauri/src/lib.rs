@@ -3560,7 +3560,7 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
     Err(format!("提权命令失败（osascript）: {stderr}"))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn run_elevated(args: &[&str]) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("无法定位自身可执行文件: {e}"))?;
     let mut cmd = std::process::Command::new(exe);
@@ -3608,6 +3608,11 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
     );
     error_log::record("elevate", format!("args={args:?} {message}"));
     Err(message)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn run_elevated(_args: &[&str]) -> Result<(), String> {
+    Err("提权仅桌面端支持".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -55,14 +55,14 @@ mod platform {
     pub const KERNEL_BIN: &str = "";
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Request {
     op: String,
     #[serde(default)]
     staging: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Response {
     ok: bool,
     message: String,
