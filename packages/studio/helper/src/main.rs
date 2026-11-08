@@ -260,11 +260,7 @@ fn run_daemon() -> ExitCode {
     use std::os::unix::net::UnixListener;
 
     let _ = std::fs::create_dir_all(SOCKET_DIR);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        let _ = std::fs::set_permissions(SOCKET_DIR, std::fs::Permissions::from_mode(0o755));
-    }
+    let _ = std::fs::set_permissions(SOCKET_DIR, std::fs::Permissions::from_mode(0o755));
     let _ = std::fs::remove_file(SOCKET_PATH);
     let listener = match UnixListener::bind(SOCKET_PATH) {
         Ok(listener) => listener,
