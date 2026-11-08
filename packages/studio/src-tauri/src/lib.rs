@@ -1382,8 +1382,10 @@ fn kernel_log_text(dir: &std::path::Path, max_bytes: usize) -> Option<String> {
 
 /// 诊断上传服务（Cloudflare Worker，见 packages/diagnostics）。
 const DIAG_UPLOAD_URL: &str = "https://exvlan-diag.era-x.cn/";
-/// 与 Worker 的 UPLOAD_KEY 一致，仅用于防滥用（拿到也只能往私有仓库灌 issue）。
-const DIAG_UPLOAD_KEY: &str = "5f06999dbefc2508435ed33ea0ccb10d";
+/// 短期 token 端点（Worker 用 `TOKEN_SECRET` 签发，绑定请求 IP，10 分钟有效）。
+///
+/// 客户端**不再内置任何长期密钥**；token 取到后在有效期内复用。
+const DIAG_TOKEN_URL: &str = "https://exvlan-diag.era-x.cn/token";
 
 /// 单份日志进 zip 的上限（压缩后很小，但避免把 10MB 的轮转文件反复读进内存）。
 const DIAG_LOG_CAP: usize = 8 * 1024 * 1024;
@@ -1530,7 +1532,11 @@ fn build_diagnostics_zip(
 /// 每层都写 `[upload]` 日志（含耗时），失败时错误文本带上 zip 路径，
 /// 前端据此提示并复制路径 —— 不再出现「点了没反应」。
 #[tauri::command]
-async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<String, String> {
+async fn upload_diagnostics(
+    app: AppHandle,
+    frontend: Option<String>,
+    reason: Option<String>,
+) -> Result<String, String> {
     use tauri::Manager as _;
 
     let started = std::time::Instant::now();
@@ -1578,6 +1584,13 @@ async fn upload_diagnostics(app: AppHandle, frontend: Option<String>) -> Result<
         .append_pair("os", std::env::consts::OS)
         .append_pair("arch", std::env::consts::ARCH)
         .append_pair("summary", summary.as_str());
+    upload_url.query_pairs_mut().append_pair(
+        "reason",
+        match reason.as_deref() {
+            Some("install-failed") => "install-failed",
+            _ => "manual",
+        },
+    );
 
     // 外层看门狗：无论哪一层卡住，60s 内必须给出结果。
     let body = zip_bytes;
@@ -1681,10 +1694,11 @@ async fn try_upload(
     client: &reqwest::Client,
     url: &url::Url,
     body: &[u8],
+    token: &str,
 ) -> Result<serde_json::Value, String> {
     let resp = client
         .post(url.clone())
-        .header("x-diag-key", DIAG_UPLOAD_KEY)
+        .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/zip")
         .body(body.to_vec())
         .send()
@@ -1698,19 +1712,132 @@ async fn try_upload(
     Ok(json)
 }
 
-/// A 直连 → B 系统代理 → C 系统 curl。
+/// token 缓存：`(token, 过期时刻)`。有效期内复用，过期或 401 后重取。
+static DIAG_TOKEN_CACHE: once_cell::sync::Lazy<
+    std::sync::Mutex<Option<(String, std::time::Instant)>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
+
+const DIAG_TOKEN_TTL_SECS: u64 = 540; // 服务端 600s，留 60s 余量
+
+fn cached_token() -> Option<String> {
+    let guard = DIAG_TOKEN_CACHE.lock().ok()?;
+    let (token, expires) = guard.as_ref()?;
+    if std::time::Instant::now() < *expires {
+        Some(token.clone())
+    } else {
+        None
+    }
+}
+
+fn cache_token(token: &str) {
+    if let Ok(mut guard) = DIAG_TOKEN_CACHE.lock() {
+        *guard = Some((
+            token.to_string(),
+            std::time::Instant::now() + std::time::Duration::from_secs(DIAG_TOKEN_TTL_SECS),
+        ));
+    }
+}
+
+fn invalidate_token() {
+    if let Ok(mut guard) = DIAG_TOKEN_CACHE.lock() {
+        *guard = None;
+    }
+}
+
+fn parse_token(json: &serde_json::Value) -> Result<String, String> {
+    json.get("token")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| format!("token 响应缺少 token 字段: {json}"))
+}
+
+async fn fetch_token_with(client: &reqwest::Client) -> Result<String, String> {
+    let resp = client
+        .get(DIAG_TOKEN_URL)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("HTTP {status}: {json}"));
+    }
+    parse_token(&json)
+}
+
+/// 取 token：命中缓存直接返回；否则直连 → 系统代理 → curl。
+async fn diag_token() -> Result<String, String> {
+    if let Some(token) = cached_token() {
+        return Ok(token);
+    }
+    let host = url::Url::parse(DIAG_TOKEN_URL)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_default();
+    let (ipv4, _) = resolve_upload_addrs(&host, 443).await;
+
+    for (label, use_proxy) in [("A(direct)", false), ("B(proxy)", true)] {
+        let started = std::time::Instant::now();
+        let client = match build_upload_client(use_proxy, &ipv4, &host) {
+            Ok(c) => c,
+            Err(err) => {
+                logger::record("upload", format!("token {label} client build failed: {err}"));
+                continue;
+            }
+        };
+        match fetch_token_with(&client).await {
+            Ok(token) => {
+                logger::record(
+                    "upload",
+                    format!("token {label} ok in {}ms", started.elapsed().as_millis()),
+                );
+                cache_token(&token);
+                return Ok(token);
+            }
+            Err(err) => logger::record(
+                "upload",
+                format!("token {label} failed in {}ms: {err}", started.elapsed().as_millis()),
+            ),
+        }
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let started = std::time::Instant::now();
+        match curl_token().await {
+            Ok(token) => {
+                logger::record(
+                    "upload",
+                    format!("token C(curl) ok in {}ms", started.elapsed().as_millis()),
+                );
+                cache_token(&token);
+                return Ok(token);
+            }
+            Err(err) => logger::record(
+                "upload",
+                format!("token C(curl) failed in {}ms: {err}", started.elapsed().as_millis()),
+            ),
+        }
+    }
+
+    Err("无法获取上传 token（直连/代理/curl 均失败）".to_string())
+}
+
+/// A 直连 → B 系统代理 → C 系统 curl（token 已在调用方取好）。
 async fn upload_with_fallback(
     url: &url::Url,
     body: Vec<u8>,
     zip_path: &std::path::Path,
 ) -> Result<serde_json::Value, String> {
     let host = url.host_str().unwrap_or_default().to_string();
-    let port = url.port_or_known_default().unwrap_or(443);
-    let (ipv4, _ipv6) = resolve_upload_addrs(&host, port).await;
+    let (ipv4, _ipv6) = resolve_upload_addrs(&host, 443).await;
+
+    let token = diag_token().await?;
 
     let started = std::time::Instant::now();
     match build_upload_client(false, &ipv4, &host) {
-        Ok(client) => match try_upload(&client, url, &body).await {
+        Ok(client) => match try_upload(&client, url, &body, &token).await {
             Ok(json) => {
                 logger::record(
                     "upload",
@@ -1720,10 +1847,7 @@ async fn upload_with_fallback(
             }
             Err(err) => logger::record(
                 "upload",
-                format!(
-                    "try A(direct) failed in {}ms: {err}",
-                    started.elapsed().as_millis()
-                ),
+                format!("try A(direct) failed in {}ms: {err}", started.elapsed().as_millis()),
             ),
         },
         Err(err) => logger::record("upload", format!("try A client build failed: {err}")),
@@ -1731,7 +1855,7 @@ async fn upload_with_fallback(
 
     let started = std::time::Instant::now();
     match build_upload_client(true, &ipv4, &host) {
-        Ok(client) => match try_upload(&client, url, &body).await {
+        Ok(client) => match try_upload(&client, url, &body, &token).await {
             Ok(json) => {
                 logger::record(
                     "upload",
@@ -1741,10 +1865,7 @@ async fn upload_with_fallback(
             }
             Err(err) => logger::record(
                 "upload",
-                format!(
-                    "try B(proxy) failed in {}ms: {err}",
-                    started.elapsed().as_millis()
-                ),
+                format!("try B(proxy) failed in {}ms: {err}", started.elapsed().as_millis()),
             ),
         },
         Err(err) => logger::record("upload", format!("try B client build failed: {err}")),
@@ -1753,7 +1874,7 @@ async fn upload_with_fallback(
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let started = std::time::Instant::now();
-        match curl_upload(url.as_str(), zip_path).await {
+        match curl_upload(url.as_str(), zip_path, &token).await {
             Ok(json) => {
                 logger::record(
                     "upload",
@@ -1763,10 +1884,7 @@ async fn upload_with_fallback(
             }
             Err(err) => logger::record(
                 "upload",
-                format!(
-                    "try C(curl) failed in {}ms: {err}",
-                    started.elapsed().as_millis()
-                ),
+                format!("try C(curl) failed in {}ms: {err}", started.elapsed().as_millis()),
             ),
         }
     }
@@ -1776,11 +1894,15 @@ async fn upload_with_fallback(
 
 /// 兜底通道：调用系统 curl 上传同一个 zip（桌面端实测可用）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-async fn curl_upload(url: &str, zip_path: &std::path::Path) -> Result<serde_json::Value, String> {
+async fn curl_upload(
+    url: &str,
+    zip_path: &std::path::Path,
+    token: &str,
+) -> Result<serde_json::Value, String> {
     let out = tokio::process::Command::new("curl")
         .args(["-sS", "--max-time", "60", "-X", "POST", url])
         .arg("-H")
-        .arg(format!("x-diag-key: {DIAG_UPLOAD_KEY}"))
+        .arg(format!("authorization: Bearer {token}"))
         .arg("-H")
         .arg("content-type: application/zip")
         .arg("--data-binary")
@@ -1796,6 +1918,25 @@ async fn curl_upload(url: &str, zip_path: &std::path::Path) -> Result<serde_json
         ));
     }
     serde_json::from_slice(&out.stdout).map_err(|e| format!("parse curl body: {e}"))
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn curl_token() -> Result<String, String> {
+    let out = tokio::process::Command::new("curl")
+        .args(["-sS", "--max-time", "15", DIAG_TOKEN_URL])
+        .output()
+        .await
+        .map_err(|e| format!("spawn curl: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "curl exit {:?}: {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("parse curl body: {e}"))?;
+    parse_token(&json)
 }
 
 /// 打开诊断包目录（上传失败时前端兜底：路径已复制，用户可一键打开）。

@@ -1,19 +1,27 @@
 // Cloudflare Worker：接收 App 上传的诊断日志，写入私有仓库的 issue。
 //
-// 设计要点：
-// - 目标仓库由 secret `REPO` 固定，**请求体无法指定仓库**（拿到 URL 也改不了投递目标）
-// - 需要 `X-Diag-Key` 与 secret `UPLOAD_KEY` 一致，避免被随意灌 issue
-// - 两条上传路径：
-//   POST /           JSON 文本段（旧接口，超 64K 自动拆 issue）
-//   POST /zip        完整 zip（存 KV，3 天过期，issue 里只贴摘要 + 下载链接）
-//   GET  /diag/<id>  下载 zip（随机 id，公开可下）
+// 鉴权（7.3 起）：
+//   GET  /token   → 签发短期 token（HMAC，绑定请求 IP，10 分钟有效）
+//   POST /zip     → Authorization: Bearer <token>
+// 客户端不再内置任何长期密钥；服务端密钥为 secret `TOKEN_SECRET`。
 //
-// secret：GH_TOKEN（fine-grained PAT，Issues: write）、REPO、UPLOAD_KEY
+// 路径：
+//   GET  /health       健康检查
+//   GET  /token        签发 token（受限流保护）
+//   POST /zip          完整 zip（存 KV，3 天过期）+ issue（正文含文本摘要 + 链接）
+//   POST /             JSON 文本段（保留接口，同样需要 token）
+//   GET  /diag/<id>    下载 zip（随机 id，公开可下，3 天过期）
+//
+// secret：GH_TOKEN（Issues: write）、REPO、TOKEN_SECRET
 // kv：DIAG_KV
+// ratelimit bindings：RL_TOKEN（10/分钟/IP）、RL_UPLOAD（20/分钟/IP）
 
-const MAX_BODY = 55000;
-const MAX_ZIP = 25 * 1024 * 1024; // KV 单值上限
+const MAX_BODY = 60000;
+const MAX_ZIP = 20 * 1024 * 1024;
 const ZIP_TTL_SECONDS = 3 * 24 * 60 * 60;
+const TOKEN_TTL_SECONDS = 600;
+
+const enc = new TextEncoder();
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -27,6 +35,76 @@ function clip(text, limit) {
   const s = String(text);
   if (s.length <= limit) return s;
   return `${s.slice(0, limit)}\n…（truncated ${s.length - limit} chars）`;
+}
+
+function b64url(bytes) {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function hmac(secret, message) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  return b64url(new Uint8Array(sig));
+}
+
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest("SHA-256", enc.encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function clientIp(request) {
+  return request.headers.get("CF-Connecting-IP") || "0.0.0.0";
+}
+
+/** token 形如 `v1.<exp>.<nonce>.<sig>`，sig 绑定 exp+nonce+ip 摘要。 */
+async function issueToken(env, request) {
+  const exp = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS;
+  const nonce = randomId().slice(0, 16);
+  const ipDigest = await sha256Hex(clientIp(request));
+  const sig = await hmac(env.TOKEN_SECRET, `${exp}.${nonce}.${ipDigest}`);
+  return { token: `v1.${exp}.${nonce}.${sig}`, exp };
+}
+
+async function verifyToken(env, request) {
+  const auth = request.headers.get("authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "v1") {
+    return { ok: false, reason: "bad-signature" };
+  }
+  const [, expRaw, nonce, sig] = parts;
+  const exp = Number(expRaw);
+  if (!Number.isFinite(exp)) {
+    return { ok: false, reason: "bad-signature" };
+  }
+  if (Math.floor(Date.now() / 1000) > exp) {
+    return { ok: false, reason: "expired" };
+  }
+  const ipDigest = await sha256Hex(clientIp(request));
+  const expect = await hmac(env.TOKEN_SECRET, `${exp}.${nonce}.${ipDigest}`);
+  if (expect !== sig) {
+    return { ok: false, reason: "ip-mismatch" };
+  }
+  return { ok: true };
+}
+
+async function rateLimited(binding, request) {
+  if (!binding) return false;
+  try {
+    const { success } = await binding.limit({ key: clientIp(request) });
+    return !success;
+  } catch {
+    // 限流器异常时放行，避免因为基础设施问题全量阻断诊断上传
+    return false;
+  }
 }
 
 function buildSections(payload) {
@@ -51,7 +129,6 @@ function chunk(sections) {
       current = "";
     }
     if (block.length > MAX_BODY) {
-      // 单段就超限：硬切
       for (let i = 0; i < block.length; i += MAX_BODY) {
         pages.push(block.slice(i, i + MAX_BODY));
       }
@@ -63,7 +140,7 @@ function chunk(sections) {
   return pages.length > 0 ? pages : ["(empty diagnostics)"];
 }
 
-async function createIssue(env, title, body) {
+async function createIssue(env, title, body, labels) {
   const resp = await fetch(`https://api.github.com/repos/${env.REPO}/issues`, {
     method: "POST",
     headers: {
@@ -72,7 +149,7 @@ async function createIssue(env, title, body) {
       "user-agent": "exvlan-diagnostics-worker",
       "content-type": "application/json",
     },
-    body: JSON.stringify({ title, body, labels: ["diagnostics"] }),
+    body: JSON.stringify({ title, body, labels }),
   });
   if (!resp.ok) {
     const detail = await resp.text();
@@ -86,6 +163,23 @@ function randomId() {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function issueTitle(version, platform) {
+  return `[diag] ${version} ${platform}`;
+}
+
+async function handleToken(request, env) {
+  if (!env.TOKEN_SECRET) {
+    return json({ error: "token secret not configured" }, 500);
+  }
+  if (await rateLimited(env.RL_TOKEN, request)) {
+    return new Response(JSON.stringify({ error: "rate limited" }), {
+      status: 429,
+      headers: { "content-type": "application/json", "retry-after": "60" },
+    });
+  }
+  return json(await issueToken(env, request));
 }
 
 async function handleZip(request, env, url) {
@@ -110,11 +204,12 @@ async function handleZip(request, env, url) {
   const version = url.searchParams.get("version") || "unknown";
   const platform = `${url.searchParams.get("os") || "unknown"}-${url.searchParams.get("arch") || "unknown"}`;
   const summary = url.searchParams.get("summary") || "";
+  const reason = url.searchParams.get("reason") === "install-failed" ? "install-failed" : "manual";
   const zipUrl = `${url.origin}/diag/${id}`;
 
   const body = [
     summary ? `## 摘要\n\n\`\`\`\n${clip(summary, 4000)}\n\`\`\`\n` : "",
-    `## 完整诊断包\n\n${zipUrl}\n\n> zip 含 error.log、events.log、内核日志、网络自检、ui-state（均已脱敏）。`,
+    `## 完整诊断包\n\n${zipUrl}\n\n> zip 含 error.log、events.log、studio/exvlan/helper 日志、网络自检、ui-state（均已脱敏）。`,
     `> 链接 ${ZIP_TTL_SECONDS / 86400} 天后过期（${zip.byteLength} bytes）。`,
   ]
     .filter(Boolean)
@@ -122,7 +217,7 @@ async function handleZip(request, env, url) {
 
   let issueUrl;
   try {
-    issueUrl = await createIssue(env, `[diagnostics] ${version} ${platform}`, body);
+    issueUrl = await createIssue(env, issueTitle(version, platform), body, ["diagnostics", reason]);
   } catch (err) {
     return json({ error: String(err) }, 502);
   }
@@ -152,6 +247,9 @@ export default {
     if (request.method === "GET" && url.pathname === "/health") {
       return json({ ok: true });
     }
+    if (request.method === "GET" && url.pathname === "/token") {
+      return handleToken(request, env);
+    }
     if (request.method === "GET" && url.pathname.startsWith("/diag/")) {
       const id = url.pathname.slice("/diag/".length);
       if (!/^[0-9a-f]{32}$/.test(id)) {
@@ -162,9 +260,21 @@ export default {
     if (request.method !== "POST") {
       return json({ error: "method not allowed" }, 405);
     }
-    if (!env.UPLOAD_KEY || request.headers.get("x-diag-key") !== env.UPLOAD_KEY) {
-      return json({ error: "forbidden" }, 403);
+
+    if (!env.TOKEN_SECRET) {
+      return json({ error: "token secret not configured" }, 500);
     }
+    const auth = await verifyToken(env, request);
+    if (!auth.ok) {
+      return json({ error: "unauthorized", reason: auth.reason }, 401);
+    }
+    if (await rateLimited(env.RL_UPLOAD, request)) {
+      return new Response(JSON.stringify({ error: "rate limited" }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "60" },
+      });
+    }
+
     if (url.pathname === "/zip") {
       return handleZip(request, env, url);
     }
@@ -183,8 +293,12 @@ export default {
     try {
       for (let i = 0; i < pages.length; i++) {
         const suffix = pages.length > 1 ? ` (${i + 1}/${pages.length})` : "";
-        const title = `[diagnostics] ${version} ${platform}${suffix}`;
-        urls.push(await createIssue(env, title, pages[i]));
+        urls.push(
+          await createIssue(env, `${issueTitle(version, platform)}${suffix}`, pages[i], [
+            "diagnostics",
+            "manual",
+          ]),
+        );
       }
     } catch (err) {
       return json({ error: String(err) }, 502);

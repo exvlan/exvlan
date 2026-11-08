@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import pkg from '~/../package.json'
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import pkg from "~/../package.json";
 
 onBeforeMount(async () => {
-  await getCurrentWindow().setTitle(`Exvlan Studio: v${pkg.version}`)
-})
+  await getCurrentWindow().setTitle(`Exvlan Studio: v${pkg.version}`);
+});
 </script>
 
 <template>
   <Toast position="bottom-right" />
+  <ConfirmDialog />
   <RouterView />
 </template>

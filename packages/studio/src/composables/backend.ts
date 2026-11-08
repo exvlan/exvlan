@@ -350,8 +350,11 @@ export async function reportBootState(
 }
 
 /** 上传诊断 zip 到私有仓库（Cloudflare Worker），返回 issue 与 zip 下载链接。 */
-export async function uploadDiagnostics(frontendState?: string) {
-  return await invoke<string>("upload_diagnostics", { frontend: frontendState });
+export async function uploadDiagnostics(
+  frontendState?: string,
+  reason: "manual" | "install-failed" = "manual",
+) {
+  return await invoke<string>("upload_diagnostics", { frontend: frontendState, reason });
 }
 
 /** 诊断链路埋点：写 events.log（失败静默）。 */

@@ -20,6 +20,7 @@ import {
 import { executeVpnTileAction } from "~/composables/mobile_vpn_tile";
 import { dedupeNetworkInstances } from "~/composables/instance_dedupe";
 import { GUIRemoteClient } from "~/modules/api";
+import { logDiagStep, uploadDiagnostics } from "~/composables/backend";
 
 import { useToast, useConfirm } from "openvue";
 import { loadMode, saveModeNow, WebClientConfig, type Mode } from "~/composables/mode";
@@ -46,6 +47,47 @@ import {
 
 const { t } = useI18n();
 const confirm = useConfirm();
+/**
+ * 安装失败时自动上传诊断（helper / 服务 / 内核安装失败）。
+ *
+ * 复用「上传诊断」的首次同意开关：没同意过就弹一次应用内确认框，
+ * 同意后以后静默上传；不同意就只保留顶部横幅里的错误。
+ */
+async function maybeAutoUploadDiag(detail: string) {
+  if (type() === "ios") {
+    return;
+  }
+  try {
+    if (localStorage.getItem("diag_upload_consent") !== "1") {
+      const accepted = await new Promise<boolean>((resolve) => {
+        confirm.require({
+          header: t("settings.upload_diag"),
+          message: t("settings.upload_consent"),
+          accept: () => resolve(true),
+          reject: () => resolve(false),
+        });
+      });
+      if (!accepted) {
+        return;
+      }
+      localStorage.setItem("diag_upload_consent", "1");
+    }
+    void logDiagStep("auto_upload_start", detail.slice(0, 200));
+    const urls = await uploadDiagnostics("", "install-failed");
+    if (urls) {
+      toast.add({
+        severity: "success",
+        summary: t("settings.upload_diag"),
+        detail: urls,
+        life: 15000,
+      });
+    }
+  } catch (e) {
+    void logDiagStep("auto_upload_failed", String(e).slice(0, 300));
+    console.warn("auto upload diagnostics failed", e);
+  }
+}
+
 const aboutVisible = ref(false);
 /** 启动/连接失败时保留的错误（顶部横幅展示，不再静默降级模式）。 */
 const startupError = ref("");
@@ -542,6 +584,7 @@ onMounted(async () => {
     } catch (e: any) {
       console.error("ensure kernel/service failed", e);
       startupError.value = String(e);
+      void maybeAutoUploadDiag(String(e));
       void reportFrontendError("fe:ensure-kernel", String(e));
       toast.add({
         severity: "error",
@@ -575,6 +618,7 @@ onMounted(async () => {
     // 保留用户所选模式，只把原因留在顶部横幅与 error.log
     console.error("initWithMode failed", e);
     startupError.value ||= String(e);
+    void maybeAutoUploadDiag(String(e));
   }
   void maybeCheckAppUpdate();
 

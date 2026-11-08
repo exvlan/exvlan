@@ -5,4 +5,8 @@
   "compatibility_date": "2026-01-01",
   "routes": [{ "pattern": "exvlan-diag.era-x.cn/*", "zone_name": "era-x.cn" }],
   "kv_namespaces": [{ "binding": "DIAG_KV", "id": "56e5109429704b1abf8a17e46b922d78" }],
+  "ratelimits": [
+    { "name": "RL_TOKEN", "namespace_id": "1010", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_UPLOAD", "namespace_id": "1011", "simple": { "limit": 20, "period": 60 } },
+  ],
 }
