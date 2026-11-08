@@ -398,6 +398,7 @@ fn verify_minisign(file: &Path, signature: &Path) -> anyhow::Result<()> {
     let data = std::fs::read(file)?;
     public_key
         .verify(&data, &signature, false)
+        .or_else(|_| public_key.verify(&data, &signature, true))
         .context("签名不匹配")
 }
 

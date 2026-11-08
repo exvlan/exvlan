@@ -12,6 +12,7 @@ pub const HELPER_VERSION: u32 = 1;
 mod imp {
     use super::*;
     use anyhow::{Context as _, bail};
+    use std::path::{Path, PathBuf};
     use tauri::Manager as _;
 
     const HELPER_BIN: &str = "/Library/PrivilegedHelperTools/era.exvlan.studio.helper";
