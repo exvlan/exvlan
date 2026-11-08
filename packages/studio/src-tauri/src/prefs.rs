@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::Manager as _;
 
-const APP_DIR: &str = "era.exvlan.studio";
+const APP_DIR: &str = crate::paths::APP_ID;
 const FILE_NAME: &str = "prefs.toml";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

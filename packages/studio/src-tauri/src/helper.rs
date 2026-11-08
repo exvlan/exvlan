@@ -16,17 +16,25 @@ mod imp {
     use tauri::Manager as _;
 
     const HELPER_LABEL: &str = "era.exvlan.studio.helper";
-    const HELPER_BIN: &str = "/Library/PrivilegedHelperTools/era.exvlan.studio.helper";
-    const HELPER_PLIST: &str = "/Library/LaunchDaemons/era.exvlan.studio.helper.plist";
-    const HELPER_VERSION_FILE: &str =
-        "/Library/PrivilegedHelperTools/era.exvlan.studio.helper.version";
+
+    fn helper_bin() -> PathBuf {
+        crate::paths::helper_bin().expect("helper 仅 macOS 存在")
+    }
+
+    fn helper_plist_path() -> PathBuf {
+        crate::paths::helper_plist().expect("helper 仅 macOS 存在")
+    }
+
+    fn helper_version_file() -> PathBuf {
+        crate::paths::helper_version_file().expect("helper 仅 macOS 存在")
+    }
 
     /// 已安装且版本匹配。
     pub fn is_installed() -> bool {
-        if !Path::new(HELPER_BIN).is_file() {
+        if !helper_bin().is_file() {
             return false;
         }
-        let text = std::fs::read_to_string(HELPER_VERSION_FILE).unwrap_or_default();
+        let text = std::fs::read_to_string(helper_version_file()).unwrap_or_default();
         text.split_whitespace()
             .next()
             .and_then(|v| v.parse::<u32>().ok())
@@ -56,15 +64,19 @@ mod imp {
         }
         std::fs::create_dir_all("/Library/PrivilegedHelperTools").ok();
         std::fs::create_dir_all("/Library/LaunchDaemons").ok();
+        // helper 日志目录（系统日志根）
+        std::fs::create_dir_all(crate::paths::system().logs).ok();
 
-        std::fs::copy(src, HELPER_BIN).with_context(|| format!("复制 helper 到 {HELPER_BIN}"))?;
-        std::fs::set_permissions(HELPER_BIN, std::fs::Permissions::from_mode(0o755))?;
-        strip_quarantine(HELPER_BIN);
+        let bin = helper_bin();
+        let plist = helper_plist_path();
+        std::fs::copy(src, &bin).with_context(|| format!("复制 helper 到 {}", bin.display()))?;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))?;
+        strip_quarantine(&bin);
 
-        std::fs::write(HELPER_PLIST, helper_plist())
-            .with_context(|| format!("写入 {HELPER_PLIST}"))?;
-        std::fs::set_permissions(HELPER_PLIST, std::fs::Permissions::from_mode(0o644))?;
-        strip_quarantine(HELPER_PLIST);
+        std::fs::write(&plist, helper_plist(&bin, &crate::paths::helper_log()))
+            .with_context(|| format!("写入 {}", plist.display()))?;
+        std::fs::set_permissions(&plist, std::fs::Permissions::from_mode(0o644))?;
+        strip_quarantine(&plist);
 
         let _ = std::process::Command::new("/bin/launchctl")
             .args(["bootout", &format!("system/{HELPER_LABEL}")])
@@ -72,7 +84,9 @@ mod imp {
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let out = std::process::Command::new("/bin/launchctl")
-            .args(["bootstrap", "system", HELPER_PLIST])
+            .arg("bootstrap")
+            .arg("system")
+            .arg(&plist)
             .output()
             .context("执行 launchctl bootstrap")?;
         if !out.status.success() {
@@ -85,22 +99,20 @@ mod imp {
             .args(["kickstart", "-k", &format!("system/{HELPER_LABEL}")])
             .output();
 
-        std::fs::write(
-            HELPER_VERSION_FILE,
-            format!("{HELPER_VERSION} {owner_uid}\n"),
-        )?;
-        std::fs::set_permissions(HELPER_VERSION_FILE, std::fs::Permissions::from_mode(0o644))?;
+        let version_file = helper_version_file();
+        std::fs::write(&version_file, format!("{HELPER_VERSION} {owner_uid}\n"))?;
+        std::fs::set_permissions(&version_file, std::fs::Permissions::from_mode(0o644))?;
         Ok(())
     }
 
-    fn strip_quarantine(path: &str) {
+    fn strip_quarantine(path: &Path) {
         let _ = std::process::Command::new("/usr/bin/xattr")
             .args(["-d", "com.apple.quarantine"])
             .arg(path)
             .output();
     }
 
-    fn helper_plist() -> String {
+    fn helper_plist(bin: &Path, log: &Path) -> String {
         format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -109,18 +121,20 @@ mod imp {
   <key>Label</key><string>{HELPER_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{HELPER_BIN}</string>
+    <string>{bin}</string>
     <string>--daemon</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Interactive</string>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>StandardOutPath</key><string>/var/log/{HELPER_LABEL}.log</string>
-  <key>StandardErrorPath</key><string>/var/log/{HELPER_LABEL}.log</string>
+  <key>StandardOutPath</key><string>{log}</string>
+  <key>StandardErrorPath</key><string>{log}</string>
 </dict>
 </plist>
-"#
+"#,
+            bin = bin.display(),
+            log = log.display(),
         )
     }
 
@@ -161,11 +175,11 @@ mod imp {
             }
         }
 
-        let out = std::process::Command::new(HELPER_BIN)
+        let out = std::process::Command::new(helper_bin())
             .arg("--apply")
             .arg(&staging)
             .output()
-            .with_context(|| format!("执行 {HELPER_BIN} --apply 失败"))?;
+            .with_context(|| format!("执行 {} --apply 失败", helper_bin().display()))?;
         let _ = std::fs::remove_dir_all(&staging);
         if !out.status.success() {
             bail!(
@@ -221,9 +235,9 @@ mod imp {
 
     /// helper 日志尾部（仅用于健康检查失败时落盘）。
     fn helper_log_tail(max: usize) -> String {
-        let path = format!("/var/log/{HELPER_LABEL}.log");
+        let path = crate::paths::helper_log();
         let Ok(bytes) = std::fs::read(&path) else {
-            return format!("(无法读取 {path})");
+            return format!("(无法读取 {})", path.display());
         };
         let start = bytes.len().saturating_sub(max);
         String::from_utf8_lossy(&bytes[start..]).replace('\n', " | ")
@@ -234,7 +248,7 @@ mod imp {
         if !is_installed() {
             return Ok("not installed".to_string());
         }
-        let out = std::process::Command::new(HELPER_BIN)
+        let out = std::process::Command::new(helper_bin())
             .arg("--status")
             .output()
             .map_err(|e| format!("执行 helper --status 失败: {e}"))?;

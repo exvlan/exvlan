@@ -8,6 +8,7 @@ mod ffi_kernel;
 mod helper;
 mod kernel;
 mod networks;
+mod paths;
 mod prefs;
 // upgrade 全平台编译：kernel 子模块在移动端返回“不支持”，app 子模块移动端走 APK 流程。
 mod upgrade;
@@ -56,7 +57,7 @@ static LAST_TUN_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32:
 ///
 /// 20711 之前用的是 crate 名 `exvlan-studio`；20712 起统一为反向域名，
 /// 与系统路径、helper 命名保持一致。
-pub const SERVICE_LABEL: &str = "era.exvlan.studio";
+pub const SERVICE_LABEL: &str = crate::paths::APP_ID;
 
 /// 构建版本串：`<标准版本>[-<channel>.<n>][+<sha6>]`。
 ///
@@ -1401,53 +1402,22 @@ fn read_capped(path: &std::path::Path, cap: usize) -> Option<String> {
     Some(text)
 }
 
-/// 诊断 zip 的输出目录：逐个候选探测「能否真的写文件」。
+/// 诊断 zip 的输出目录（唯一落点：`<用户日志目录>/diagnostics`）。
 ///
-/// 背景：macOS 上 `~/Library/Caches/<id>` 可能被 root 写过（曾用 sudo 启动过 App），
-/// 直接 `create_dir_all` 会 EACCES，而旧代码只做了一次字符串回退。
+/// 不再有多级 fallback —— 产物落点必须可预期，否则「把诊断包发我」时
+/// 用户和我都找不到文件。目录不可写时直接报错并记日志。
 fn diagnostics_output_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    use tauri::Manager as _;
-
-    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
-    // ① error.log 所在目录：能追加 error.log 就一定能在这里建文件
-    if let Some(log) = error_log::path()
-        && let Some(dir) = log.parent()
-    {
-        candidates.push(dir.join("diagnostics"));
-    }
-    if let Ok(dir) = app.path().app_cache_dir() {
-        candidates.push(dir.join("diagnostics"));
-    }
-    if let Ok(dir) = app.path().app_config_dir() {
-        candidates.push(dir.join("diagnostics"));
-    }
-    candidates.push(std::env::temp_dir().join("era.exvlan.studio-diagnostics"));
-    candidates.push(std::path::PathBuf::from(
-        "/tmp/era.exvlan.studio-diagnostics",
-    ));
-
-    let mut attempts: Vec<String> = Vec::new();
-    for dir in candidates {
-        match probe_writable(&dir) {
-            Ok(()) => {
-                if !attempts.is_empty() {
-                    error_log::record(
-                        "diag.dir",
-                        format!(
-                            "fallback → {}; 失败候选: {}",
-                            dir.display(),
-                            attempts.join(" ; ")
-                        ),
-                    );
-                }
-                return Ok(dir);
-            }
-            Err(err) => attempts.push(format!("{}: {err}", dir.display())),
+    let dir = crate::paths::diagnostics_dir(app)?;
+    match probe_writable(&dir) {
+        Ok(()) => Ok(dir),
+        Err(err) => {
+            error_log::record(
+                "diag.dir",
+                format!("诊断目录不可写 {}: {err}", dir.display()),
+            );
+            Err(format!("无法创建诊断目录（{}: {err}）", dir.display()))
         }
     }
-    let detail = attempts.join(" ; ");
-    error_log::record("diag.dir", format!("所有候选目录不可写: {detail}"));
-    Err(format!("无法创建诊断目录（{detail}）"))
 }
 
 /// 建目录 + 写探针文件，确认真的可写。
@@ -3176,26 +3146,10 @@ fn service_default_dirs() -> ServiceDefaultDirs {
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn desktop_service_default_dirs() -> ServiceDefaultDirs {
-    #[cfg(target_os = "macos")]
-    {
-        ServiceDefaultDirs {
-            config_dir: "/Library/Application Support/era.exvlan.studio/config".to_string(),
-            file_log_dir: "/Library/Logs/era.exvlan.studio".to_string(),
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        ServiceDefaultDirs {
-            config_dir: r"C:\ProgramData\era.exvlan.studio\config".to_string(),
-            file_log_dir: r"C:\ProgramData\era.exvlan.studio\logs".to_string(),
-        }
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        ServiceDefaultDirs {
-            config_dir: "/var/lib/era.exvlan.studio/config".to_string(),
-            file_log_dir: "/var/log/era.exvlan.studio".to_string(),
-        }
+    let sys = crate::paths::system();
+    ServiceDefaultDirs {
+        config_dir: sys.config.display().to_string(),
+        file_log_dir: sys.logs.display().to_string(),
     }
 }
 
@@ -3227,10 +3181,14 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
         println!("{line}");
         eprintln!("{line}");
         use std::io::Write as _;
+        let log_path = crate::paths::elevate_log();
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open("/tmp/exvlan-elevate.log")
+            .open(&log_path)
         {
             let _ = writeln!(f, "{line}");
         }
@@ -4023,7 +3981,7 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
         detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
     }
     if detail.is_empty()
-        && let Ok(log) = std::fs::read_to_string("/tmp/exvlan-elevate.log")
+        && let Ok(log) = std::fs::read_to_string(crate::paths::elevate_log())
     {
         detail = log
             .lines()
@@ -4039,7 +3997,7 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
         "提权命令失败（exit={}）：{}",
         output.status,
         if detail.is_empty() {
-            "（无输出，详见 /tmp/exvlan-elevate.log）".to_string()
+            format!("（无输出，详见 {}）", crate::paths::elevate_log().display())
         } else {
             detail
         }

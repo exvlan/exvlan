@@ -26,18 +26,7 @@ pub fn kernel_bin_name() -> &'static str {
 
 /// 内核仓库目录（需 root 写入）。
 pub fn kernel_dir() -> PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        PathBuf::from("/Library/Application Support/era.exvlan.studio/core")
-    }
-    #[cfg(target_os = "windows")]
-    {
-        PathBuf::from(r"C:\ProgramData\era.exvlan.studio\core")
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        PathBuf::from("/opt/era.exvlan.studio/core")
-    }
+    crate::paths::system().core
 }
 
 /// 20711 及更早的内核目录（迁移用）。

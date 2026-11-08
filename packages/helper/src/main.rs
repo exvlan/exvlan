@@ -40,8 +40,12 @@ mod platform {
     pub const HELPER_PLIST: &str = "/Library/LaunchDaemons/era.exvlan.studio.helper.plist";
     pub const HELPER_VERSION_FILE: &str =
         "/Library/PrivilegedHelperTools/era.exvlan.studio.helper.version";
-    pub const SOCKET_PATH: &str = "/var/run/era.exvlan.studio.helper.sock";
+    /// 运行时 socket：`/var/run/<id>/` 子目录（FHS：不污染 /var/run 根）。
+    pub const SOCKET_DIR: &str = "/var/run/era.exvlan.studio";
+    pub const SOCKET_PATH: &str = "/var/run/era.exvlan.studio/helper.sock";
     pub const KERNEL_DIR: &str = "/Library/Application Support/era.exvlan.studio/core";
+    pub const LOG_DIR: &str = "/Library/Logs/era.exvlan.studio";
+    pub const LOG_PATH: &str = "/Library/Logs/era.exvlan.studio/helper.log";
     pub const KERNEL_BIN: &str = "exvlan";
 }
 
@@ -50,9 +54,50 @@ mod platform {
     pub const HELPER_BIN: &str = "";
     pub const HELPER_PLIST: &str = "";
     pub const HELPER_VERSION_FILE: &str = "";
+    pub const SOCKET_DIR: &str = "";
     pub const SOCKET_PATH: &str = "";
     pub const KERNEL_DIR: &str = "";
+    pub const LOG_DIR: &str = "";
+    pub const LOG_PATH: &str = "";
     pub const KERNEL_BIN: &str = "";
+}
+
+/// 极简 UTC 时间戳（避免为一行日志引入 chrono/time 依赖）。
+fn timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
+/// Howard Hinnant 的 days→civil 算法。
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// 带时间戳的 helper 日志（stdout/stderr 由 launchd 落到 LOG_PATH）。
+macro_rules! hlog {
+    ($($arg:tt)*) => {
+        eprintln!("{} [helper] {}", timestamp(), format!($($arg)*))
+    };
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -93,7 +138,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         _ => {
-            eprintln!(
+            hlog!(
                 "usage: exvlan-helper --install <uid> | --daemon | --apply <dir> | --status | --restart-service"
             );
             ExitCode::FAILURE
@@ -110,7 +155,7 @@ fn install(owner_uid: u32) -> ExitCode {
     match install_inner(owner_uid) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("install failed: {err:#}");
+            hlog!("install failed: {err:#}");
             ExitCode::FAILURE
         }
     }
@@ -130,6 +175,8 @@ fn install_inner(owner_uid: u32) -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("定位自身可执行文件")?;
     std::fs::create_dir_all("/Library/PrivilegedHelperTools").ok();
     std::fs::create_dir_all("/Library/LaunchDaemons").ok();
+    std::fs::create_dir_all(LOG_DIR).ok();
+    std::fs::set_permissions(LOG_DIR, std::fs::Permissions::from_mode(0o755)).ok();
 
     std::fs::copy(&exe, HELPER_BIN).with_context(|| format!("复制 helper 到 {HELPER_BIN}"))?;
     std::fs::set_permissions(HELPER_BIN, std::fs::Permissions::from_mode(0o755))?;
@@ -186,8 +233,8 @@ fn plist() -> String {
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Interactive</string>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>StandardOutPath</key><string>/var/log/{HELPER_LABEL}.log</string>
-  <key>StandardErrorPath</key><string>/var/log/{HELPER_LABEL}.log</string>
+  <key>StandardOutPath</key><string>{LOG_PATH}</string>
+  <key>StandardErrorPath</key><string>{LOG_PATH}</string>
 </dict>
 </plist>
 "#
@@ -212,11 +259,17 @@ fn run_daemon() -> ExitCode {
     use std::os::unix::fs::PermissionsExt as _;
     use std::os::unix::net::UnixListener;
 
+    let _ = std::fs::create_dir_all(SOCKET_DIR);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(SOCKET_DIR, std::fs::Permissions::from_mode(0o755));
+    }
     let _ = std::fs::remove_file(SOCKET_PATH);
     let listener = match UnixListener::bind(SOCKET_PATH) {
         Ok(listener) => listener,
         Err(err) => {
-            eprintln!("bind {SOCKET_PATH} failed: {err}");
+            hlog!("bind {SOCKET_PATH} failed: {err}");
             return ExitCode::FAILURE;
         }
     };
@@ -236,7 +289,7 @@ fn run_daemon() -> ExitCode {
                 let _ = serde_json::to_writer(&mut stream, &response);
                 let _ = stream.write_all(b"\n");
             }
-            Err(err) => eprintln!("accept failed: {err}"),
+            Err(err) => hlog!("accept failed: {err}"),
         }
     }
     ExitCode::SUCCESS
@@ -468,7 +521,7 @@ fn client(request: Request) -> ExitCode {
     let mut stream = match UnixStream::connect(SOCKET_PATH) {
         Ok(stream) => stream,
         Err(err) => {
-            eprintln!("connect {SOCKET_PATH} failed: {err}");
+            hlog!("connect {SOCKET_PATH} failed: {err}");
             return ExitCode::FAILURE;
         }
     };
@@ -476,7 +529,7 @@ fn client(request: Request) -> ExitCode {
     let payload = match serde_json::to_string(&request) {
         Ok(payload) => payload,
         Err(err) => {
-            eprintln!("encode request failed: {err}");
+            hlog!("encode request failed: {err}");
             return ExitCode::FAILURE;
         }
     };
@@ -497,7 +550,7 @@ fn client(request: Request) -> ExitCode {
             }
         }
         Err(err) => {
-            eprintln!("decode response failed: {err} ({line})");
+            hlog!("decode response failed: {err} ({line})");
             ExitCode::FAILURE
         }
     }

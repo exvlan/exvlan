@@ -25,7 +25,7 @@ use serde_json::{Map, Value};
 #[allow(unused_imports)]
 use tauri::Manager as _;
 
-const APP_DIR: &str = "era.exvlan.studio";
+const APP_DIR: &str = crate::paths::APP_ID;
 const FILE_NAME: &str = "networks.toml";
 const SCHEMA: i64 = 1;
 
