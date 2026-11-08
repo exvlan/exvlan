@@ -509,34 +509,7 @@ mod win_service_manager {
         }
     }
 
-    impl super::ServiceManager for WinServiceManager {
-        fn update(&self, ctx: service_manager::ServiceInstallCtx) -> io::Result<()> {
-            let (service_info, description) = generate_service_info(&ctx);
-
-            let service = self
-                .service_manager
-                .open_service(ctx.label.to_qualified_name(), ServiceAccess::ALL_ACCESS)
-                .map_err(io::Error::other)?;
-
-            service
-                .change_config(&service_info)
-                .map_err(io::Error::other)?;
-
-            if let Some(s) = description {
-                service
-                    .set_description(s.clone())
-                    .map_err(io::Error::other)?;
-            }
-
-            if let Some(work_dir) = ctx.working_directory {
-                set_service_work_directory(&ctx.label.to_qualified_name(), work_dir)?;
-            }
-
-            configure_failure_actions(&service, ctx.disable_restart_on_failure)?;
-
-            Ok(())
-        }
-    }
+    impl super::ServiceManager for WinServiceManager {}
 
     fn set_service_work_directory(service_name: &str, work_directory: PathBuf) -> io::Result<()> {
         let (reg_key, _) =
