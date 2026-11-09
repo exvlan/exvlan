@@ -574,7 +574,30 @@ onMounted(async () => {
 
   cleanupFns.push(await listenGlobalEvents());
   currentMode.value = await normalizeMode(loadMode());
-  void reportBootState(currentMode.value.mode, loadLastNetworkInstanceId());
+
+  // 模式丢失（prefs 与 localStorage 都没有）且内核服务已在运行 → 让用户选一次。
+  // 历史 bug：prefs 的 app_mode 被并发写覆盖后，每次启动都静默回到普通模式。
+  let modeSource = localStorage.getItem("app_mode") === null ? "default" : "persisted";
+  if (modeSource === "default" && type() !== "android" && type() !== "ios") {
+    const status = await getServiceStatus().catch(() => "NotInstalled");
+    if (status === "Running") {
+      const useService = await new Promise<boolean>((resolve) => {
+        confirm.require({
+          header: t("settings.mode"),
+          message: t("settings.mode_missing_service_running"),
+          accept: () => resolve(true),
+          reject: () => resolve(false),
+        });
+      });
+      const chosen = await normalizeMode(
+        (useService ? { mode: "service" } : { mode: "normal" }) as Mode,
+      );
+      await saveModeNow(chosen);
+      currentMode.value = chosen;
+      modeSource = "dialog";
+    }
+  }
+  void reportBootState(currentMode.value.mode, loadLastNetworkInstanceId(), null, modeSource);
 
   // 首次安装/升级后会自动装好内核并（重新）注册系统服务；失败不阻塞进入界面。
   // service 模式由 initWithMode 内部统一处理，避免同一次启动弹两次授权。

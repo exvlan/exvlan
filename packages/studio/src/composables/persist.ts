@@ -43,6 +43,18 @@ export async function hydrateUiState(): Promise<void> {
         restored.push(key);
       }
     }
+    // 反向回填：后端缺某个权威键、前端还有值时写回后端。
+    // （历史 bug：prefs 的键被并发写覆盖后，localStorage 里的值再也回不去）
+    for (const key of AUTHORITATIVE_KEYS) {
+      if (key in (state ?? {})) {
+        continue;
+      }
+      const local = localStorage.getItem(key);
+      if (local !== null && local !== "") {
+        pushToBackend(key, local);
+        restored.push(`${key}(push)`);
+      }
+    }
     console.info("[prefs] hydrated:", restored.join(",") || "(none)");
   } catch (e) {
     console.warn("hydrateUiState failed:", e);

@@ -131,3 +131,19 @@ POST /zip  Authorization: Bearer <token>
 - 服务端节点（relay / host）本轮不升级，后续单独处理
 - 7.4 再删除最小残留扫描
 - Android 版本列的完整版本串只能 hover 查看（手机无 hover，已接受）
+
+---
+
+## 9. pre.9 补充决策（7.3 预览期修复）
+
+| 项             | 结论                                                                                                                                          |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 内核同基线更新 | `want_version` 改用 `BUILD_VERSION`（含 `-pre.N+sha`），同一基线下的预览版之间也能更新内核                                                    |
+| helper 强更    | `HELPER_VERSION` 1 → 2（GUI 与 daemon 两处同步），强制重装以启用新 socket/日志路径与时间戳                                                    |
+| GUI 日志       | 文件名改为 `studio.log`（内核仍是 `exvlan.log`），上限 32MB → 16MB                                                                            |
+| 诊断包         | 分别收 `studio.log`（用户目录）与 `exvlan.log`（系统目录），并带 `prefs.toml`（脱敏整份）                                                     |
+| 模式丢失       | prefs 写入加全局锁串行化；`hydrateUiState` 在后端缺键时用前端值反向回填；模式缺失且服务在运行 → 弹一次让用户选（默认服务模式）                |
+| 实例去重       | 先按采集结果判断 `running && !error_msg`，优先保留真正能跑的实例                                                                              |
+| Windows 安装包 | `tauri.windows.conf.json` 的 `resources` 数组会**整体替换**基础配置 → 补回 `resources/kernel/*`（否则 MSI 里没有内核，整个 Windows 端不可用） |
+| Android 版本串 | APK 由 `mobile.yml` 构建，需补 `build-version.sh` 注入，否则版本串缺 `-pre.N+sha`                                                             |
+| MSI 版本       | 预览 `1000+序号`、正式 `60000+patch`，保证严格递增                                                                                            |

@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 /// 必须与 `packages/studio/helper` 的 `HELPER_VERSION` 保持一致。
-pub const HELPER_VERSION: u32 = 1;
+pub const HELPER_VERSION: u32 = 2;
 
 #[cfg(target_os = "macos")]
 mod imp {
@@ -166,7 +166,7 @@ mod imp {
         }
         std::fs::copy(&kernel, staging.join("kernel"))?;
         std::fs::copy(&sig, staging.join("kernel.sig"))?;
-        std::fs::write(staging.join("version"), env!("CARGO_PKG_VERSION"))?;
+        std::fs::write(staging.join("version"), crate::BUILD_VERSION)?;
 
         // helper 自更新：升级包内带新 helper + 签名时一并交给 root 侧替换，
         // 这样连 helper 版本升级也不需要再提权。

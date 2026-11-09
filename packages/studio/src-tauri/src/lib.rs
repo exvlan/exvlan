@@ -781,7 +781,7 @@ fn init_gui_logging_with(app: &tauri::AppHandle, level: Option<&str>) {
             dir: Some(log_dir.to_string_lossy().to_string()),
             level: Some(level.clone()),
             file: None,
-            size_mb: Some(32),
+            size_mb: Some(16),
             count: Some(3),
         },
     );
@@ -791,7 +791,7 @@ fn init_gui_logging_with(app: &tauri::AppHandle, level: Option<&str>) {
         return;
     }
     // 自检：记录级别与文件路径；文件大小在下次启动的 [boot] 行回报
-    let path = log_dir.join("exvlan.log");
+    let path = log_dir.join("studio.log");
     let size = std::fs::metadata(&path)
         .map(|m| m.len())
         .unwrap_or_default();
@@ -1258,10 +1258,18 @@ async fn network_diagnostics(app: AppHandle, frontend: Option<String>) -> Result
 }
 /// 前端启动状态上报（写进 `error.log` 的 `[boot.ui]`，便于对照模式/选网是否恢复）。
 #[tauri::command]
-fn report_boot_state(mode: String, last_instance: Option<String>, service_current: Option<bool>) {
+fn report_boot_state(
+    mode: String,
+    last_instance: Option<String>,
+    service_current: Option<bool>,
+    mode_source: Option<String>,
+) {
     logger::record(
         "boot.ui",
-        format!("mode={mode} last_instance={last_instance:?} service_current={service_current:?}"),
+        format!(
+            "mode={mode} mode_source={} last_instance={last_instance:?} service_current={service_current:?}",
+            mode_source.as_deref().unwrap_or("-")
+        ),
     );
 }
 
@@ -1461,15 +1469,32 @@ fn build_diagnostics_zip(
         let _ = zip.write_all(logger::redact(&text).as_bytes());
     }
 
-    // 2) 内核日志（peer/握手/TUN/路由都在这里；取尾部但远大于自检行数）
+    // 2) GUI 日志（界面/上传/模式/服务安装都在这里）
     if let Ok(dir) = get_log_dir(app)
-        && let Some(text) = kernel_log_text(&dir, DIAG_LOG_CAP)
+        && let Some(text) = read_capped(&dir.join("studio.log"), DIAG_LOG_CAP)
     {
-        let _ = zip.start_file("exvlan.log", opts);
+        let _ = zip.start_file("studio.log", opts);
         let _ = zip.write_all(logger::redact(&text).as_bytes());
     }
 
-    // 3) events.log（GUI 事件流：VPN 路由、诊断请求都在这里）
+    // 3) 内核日志（peer/握手/TUN/路由）—— 注意在**系统**日志目录，不是用户目录
+    {
+        let sys_logs = crate::paths::system().logs;
+        if let Some(text) = kernel_log_text(&sys_logs, DIAG_LOG_CAP) {
+            let _ = zip.start_file("exvlan.log", opts);
+            let _ = zip.write_all(logger::redact(&text).as_bytes());
+        }
+    }
+
+    // 4) prefs.toml（脱敏整份：用于判断“模式/上次网络到底存没存”）
+    if let Ok(prefs_path) = crate::prefs::prefs_path(app)
+        && let Some(text) = read_capped(&prefs_path, 256 * 1024)
+    {
+        let _ = zip.start_file("prefs.toml", opts);
+        let _ = zip.write_all(logger::redact(&text).as_bytes());
+    }
+
+    // 5) events.log（GUI 事件流：VPN 路由、诊断请求都在这里）
     if let Ok(dir) = get_log_dir(app)
         && let Some(text) = read_capped(&dir.join("events.log"), DIAG_LOG_CAP)
     {
@@ -1477,7 +1502,7 @@ fn build_diagnostics_zip(
         let _ = zip.write_all(logger::redact(&text).as_bytes());
     }
 
-    // 4) helper.log（特权 helper：安装/apply/自更新/授权失败都记在这里）
+    // 6) helper.log（特权 helper：安装/apply/自更新/授权失败都记在这里）
     {
         let helper_log = crate::paths::helper_log();
         if let Some(text) = read_capped(&helper_log, DIAG_LOG_CAP) {
@@ -1486,13 +1511,13 @@ fn build_diagnostics_zip(
         }
     }
 
-    // 5) 网络自检（结构化：实例/节点/路由/接口/VPN 状态）
+    // 7) 网络自检（结构化：实例/节点/路由/接口/VPN 状态）
     if !network_report.trim().is_empty() {
         let _ = zip.start_file("network-report.txt", opts);
         let _ = zip.write_all(logger::redact(network_report).as_bytes());
     }
 
-    // 6) ui-state.json（脱敏）
+    // 8) ui-state.json（旧版遗留，若存在则一并带上）
     if let Ok(dir) = app.path().app_config_dir()
         && let Ok(text) = std::fs::read_to_string(dir.join("ui-state.json"))
     {
@@ -1500,7 +1525,7 @@ fn build_diagnostics_zip(
         let _ = zip.write_all(logger::redact(&text).as_bytes());
     }
 
-    // 7) 摘要
+    // 9) 摘要
     let summary = format!(
         "version: {}\nos: {} ({})\nhome: {}\nlog_dir: {:?}\nconfig_dir: {:?}\nerror_log: {:?}\n",
         BUILD_VERSION,
@@ -3648,7 +3673,9 @@ async fn ensure_kernel_service(
 
     // 一次提权完成「内核（版本不一致时覆盖）+ 服务（指纹不一致时重装）」，
     // 避免首次安装连弹两次密码。
-    let want_version = env!("CARGO_PKG_VERSION");
+    // 必须用带构建标识的串：同一基线下的预览版之间（26.410.20712 → -pre.9+sha）
+    // 若只比 CARGO_PKG_VERSION 会永远判为“已是最新”，内核与 helper 都不更新。
+    let want_version = crate::BUILD_VERSION;
     let need_kernel =
         !kernel::is_installed() || kernel::installed_version().as_deref() != Some(want_version);
     let need_service = !service::is_current(&opts);

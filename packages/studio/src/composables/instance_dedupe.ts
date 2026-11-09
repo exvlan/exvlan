@@ -1,11 +1,35 @@
 import { Utils } from "@exvlan/std";
 import {
+  collectNetworkInfo,
   getConfig,
   listNetworkInstanceIds,
   logDiagStep,
   updateNetworkConfigState,
 } from "./backend";
 import { loadLastNetworkInstanceId } from "./config";
+
+/** 给采集 RPC 加超时，避免坏实例把去重流程也拖住。 */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
+
+/** 该实例是否真的在跑且没有错误（用采集结果判断，而不是只看 id 列表）。 */
+async function instanceHealthy(id: string): Promise<boolean> {
+  try {
+    const resp = await withTimeout(collectNetworkInfo(id), 2500);
+    const info = (resp as any)?.info?.map?.[id];
+    if (!info) {
+      return false;
+    }
+    const errorMsg = String(info.error_msg ?? "");
+    return info.running === true && errorMsg.length === 0;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * 启动后清理「重复实例」。
@@ -46,7 +70,18 @@ export async function dedupeNetworkInstances(): Promise<void> {
     if (list.length < 2) {
       continue;
     }
-    const keep = preferred && list.includes(preferred) ? preferred : list[0];
+    // 优先保留「真正能跑起来」的实例：只看 id 列表会把已经崩掉的实例当成正常，
+    // 上次就是因此把能用的关掉、留下了报 Address already in use 的那个。
+    const healthy: string[] = [];
+    for (const id of list) {
+      if (await instanceHealthy(id)) {
+        healthy.push(id);
+      }
+    }
+    const keep =
+      preferred && healthy.includes(preferred)
+        ? preferred
+        : (healthy[0] ?? (preferred && list.includes(preferred) ? preferred : list[0]));
     for (const id of list) {
       if (id === keep) {
         continue;

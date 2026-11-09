@@ -116,6 +116,7 @@ settings:
   about: 关于
   language: 语言
   mode: 运行模式
+  mode_missing_service_running: "检测到内核服务已安装并在运行。\n\n使用「服务模式」（开机自启，关闭界面后网络继续）还是「普通模式」（仅本界面运行时生效）？\n\n选择会记住，不再询问。"
   autostart: 开机启动
   config_server: 配置服务器
   kernel: 内核

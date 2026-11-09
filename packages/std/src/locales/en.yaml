@@ -116,6 +116,7 @@ settings:
   about: About
   language: Language
   mode: Running mode
+  mode_missing_service_running: "The kernel service is installed and running.\n\nUse service mode (starts at login, keeps running after the window closes) or normal mode (only while this window is open)?\n\nYour choice is remembered."
   autostart: Launch at login
   config_server: Config server
   kernel: Kernel

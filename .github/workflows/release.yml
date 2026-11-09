@@ -93,15 +93,17 @@ jobs:
           # 预览版：安装包文件名带上完整版本串（含 -pre.N），
           # 避免与正式版同名被误下载；正式版（tag 无 '-'）跳过。
           if [[ "$VERSION" == *-* ]]; then
-            base="${VERSION%%-*}"
-            pre="${VERSION#*-}"
+            # tag 带 v 前缀（v26.410.20712-pre.9），文件名里没有
+            ver="${VERSION#v}"
+            base="${ver%%-*}"
+            pre="${ver#*-}"
             for f in ../zipped_assets/*; do
               case "$f" in
                 *.dmg|*.msi|*.exe) ;;
                 *) continue ;;
               esac
               case "$(basename "$f")" in
-                *"$base"*) mv "$f" "${f//$base/$VERSION}" ;;
+                *"$base"*) mv "$f" "${f//$base/$ver}" ;;
               esac
             done
             for f in ../zipped_assets/app-*-release.apk; do

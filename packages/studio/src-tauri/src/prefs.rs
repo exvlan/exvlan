@@ -98,6 +98,17 @@ fn read_file(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
+/// 全局串行化：`set_ui_state` 的「读 → 改 → 整文件写回」必须原子。
+///
+/// 前端启动时会把每一次 `localStorage.setItem` 都推给后端，并发调用之间
+/// 若不加锁，后写的那次会用旧快照覆盖，静默丢掉前一次刚写入的键
+/// （`app_mode` / `last_network_instance_id` 就是这么丢的）。
+static PREFS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn prefs_guard() -> std::sync::MutexGuard<'static, ()> {
+    PREFS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 读取偏好；文件损坏时返回默认值（并保留原文件供排查）。
 fn load(app: &tauri::AppHandle) -> Prefs {
     let Ok(path) = prefs_path(app) else {
@@ -235,6 +246,7 @@ fn load_or_migrate(app: &tauri::AppHandle) -> Prefs {
 /// 读取全部偏好（前端启动时回填）。
 #[tauri::command]
 pub fn get_ui_state(app: tauri::AppHandle) -> BTreeMap<String, String> {
+    let _guard = prefs_guard();
     let prefs = load_or_migrate(&app);
     let mut out = BTreeMap::new();
     for key in [
@@ -261,6 +273,7 @@ pub fn set_ui_state(
     key: String,
     value: Option<String>,
 ) -> Result<(), String> {
+    let _guard = prefs_guard();
     let mut prefs = load_or_migrate(&app);
     set_key(&mut prefs, &key, value);
     if key == "diag_last_upload" {

@@ -171,6 +171,24 @@ jobs:
               find "./exvlan/exvlan/third_party/${ARCH_DIR}" -maxdepth 1 -type f \( -name "*.dll" -o -name "*.sys" -o -name "*.lib" \) -exec cp {} ./packages/studio/src-tauri/ \;
           fi
 
+      # 预览版之间 MSI ProductVersion 必须严格递增，否则 Windows 会当成“同版本”
+      # 走修复式安装（见 script/ci/msi-version.py）
+      - name: Apply Windows MSI version
+        if: ${{ contains(matrix.GUI_TARGET, 'windows') }}
+        run: |
+          set -euo pipefail
+          msi=$(python3 script/ci/msi-version.py "${EXVLAN_BUILD_VERSION:?}")
+          python3 - "$msi" <<'PY'
+          import json, sys
+          path = "packages/studio/src-tauri/tauri.windows.conf.json"
+          data = json.load(open(path, encoding="utf-8"))
+          data.setdefault("bundle", {}).setdefault("windows", {}).setdefault("wix", {})[
+              "version"
+          ] = sys.argv[1]
+          open(path, "w", encoding="utf-8").write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+          print("wix.version =", sys.argv[1])
+          PY
+
       - name: Build GUI (Tauri)
         if: ${{ matrix.GUI_TARGET != '' }}
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1

@@ -341,9 +341,10 @@ export async function reportBootState(
   mode: string,
   lastInstance?: string | null,
   serviceCurrent?: boolean | null,
+  modeSource?: string,
 ) {
   try {
-    await invoke("report_boot_state", { mode, lastInstance, serviceCurrent });
+    await invoke("report_boot_state", { mode, lastInstance, serviceCurrent, modeSource });
   } catch {
     // 诊断上报失败不影响启动
   }

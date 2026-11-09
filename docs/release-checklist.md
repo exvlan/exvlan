@@ -11,7 +11,11 @@ GITHUB_REF_NAME=v26.410.20712-pre.8 bash script/ci/build-version.sh   # tag：26
 
 - 标准版本（Cargo / package.json / tauri.conf / magisk）保持 `YY.QMM.Mmpp`
 - 展示串 = `<标准版本>[-<channel>.<n>][+<sha6>]`；序号**基线内递增、换基线重置为 1**
-- Windows MSI 用 `bundle.windows.wix.version` = `YY.MMQ.mmmm.pp`（四段纯数字，≤255/255/65535/65535）
+- Windows MSI 用 `bundle.windows.wix.version`（四段纯数字，≤255/255/65535/65535），由
+  `script/ci/msi-version.py` 在 CI 里按 tag 生成：
+  - 预览版第 4 段 = `1000 + 预览序号`（pre.9 → `26.104.207.1009`）
+  - 正式版第 4 段 = `60000 + patch`（`26.410.20712` → `26.104.207.60012`）
+  - 这样任何新包都比旧包大，MSI 不会因为"同版本"走修复式安装
 
 ## 1. 本地检查
 

@@ -2,7 +2,7 @@
   "version": "26.410.20712",
   "bundle": {
     "externalBin": [],
-    "resources": ["./wintun.dll", "./Packet.dll", "./*.sys"],
+    "resources": ["./wintun.dll", "./Packet.dll", "./*.sys", "resources/kernel/*"],
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"
