@@ -89,7 +89,7 @@ jobs:
           target: ${{ matrix.TARGET }}
           rustflags: ""
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: ./.github/actions/install-cargo-tool
         with:
           tool: cargo-ndk
 

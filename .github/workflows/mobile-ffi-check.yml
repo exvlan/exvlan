@@ -12,14 +12,14 @@ on:
   workflow_call:
     inputs:
       abi:
-        description: 'Android ABI 或 all'
+        description: "Android ABI 或 all"
         type: string
-        default: 'arm64-v8a'
+        default: "arm64-v8a"
   workflow_dispatch:
     inputs:
       abi:
-        description: 'Android ABI 或 all'
-        default: 'arm64-v8a'
+        description: "Android ABI 或 all"
+        default: "arm64-v8a"
 
 permissions:
   contents: read
@@ -85,13 +85,13 @@ jobs:
           target: ${{ matrix.TARGET }}
           rustflags: ""
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: ./.github/actions/install-cargo-tool
         with:
           tool: cargo-ndk
 
       - uses: ./.github/actions/setup-protoc
         with:
-          version: '35.1'
+          version: "35.1"
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2

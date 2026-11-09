@@ -1,0 +1,57 @@
+name: "Install cargo tool (cache + crates.io fallback)"
+description: >
+  替代 taiki-e/install-action：它走 cargo-binstall，从 GitHub Releases 下载预编译包。
+  GitHub 的 release CDN 出现 5xx 时（近期多次，cargo-ndk / cargo-zigbuild /
+  binaryen / VC-LTL / YY-Thunks 都被打挂过），整个作业直接失败。
+  这里改成：先查 actions/cache 里的二进制，再用 crates.io 源码安装（带重试），
+  完全不依赖 GitHub Releases。
+
+inputs:
+  tool:
+    description: "cargo 工具名，例如 cargo-ndk / cargo-zigbuild"
+    required: true
+  version:
+    description: "可选版本（cargo install --version）"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Restore ${{ inputs.tool }} from cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: |
+          ~/.cargo/bin/${{ inputs.tool }}
+          ~/.cargo/bin/${{ inputs.tool }}.exe
+        key: cargo-tool-${{ inputs.tool }}-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Ensure ${{ inputs.tool }} is installed
+      shell: bash
+      env:
+        TOOL: ${{ inputs.tool }}
+        TOOL_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if command -v "$TOOL" >/dev/null 2>&1; then
+          echo "already available: $("$TOOL" --version 2>&1 | head -1)"
+          exit 0
+        fi
+
+        args=(--locked --force)
+        if [ -n "${TOOL_VERSION}" ]; then
+          args+=(--version "${TOOL_VERSION}")
+        fi
+
+        for attempt in 1 2 3; do
+          if cargo install "${args[@]}" "$TOOL"; then
+            "$TOOL" --version || true
+            exit 0
+          fi
+          echo "::warning::cargo install $TOOL 失败（第 ${attempt} 次），重试…"
+          sleep $((attempt * 5))
+        done
+
+        echo "::error::无法安装 $TOOL（crates.io 也不可用？）"
+        exit 1
