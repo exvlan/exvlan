@@ -5,7 +5,12 @@ import { createRouter, createWebHistory } from "vue-router";
 import { routes } from "vue-router/auto-routes";
 
 import App from "~/App.vue";
-import { legacyCleanupEnabled, migrateNetworks, reportFrontendError } from "~/composables/backend";
+import {
+  legacyCleanupEnabled,
+  logDiagStep,
+  migrateNetworks,
+  reportFrontendError,
+} from "~/composables/backend";
 import { hydrateUiState, installPersistHook } from "~/composables/persist";
 import "@exvlan/std/style.css";
 import "~/styles.css";
@@ -55,12 +60,20 @@ async function migrateLocalNetworks(): Promise<void> {
 }
 
 async function main() {
+  // 启动阶段耗时打点（D5）：用于定位「IPC 未就绪 / hydrate 失败」这类竞态。
+  const t0 = performance.now();
+  const mark = (step: string) =>
+    void logDiagStep(step, `${Math.round(performance.now() - t0)}ms`).catch(() => {});
+
+  mark("boot:script_start");
   // 先回填后端持久化的 UI 状态（语言/模式/日志级别等），再初始化 i18n
   await hydrateUiState();
+  mark("boot:hydrate_done");
   installPersistHook();
   await migrateLocalNetworks();
 
   await I18nUtils.loadLanguageAsync(localStorage.getItem("lang") || "en");
+  mark("boot:i18n_ready");
 
   const app = createApp(App);
 
@@ -101,6 +114,7 @@ async function main() {
   app.use(DialogService);
   app.use(ConfirmationService);
   app.mount("#app");
+  mark("boot:mounted");
 }
 
 main();

@@ -190,8 +190,15 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 async function buildFrontendState(): Promise<string> {
+  // D4：把 localStorage 里最关键的几个键带上，和 prefs.toml 对照，
+  // 可直接判断「模式丢失」是前端还是后端的问题。
+  const localKeys = ["app_mode", "lang", "log_level", "last_network_instance_id"];
+  const local = ["--- local-storage ---"];
+  for (const key of localKeys) {
+    local.push(`  ${key}: ${localStorage.getItem(key) ?? "<null>"}`);
+  }
   // 桌面端没有 VpnService，VPN 段由 Rust 侧输出 n/a，这里不再重复。
-  const lines = isMobile ? [mobileVpnDiagnostics()] : [];
+  const lines = [local.join("\n"), ...(isMobile ? [mobileVpnDiagnostics()] : [])];
   try {
     const ids = await withTimeout(listNetworkInstanceIds(), 5000, "listNetworkInstanceIds");
     const list = [...(ids.running_inst_ids ?? []), ...(ids.disabled_inst_ids ?? [])]
