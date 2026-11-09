@@ -98,8 +98,9 @@ jobs:
             base="${ver%%-*}"
             pre="${ver#*-}"
             for f in ../zipped_assets/*; do
+              # .sig 必须跟着一起改名，否则 install.sh/manifest 会找不到配对签名
               case "$f" in
-                *.dmg|*.msi|*.exe) ;;
+                *.dmg|*.msi|*.exe|*.dmg.sig|*.msi.sig|*.exe.sig) ;;
                 *) continue ;;
               esac
               case "$(basename "$f")" in

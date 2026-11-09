@@ -31,6 +31,7 @@ declare global {
   const deleteNetworkInstance: typeof import("./composables/backend").deleteNetworkInstance;
   const diagnosticsInfo: typeof import("./composables/backend").diagnosticsInfo;
   const effectScope: typeof import("vue").effectScope;
+  const elevateSelftest: typeof import("./composables/backend").elevateSelftest;
   const ensureKernelService: typeof import("./composables/backend").ensureKernelService;
   const errorLogPath: typeof import("./composables/backend").errorLogPath;
   const executeVpnTileAction: typeof import("./composables/mobile_vpn_tile").executeVpnTileAction;
@@ -268,6 +269,9 @@ declare module "vue" {
       (typeof import("./composables/backend"))["diagnosticsInfo"]
     >;
     readonly effectScope: UnwrapRef<(typeof import("vue"))["effectScope"]>;
+    readonly elevateSelftest: UnwrapRef<
+      (typeof import("./composables/backend"))["elevateSelftest"]
+    >;
     readonly ensureKernelService: UnwrapRef<
       (typeof import("./composables/backend"))["ensureKernelService"]
     >;
