@@ -3346,6 +3346,7 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
         if let Some(parent) = log_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
+        rotate_elevate_log_if_needed(&log_path);
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -4133,6 +4134,20 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
     Err(format!("提权命令失败（osascript）: {stderr}"))
 }
 
+/// 提权日志轮转：8MB × 2（历史文件 `.1`）。
+fn rotate_elevate_log_if_needed(path: &std::path::Path) {
+    const MAX: u64 = 8 * 1024 * 1024;
+    let Ok(meta) = std::fs::metadata(path) else {
+        return;
+    };
+    if meta.len() < MAX {
+        return;
+    }
+    let backup = path.with_extension("log.1");
+    let _ = std::fs::remove_file(&backup);
+    let _ = std::fs::rename(path, &backup);
+}
+
 /// 提权日志里写一条分段标记，便于失败时只展示本次调用的输出。
 fn mark_elevate_begin(args: &[&str]) {
     let path = crate::paths::elevate_log();
@@ -4140,6 +4155,7 @@ fn mark_elevate_begin(args: &[&str]) {
         let _ = std::fs::create_dir_all(parent);
     }
     use std::io::Write as _;
+    rotate_elevate_log_if_needed(&path);
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

@@ -483,6 +483,58 @@ async function initWithMode(rawMode: Mode) {
 }
 
 /** 桌面端启动闭环：确保内核已安装、服务定义与当前配置一致（一致时不提权）。 */
+/**
+ * 自动提权闸门。
+ *
+ * - 用户取消过 UAC → 不再自动弹（只弹一次），改为横幅提示 + 设置里手动重试
+ * - 失败每会话最多自动尝试 3 次，避免反复弹窗
+ */
+const autoElevateAttempts = ref(0);
+const elevateDenied = ref(false);
+
+async function loadElevateDenied() {
+  try {
+    const state = await invoke<Record<string, string>>("get_ui_state");
+    elevateDenied.value = state?.elevate_denied === "1";
+  } catch {
+    // 读不到就当作未拒绝
+  }
+}
+
+function isElevateCancel(err: unknown): boolean {
+  const text = String(err).toLowerCase();
+  return text.includes("cancel") || text.includes("取消");
+}
+
+async function ensureKernelServiceGuarded(opts: {
+  config_dir: string;
+  rpc_portal: string;
+  file_log_level: string;
+  file_log_dir: string;
+  config_server?: string;
+}) {
+  if (elevateDenied.value) {
+    startupError.value ||= t("settings.elevate_denied_hint");
+    return;
+  }
+  if (autoElevateAttempts.value >= 3) {
+    startupError.value ||= t("settings.elevate_retry_exhausted");
+    return;
+  }
+  autoElevateAttempts.value += 1;
+  try {
+    await ensureKernelService(opts);
+  } catch (e: any) {
+    if (isElevateCancel(e)) {
+      elevateDenied.value = true;
+      void logDiagStep("elevate_denied", String(e).slice(0, 200));
+      void invoke("set_ui_state", { key: "elevate_denied", value: "1" }).catch(() => {});
+      startupError.value = t("settings.elevate_denied_hint");
+    }
+    throw e;
+  }
+}
+
 async function ensureLocalKernel(mode: Mode) {
   const platform = type();
   if (platform === "android" || platform === "ios") return;
@@ -506,7 +558,7 @@ async function ensureLocalKernel(mode: Mode) {
     file_log_dir: (mode as any).file_log_dir || saved.file_log_dir || defaults.file_log_dir,
     config_server: (mode as { config_server_url?: string }).config_server_url,
   };
-  await ensureKernelService(merged);
+  await ensureKernelServiceGuarded(merged);
 }
 
 /** 应用更新：启动静默检查（24h 节流，已忽略的版本不再打扰）。 */
@@ -559,6 +611,9 @@ function onAppUpdateLater() {
 
 onMounted(async () => {
   const cleanupFns: Array<() => void> = [];
+
+  // 提权被拒绝过就不再自动弹 UAC（见 ensureKernelServiceGuarded）
+  await loadElevateDenied();
 
   // `logLevel` 的初始值在模块加载时读取，此时 main.ts 的 prefs 回填还没执行；
   // 这里再读一次，保证 UI 与 prefs.toml 一致。

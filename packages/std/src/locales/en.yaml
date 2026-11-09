@@ -140,6 +140,8 @@ settings:
   service_reinstall: Reinstall service
   service_result: Result
   elevate_selftest: Check elevation
+  elevate_denied_hint: "Administrator permission is required to install the local kernel service. Elevation was cancelled, so it will not prompt again automatically; retry from Settings → Service."
+  elevate_retry_exhausted: "Automatic setup failed 3 times. Retry manually from Settings → Service, or check the logs."
   copy: Copy
   rpc_connected: Kernel connected
   rpc_disconnected: Kernel not connected

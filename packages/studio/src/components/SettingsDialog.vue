@@ -19,7 +19,13 @@ import {
   serviceRestart,
   uploadDiagnostics,
 } from "~/composables/backend";
+import { invoke } from "@tauri-apps/api/core";
 import { mobileVpnDiagnostics } from "~/composables/mobile_vpn";
+
+/** 手动重试提权前先清掉"已拒绝"标记，否则后端/前端闸门会继续拦。 */
+async function clearElevateDenied() {
+  await invoke("set_ui_state", { key: "elevate_denied", value: null }).catch(() => {});
+}
 
 /** 诊断链路埋点：写 events.log，失败静默（埋点不能影响主流程）。 */
 function diagStep(step: string, detail?: string) {
@@ -105,6 +111,7 @@ async function runDiagnostics() {
 async function restartService() {
   restarting.value = true;
   try {
+    await clearElevateDenied();
     await serviceRestart();
     toast.add({
       severity: "success",
@@ -123,6 +130,7 @@ async function restartService() {
 async function reinstallService() {
   reinstalling.value = true;
   try {
+    await clearElevateDenied();
     await serviceReinstall({
       config_dir: "",
       rpc_portal: (props.mode as any).rpc_portal || "127.0.0.1:15999",

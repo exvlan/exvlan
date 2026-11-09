@@ -140,6 +140,8 @@ settings:
   service_reinstall: 重装服务
   service_result: 自检结果
   elevate_selftest: 权限自检
+  elevate_denied_hint: "需要管理员权限才能安装本地内核服务。已取消授权，之后不再自动弹窗；可在「设置 → 服务」点「重装服务」重试。"
+  elevate_retry_exhausted: "自动安装已尝试 3 次仍未成功，请到「设置 → 服务」手动重试或查看日志。"
   copy: 复制
   rpc_connected: 内核连接正常
   rpc_disconnected: 内核未连接
