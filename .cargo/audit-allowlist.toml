@@ -23,3 +23,8 @@ reason = "hickory-proto 0.25.2 编码 O(n²)；同上，待 hickory 稳定 0.26 
 id = "RUSTSEC-2026-0387"
 review_by = "2027-01-31"
 reason = "crypto-bigint 0.5.5（timing 变异性）经 openidconnect 4.0.1→p256 0.13→ecdsa 0.16→elliptic-curve 0.13 引入；上游 openidconnect 最新仍 4.0.1，无 0.7 链路。仅 API 侧 OIDC 签名验证路径。见 issue #7。"
+
+[[allow]]
+id = "RUSTSEC-2026-0459"
+review_by = "2026-12-31"
+reason = "libsqlite3-sys 0.30.1 SQLite CVE-2026-119375（2026-10-30 披露）；位于 sqlx-sqlite 内置 SQLite。修复需 libsqlite3-sys>=0.39，受 sea-orm 1.1.20→sqlx 0.8 锁定。仅 API 侧本地 sqlite 文件使用，攻击面为本地数据库；到期前随 sqlx/sea-orm 升级移除。"
