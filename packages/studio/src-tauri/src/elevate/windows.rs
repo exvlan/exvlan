@@ -129,10 +129,10 @@ impl Command {
             anyhow::bail!("提权进程句柄无效");
         }
 
-        unsafe { WaitForSingleObject(info.hProcess, INFINITE) };
+        let _ = unsafe { WaitForSingleObject(info.hProcess, INFINITE) };
         let mut code: u32 = 1;
         let got = unsafe { GetExitCodeProcess(info.hProcess, &mut code) };
-        unsafe { CloseHandle(info.hProcess) };
+        let _ = unsafe { CloseHandle(info.hProcess) };
         if let Err(err) = got {
             anyhow::bail!("读取提权进程退出码失败: {err}");
         }
