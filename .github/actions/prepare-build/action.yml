@@ -95,11 +95,49 @@ runs:
           target="$(find "$root" -maxdepth 3 -type d -name TargetPlatform 2>/dev/null | head -1 || true)"
         fi
         if [ -z "$target" ]; then
-          echo "::error::VC-LTL 准备失败（TargetPlatform 未找到）"
-          exit 1
+          echo "::warning::VC-LTL 不可用，本次构建跳过 thunk（不影响 Windows 10/11）"
+          echo "EXVLAN_SKIP_THUNK=1" >> "$GITHUB_ENV"
+          exit 0
         fi
         echo "VC_LTL=$(dirname "$target")" >> "$GITHUB_ENV"
         echo "VC-LTL ready: $(dirname "$target")"
+
+    # YY-Thunks：thunk-rs 的第二个外链下载（同样会因 GitHub 504 打挂 Windows 构建）
+    - name: Cache YY-Thunks
+      if: runner.os == 'Windows'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: C:/yy-thunks
+        key: yy-thunks-1.1.7
+
+    - name: Setup YY-Thunks
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        version=1.1.7
+        root="C:/yy-thunks"
+        target="$(find "$root" -maxdepth 3 -type d -name objs 2>/dev/null | head -1 || true)"
+        if [ -z "$target" ]; then
+          for attempt in 1 2 3 4 5; do
+            if curl --retry 5 --retry-all-errors --retry-delay 3 -fsSL -o "$RUNNER_TEMP/yy-thunks.zip" \
+                "https://github.com/Chuyu-Team/YY-Thunks/releases/download/v${version}/YY-Thunks-Objs.zip"; then
+              break
+            fi
+            echo "::warning::YY-Thunks 下载失败（第 ${attempt} 次），重试…"
+            sleep $((attempt * 3))
+          done
+          mkdir -p "$root"
+          7z x -y -o"$root" "$RUNNER_TEMP/yy-thunks.zip" >/dev/null || true
+          target="$(find "$root" -maxdepth 3 -type d -name objs 2>/dev/null | head -1 || true)"
+        fi
+        if [ -z "$target" ]; then
+          echo "::warning::YY-Thunks 不可用，本次构建跳过 thunk（不影响 Windows 10/11）"
+          echo "EXVLAN_SKIP_THUNK=1" >> "$GITHUB_ENV"
+          exit 0
+        fi
+        echo "YY_THUNKS=$(dirname "$target")" >> "$GITHUB_ENV"
+        echo "YY-Thunks ready: $(dirname "$target")"
 
     - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
       with:

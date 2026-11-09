@@ -82,8 +82,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     // enable thunk-rs when target os is windows and arch is x86_64 or i686
+    //
+    // thunk-rs 在构建期会从 GitHub Releases 下载 VC-LTL / YY-Thunks（无重试），
+    // GitHub CDN 出现 504 时整条流水线会直接红。CI 会先带重试预取并缓存；
+    // 若仍取不到则置 EXVLAN_SKIP_THUNK=1 —— 只是这次构建不带 Win7 兼容垫片，
+    // 不影响 Windows 10/11 运行，也不会让发版卡死。
     if target_os == "windows" && (target_arch == "x86" || target_arch == "x86_64") {
-        thunk::thunk();
+        if env::var("EXVLAN_SKIP_THUNK").is_ok() {
+            println!(
+                "cargo:warning=thunk-rs skipped (EXVLAN_SKIP_THUNK set): no Win7 shims in this build"
+            );
+        } else {
+            thunk::thunk();
+        }
     }
 
     #[cfg(target_os = "windows")]
