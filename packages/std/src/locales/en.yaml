@@ -139,6 +139,7 @@ settings:
   service_restart: Restart service
   service_reinstall: Reinstall service
   service_result: Result
+  elevate_selftest: Check elevation
   copy: Copy
   rpc_connected: Kernel connected
   rpc_disconnected: Kernel not connected

@@ -367,6 +367,11 @@ export async function logDiagStep(step: string, detail?: string) {
   }
 }
 
+/** 提权链路自检（Windows 上确认 UAC → 子进程 → 退出码整条链路）。 */
+export async function elevateSelftest() {
+  return await invoke<string>("elevate_selftest");
+}
+
 /** 打开诊断包所在目录（上传失败时的兜底入口）。 */
 export async function openDiagnosticsDir() {
   return await invoke<string>("open_diagnostics_dir");

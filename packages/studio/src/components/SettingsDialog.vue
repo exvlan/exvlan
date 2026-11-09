@@ -8,6 +8,7 @@ import type { Mode } from "~/composables/mode";
 import About from "~/components/About.vue";
 import KernelManager from "~/components/KernelManager.vue";
 import {
+  elevateSelftest,
   getConfig,
   listNetworkInstanceIds,
   logDiagStep,
@@ -268,6 +269,25 @@ function resolveUploadConsent(ok: boolean) {
   }
   consentResolve?.(ok);
   consentResolve = null;
+}
+
+async function onElevateSelftest() {
+  try {
+    const msg = await elevateSelftest();
+    toast.add({
+      severity: "success",
+      summary: t("settings.elevate_selftest"),
+      detail: msg,
+      life: 6000,
+    });
+  } catch (e: any) {
+    toast.add({
+      severity: "warn",
+      summary: t("settings.elevate_selftest"),
+      detail: String(e),
+      life: 15000,
+    });
+  }
 }
 
 async function onOpenDiagnosticsDir() {
@@ -536,6 +556,12 @@ watch(
                 outlined
                 :loading="reinstalling"
                 @click="reinstallService"
+              />
+              <Button
+                :label="t('settings.elevate_selftest')"
+                size="small"
+                text
+                @click="onElevateSelftest"
               />
               <Button
                 :label="t('settings.copy')"

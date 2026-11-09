@@ -139,6 +139,7 @@ settings:
   service_restart: 重启服务
   service_reinstall: 重装服务
   service_result: 自检结果
+  elevate_selftest: 权限自检
   copy: 复制
   rpc_connected: 内核连接正常
   rpc_disconnected: 内核未连接

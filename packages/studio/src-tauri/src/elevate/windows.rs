@@ -12,7 +12,6 @@ use winapi::shared::minwindef::{DWORD, LPVOID};
 use winapi::um::processthreadsapi::{GetCurrentProcess, OpenProcessToken};
 use winapi::um::securitybaseapi::GetTokenInformation;
 use winapi::um::winnt::{HANDLE, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
-use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 use windows::core::{HSTRING, PCWSTR, w};
 
@@ -83,29 +82,63 @@ impl Command {
         let args = self
             .cmd
             .get_args()
-            .map(|c| c.to_str().unwrap().to_string())
+            .map(|c| c.to_string_lossy().into_owned())
             .collect::<Vec<String>>();
         let parameters = if args.is_empty() {
             HSTRING::new()
         } else {
-            let arg_str = args.join(" ");
-            HSTRING::from(arg_str)
+            // 必须按 Windows 规则转义：之前直接 join(" ") 会把 JSON 参数的引号吃掉，
+            // 提权侧收到 `{a:b}` → "key must be a string at line 1 column 2"。
+            HSTRING::from(super::quote_args(args))
         };
 
-        // according to https://stackoverflow.com/a/38034535
-        // the cwd always point to %SystemRoot%\System32 and cannot be changed by settting lpdirectory param
-        let r = unsafe {
-            ShellExecuteW(
-                None,
-                w!("runas"),
-                &HSTRING::from(self.cmd.get_program()),
-                &HSTRING::from(parameters),
-                PCWSTR::null(),
-                SW_HIDE,
-            )
+        use windows::Win32::Foundation::{CloseHandle, ERROR_CANCELLED};
+        use windows::Win32::System::Threading::{
+            GetExitCodeProcess, INFINITE, WaitForSingleObject,
         };
+        use windows::Win32::UI::Shell::{
+            SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+        };
+
+        // 这两个 HSTRING 必须活到 ShellExecuteEx 返回之后再释放，
+        // 否则 lpFile/lpParameters 会变成悬垂指针。
+        let program = HSTRING::from(self.cmd.get_program());
+        // 不用 ..Default::default()：该 impl 需要 Win32_System_Registry feature，
+        // 这里零初始化后逐个赋值即可。
+        let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+        info.lpVerb = w!("runas");
+        info.lpFile = PCWSTR(program.as_ptr());
+        info.lpParameters = PCWSTR(parameters.as_ptr());
+        info.nShow = SW_HIDE.0;
+
+        // ShellExecuteEx + NOCLOSEPROCESS：拿到进程句柄后**等待**子进程结束。
+        // 旧实现用 ShellExecuteW 直接返回，父进程随即删掉临时目录，
+        // 提权进程启动时内核 exe 已经不存在（[kernel] 安装失败: 内核源文件不存在）。
+        if let Err(err) = unsafe { ShellExecuteExW(&mut info) } {
+            // 用户点了 UAC 的“否”（ERROR_CANCELLED = 1223）
+            // windows crate 把 Win32 错误包装成 HRESULT_FROM_WIN32，低 16 位才是原始错误码
+            let code = err.code().0 as u32;
+            if code & 0xFFFF == ERROR_CANCELLED.0 {
+                anyhow::bail!("已取消管理员授权（ERROR_CANCELLED）");
+            }
+            anyhow::bail!("提权启动失败（Win32 错误 0x{code:08X}: {err}）");
+        }
+        if info.hProcess.is_invalid() {
+            anyhow::bail!("提权进程句柄无效");
+        }
+
+        unsafe { WaitForSingleObject(info.hProcess, INFINITE) };
+        let mut code: u32 = 1;
+        let got = unsafe { GetExitCodeProcess(info.hProcess, &mut code) };
+        unsafe { CloseHandle(info.hProcess) };
+        if let Err(err) = got {
+            anyhow::bail!("读取提权进程退出码失败: {err}");
+        }
+
         Ok(Output {
-            status: ExitStatus::from_raw(r.0 as u32),
+            status: ExitStatus::from_raw(code),
             stdout: Vec::<u8>::new(),
             stderr: Vec::<u8>::new(),
         })

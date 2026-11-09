@@ -3356,6 +3356,20 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
     }
 
     let code = match args.first().map(|s| s.as_str()) {
+        Some("--elevate-selftest") => {
+            report(
+                "selftest",
+                &format!(
+                    "ok pid={} uid={} exe={}",
+                    std::process::id(),
+                    helper::current_uid(),
+                    std::env::current_exe()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default()
+                ),
+            );
+            ExitCode::SUCCESS
+        }
         Some("--install-kernel") => {
             let src = args.get(1).cloned().unwrap_or_default();
             let version = args.get(2).cloned().unwrap_or_default();
@@ -4119,12 +4133,42 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
     Err(format!("提权命令失败（osascript）: {stderr}"))
 }
 
+/// 提权日志里写一条分段标记，便于失败时只展示本次调用的输出。
+fn mark_elevate_begin(args: &[&str]) {
+    let path = crate::paths::elevate_log();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "--- begin {} args={args:?} ---", logger::timestamp());
+    }
+}
+
+/// 只取最后一次 `--- begin ` 之后的日志（避免把上一次调用的旧错误混进本次失败提示）。
+fn elevate_log_tail_since_begin(max_lines: usize) -> String {
+    let Ok(text) = std::fs::read_to_string(crate::paths::elevate_log()) else {
+        return String::new();
+    };
+    let mut lines: Vec<&str> = text.lines().collect();
+    if let Some(pos) = lines.iter().rposition(|l| l.starts_with("--- begin ")) {
+        lines = lines[pos..].to_vec();
+    }
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].join("\n")
+}
+
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn run_elevated(args: &[&str]) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("无法定位自身可执行文件: {e}"))?;
     let mut cmd = std::process::Command::new(exe);
     #[cfg(not(target_os = "macos"))]
     cmd.args(args);
+    mark_elevate_begin(args);
     let output = match elevate::Command::new(cmd).output() {
         Ok(out) => out,
         Err(err) => {
@@ -4143,18 +4187,8 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
     if detail.is_empty() {
         detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
     }
-    if detail.is_empty()
-        && let Ok(log) = std::fs::read_to_string(crate::paths::elevate_log())
-    {
-        detail = log
-            .lines()
-            .rev()
-            .take(20)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
+    if detail.is_empty() {
+        detail = elevate_log_tail_since_begin(20);
     }
     let message = format!(
         "提权命令失败（exit={}）：{}",
@@ -4172,6 +4206,14 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn run_elevated(_args: &[&str]) -> Result<(), String> {
     Err("提权仅桌面端支持".to_string())
+}
+/// 提权链路自检：跑一次 `--elevate-selftest`，返回真实退出码/错误。
+///
+/// 用于 Windows 上确认"UAC → 子进程启动 → 参数传递 → 等待退出"整条链路可用。
+#[tauri::command]
+async fn elevate_selftest() -> Result<String, String> {
+    run_elevated(&["--elevate-selftest"])?;
+    Ok("提权链路正常".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -4304,6 +4346,7 @@ pub fn run_gui() -> std::process::ExitCode {
             report_frontend_error,
             log_diag_step,
             open_diagnostics_dir,
+            elevate_selftest,
             report_boot_state,
             diagnostics_info,
             service_default_dirs_cmd,

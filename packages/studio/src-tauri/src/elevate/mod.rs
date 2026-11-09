@@ -93,6 +93,92 @@ impl From<StdCommand> for Command {
     }
 }
 
+/// 按 Windows `CommandLineToArgvW` 的规则把参数拼成命令行。
+///
+/// 直接 `args.join(" ")` 会把 JSON/带空格路径拆碎（历史上导致
+/// `[service] 参数解析失败: key must be a string at line 1 column 2`）。
+pub fn quote_args<I: IntoIterator<Item = String>>(args: I) -> String {
+    args.into_iter()
+        .map(|a| quote_arg(&a))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 单个参数的引号化；规则见
+/// <https://learn.microsoft.com/en-us/cpp/cpp/main-function-command-line-args>。
+pub fn quote_arg(arg: &str) -> String {
+    let needs_quote = arg.is_empty()
+        || arg
+            .chars()
+            .any(|c| matches!(c, ' ' | '\t' | '\n' | '\u{0b}' | '"'));
+    if !needs_quote {
+        return arg.to_string();
+    }
+
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('"');
+    let mut backslashes = 0usize;
+    for ch in arg.chars() {
+        match ch {
+            '\\' => backslashes += 1,
+            '"' => {
+                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                out.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                out.extend(std::iter::repeat_n('\\', backslashes));
+                backslashes = 0;
+                out.push(ch);
+            }
+        }
+    }
+    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+    out.push('"');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quotes_args_per_windows_rules() {
+        // 无特殊字符 → 不加引号
+        assert_eq!(quote_arg("--provision"), "--provision");
+        assert_eq!(
+            quote_arg(r"C:\ProgramData\era.exvlan.studio"),
+            r"C:\ProgramData\era.exvlan.studio"
+        );
+
+        // 含空格 → 加引号
+        assert_eq!(
+            quote_arg("C:\\Program Files\\a b.exe"),
+            "\"C:\\Program Files\\a b.exe\""
+        );
+
+        // 内嵌引号 → 前面补反斜杠
+        assert_eq!(quote_arg(r#"{"a":"b"}"#), r#""{\"a\":\"b\"}""#);
+
+        // 含空格且结尾反斜杠 → 引号内的反斜杠成对加倍
+        assert_eq!(
+            quote_arg(r"C:\Program Files\foo\"),
+            r#""C:\Program Files\foo\\""#
+        );
+        // 不含空格时即便结尾是反斜杠也不需要引号
+        assert_eq!(quote_arg(r"C:\tmp\"), r"C:\tmp\");
+
+        // 空参数也要引号
+        assert_eq!(quote_arg(""), "\"\"");
+
+        // 多个参数拼接
+        assert_eq!(
+            quote_args(vec!["--provision".to_string(), r#"{"a":"b"}"#.to_string()]),
+            r#"--provision "{\"a\":\"b\"}""#
+        );
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
