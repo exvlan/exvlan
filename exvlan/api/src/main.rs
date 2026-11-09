@@ -75,23 +75,37 @@ struct Cli {
     )]
     file_log_dir: Option<String>,
 
+    /// config-server 监听地址（可选）。默认 `0.0.0.0`；v6 仍额外监听 `[::]`。
+    /// 只影响 config-server（默认 22020），不影响 REST API（11211）。
     #[arg(
-        long,
-        short='c',
+        long = "host",
+        env = "ET_HOST",
+        default_value = "0.0.0.0",
+        help = "config-server listen address (default 0.0.0.0)"
+    )]
+    host: IpAddr,
+
+    #[arg(
+        long = "port",
+        short = 'c',
+        alias = "config-server-port",
         env = "ET_CONFIG_SERVER_PORT",
         default_value = "22020",
         help = t!("cli.config_server_port").to_string(),
     )]
-    config_server_port: u16,
+    port: u16,
 
+    /// 可逗号分隔多个协议（`udp,ws`）；每个协议各起一组监听。
     #[arg(
-        long,
-        short='p',
+        long = "protocol",
+        short = 'p',
+        alias = "config-server-protocol",
         env = "ET_CONFIG_SERVER_PROTOCOL",
-        default_value = "udp",
+        default_value = "udp,ws",
+        value_delimiter = ',',
         help = t!("cli.config_server_protocol").to_string(),
     )]
-    config_server_protocol: String,
+    protocol: Vec<String>,
 
     #[arg(
         long,
@@ -287,6 +301,7 @@ pub fn get_listener_by_url(
 
 async fn get_dual_stack_listener(
     protocol: &str,
+    host: IpAddr,
     port: u16,
 ) -> Result<
     (
@@ -298,19 +313,32 @@ async fn get_dual_stack_listener(
     let scheme = protocol
         .parse()
         .map_err(|_| Error::InvalidUrl(protocol.to_string()))?;
-    let v6_listener =
-        if local_ipv6().await.is_ok() && matches!(scheme, IpScheme::Tcp | IpScheme::Udp) {
-            get_listener_by_url(
-                scheme,
-                &format!("{protocol}://[::]:{port}").parse().unwrap(),
-            )
+    // v4 绑定地址可配置：多网卡机器上必须指定，否则 UDP 回包会从默认路由的网卡出去，
+    // 与入口 EIP 不一致 → 被 NAT 判为不对称丢弃。
+    let v4_bind = if host.is_ipv4() {
+        host.to_string()
+    } else {
+        "0.0.0.0".to_string()
+    };
+    let v6_listener = if local_ipv6().await.is_ok()
+        && matches!(scheme, IpScheme::Tcp | IpScheme::Udp | IpScheme::Ws)
+    {
+        let bind = if host.is_ipv6() {
+            host.to_string()
         } else {
-            None
+            "[::]".to_string()
         };
+        get_listener_by_url(
+            scheme,
+            &format!("{protocol}://{bind}:{port}").parse().unwrap(),
+        )
+    } else {
+        None
+    };
     let v4_listener = if local_ipv4().await.is_ok() {
         get_listener_by_url(
             scheme,
-            &format!("{protocol}://0.0.0.0:{port}").parse().unwrap(),
+            &format!("{protocol}://{v4_bind}:{port}").parse().unwrap(),
         )
     } else {
         None
@@ -331,8 +359,9 @@ async fn main() {
         web_instance_id = ?cli.webhook.web_instance_id,
         api_address = %cli.api_server_addr,
         api_port = cli.api_server_port,
-        config_protocol = %cli.config_server_protocol,
-        config_port = cli.config_server_port,
+        config_protocol = %cli.protocol.join(","),
+        config_host = %cli.host,
+        config_port = cli.port,
         heartbeat_min_response_ms = cli.heartbeat_min_response_ms,
         heartbeat_timeout_ms = cli.heartbeat_timeout_ms,
         webhook_enabled = cli.webhook.webhook_url.as_deref().is_some_and(|url| !url.trim().is_empty()),
@@ -404,7 +433,7 @@ async fn main() {
             relay_data: cli.gateway_relay_data,
         };
         config
-            .validate(&cli.config_server_protocol)
+            .validate(&cli.protocol.join(","))
             .unwrap_or_else(|error| {
                 eprintln!("Invalid Gateway configuration: {error}");
                 std::process::exit(2);
@@ -419,14 +448,23 @@ async fn main() {
         feature_flags.clone(),
         webhook_config.clone(),
     );
-    let (v6_listener, v4_listener) =
-        get_dual_stack_listener(&cli.config_server_protocol, cli.config_server_port)
-            .await
-            .unwrap();
-    if v4_listener.is_none() && v6_listener.is_none() {
+    // 支持一次监听多种协议（默认 udp,ws）：每个协议各起一组 v4/v6 监听。
+    let mut config_listeners = Vec::new();
+    for protocol in &cli.protocol {
+        match get_dual_stack_listener(protocol, cli.host, cli.port).await {
+            Ok((v6, v4)) => {
+                if v6.is_none() && v4.is_none() {
+                    tracing::error!(%protocol, "listen failed on both IPv4 and IPv6");
+                }
+                config_listeners.extend([v6, v4].into_iter().flatten());
+            }
+            Err(err) => tracing::error!(%protocol, %err, "create config-server listener failed"),
+        }
+    }
+    if config_listeners.is_empty() {
         panic!("Listen to both IPv4 and IPv6 failed");
     }
-    for listener in [v6_listener, v4_listener].into_iter().flatten() {
+    for listener in config_listeners {
         if let Some(instances) = network_instances.as_ref() {
             mgr.add_listener(gateway::listener::GatewayListener::new(
                 listener,
@@ -490,8 +528,12 @@ async fn main() {
         feature_flags,
         oidc_config,
         webhook_config,
-        cli.config_server_protocol.clone(),
-        cli.config_server_port,
+        // 控制台展示用：取第一个协议（wss 入口在反代侧，不在内核监听里）
+        cli.protocol
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "udp".to_string()),
+        cli.port,
     )
     .await
     .unwrap()

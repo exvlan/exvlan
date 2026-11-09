@@ -102,10 +102,11 @@ function emptyAcl(): Acl {
 
 /** 服务端真实支持的入口；顺序无关。 */
 const DEFAULT_PEERS = [
-  "tcp://xvlan.era-x.cn:11010",
-  "udp://xvlan.era-x.cn:11010",
-  "ws://xvlan.era-x.cn:11011/",
-  "quic://xvlan.era-x.cn:11012",
+  // 三种发现方式互为兜底：DNS TXT / DNS SRV / HTTPS。
+  // 具体入口由服务端维护（换 IP/端口只改 DNS，不用发版改默认值）。
+  "https://xvlan.era-x.cn/discover",
+  "txt:xvlan.era-x.cn",
+  "srv:xvlan.era-x.cn",
 ];
 
 export function DEFAULT_NETWORK_CONFIG(): NetworkConfig {

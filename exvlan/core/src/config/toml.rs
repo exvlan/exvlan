@@ -1554,7 +1554,7 @@ socket_mark = 66
         assert!(config.get_tcp_stun_servers().is_none());
 
         // Test setting custom stun servers
-        let custom_servers = vec!["txt:stun.exvlan.cn".to_string()];
+        let custom_servers = vec!["txt:stun.xvlan.era-x.cn".to_string()];
         config.set_stun_servers(Some(custom_servers.clone()));
 
         let retrieved_servers = config.get_stun_servers();
@@ -1574,7 +1574,7 @@ instance_name = "test"
 stun_servers = [
     "stun.l.google.com:19302",
     "stun1.l.google.com:19302",
-    "txt:stun.exvlan.cn"
+    "txt:stun.xvlan.era-x.cn"
 ]
 tcp_stun_servers = [
     "tcp-stun.example.com:3478"
@@ -1587,7 +1587,7 @@ tcp_stun_servers = [
         assert_eq!(stun_servers.len(), 3);
         assert_eq!(stun_servers[0], "stun.l.google.com:19302");
         assert_eq!(stun_servers[1], "stun1.l.google.com:19302");
-        assert_eq!(stun_servers[2], "txt:stun.exvlan.cn");
+        assert_eq!(stun_servers[2], "txt:stun.xvlan.era-x.cn");
         assert_eq!(tcp_stun_servers, ["tcp-stun.example.com:3478"]);
     }
 

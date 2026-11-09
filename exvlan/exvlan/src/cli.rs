@@ -130,6 +130,8 @@ enum SubCommand {
     MappedListener(MappedListenerArgs),
     #[command(about = "do stun test")]
     Stun,
+    #[command(about = "serve this node's listener addresses over HTTP (for http(s) discovery)")]
+    Discovery(DiscoveryArgs),
     #[command(about = "show route info")]
     Route(RouteArgs),
     #[command(about = "show global peers info")]
@@ -184,6 +186,34 @@ impl From<&InstanceSelectArgs> for InstanceIdentifier {
             },
         }
     }
+}
+
+#[derive(Args, Debug)]
+struct DiscoveryArgs {
+    #[arg(long, default_value = "127.0.0.1:12080", help = "HTTP listen address")]
+    bind: String,
+
+    #[arg(
+        long,
+        help = "public host/IP to advertise (default: STUN-detected public IP)"
+    )]
+    advertise: Option<String>,
+
+    #[arg(long, default_value_t = 11010, help = "base listener port")]
+    base_port: u16,
+
+    #[arg(
+        long,
+        default_value = "tcp,udp,ws,wg,quic,wss",
+        help = "comma separated schemes to advertise"
+    )]
+    schemes: String,
+
+    #[arg(long, help = "require ?token=<value> on requests")]
+    token: Option<String>,
+
+    #[arg(long, help = "print JSON once and exit (for scripts)")]
+    json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -3406,6 +3436,33 @@ async fn main() -> Result<(), Error> {
             Some(RouteSubCommand::List) | None => handler.handle_route_list().await?,
             Some(RouteSubCommand::Dump) => handler.handle_route_dump().await?,
         },
+        SubCommand::Discovery(args) => {
+            let cfg = exvlan::discovery_http::DiscoveryConfig {
+                bind: args.bind.clone(),
+                advertise: args.advertise.clone(),
+                base_port: args.base_port,
+                schemes: args
+                    .schemes
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(ToString::to_string)
+                    .collect(),
+                token: args.token.clone(),
+            };
+            if args.json {
+                let host = match args.advertise.clone() {
+                    Some(h) => h,
+                    None => {
+                        eprintln!("--json 需要同时提供 --advertise");
+                        std::process::exit(2);
+                    }
+                };
+                exvlan::discovery_http::print_json(&cfg, &host)?;
+            } else {
+                exvlan::discovery_http::serve(cfg).await?;
+            }
+        }
         SubCommand::Stun => {
             timeout(Duration::from_secs(25), async move {
                 let collector = runtime_stun_info_collector(Default::default());

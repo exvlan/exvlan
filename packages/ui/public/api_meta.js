@@ -1,3 +1,3 @@
 window.apiMeta = {
-    api_host: "https://config-server.xvlan.era-x.cn"
-}
+  api_host: "https://console.xvlan.era-x.cn",
+};

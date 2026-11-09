@@ -873,7 +873,19 @@ fn ensure_error_log(app: &AppHandle) -> Option<std::path::PathBuf> {
     if logger::is_initialized() {
         return logger::path();
     }
-    logger::init_best(&error_log_candidates(app))
+    let initialized = logger::init_best(&error_log_candidates(app));
+    // 提权子进程会继承这个变量，把 [provision]/[service.install]/launchctl 现场
+    // 写回**同一个** error.log —— 否则那些日志落在 root 的 HOME 下，用户永远看不到。
+    if let Some(dir) = initialized
+        .as_ref()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+    {
+        // SAFETY: 启动早期单线程，没有其他线程在读环境变量。
+        unsafe {
+            std::env::set_var("EXVLAN_ELEVATED_LOG_DIR", dir);
+        }
+    }
+    initialized
 }
 
 fn dir_writable(dir: &std::path::Path) -> bool {
@@ -3377,6 +3389,16 @@ fn legacy_cleanup_enabled() -> bool {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
     use std::process::ExitCode;
+
+    // 提权子进程：把日志写回 GUI 的 error.log（父进程通过环境变量传入），
+    // 这样 provision / service install / launchctl 现场能在同一个文件里看到。
+    if let Some(dir) = std::env::var_os("EXVLAN_ELEVATED_LOG_DIR") {
+        let _ = logger::init_best(&[std::path::PathBuf::from(dir)]);
+        logger::record(
+            "elevated",
+            format!("pid={} args={args:?}", std::process::id()),
+        );
+    }
 
     /// 提权子进程的错误：同时写 stdout（父进程可捕获）与 /tmp 日志（stderr 在
     /// AuthorizationExecuteWithPrivileges 下会进系统日志，拿不到）。

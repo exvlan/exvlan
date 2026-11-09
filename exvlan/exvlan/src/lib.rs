@@ -12,6 +12,7 @@ mod vpn_portal;
 pub mod common;
 #[cfg(feature = "management")]
 pub mod core;
+pub mod discovery_http;
 #[cfg(feature = "upnp")]
 pub(crate) mod igd_next;
 pub mod proto;
