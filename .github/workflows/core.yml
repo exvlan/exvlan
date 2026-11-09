@@ -132,13 +132,28 @@ jobs:
       - name: Compute build version
         run: bash script/ci/build-version.sh
 
+      # core 只产出 Rust 二进制：不需要 pnpm（也不装 webkit/gtk）。
+      # 唯一的 web 依赖是 packages/ui/dist，由 pipeline 的 web_dist 作业统一提供。
       - name: Prepare build environment
         uses: ./.github/actions/prepare-build
         with:
           target: ${{ matrix.TARGET }}
-          gui: true
-          pnpm: true
+          gui: false
+          pnpm: false
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download web console dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: web-dist
+          path: ./web-dist
+
+      - name: Place web console dist
+        run: |
+          set -euo pipefail
+          mkdir -p packages/ui/dist
+          cp -R ./web-dist/. packages/ui/dist/
+          test -f packages/ui/dist/index.html
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -186,7 +201,12 @@ jobs:
           cargo $BUILD --release --target $TARGET --package=exvlan-api --features=embed
           mv ./target/$TARGET/release/exvlan-api"$SUFFIX" ./target/$TARGET/release/exvlan-api-embed"$SUFFIX"
 
-          cargo $BUILD --release --target $TARGET --features=$FEATURES
+          # 临时：量化 Windows 构建耗时构成（tag 运行时产出 cargo timings）
+          TIMINGS=""
+          if [[ "$TARGET" == *windows* && "$GITHUB_REF_TYPE" == "tag" ]]; then
+            TIMINGS="--timings"
+          fi
+          cargo $BUILD --release --target $TARGET --features=$FEATURES $TIMINGS
 
       - name: Build (MIPS)
         if: ${{ contains(matrix.TARGET, 'mips') }}
@@ -228,9 +248,26 @@ jobs:
 
             UPX_VERSION=4.2.4
             UPX_PKG="upx-${UPX_VERSION}-${UPX_ARCH}_linux"
-            curl -L "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_PKG}.tar.xz" -s | tar xJvf -
-            cp "${UPX_PKG}/upx" .
-            UPX_BIN=./upx
+            # GitHub release 偶尔 5xx/断流；直接 `curl | tar` 会把错误页喂给 xz。
+            # 先落盘 + 校验 + 重试，失败就跳过压缩（不阻断构建）。
+            for attempt in 1 2 3 4 5; do
+              if curl --retry 5 --retry-all-errors --retry-delay 3 -fsSL \
+                  -o /tmp/upx.tar.xz \
+                  "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_PKG}.tar.xz" \
+                 && tar -tJf /tmp/upx.tar.xz >/dev/null 2>&1; then
+                break
+              fi
+              echo "::warning::UPX 下载失败（第 ${attempt} 次），重试…"
+              sleep $((attempt * 3))
+            done
+            if tar -tJf /tmp/upx.tar.xz >/dev/null 2>&1; then
+              tar -xJf /tmp/upx.tar.xz
+              cp "${UPX_PKG}/upx" .
+              UPX_BIN=./upx
+            else
+              echo "::warning::UPX 不可用，跳过压缩"
+              UPX_BIN=""
+            fi
           fi
 
           for BIN_NAME in exvlan exvlan-cli exvlan-api exvlan-api-embed; do
@@ -246,6 +283,23 @@ jobs:
 
           mv ./artifacts/objects/* ./artifacts/
           rm -rf ./artifacts/objects/
+
+      - name: Collect cargo timings
+        if: ${{ github.ref_type == 'tag' && contains(matrix.TARGET, 'windows') }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./cargo-timings
+          cp -R target/$TARGET/cargo-timings/. ./cargo-timings/ 2>/dev/null || true
+          ls -l ./cargo-timings || true
+
+      - name: Upload cargo timings
+        if: ${{ github.ref_type == 'tag' && contains(matrix.TARGET, 'windows') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: timings-${{ matrix.ARTIFACT_NAME }}
+          path: ./cargo-timings
+          if-no-files-found: warn
+          retention-days: 7
 
       # 内核元数据：供 release.yml 汇总为 manifest.json，也便于镜像端校验。
       - name: Emit kernel metadata

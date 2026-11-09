@@ -1,15 +1,15 @@
-name: 'Setup pnpm'
+name: "Setup pnpm"
 author: Luna
-description: 'Setup Node.js, pnpm, and install dependencies'
+description: "Setup Node.js, pnpm, and install dependencies"
 
 inputs:
   token:
-    description: 'GitHub token, used by setup-protoc action'
+    description: "GitHub token, used by setup-protoc action"
     required: false
   build-filter:
-    description: 'The filter argument for pnpm build (e.g. packages/studio)'
+    description: "The filter argument for pnpm build (e.g. packages/studio)"
     required: false
-    default: ''
+    default: ""
 
 runs:
   using: "composite"
@@ -19,7 +19,7 @@ runs:
         toolchain: 1.95
         target: wasm32-unknown-unknown
         cache: false
-        rustflags: ''
+        rustflags: ""
 
     # Windows 上 install-action 偶发 bash 启动失败（actions/partner-runner-images#169），
     # 这里直接拉官方预编译包，绕开该动作。
@@ -34,7 +34,19 @@ runs:
         $dest = Join-Path $env:RUNNER_TEMP 'wasm-pack'
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
         $archive = Join-Path $dest 'wasm-pack.tar.gz'
-        Invoke-WebRequest -Uri $url -OutFile $archive
+        # GitHub releases 偶尔 5xx：带退避重试，避免整条流水线因工具下载失败而红
+        $ok = $false
+        for ($i = 1; $i -le 5; $i++) {
+          try {
+            Invoke-WebRequest -Uri $url -OutFile $archive -ErrorAction Stop
+            $ok = $true
+            break
+          } catch {
+            Write-Warning "wasm-pack download failed (attempt $i): $_"
+            Start-Sleep -Seconds ($i * 3)
+          }
+        }
+        if (-not $ok) { throw "wasm-pack download failed after 5 attempts: $url" }
         tar -xzf $archive -C $dest
         Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $dest $name)
         & (Join-Path $dest "$name\wasm-pack.exe") --version
@@ -46,7 +58,7 @@ runs:
 
     - uses: ./.github/actions/setup-protoc
       with:
-        version: '35.1'
+        version: "35.1"
         token: ${{ inputs.token }}
 
     - name: Setup Node.js

@@ -3,25 +3,25 @@ author: Luna
 description: Prepare build environment
 inputs:
   target:
-    description: 'The target to build for'
+    description: "The target to build for"
     required: false
   pnpm:
-    description: 'Whether to run pnpm build'
+    description: "Whether to run pnpm build"
     required: true
-    default: 'true'
+    default: "true"
   pnpm-build-filter:
-    description: 'The filter argument for pnpm build (e.g. ./packages/*)'
+    description: "The filter argument for pnpm build (e.g. ./packages/*)"
     required: false
-    default: './packages/*'
+    default: "./packages/*"
   gui:
-    description: 'Whether to prepare the GUI build environment'
+    description: "Whether to prepare the GUI build environment"
     required: true
-    default: 'true'
+    default: "true"
   token:
-    description: 'GitHub token, used by setup-protoc action'
+    description: "GitHub token, used by setup-protoc action"
     required: false
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - run: mkdir -p packages/studio/dist
       shell: bash
@@ -36,7 +36,7 @@ runs:
     - name: Setup protoc
       uses: ./.github/actions/setup-protoc
       with:
-        version: '35.1'
+        version: "35.1"
         token: ${{ inputs.token }}
 
     - name: Verify protoc version
@@ -63,13 +63,51 @@ runs:
         libxdo-dev
       shell: bash
 
+    # VC-LTL：thunk-rs 的构建脚本会 curl 下载 VC-LTL-Binary.7z（无重试），
+    # 历史上多次因 GitHub 504 直接 panic 打挂 Windows 构建。这里预下载 + 缓存，
+    # 并用 `VC_LTL` 让 thunk-rs 跳过下载。
+    - name: Cache VC-LTL
+      if: runner.os == 'Windows'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: C:/vc-ltl
+        key: vc-ltl-5.2.2
+
+    - name: Setup VC-LTL
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        version=5.2.2
+        root="C:/vc-ltl"
+        target="$(find "$root" -maxdepth 3 -type d -name TargetPlatform 2>/dev/null | head -1 || true)"
+        if [ -z "$target" ]; then
+          for attempt in 1 2 3 4 5; do
+            if curl --retry 5 --retry-all-errors --retry-delay 3 -fsSL -o "$RUNNER_TEMP/vc-ltl.7z" \
+                "https://github.com/Chuyu-Team/VC-LTL5/releases/download/v${version}/VC-LTL-Binary.7z"; then
+              break
+            fi
+            echo "::warning::VC-LTL 下载失败（第 ${attempt} 次），重试…"
+            sleep $((attempt * 3))
+          done
+          mkdir -p "$root"
+          7z x -y -o"$root" "$RUNNER_TEMP/vc-ltl.7z" >/dev/null
+          target="$(find "$root" -maxdepth 3 -type d -name TargetPlatform 2>/dev/null | head -1 || true)"
+        fi
+        if [ -z "$target" ]; then
+          echo "::error::VC-LTL 准备失败（TargetPlatform 未找到）"
+          exit 1
+        fi
+        echo "VC_LTL=$(dirname "$target")" >> "$GITHUB_ENV"
+        echo "VC-LTL ready: $(dirname "$target")"
+
     - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
       with:
         toolchain: 1.95
         target: ${{ !contains(inputs.target, 'mips') && inputs.target || '' }}
         components: ${{ contains(inputs.target, 'mips') && 'rust-src' || '' }}
         cache: false
-        rustflags: ''
+        rustflags: ""
 
     - name: Install Rust (MIPS)
       if: ${{ contains(inputs.target, 'mips') }}
@@ -90,7 +128,7 @@ runs:
         cd "$PWD/musl_gcc/${MUSL_TARGET}/lib/gcc/${MUSL_TARGET}/15.1.0" || exit 255
         # for panic-abort
         cp libgcc_eh.a libunwind.a
-        
+
         # for mimalloc
         ar x libgcc.a _ctzsi2.o _clz.o _bswapsi2.o
         ar rcs libctz.a _ctzsi2.o _clz.o _bswapsi2.o

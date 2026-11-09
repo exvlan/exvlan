@@ -111,12 +111,38 @@ jobs:
     uses: ./.github/workflows/test.yml
     secrets: inherit
 
+  # Web 控制台产物：`exvlan-api --features=embed` 会把 packages/ui/dist 编进二进制。
+  # 单独构建一次供 15 个 core 平台复用，避免每个作业都装 pnpm/wasm-pack
+  # （历史上 pnpm 的 wasm-pack → binaryen 下载失败过多次，直接打挂发版）。
+  web_dist:
+    name: Build Web Console
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Prepare pnpm environment
+        uses: ./.github/actions/prepare-pnpm
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          build-filter: "./packages/ui... ./packages/generator..."
+
+      # 注意：prepare-pnpm 的最后一步已把 generator/dist 复制进
+      # ui/dist/config-generator，所以只需要上传 ui/dist 一个目录
+      # （单一路径的 artifact 根就是 dist 本身，下游复制路径才可预测）。
+      - name: Upload web console dist
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: web-dist
+          path: packages/ui/dist
+          if-no-files-found: error
+          retention-days: 3
+
   core:
     name: Build Core
-    needs: tests
-    if: >-
-      github.event_name != 'schedule' &&
-      (needs.tests.result == 'success' || needs.tests.result == 'skipped')
+    # 不再等 tests：core 构建不消费测试结果；tests 仍作为 release 的门禁。
+    needs: [changes, web_dist]
+    if: github.event_name != 'schedule'
     uses: ./.github/workflows/core.yml
     with:
       targets: ${{ github.ref_name == 'feature' && '["x86_64-unknown-linux-musl"]' || 'all' }}
