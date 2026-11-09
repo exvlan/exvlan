@@ -4560,7 +4560,6 @@ async fn elevate_selftest() -> Result<String, String> {
     Ok("提权链路正常".to_string())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[cfg(windows)]
 mod win_error_mode {
     #[link(name = "kernel32")]
@@ -4579,6 +4578,7 @@ mod win_error_mode {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run_gui() -> std::process::ExitCode {
     // Windows：抑制加载器/GPF 的硬错误对话框。
     // 内核是控制台程序，GUI 拉起它时若缺少 Packet.dll，系统会弹
