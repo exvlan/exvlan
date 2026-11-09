@@ -291,6 +291,10 @@ pub mod kernel {
             };
             let binary = tmp.path().join(&entry_name);
             extract_entry(&archive, &entry_name, &binary)?;
+            // 内核对运行时依赖（Windows: Packet.dll / wintun.dll / WinDivert*.sys）
+            // 做同目录加载；在线更新时把 zip 里的动态库一并解出来，
+            // 后面 install_kernel 会从 kernel_src 的父目录把它们复制到 core/。
+            extract_runtime_deps(&archive, tmp.path())?;
 
             crate::run_elevated(&["--install-kernel", &binary.display().to_string(), version])
                 .map_err(|e| anyhow::anyhow!(e))?;
@@ -305,6 +309,38 @@ pub mod kernel {
     }
 
     /// 从 zip 中解出入口二进制。
+    /// 把内核包里的动态库（`*.dll` / `*.sys`）解到 `out_dir`（摊平目录，只取文件名）。
+    ///
+    /// 内核在 Windows 上从自己所在目录加载 `Packet.dll` / `wintun.dll` / `WinDivert*.sys`，
+    /// 在线更新时必须一并带出来，否则更新后的内核会因为缺少依赖而跑不起来。
+    fn extract_runtime_deps(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
+        let file = std::fs::File::open(archive).context("打开内核包失败")?;
+        let mut zip = zip::ZipArchive::new(file).context("解析内核包失败")?;
+
+        for i in 0..zip.len() {
+            let mut zf = zip.by_index(i)?;
+            if zf.is_dir() {
+                continue;
+            }
+            let name = zf.name()?.to_string();
+            let lower = name.to_ascii_lowercase();
+            if !(lower.ends_with(".dll") || lower.ends_with(".sys")) {
+                continue;
+            }
+            // 只取文件名，避免 zip 里的路径穿越
+            let Some(file_name) = Path::new(&name).file_name() else {
+                continue;
+            };
+            let out = out_dir.join(file_name);
+            let mut buf = Vec::with_capacity(zf.size() as usize);
+            std::io::Read::read_to_end(&mut zf, &mut buf)?;
+            std::fs::write(&out, &buf)
+                .with_context(|| format!("写出运行时依赖 {} 失败", out.display()))?;
+            crate::logger::record("kernel.deps", format!("extracted {}", out.display()));
+        }
+        Ok(())
+    }
+
     fn extract_entry(archive: &Path, entry: &str, out: &Path) -> anyhow::Result<()> {
         let file = std::fs::File::open(archive).context("打开内核包失败")?;
         let mut zip = zip::ZipArchive::new(file).context("解析内核包失败")?;

@@ -19,6 +19,33 @@ pub type ServiceStatus = service_manager::ServiceStatus;
 trait ServiceManager: service_manager::ServiceManager {}
 impl ServiceManager for service_manager::TypedServiceManager {}
 
+/// 清理 launchd 的残留状态：清 disabled 覆盖 + bootout。
+///
+/// 被 `launchctl disable` 过的 job 无法 bootstrap/kickstart，报
+/// `Could not find service "..." in domain for system` —— 这正是 macOS 上
+/// 「服务装不上 / 每次启动都重装」的根因之一。
+#[cfg(target_os = "macos")]
+fn clean_launchd_job(label: &service_manager::ServiceLabel) {
+    let qualified = format!("system/{}", label.to_qualified_name());
+    for args in [
+        ["enable", qualified.as_str()],
+        ["bootout", qualified.as_str()],
+    ] {
+        match std::process::Command::new("/bin/launchctl")
+            .args(args)
+            .output()
+        {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => tracing::debug!(
+                ?args,
+                stderr = %String::from_utf8_lossy(&out.stderr),
+                "launchctl cleanup"
+            ),
+            Err(err) => tracing::debug!(?args, %err, "launchctl cleanup failed to run"),
+        }
+    }
+}
+
 pub struct Service {
     label: service_manager::ServiceLabel,
     kind: service_manager::ServiceManagerKind,
@@ -62,7 +89,7 @@ impl Service {
     }
 
     pub fn install(&self, options: &ServiceInstallOptions) -> Result<(), anyhow::Error> {
-        let ctx = service_manager::ServiceInstallCtx {
+        let make_ctx = || service_manager::ServiceInstallCtx {
             label: self.label.clone(),
             program: options.program.clone(),
             args: options.args.clone(),
@@ -79,6 +106,8 @@ impl Service {
         // 不能走 service-manager 的 status()/update() 路径：新版 macOS 的
         // `launchctl print` 对不存在的服务返回 **113**（而不是 64），会被误判成错误；
         // 更早的行为是「看到 Running 就 update，而 update 里再查已经查不到」→ 永远装不上。
+        #[cfg(target_os = "macos")]
+        clean_launchd_job(&self.label);
         let _ = self
             .service_manager
             .uninstall(service_manager::ServiceUninstallCtx {
@@ -86,9 +115,33 @@ impl Service {
             });
         std::thread::sleep(std::time::Duration::from_millis(250));
 
-        self.service_manager
-            .install(ctx)
-            .map_err(|e| anyhow::anyhow!("failed to install service: {:?}", e))?;
+        // launchd 的注销/注册是异步的：bootout 之后立刻 bootstrap 常见
+        // `Bootstrap failed: 5: Input/output error` 或 `Could not find service`。
+        // 这里重试 3 次，并把每次失败记录给上层（便于 error.log 定位）。
+        let mut last_error: Option<anyhow::Error> = None;
+        for attempt in 1..=3u32 {
+            match self.service_manager.install(make_ctx()) {
+                Ok(()) => {
+                    last_error = None;
+                    break;
+                }
+                Err(err) => {
+                    tracing::warn!(attempt, error = ?err, "install attempt failed");
+                    last_error = Some(anyhow::anyhow!("failed to install service: {err:?}"));
+                    #[cfg(target_os = "macos")]
+                    clean_launchd_job(&self.label);
+                    let _ = self
+                        .service_manager
+                        .uninstall(service_manager::ServiceUninstallCtx {
+                            label: self.label.clone(),
+                        });
+                    std::thread::sleep(std::time::Duration::from_millis(300 * u64::from(attempt)));
+                }
+            }
+        }
+        if let Some(err) = last_error {
+            return Err(err);
+        }
 
         tracing::info!(
             "Service installed successfully! Service Name: {}",

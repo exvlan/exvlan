@@ -41,6 +41,17 @@ mod imp {
             == Some(super::HELPER_VERSION)
     }
 
+    /// 已安装 **且进程真的在跑**（socket 可用）。
+    ///
+    /// `is_installed()` 只看文件+版本号，历史上出现过「版本文件写了、helper 从没起来」
+    /// 的情况，导致之后永远不再修复。启动判断应使用本函数。
+    pub fn is_ready() -> bool {
+        if !is_installed() {
+            return false;
+        }
+        matches!(status(), Ok(s) if !s.is_empty() && s != "not installed")
+    }
+
     /// 随包 helper 的路径。
     pub fn bundled_helper(app: &tauri::AppHandle) -> Option<PathBuf> {
         let dir = app.path().resource_dir().ok()?;
@@ -82,31 +93,95 @@ mod imp {
         std::fs::set_permissions(&plist, std::fs::Permissions::from_mode(0o644))?;
         strip_quarantine(&plist);
 
-        let _ = std::process::Command::new("/bin/launchctl")
-            .args(["bootout", &format!("system/{HELPER_LABEL}")])
-            .output();
+        let _ = launchctl(&["bootout", &format!("system/{HELPER_LABEL}")]);
         std::thread::sleep(std::time::Duration::from_millis(300));
 
-        let out = std::process::Command::new("/bin/launchctl")
-            .arg("bootstrap")
-            .arg("system")
-            .arg(&plist)
-            .output()
-            .context("执行 launchctl bootstrap")?;
-        if !out.status.success() {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            if !stderr.contains("already") && !stderr.contains("Input/output error") {
-                bail!("launchctl bootstrap 失败: {}", stderr.trim());
+        // launchd 的注销是异步的：bootout 之后立刻 bootstrap 常见
+        // `Bootstrap failed: 5: Input/output error`。旧代码把这个错误吞掉，
+        // 于是「装上了但没在跑」还会写版本文件 → 之后永远不再修复。
+        let mut last_err = String::new();
+        let mut booted = false;
+        for attempt in 1..=3u32 {
+            match launchctl(&["bootstrap", "system", &plist.to_string_lossy()]) {
+                Ok(out) if out.status.success() => {
+                    booted = true;
+                    break;
+                }
+                Ok(out) => {
+                    last_err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    if last_err.contains("already bootstrapped") || last_err.contains("already") {
+                        booted = true;
+                        break;
+                    }
+                    crate::logger::record(
+                        "helper.install",
+                        format!("bootstrap attempt={attempt}/3 failed: {last_err}"),
+                    );
+                    let _ = launchctl(&["bootout", &format!("system/{HELPER_LABEL}")]);
+                    std::thread::sleep(std::time::Duration::from_millis(300 * u64::from(attempt)));
+                }
+                Err(err) => {
+                    last_err = err.to_string();
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                }
             }
         }
-        let _ = std::process::Command::new("/bin/launchctl")
-            .args(["kickstart", "-k", &format!("system/{HELPER_LABEL}")])
-            .output();
+        if !booted {
+            bail!(
+                "launchctl bootstrap 失败（3 次）：{last_err}\n{}",
+                diag_snapshot()
+            );
+        }
 
-        let version_file = helper_version_file();
-        std::fs::write(&version_file, format!("{HELPER_VERSION} {owner_uid}\n"))?;
-        std::fs::set_permissions(&version_file, std::fs::Permissions::from_mode(0o644))?;
-        Ok(())
+        let _ = launchctl(&["kickstart", "-k", &format!("system/{HELPER_LABEL}")]);
+
+        // 健康检查：socket 真的能连才算装好；否则**不写版本文件**，
+        // 让 ensure_kernel_service 下次仍判定 need_helper，自动重试。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut last = String::new();
+        while std::time::Instant::now() < deadline {
+            match status() {
+                Ok(s) if !s.is_empty() && s != "not installed" => {
+                    let version_file = helper_version_file();
+                    std::fs::write(&version_file, format!("{HELPER_VERSION} {owner_uid}\n"))?;
+                    std::fs::set_permissions(
+                        &version_file,
+                        std::fs::Permissions::from_mode(0o644),
+                    )?;
+                    return Ok(());
+                }
+                Ok(s) => last = s,
+                Err(e) => last = e,
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+
+        bail!(
+            "helper 已安装但未就绪（socket 不可用）：{last}\n{}",
+            diag_snapshot()
+        )
+    }
+
+    fn launchctl(args: &[&str]) -> std::io::Result<std::process::Output> {
+        std::process::Command::new("/bin/launchctl")
+            .args(args)
+            .output()
+    }
+
+    /// 安装/启动失败时的现场（launchctl 状态 + helper 日志尾）。
+    fn diag_snapshot() -> String {
+        let print = std::process::Command::new("/bin/launchctl")
+            .args(["print", &format!("system/{HELPER_LABEL}")])
+            .output()
+            .map(|o| {
+                let mut text = String::from_utf8_lossy(&o.stdout).into_owned();
+                if text.len() > 1200 {
+                    text.truncate(1200);
+                }
+                text.replace('\n', " | ")
+            })
+            .unwrap_or_default();
+        format!("launchctl: {print} | log tail: {}", helper_log_tail(2048))
     }
 
     fn strip_quarantine(path: &Path) {
@@ -271,6 +346,10 @@ mod imp {
         false
     }
 
+    pub fn is_ready() -> bool {
+        false
+    }
+
     pub fn bundled_helper(_app: &tauri::AppHandle) -> Option<PathBuf> {
         None
     }
@@ -291,7 +370,9 @@ mod imp {
 }
 
 #[allow(unused_imports)]
-pub use imp::{apply_bundled, bundled_helper, install_from, is_installed, status, verify_healthy};
+pub use imp::{
+    apply_bundled, bundled_helper, install_from, is_installed, is_ready, status, verify_healthy,
+};
 
 /// 当前进程 uid（供提权安装使用）。
 pub fn current_uid() -> u32 {

@@ -780,7 +780,9 @@ fn init_gui_logging_with(app: &tauri::AppHandle, level: Option<&str>) {
         exvlan_rpc::log::FileLoggerConfig {
             dir: Some(log_dir.to_string_lossy().to_string()),
             level: Some(level.clone()),
-            file: None,
+            // GUI 自己的日志必须写 studio.log：默认文件名是 exvlan.log，会和内核日志
+            // 同名（不同目录），诊断包里 studio.log 永远是空文件，排查时误判成"没有日志"。
+            file: Some("studio.log".to_string()),
             size_mb: Some(16),
             count: Some(3),
         },
@@ -1065,12 +1067,17 @@ async fn build_network_report(app: &AppHandle, frontend: Option<&str>) -> Result
     }
 
     // 前端才有 VPN 运行时状态（实际下发的路由、dns、所属实例），由它一并带上来。
+    // 注意：前端文本自带 `--- vpn ---` / `--- config ---` 标题，直接拼进来会
+    // 和后端自己的段落混淆（排查时误判成「frontend 段为空」）。这里统一缩进并加闭合标记。
     if let Some(text) = frontend.filter(|s| !s.trim().is_empty()) {
-        out.push_str("--- frontend ---\n");
-        out.push_str(&logger::redact(text));
-        if !text.ends_with('\n') {
+        crate::logger::record("report.frontend", format!("{}B", text.len()));
+        out.push_str(&format!("--- frontend ({} bytes) ---\n", text.len()));
+        for line in text.lines() {
+            out.push_str("  ");
+            out.push_str(line);
             out.push('\n');
         }
+        out.push_str("--- /frontend ---\n");
     }
 
     if let Ok(cm) = get_client_manager!() {
@@ -1201,11 +1208,28 @@ async fn build_network_report(app: &AppHandle, frontend: Option<&str>) -> Result
 
                 out.push_str(&format!("peers: {}\n", info.peers.len()));
                 for p in &info.peers {
+                    // `directly_connected_conns` 只统计「对方主动连进来」的直连，
+                    // **不包含打洞连接**（内核 get_directly_connections 的实现），
+                    // 所以 conns - direct 约等于打洞/中转连接数。这里把 default conn
+                    // 的隧道类型也带上，避免再把「打洞直连」误判成「走中转」。
+                    let total = p.conns.len();
+                    let direct = p.directly_connected_conns.len();
+                    let hole_like = total.saturating_sub(direct);
+                    let default_id = p.default_conn_id.as_ref().map(ToString::to_string);
+                    let default_kind = default_id
+                        .as_ref()
+                        .and_then(|id| {
+                            p.conns.iter().find(|c| &c.conn_id == id).and_then(|c| {
+                                c.tunnel
+                                    .as_ref()
+                                    .map(|t| t.tunnel_type.clone())
+                                    .filter(|s| !s.is_empty())
+                            })
+                        })
+                        .unwrap_or_else(|| "-".to_string());
                     out.push_str(&format!(
-                        "  peer={} conns={} direct_conns={}\n",
-                        p.peer_id,
-                        p.conns.len(),
-                        p.directly_connected_conns.len(),
+                        "  peer={} conns={} direct={} hole_punched~={} default={}\n",
+                        p.peer_id, total, direct, hole_like, default_kind
                     ));
                 }
             }
@@ -1573,9 +1597,15 @@ async fn upload_diagnostics(
         ),
     );
 
-    let network_report = build_network_report(&app, frontend.as_deref())
-        .await
-        .unwrap_or_default();
+    let network_report = match build_network_report(&app, frontend.as_deref()).await {
+        Ok(report) => report,
+        Err(err) => {
+            // 不再 `unwrap_or_default()` 静默吞掉：采集失败必须写进报告，
+            // 否则诊断包只会缺一大段内容，看不出是"没采到"还是"没问题"。
+            logger::record("diag.collect", format!("network_report failed: {err}"));
+            format!("[collect_errors]\nnetwork_report failed: {err}\n")
+        }
+    };
     let zip_path = build_diagnostics_zip(&app, &network_report)?;
     let zip_bytes = std::fs::read(&zip_path).map_err(|e| format!("读取诊断包失败: {e}"))?;
     let zip_size = zip_bytes.len();
@@ -1698,9 +1728,10 @@ fn build_upload_client(
     use_proxy: bool,
     ipv4: &[std::net::IpAddr],
     host: &str,
+    timeout_secs: u64,
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
         .connect_timeout(std::time::Duration::from_secs(5));
     if !use_proxy {
         builder = builder.no_proxy();
@@ -1804,7 +1835,7 @@ async fn diag_token() -> Result<String, String> {
 
     for (label, use_proxy) in [("A(direct)", false), ("B(proxy)", true)] {
         let started = std::time::Instant::now();
-        let client = match build_upload_client(use_proxy, &ipv4, &host) {
+        let client = match build_upload_client(use_proxy, &ipv4, &host, 8) {
             Ok(c) => c,
             Err(err) => {
                 logger::record(
@@ -1897,7 +1928,7 @@ async fn upload_once(
     let token = diag_token().await?;
 
     let started = std::time::Instant::now();
-    match build_upload_client(false, &ipv4, &host) {
+    match build_upload_client(false, &ipv4, &host, 8) {
         Ok(client) => match try_upload(&client, url, body, &token).await {
             Ok(json) => {
                 logger::record(
@@ -1918,7 +1949,7 @@ async fn upload_once(
     }
 
     let started = std::time::Instant::now();
-    match build_upload_client(true, &ipv4, &host) {
+    match build_upload_client(true, &ipv4, &host, 25) {
         Ok(client) => match try_upload(&client, url, body, &token).await {
             Ok(json) => {
                 logger::record(
@@ -2784,6 +2815,18 @@ mod service {
                 truncate_for_log(&stored, 160)
             ),
         );
+
+        // 自愈：标记丢失（首次安装后被杀软/清理工具删掉、或旧版本写在 root 侧）
+        // 但 plist 参数完全一致时，直接补写标记，不再走提权重装。
+        if stored.trim().is_empty() && plist_matches(opts) == Some(true) {
+            if let Err(err) = write_marker(opts) {
+                crate::logger::record("service.marker", format!("self-heal failed: {err:#}"));
+            } else {
+                crate::logger::record("service.fingerprint", "marker 丢失但 plist 一致，已自愈");
+                return true;
+            }
+        }
+
         false
     }
 
@@ -3503,25 +3546,61 @@ pub struct ProvisionPayload {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn stop_service_if_running() -> bool {
+    use exvlan_rpc::service_manager::ServiceStatus;
+    if !matches!(service::status(), Ok(ServiceStatus::Running)) {
+        return false;
+    }
+    match service::set_status(false) {
+        Ok(()) => {
+            crate::logger::record("provision.service", "stopped before kernel replace");
+            true
+        }
+        Err(err) => {
+            crate::logger::record("provision.service", format!("stop failed: {err:#}"));
+            false
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
-    if let Some(src) = req.kernel_src.as_deref() {
-        kernel::install_kernel(std::path::Path::new(src), &req.kernel_version)?;
-        crate::logger::record(
-            "provision.kernel",
-            format!("installed {}", req.kernel_version),
-        );
+    // 替换内核二进制前必须先停服务：Windows 上运行中的 exe/dll 被文件锁占用，
+    // rename 会直接失败；Unix 上虽然允许覆盖，但运行中的进程仍在跑旧镜像。
+    let stopped_for_kernel = req.kernel_src.is_some() && stop_service_if_running();
+
+    let result = (|| -> anyhow::Result<()> {
+        if let Some(src) = req.kernel_src.as_deref() {
+            kernel::install_kernel(std::path::Path::new(src), &req.kernel_version)?;
+            crate::logger::record(
+                "provision.kernel",
+                format!("installed {}", req.kernel_version),
+            );
+        }
+        if let Some(opts) = req.service.clone() {
+            service::install(opts)?;
+            crate::logger::record("provision.service", "installed");
+        }
+        if let Some(src) = req.helper_src.as_deref() {
+            crate::helper::install_from(std::path::Path::new(src), req.owner_uid)?;
+            crate::logger::record("provision.helper", "installed");
+            // 启动竞态：bootstrap 后 socket 还没 bind，这里轮询 3s 再判定。
+            crate::helper::verify_healthy(std::time::Duration::from_secs(3));
+        }
+        Ok(())
+    })();
+
+    // 只换了内核、没有重装服务 → 把服务拉回来（失败时也拉回，避免用户彻底断网）。
+    if stopped_for_kernel && req.service.is_none() {
+        if let Err(err) = service::set_status(true) {
+            crate::logger::record(
+                "provision.service",
+                format!("restart after kernel install failed: {err:#}"),
+            );
+        }
     }
-    if let Some(opts) = req.service.clone() {
-        service::install(opts)?;
-        crate::logger::record("provision.service", "installed");
-    }
-    if let Some(src) = req.helper_src.as_deref() {
-        crate::helper::install_from(std::path::Path::new(src), req.owner_uid)?;
-        crate::logger::record("provision.helper", "installed");
-        // 启动竞态：bootstrap 后 socket 还没 bind，这里轮询 3s 再判定。
-        crate::helper::verify_healthy(std::time::Duration::from_secs(3));
-    }
-    Ok(())
+
+    result
 }
 
 /// 修复用户目录属主（目录被 root 守护进程写过时会变成 root，用户态无法再写）。
@@ -3697,7 +3776,7 @@ async fn ensure_kernel_service(
     // helper 仅 macOS 存在；其它平台恒为 false，否则每次启动都会判定「需要安装」
     // → 反复提权。
     #[cfg(target_os = "macos")]
-    let need_helper = !helper::is_installed();
+    let need_helper = !helper::is_ready();
     #[cfg(not(target_os = "macos"))]
     let need_helper = false;
 
@@ -3825,6 +3904,20 @@ fn service_diagnostics(rpc_portal: Option<String>) -> Result<String, String> {
         helper::is_installed(),
         helper::status().unwrap_or_else(|e| e)
     ));
+    // 内核运行时依赖（Windows 上 Packet.dll / wintun.dll / WinDivert*.sys 缺一不可）
+    let deps = kernel::runtime_dep_status();
+    if !deps.is_empty() {
+        let list = deps
+            .iter()
+            .map(|(name, ok)| format!("{name}={}", if *ok { "ok" } else { "MISSING" }))
+            .collect::<Vec<_>>()
+            .join(" ");
+        report.push_str(&format!("[core] {list}\n"));
+    }
+    report.push_str(&format!("[core.dir] {}\n", kernel::kernel_dir().display()));
+    if let Ok(text) = std::fs::read_to_string(kernel::kernel_dir().join("version")) {
+        report.push_str(&format!("[core.version] {}\n", text.trim()));
+    }
     logger::record("service.diagnostics", &report);
     Ok(report)
 }
@@ -3841,9 +3934,49 @@ fn service_restart() -> Result<(), String> {
 /// 强制重装服务（提权，含 bootout + 目录预建 + 真连自检）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
-async fn service_reinstall(opts: service::ServiceOptions) -> Result<(), String> {
+async fn service_reinstall(
+    app: tauri::AppHandle,
+    opts: service::ServiceOptions,
+) -> Result<(), String> {
     let mut opts = opts;
     normalize_service_options(&mut opts);
+
+    // 内核没装时不能只重装服务（服务指向的二进制不存在）——走完整 provision。
+    if !kernel::is_installed() {
+        let kernel_src = kernel::bundled_kernel(&app)
+            .ok_or_else(|| {
+                format!(
+                    "未找到随包内核（{}）。请确认安装包完整。",
+                    kernel::kernel_bin_name()
+                )
+            })?
+            .display()
+            .to_string();
+        let payload = ProvisionPayload {
+            kernel_src: Some(kernel_src),
+            kernel_version: crate::BUILD_VERSION.to_string(),
+            service: Some(opts.clone()),
+            helper_src: {
+                #[cfg(target_os = "macos")]
+                {
+                    helper::bundled_helper(&app).map(|p| p.display().to_string())
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    None
+                }
+            },
+            owner_uid: helper::current_uid(),
+        };
+        let json = serde_json::to_string(&payload)
+            .map_err(|e| logger::other("cmd:service_reinstall", e))?;
+        logger::record("provision", "kernel=false(missing) service=true");
+        run_elevated(&["--provision", &json])?;
+        service::mark_current(&opts);
+        logger::record("service.reinstall", "done (with kernel)");
+        return Ok(());
+    }
+
     let payload =
         serde_json::to_string(&opts).map_err(|e| logger::other("cmd:service_reinstall", e))?;
     run_elevated(&["--service-reinstall", &payload])?;
@@ -4233,7 +4366,31 @@ async fn elevate_selftest() -> Result<String, String> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(windows)]
+mod win_error_mode {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SetErrorMode(mode: u32) -> u32;
+    }
+
+    /// 关掉「缺 DLL / 未处理异常」的系统硬错误对话框。
+    /// 子进程会继承该设置，所以拉起内核时也不会再弹窗打断用户。
+    pub fn suppress_hard_error_dialogs() {
+        const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+        const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
+        unsafe {
+            SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+        }
+    }
+}
+
 pub fn run_gui() -> std::process::ExitCode {
+    // Windows：抑制加载器/GPF 的硬错误对话框。
+    // 内核是控制台程序，GUI 拉起它时若缺少 Packet.dll，系统会弹
+    // “The code execution cannot proceed…” 并阻塞；SetErrorMode 会被子进程继承。
+    #[cfg(windows)]
+    win_error_mode::suppress_hard_error_dialogs();
+
     // 桌面端不再自动提权：内核以独立 root 守护进程运行，GUI 始终是普通用户。
     let mut builder = tauri::Builder::default();
 

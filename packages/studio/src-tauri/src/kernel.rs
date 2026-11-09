@@ -15,6 +15,24 @@ use std::process::Command;
 
 use anyhow::{Context as _, bail};
 
+/// Windows：控制台程序被 GUI（无控制台）拉起时，系统会新建一个 conhost 窗口。
+/// 只重定向 stdout/stderr 不够，必须显式传创建标志（clash-verge-rev / Zephyr 同做法）。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// 拉起内核进程的统一入口。所有 `exvlan(.exe)` 子进程都必须走这里，
+/// 否则 Windows 上每次调用都会闪一个黑框。
+pub fn kernel_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// 内核可执行文件名。
 pub fn kernel_bin_name() -> &'static str {
     if cfg!(windows) {
@@ -22,6 +40,92 @@ pub fn kernel_bin_name() -> &'static str {
     } else {
         "exvlan"
     }
+}
+
+/// Windows 内核运行时依赖（必须与 `exvlan.exe` 同目录）。
+///
+/// 抽成纯函数方便在非 Windows 上单测文件名规则。
+pub fn runtime_dep_names(is_64bit: bool) -> Vec<&'static str> {
+    vec![
+        "Packet.dll",
+        "wintun.dll",
+        if is_64bit {
+            "WinDivert64.sys"
+        } else {
+            "WinDivert32.sys"
+        },
+    ]
+}
+
+/// 当前平台上内核运行时依赖的落地情况（诊断用）。
+pub fn runtime_dep_status() -> Vec<(String, bool)> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    let dir = kernel_dir();
+    runtime_dep_names(cfg!(target_pointer_width = "64"))
+        .into_iter()
+        .map(|name| (name.to_string(), dir.join(name).is_file()))
+        .collect()
+}
+
+#[cfg(windows)]
+fn install_runtime_deps(src: &Path) -> anyhow::Result<()> {
+    let dir = kernel_dir();
+    // 源目录优先级：
+    //   1) kernel_src 的父目录 —— 便携包 / 在线更新解压后 DLL 就在 exe 旁边
+    //   2) 当前 GUI 可执行文件所在目录 —— MSI 安装到 Program Files 时 DLL 在应用根
+    let mut search: Vec<PathBuf> = Vec::new();
+    if let Some(parent) = src.parent() {
+        search.push(parent.to_path_buf());
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(parent) = exe.parent()
+    {
+        search.push(parent.to_path_buf());
+    }
+    search.dedup();
+
+    let mut missing: Vec<String> = Vec::new();
+    for name in runtime_dep_names(cfg!(target_pointer_width = "64")) {
+        let target = dir.join(name);
+        if target.is_file() {
+            continue;
+        }
+        let found = search.iter().map(|d| d.join(name)).find(|p| p.is_file());
+        match found {
+            Some(from) => {
+                std::fs::copy(&from, &target).with_context(|| {
+                    format!("复制依赖 {} -> {} 失败", from.display(), target.display())
+                })?;
+                crate::logger::record(
+                    "kernel.deps",
+                    format!("copied {} from {}", name, from.display()),
+                );
+            }
+            None => missing.push(name.to_string()),
+        }
+    }
+
+    if !missing.is_empty() {
+        // 提前失败，避免用户只看到系统的 STATUS_DLL_NOT_FOUND (0xc0000135) 弹窗。
+        bail!(
+            "内核缺少运行时依赖: {}（查找目录: {}）。请确认安装包完整，或把依赖放到 {}",
+            missing.join(", "),
+            search
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            dir.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn install_runtime_deps(_src: &Path) -> anyhow::Result<()> {
+    Ok(())
 }
 
 /// 内核仓库目录（需 root 写入）。
@@ -51,7 +155,10 @@ pub fn installed_version() -> Option<String> {
             return Some(trimmed.to_string());
         }
     }
-    let out = Command::new(kernel_path()).arg("--version").output().ok()?;
+    let out = kernel_command(kernel_path())
+        .arg("--version")
+        .output()
+        .ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     // 形如 "exvlan 26.410.20706-..."，取第二段。
     text.split_whitespace()
@@ -71,6 +178,10 @@ pub fn install_kernel(src: &Path, version: &str) -> anyhow::Result<()> {
     let dir = kernel_dir();
     std::fs::create_dir_all(&dir).with_context(|| format!("无法创建内核目录 {}", dir.display()))?;
 
+    // Windows：先把 Packet.dll / wintun.dll / WinDivert*.sys 放到位，
+    // 否则下面的 `--version` 预演会直接以 STATUS_DLL_NOT_FOUND (0xc0000135) 失败。
+    install_runtime_deps(src)?;
+
     let staged = dir.join(format!("{}.new", kernel_bin_name()));
     std::fs::copy(src, &staged).with_context(|| format!("复制内核到 {} 失败", staged.display()))?;
 
@@ -81,7 +192,7 @@ pub fn install_kernel(src: &Path, version: &str) -> anyhow::Result<()> {
     }
 
     // 预演：先把旧内核放一边，验证新二进制能跑（架构/签名/依赖）。
-    let output = Command::new(&staged)
+    let output = kernel_command(&staged)
         .arg("--version")
         .output()
         .with_context(|| {
@@ -239,6 +350,18 @@ mod tests {
         } else {
             assert_eq!(kernel_bin_name(), "exvlan");
         }
+    }
+
+    #[test]
+    fn runtime_dep_names_follow_arch() {
+        let d64 = runtime_dep_names(true);
+        assert!(d64.contains(&"Packet.dll"));
+        assert!(d64.contains(&"wintun.dll"));
+        assert!(d64.contains(&"WinDivert64.sys"));
+
+        let d32 = runtime_dep_names(false);
+        assert!(d32.contains(&"WinDivert32.sys"));
+        assert!(!d32.contains(&"WinDivert64.sys"));
     }
 
     #[cfg(unix)]
