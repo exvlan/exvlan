@@ -22,6 +22,26 @@ import sys
 import urllib.parse
 from datetime import datetime, timezone
 
+# 版本串：`YY.QMM.Mmpp[-channel.n][+build]`（预览版带 prerelease 段）
+_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]+\.(\d+))?(?:\+.*)?$")
+
+
+def parse_version(version: str) -> tuple[int, int, int, int]:
+    """拆出 (major, minor, patch, 预览序号)。
+
+    预览序号用于 Android/Magisk 的 versionCode 末三位；正式版为 0。
+    """
+    m = _VERSION_RE.match(version)
+    if not m:
+        sys.exit(f"[upgrade] 无法解析版本 {version}")
+    return (
+        int(m.group(1)),
+        int(m.group(2)),
+        int(m.group(3)),
+        int(m.group(4) or 0),
+    )
+
+
 # 自建 manifest 的平台键 → 安装包匹配规则（GUI 的 platform_key() 命名）
 APP_PLATFORM_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("macos-x86_64", re.compile(r"^.*_x64.*\.dmg$", re.I)),
@@ -162,12 +182,9 @@ def main() -> int:
     # ---- Magisk 在线更新清单（镜像为 /upgrade/magisk_update.json）----
     magisk_zip = find_one(files, re.compile(r"^Exvlan-Magisk-.*\.zip$", re.I))
     if magisk_zip is not None:
-        # versionCode 约定：YY | QMM | Mmpp | 000（与 module.prop 一致）
-        try:
-            major, minor, patch = (int(x) for x in version.split(".")[:3])
-        except ValueError:
-            sys.exit(f"[upgrade] 无法从版本 {version} 推导 magisk versionCode")
-        version_code = int(f"{major:02d}{minor:03d}{patch:05d}000")
+        # versionCode 约定：YY | QMM | Mmpp | NNN（NNN = 预览序号，正式版为 000）
+        major, minor, patch, pre = parse_version(version)
+        version_code = int(f"{major:02d}{minor:03d}{patch:05d}{pre:03d}")
         magisk_update = {
             "version": version,
             "versionCode": version_code,
