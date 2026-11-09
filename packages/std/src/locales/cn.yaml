@@ -13,6 +13,8 @@ initial_nodes_help: |
 initial_node_placeholder: 例如：node.example.com
 virtual_ipv4: 虚拟IPv4地址
 virtual_ipv4_dhcp: DHCP
+tun_enabled: 接管全部流量（TUN）
+tun_enabled_hint: 关闭后仅做代理/端口转发，不创建 TUN 网卡
 network_name: 网络名称
 network_secret: 网络密码
 secure_mode: 安全模式

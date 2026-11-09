@@ -13,6 +13,8 @@ initial_nodes_help: |
 initial_node_placeholder: "Example: node.example.com"
 virtual_ipv4: Virtual IPv4
 virtual_ipv4_dhcp: DHCP
+tun_enabled: Take over all traffic (TUN)
+tun_enabled_hint: When off, only proxy/port-forwarding is used (no TUN adapter)
 network_name: Network Name
 network_secret: Network Secret
 secure_mode: Secure Mode
