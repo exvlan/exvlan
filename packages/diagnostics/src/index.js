@@ -96,15 +96,35 @@ async function verifyToken(env, request) {
   return { ok: true };
 }
 
-async function rateLimited(binding, request) {
-  if (!binding) return false;
+/**
+ * 限流：Rate Limiting binding + KV 计数双保险。
+ *
+ * 实测该账号的 binding 恒返回 `success: true`（不计数），所以 KV 计数才是
+ * 真正生效的那一层；binding 保留，账号/区域恢复正常后自动叠加。
+ */
+async function rateLimited(env, request, scope, limit) {
+  const ip = clientIp(request);
+  const binding = scope === "token" ? env.RL_TOKEN : env.RL_UPLOAD;
+  if (binding) {
+    try {
+      const { success } = await binding.limit({ key: ip });
+      if (!success) return true;
+    } catch {
+      // 忽略：下面的 KV 计数兜底
+    }
+  }
+  if (!env.DIAG_KV) return false;
+  const bucket = Math.floor(Date.now() / 60000);
+  const key = `rl:${scope}:${ip}:${bucket}`;
   try {
-    const { success } = await binding.limit({ key: clientIp(request) });
-    return !success;
+    const current = Number((await env.DIAG_KV.get(key)) || 0);
+    if (current >= limit) return true;
+    await env.DIAG_KV.put(key, String(current + 1), { expirationTtl: 120 });
   } catch {
     // 限流器异常时放行，避免因为基础设施问题全量阻断诊断上传
     return false;
   }
+  return false;
 }
 
 function buildSections(payload) {
@@ -173,7 +193,7 @@ async function handleToken(request, env) {
   if (!env.TOKEN_SECRET) {
     return json({ error: "token secret not configured" }, 500);
   }
-  if (await rateLimited(env.RL_TOKEN, request)) {
+  if (await rateLimited(env, request, "token", 10)) {
     return new Response(JSON.stringify({ error: "rate limited" }), {
       status: 429,
       headers: { "content-type": "application/json", "retry-after": "60" },
@@ -268,7 +288,7 @@ export default {
     if (!auth.ok) {
       return json({ error: "unauthorized", reason: auth.reason }, 401);
     }
-    if (await rateLimited(env.RL_UPLOAD, request)) {
+    if (await rateLimited(env, request, "upload", 20)) {
       return new Response(JSON.stringify({ error: "rate limited" }), {
         status: 429,
         headers: { "content-type": "application/json", "retry-after": "60" },
