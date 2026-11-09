@@ -1,4 +1,5 @@
 import type { NetworkTypes } from "@exvlan/std";
+import { type as osType } from "@tauri-apps/plugin-os";
 import { addPluginListener } from "@tauri-apps/api/core";
 import { Utils } from "@exvlan/std";
 import {
@@ -661,6 +662,12 @@ export async function prepareVpnService(instanceId: string) {
 }
 
 export async function syncMobileVpnService() {
+  // 桌面端没有 VpnService：这里直接返回，避免调用 plugin:vpnservice 触发 ACL 拒绝
+  // （历史日志里的 "Command plugin:vpnservice|get_vpn_status not allowed by ACL"）。
+  const platform = osType();
+  if (platform !== "android" && platform !== "ios") {
+    return;
+  }
   syncVpnStatusFromNative(await get_vpn_status());
   const instanceId = await findRunningTunInstanceId();
   if (instanceId) {

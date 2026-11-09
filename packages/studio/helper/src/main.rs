@@ -259,6 +259,14 @@ fn run_daemon() -> ExitCode {
     use std::os::unix::fs::PermissionsExt as _;
     use std::os::unix::net::UnixListener;
 
+    // 启动首行日志：helper.log 长期为空时，无法判断"没启动"还是"没写日志"。
+    hlog!(
+        "start pid={} version={} socket={}",
+        std::process::id(),
+        env!("CARGO_PKG_VERSION"),
+        SOCKET_PATH
+    );
+
     let _ = std::fs::create_dir_all(SOCKET_DIR);
     let _ = std::fs::set_permissions(SOCKET_DIR, std::fs::Permissions::from_mode(0o755));
     let _ = std::fs::remove_file(SOCKET_PATH);
@@ -270,6 +278,7 @@ fn run_daemon() -> ExitCode {
         }
     };
     let _ = std::fs::set_permissions(SOCKET_PATH, std::fs::Permissions::from_mode(0o666));
+    hlog!("listening on {SOCKET_PATH}");
 
     for stream in listener.incoming() {
         match stream {

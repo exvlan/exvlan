@@ -138,6 +138,38 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  # Web 控制台静态镜像（Cloudflare Pages）。`console.xvlan.era-x.cn` 由 Caddy 反代
+  # exvlan-api 提供（主入口）；这里只维护 `ui.console.xvlan.era-x.cn` 的静态副本。
+  pages:
+    name: Deploy Web Console (Pages)
+    needs: [changes, web_dist]
+    if: >-
+      github.event_name != 'pull_request' && github.event_name != 'schedule' &&
+      needs.web_dist.result == 'success' &&
+      (github.ref_type == 'tag' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: web-dist
+          path: ./web-dist
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 8538ebeec9a79fac1169610553c1422e
+        run: |
+          set -euo pipefail
+          # --branch main 表示生产部署（Pages 生产分支为 main）
+          npx --yes wrangler@4 pages deploy ./web-dist \
+            --project-name era-xvlan-ui \
+            --branch main \
+            --commit-dirty=true
+
   core:
     name: Build Core
     # 不再等 tests：core 构建不消费测试结果；tests 仍作为 release 的门禁。

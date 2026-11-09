@@ -640,11 +640,6 @@ async fn init_rpc_connection(
     _is_normal_mode: bool,
     url: Option<String>,
 ) -> Result<(), String> {
-    let mut client_manager_guard =
-        tokio::time::timeout(std::time::Duration::from_secs(5), CLIENT_MANAGER.write())
-            .await
-            .map_err(|_| "Failed to acquire write lock for client manager")?;
-
     // normal 模式不再在 GUI 进程内跑实例，统一连本地内核守护进程；
     // remote 模式由前端传入显式地址。
     let client_url = url
@@ -652,6 +647,9 @@ async fn init_rpc_connection(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| LOCAL_DAEMON_RPC_PORTAL.to_string());
 
+    // 注意：连接期间**不能**持有 CLIENT_MANAGER 写锁。
+    // 历史 bug：这里先拿锁再 connect(5s)，期间其它命令读锁全部超时，
+    // 表现为日志里成片的 "Failed to acquire write lock for client manager"。
     let client_manager = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         manager::GUIClientManager::new(Some(client_url.clone())),
@@ -660,6 +658,12 @@ async fn init_rpc_connection(
     .map_err(|_| format!("connect rpc timed out: {client_url}"))?
     .with_context(|| format!("Failed to connect rpc: {client_url}"))
     .map_err(|e| format!("{:#}", e))?;
+
+    // 连接成功后只短暂持锁替换。
+    let mut client_manager_guard =
+        tokio::time::timeout(std::time::Duration::from_secs(2), CLIENT_MANAGER.write())
+            .await
+            .map_err(|_| "Failed to acquire write lock for client manager")?;
     *client_manager_guard = Some(client_manager);
     logger::record("mode", format!("desktop rpc connected: {client_url}"));
     logger::event("mode", format!("desktop rpc connected: {client_url}"));

@@ -93,6 +93,17 @@ mod imp {
         std::fs::set_permissions(&plist, std::fs::Permissions::from_mode(0o644))?;
         strip_quarantine(&plist);
 
+        // 清理历史 label / 残留 plist：新旧 helper 并存会导致端口/socket 争用，
+        // 且旧 plist 会让 launchctl 找到"另一个同名服务的旧定义"。
+        for legacy in [
+            "era.exvlan.studio.helper",
+            "exvlan-studio.helper",
+            "com.exvlan.studio.helper",
+        ] {
+            let _ = launchctl(&["bootout", &format!("system/{legacy}")]);
+            let _ = std::fs::remove_file(format!("/Library/LaunchDaemons/{legacy}.plist"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
         let _ = launchctl(&["bootout", &format!("system/{HELPER_LABEL}")]);
         std::thread::sleep(std::time::Duration::from_millis(300));
 
