@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use anyhow::{Context as _, bail};
-use tauri::Manager as _;
 
 pub struct NormalKernel {
     /// `None` 表示由 macOS helper / Windows supervisor 托管，GUI 只负责通知停止。
@@ -193,17 +192,6 @@ pub fn stop() {
                 .output();
         }
     }
-}
-
-/// 普通模式是否已启动（供诊断）。
-pub fn is_running() -> bool {
-    let mut guard = NORMAL.lock().unwrap_or_else(|e| e.into_inner());
-    guard.as_mut().is_some_and(NormalKernel::alive)
-}
-
-/// 普通模式日志目录（供诊断引用）。
-pub fn log_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
-    crate::paths::normal_log_dir(app).ok()
 }
 
 // ---------------------------------------------------------------------------

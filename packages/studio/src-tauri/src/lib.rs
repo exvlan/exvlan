@@ -3749,13 +3749,14 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
     })();
 
     // 只换了内核、没有重装服务 → 把服务拉回来（失败时也拉回，避免用户彻底断网）。
-    if stopped_for_kernel && req.service.is_none() {
-        if let Err(err) = service::set_status(true) {
-            crate::logger::record(
-                "provision.service",
-                format!("restart after kernel install failed: {err:#}"),
-            );
-        }
+    if stopped_for_kernel
+        && req.service.is_none()
+        && let Err(err) = service::set_status(true)
+    {
+        crate::logger::record(
+            "provision.service",
+            format!("restart after kernel install failed: {err:#}"),
+        );
     }
 
     result

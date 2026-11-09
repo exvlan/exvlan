@@ -130,6 +130,7 @@ pub fn collect_system(app_config: &Path, app_log: &Path, core_dir: &Path) -> Col
     let exe = std::env::current_exe().unwrap_or_default();
     let mut errors: Vec<String> = Vec::new();
 
+    #[allow(unused_mut)]
     let mut sig: Vec<Value> = Vec::new();
     #[cfg(target_os = "macos")]
     {
@@ -158,6 +159,7 @@ pub fn collect_system(app_config: &Path, app_log: &Path, core_dir: &Path) -> Col
         sig.push(json!({"output": out, "error": err}));
     }
 
+    #[allow(unused_mut)]
     let mut quarantine: Vec<Value> = Vec::new();
     #[cfg(target_os = "macos")]
     {
@@ -200,7 +202,7 @@ pub fn collect_system(app_config: &Path, app_log: &Path, core_dir: &Path) -> Col
     });
     if !errors.is_empty() {
         // 目前各子项错误已内联在 sig/quarantine 里；保留统一出口便于以后扩展。
-        value["collect_errors"] = json!(errors.drain(..).collect::<Vec<_>>());
+        value["collect_errors"] = json!(std::mem::take(&mut errors));
     }
 
     Collected {

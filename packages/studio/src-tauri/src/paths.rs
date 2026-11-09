@@ -98,6 +98,24 @@ pub fn helper_version_file() -> Option<PathBuf> {
     None
 }
 
+/// helper 的运行时 socket（macOS）。
+#[cfg(target_os = "macos")]
+pub fn helper_socket() -> PathBuf {
+    PathBuf::from("/var/run").join(APP_ID).join("helper.sock")
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+pub fn helper_socket() -> PathBuf {
+    PathBuf::new()
+}
+
+/// 系统 LaunchDaemons 目录（macOS）。
+#[cfg(target_os = "macos")]
+pub fn launch_daemons_dir() -> PathBuf {
+    PathBuf::from("/Library/LaunchDaemons")
+}
+
 /// 用户侧配置目录（prefs.toml / networks.toml / machine_id）。
 pub fn user_config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager as _;

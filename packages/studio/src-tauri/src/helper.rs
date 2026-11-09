@@ -101,7 +101,9 @@ mod imp {
             "com.exvlan.studio.helper",
         ] {
             let _ = launchctl(&["bootout", &format!("system/{legacy}")]);
-            let _ = std::fs::remove_file(format!("/Library/LaunchDaemons/{legacy}.plist"));
+            let _ = std::fs::remove_file(
+                crate::paths::launch_daemons_dir().join(format!("{legacy}.plist")),
+            );
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
         let _ = launchctl(&["bootout", &format!("system/{HELPER_LABEL}")]);
@@ -280,12 +282,9 @@ mod imp {
         Ok(())
     }
 
-    /// helper 的运行时 socket（与 helper 侧常量保持一致）。
-    pub const SOCKET_PATH: &str = "/var/run/era.exvlan.studio/helper.sock";
-
     fn socket_request(op: &str, extra: serde_json::Value) -> Result<String, String> {
         use std::io::{BufRead as _, BufReader, Write as _};
-        let mut stream = std::os::unix::net::UnixStream::connect(SOCKET_PATH)
+        let mut stream = std::os::unix::net::UnixStream::connect(crate::paths::helper_socket())
             .map_err(|e| format!("连接 helper socket 失败: {e}"))?;
         let mut body = serde_json::json!({ "op": op });
         if let (Some(obj), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
