@@ -318,7 +318,8 @@ jobs:
         needs.studio.result == 'success' ||
         needs.mobile.result == 'success'
       )
-    needs: [core, studio, mobile, publish_sdk, publish_go]
+    # tests 必须在列：core 已不再 needs tests，release 要自己把测试门禁接回来
+    needs: [tests, core, studio, mobile, publish_sdk, publish_go]
     uses: ./.github/workflows/release.yml
     with:
       version: ${{ github.ref_name }} # tag 名即为版本号，如 v26.410.20712
