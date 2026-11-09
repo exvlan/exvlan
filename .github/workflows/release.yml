@@ -90,6 +90,26 @@ jobs:
             find "$d" -type f -exec mv {} ../zipped_assets/ \;
           done
 
+          # 预览版：安装包文件名带上完整版本串（含 -pre.N），
+          # 避免与正式版同名被误下载；正式版（tag 无 '-'）跳过。
+          if [[ "$VERSION" == *-* ]]; then
+            base="${VERSION%%-*}"
+            pre="${VERSION#*-}"
+            for f in ../zipped_assets/*; do
+              case "$f" in
+                *.dmg|*.msi|*.exe) ;;
+                *) continue ;;
+              esac
+              case "$(basename "$f")" in
+                *"$base"*) mv "$f" "${f//$base/$VERSION}" ;;
+              esac
+            done
+            for f in ../zipped_assets/app-*-release.apk; do
+              [ -e "$f" ] || continue
+              mv "$f" "${f%.apk}-${pre}.apk"
+            done
+          fi
+
           cd ..
           echo "=== zipped_assets ==="
           ls -lR zipped_assets
