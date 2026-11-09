@@ -96,11 +96,18 @@ runs:
 
     - name: Install and build
       shell: bash
+      env:
+        BUILD_FILTER: ${{ inputs.build-filter }}
       run: |
+        set -euo pipefail
         pnpm -r install --frozen-lockfile
-        if [ -n "${{ inputs.build-filter }}" ]; then
-          echo "Building with filter: ${{ inputs.build-filter }}"
-          pnpm -r --workspace-concurrency=1 --filter "${{ inputs.build-filter }}" build
+        if [ -n "${BUILD_FILTER}" ]; then
+          echo "Building with filter: ${BUILD_FILTER}"
+          # 支持空格分隔的多个 filter（如 "./packages/ui... ./packages/generator..."），
+          # 每个 token 单独传给 --filter。
+          filters=()
+          for f in ${BUILD_FILTER}; do filters+=(--filter "$f"); done
+          pnpm -r --workspace-concurrency=1 "${filters[@]}" build
         else
           echo "No build filter provided, building all packages"
           pnpm -r --workspace-concurrency=1 build
