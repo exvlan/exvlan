@@ -33,16 +33,23 @@ runs:
         sudo apt-get install -qqy build-essential mold musl-tools
       shell: bash
 
+    # protoc 走 GitHub Releases，近期频繁 504。允许失败：
+    # exvlan/proto 的 build script 会回退到 crates.io 的 protoc-bin-vendored。
     - name: Setup protoc
+      id: protoc
+      continue-on-error: true
       uses: ./.github/actions/setup-protoc
       with:
         version: "35.1"
         token: ${{ inputs.token }}
 
-    - name: Verify protoc version
+    - name: protoc availability
       run: |
-        version="$(protoc --version | tr -d '\r')"
-        test "$version" = "libprotoc 35.1"
+        if command -v protoc >/dev/null 2>&1; then
+          echo "protoc: $(protoc --version)"
+        else
+          echo "::warning::protoc 未安装，将使用 protoc-bin-vendored（crates.io）"
+        fi
       shell: bash
 
     - name: Setup Frontend Environment

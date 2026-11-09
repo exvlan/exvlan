@@ -39,6 +39,8 @@ indoc.workspace = true
 pbjson-build = "0.9.0"
 proc-macro2 = "1"
 prost-build = "0.14.4"
+# 内置 protoc（crates.io），避免构建期从 GitHub Releases 下载
+protoc-bin-vendored = "3"
 quote = "1"
 
 [target.'cfg(windows)'.build-dependencies]

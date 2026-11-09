@@ -81,9 +81,50 @@ fn ensure_protoc_for_windows() {
     }
 }
 
+/// 保证 PROTOC 可用，且**不依赖 GitHub Releases**。
+///
+/// 优先顺序：`PROTOC` 环境变量 → PATH → crates.io 内置的 protoc
+/// （`protoc-bin-vendored`）。CI 的 setup-protoc 仍会先尝试装 35.1，
+/// 但它走的是 GitHub Releases，历史上频繁 5xx；失败时这里能兜住。
+fn ensure_protoc() {
+    if env::var_os("PROTOC").is_some() {
+        println!("cargo:info=use PROTOC from env");
+        return;
+    }
+    if let Some(path) = env::var_os("PATH").and_then(|path| {
+        env::split_paths(&path)
+            .map(|p| {
+                p.join(if cfg!(windows) {
+                    "protoc.exe"
+                } else {
+                    "protoc"
+                })
+            })
+            .find(|p| p.is_file())
+    }) {
+        println!("cargo:info=use protoc from PATH: {:?}", path);
+        unsafe { env::set_var("PROTOC", path) };
+        return;
+    }
+    match protoc_bin_vendored::protoc_bin_path() {
+        Ok(path) => {
+            println!("cargo:info=use vendored protoc: {:?}", path);
+            unsafe { env::set_var("PROTOC", path) };
+        }
+        Err(err) => {
+            println!("cargo:warning=no protoc available ({err}); build may fail");
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ensure_protoc();
+
     #[cfg(target_os = "windows")]
-    ensure_protoc_for_windows();
+    if env::var_os("PROTOC").is_none() {
+        // 最后兜底：vendored 也不可用时再走旧的下载路径
+        ensure_protoc_for_windows();
+    }
 
     let proto_files_reflect = ["proto/peer_rpc.proto", "proto/common.proto"];
 
