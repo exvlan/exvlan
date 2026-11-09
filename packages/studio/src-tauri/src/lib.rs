@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod diagnostics;
 mod elevate;
 #[cfg(target_os = "android")]
 mod ffi;
@@ -874,6 +875,15 @@ fn ensure_error_log(app: &AppHandle) -> Option<std::path::PathBuf> {
         return logger::path();
     }
     let initialized = logger::init_best(&error_log_candidates(app));
+    if let Ok(log_dir) = get_log_dir(app) {
+        crate::diagnostics::start_session(&log_dir);
+        if let Some(prev) = crate::diagnostics::abnormal_session() {
+            logger::event(
+                "boot",
+                format!("previous session did not exit cleanly: {prev}"),
+            );
+        }
+    }
     // 提权子进程会继承这个变量，把 [provision]/[service.install]/launchctl 现场
     // 写回**同一个** error.log —— 否则那些日志落在 root 的 HOME 下，用户永远看不到。
     if let Some(dir) = initialized
@@ -1493,75 +1503,154 @@ fn build_diagnostics_zip(
         .unwrap_or_default();
     let path = base.join(format!("exvlan-diagnostics-{stamp}.zip"));
 
-    let file = std::fs::File::create(&path).map_err(|e| format!("创建 zip 失败: {e}"))?;
-    let mut zip = ZipWriter::new(file);
-    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-
-    // 1) error.log（完整当前文件，脱敏）
-    if let Some(log) = logger::path()
-        && let Some(text) = read_capped(&log, DIAG_LOG_CAP)
-    {
-        let _ = zip.start_file("error.log", opts);
-        let _ = zip.write_all(logger::redact(&text).as_bytes());
+    // 统一收集：先攒内容与元信息，最后写 manifest + 全部条目。
+    // 这样「文件缺失/读取失败」也能明确记录，而不是静默消失。
+    struct Entry {
+        name: String,
+        bytes: Vec<u8>,
+        error: Option<String>,
     }
+    let mut entries: Vec<Entry> = Vec::new();
 
-    // 2) GUI 日志（界面/上传/模式/服务安装都在这里）
-    if let Ok(dir) = get_log_dir(app)
-        && let Some(text) = read_capped(&dir.join("studio.log"), DIAG_LOG_CAP)
-    {
-        let _ = zip.start_file("studio.log", opts);
-        let _ = zip.write_all(logger::redact(&text).as_bytes());
+    let mut add_file =
+        |name: &str, path: &std::path::Path, cap: usize, redact: bool| match read_capped(path, cap)
+        {
+            Some(text) => {
+                let text = if redact { logger::redact(&text) } else { text };
+                entries.push(Entry {
+                    name: name.to_string(),
+                    bytes: text.into_bytes(),
+                    error: None,
+                });
+            }
+            None => {
+                let error = if path.exists() {
+                    "unreadable".to_string()
+                } else {
+                    "missing".to_string()
+                };
+                entries.push(Entry {
+                    name: name.to_string(),
+                    bytes: Vec::new(),
+                    error: Some(error),
+                });
+            }
+        };
+
+    if let Some(log) = logger::path() {
+        add_file("error.log", &log, DIAG_LOG_CAP, true);
     }
-
-    // 3) 内核日志（peer/握手/TUN/路由）—— 注意在**系统**日志目录，不是用户目录
+    if let Ok(dir) = get_log_dir(app) {
+        add_file("studio.log", &dir.join("studio.log"), DIAG_LOG_CAP, true);
+        add_file("events.log", &dir.join("events.log"), DIAG_LOG_CAP, true);
+    }
     {
         let sys_logs = crate::paths::system().logs;
-        if let Some(text) = kernel_log_text(&sys_logs, DIAG_LOG_CAP) {
-            let _ = zip.start_file("exvlan.log", opts);
-            let _ = zip.write_all(logger::redact(&text).as_bytes());
-        }
+        let kernel_log = if sys_logs.join("exvlan.log").exists() {
+            sys_logs.join("exvlan.log")
+        } else if let Ok(dir) = get_log_dir(app) {
+            dir.join("exvlan.log")
+        } else {
+            sys_logs.join("exvlan.log")
+        };
+        add_file("exvlan.log", &kernel_log, DIAG_LOG_CAP, true);
     }
-
-    // 4) prefs.toml（脱敏整份：用于判断“模式/上次网络到底存没存”）
-    if let Ok(prefs_path) = crate::prefs::prefs_path(app)
-        && let Some(text) = read_capped(&prefs_path, 256 * 1024)
-    {
-        let _ = zip.start_file("prefs.toml", opts);
-        let _ = zip.write_all(logger::redact(&text).as_bytes());
+    if let Ok(prefs_path) = crate::prefs::prefs_path(app) {
+        add_file("prefs.toml", &prefs_path, 256 * 1024, true);
     }
+    add_file(
+        "helper.log",
+        &crate::paths::helper_log(),
+        DIAG_LOG_CAP,
+        true,
+    );
 
-    // 5) events.log（GUI 事件流：VPN 路由、诊断请求都在这里）
-    if let Ok(dir) = get_log_dir(app)
-        && let Some(text) = read_capped(&dir.join("events.log"), DIAG_LOG_CAP)
-    {
-        let _ = zip.start_file("events.log", opts);
-        let _ = zip.write_all(logger::redact(&text).as_bytes());
-    }
+    // 网络自检（由上传流程传入，含前端状态）
+    entries.push(Entry {
+        name: "network-report.txt".to_string(),
+        bytes: if network_report.trim().is_empty() {
+            Vec::new()
+        } else {
+            logger::redact(network_report).into_bytes()
+        },
+        error: network_report
+            .trim()
+            .is_empty()
+            .then(|| "empty (network_report not built)".to_string()),
+    });
 
-    // 6) helper.log（特权 helper：安装/apply/自更新/授权失败都记在这里）
-    {
-        let helper_log = crate::paths::helper_log();
-        if let Some(text) = read_capped(&helper_log, DIAG_LOG_CAP) {
-            let _ = zip.start_file("helper.log", opts);
-            let _ = zip.write_all(logger::redact(&text).as_bytes());
-        }
-    }
-
-    // 7) 网络自检（结构化：实例/节点/路由/接口/VPN 状态）
-    if !network_report.trim().is_empty() {
-        let _ = zip.start_file("network-report.txt", opts);
-        let _ = zip.write_all(logger::redact(network_report).as_bytes());
-    }
-
-    // 8) ui-state.json（旧版遗留，若存在则一并带上）
     if let Ok(dir) = app.path().app_config_dir()
         && let Ok(text) = std::fs::read_to_string(dir.join("ui-state.json"))
     {
-        let _ = zip.start_file("ui-state.json", opts);
-        let _ = zip.write_all(logger::redact(&text).as_bytes());
+        entries.push(Entry {
+            name: "ui-state.json".to_string(),
+            bytes: logger::redact(&text).into_bytes(),
+            error: None,
+        });
     }
 
-    // 9) 摘要
+    // ---- 诊断 v2：系统/网络/服务/DNS/会话 ----
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let log_dir = get_log_dir(app).unwrap_or_else(|_| config_dir.clone());
+    let core_dir = crate::kernel::kernel_dir();
+
+    let sys = crate::diagnostics::collect_system(&config_dir, &log_dir, &core_dir);
+    entries.push(Entry {
+        name: sys.name.to_string(),
+        bytes: sys.text.into_bytes(),
+        error: sys.error,
+    });
+
+    let net = crate::diagnostics::collect_net(None);
+    entries.push(Entry {
+        name: net.name.to_string(),
+        bytes: net.text.into_bytes(),
+        error: net.error,
+    });
+
+    let svc = crate::diagnostics::collect_service();
+    entries.push(Entry {
+        name: svc.name.to_string(),
+        bytes: svc.text.into_bytes(),
+        error: svc.error,
+    });
+
+    let dns = crate::diagnostics::collect_dns_resolve();
+    entries.push(Entry {
+        name: dns.name.to_string(),
+        bytes: dns.text.into_bytes(),
+        error: dns.error,
+    });
+
+    // D11–D13：统一日志 / 崩溃报告 / 防火墙（默认开启，已做密钥脱敏）
+    for collected in [
+        crate::diagnostics::collect_unified_log(),
+        crate::diagnostics::collect_crash_reports(),
+        crate::diagnostics::collect_firewall(),
+    ] {
+        entries.push(Entry {
+            name: collected.name.to_string(),
+            bytes: collected.text.into_bytes(),
+            error: collected.error,
+        });
+    }
+
+    entries.push(Entry {
+        name: "session.json".to_string(),
+        bytes: crate::diagnostics::previous_session().into_bytes(),
+        error: None,
+    });
+    if let Some(prev) = crate::diagnostics::abnormal_session() {
+        logger::record(
+            "diag.session",
+            format!("previous session did not exit cleanly: {prev}"),
+        );
+    }
+
+    // 摘要
     let summary = format!(
         "version: {}\nos: {} ({})\nhome: {}\nlog_dir: {:?}\nconfig_dir: {:?}\nerror_log: {:?}\n",
         BUILD_VERSION,
@@ -1578,8 +1667,32 @@ fn build_diagnostics_zip(
             .map(|p| p.display().to_string()),
         logger::path().map(|p| p.display().to_string()),
     );
-    let _ = zip.start_file("summary.txt", opts);
-    let _ = zip.write_all(summary.as_bytes());
+    entries.push(Entry {
+        name: "summary.txt".to_string(),
+        bytes: summary.into_bytes(),
+        error: None,
+    });
+
+    // manifest（JSON + 文本双份）
+    let meta: Vec<(String, usize, Option<String>)> = entries
+        .iter()
+        .map(|e| (e.name.clone(), e.bytes.len(), e.error.clone()))
+        .collect();
+    let (manifest_json, manifest_txt) = crate::diagnostics::build_manifest(&meta);
+
+    let file = std::fs::File::create(&path).map_err(|e| format!("创建 zip 失败: {e}"))?;
+    let mut zip = ZipWriter::new(file);
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    let _ = zip.start_file("manifest.json", opts);
+    let _ = zip.write_all(manifest_json.as_bytes());
+    let _ = zip.start_file("manifest.txt", opts);
+    let _ = zip.write_all(manifest_txt.as_bytes());
+
+    for entry in &entries {
+        let _ = zip.start_file(entry.name.as_str(), opts);
+        let _ = zip.write_all(&entry.bytes);
+    }
 
     zip.finish().map_err(|e| format!("写入 zip 失败: {e}"))?;
     Ok(path)
