@@ -114,6 +114,16 @@ pub fn user_log_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("无法定位应用日志目录: {e}"))
 }
 
+/// 普通模式（用户态子进程）的配置目录：与系统服务完全隔离。
+pub fn normal_config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(user_config_dir(app)?.join("normal").join("config"))
+}
+
+/// 普通模式的日志目录（与系统服务日志分开，诊断时一眼能区分）。
+pub fn normal_log_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(user_log_dir(app)?.join("normal"))
+}
+
 /// 诊断包落点：唯一目录，不再有 fallback 链。
 pub fn diagnostics_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(user_log_dir(app)?.join("diagnostics"))

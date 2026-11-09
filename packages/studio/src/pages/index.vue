@@ -550,6 +550,16 @@ async function ensureLocalKernel(mode: Mode) {
   };
   // 默认目录必须是系统路径：守护进程以 root 运行，写用户目录会把属主改成 root，
   // 之后 GUI 连 error.log / ui-state.json 都写不进去（20709 实测）。
+  // 普通模式只装内核（不装系统服务）：这是唯一一次提权，之后内核以用户身份跑。
+  if (mode.mode === "normal") {
+    try {
+      await invoke<string>("ensure_kernel_only");
+    } catch (e: any) {
+      console.error("ensure_kernel_only failed", e);
+    }
+    return;
+  }
+
   const defaults = await serviceDefaultDirs();
   const merged = {
     config_dir: (mode as any).config_dir || saved.config_dir || defaults.config_dir,

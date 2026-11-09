@@ -11,6 +11,7 @@ mod logger;
 mod networks;
 mod paths;
 mod prefs;
+mod supervisor;
 // upgrade 全平台编译：kernel 子模块在移动端返回“不支持”，app 子模块移动端走 APK 流程。
 mod upgrade;
 
@@ -636,16 +637,21 @@ const LOCAL_DAEMON_RPC_PORTAL: &str = "tcp://127.0.0.1:15999";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn init_rpc_connection(
-    _app: AppHandle,
-    _is_normal_mode: bool,
+    app: AppHandle,
+    is_normal_mode: bool,
     url: Option<String>,
 ) -> Result<(), String> {
-    // normal 模式不再在 GUI 进程内跑实例，统一连本地内核守护进程；
-    // remote 模式由前端传入显式地址。
-    let client_url = url
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| LOCAL_DAEMON_RPC_PORTAL.to_string());
+    // normal：拉起**用户态**内核子进程（随 GUI 退出）；service/remote：连已有地址。
+    let explicit = url.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let client_url = match explicit {
+        Some(url) => url,
+        None if is_normal_mode => {
+            let portal = crate::supervisor::ensure(&app)
+                .map_err(|e| format!("启动普通模式内核失败: {e:#}"))?;
+            format!("tcp://{portal}")
+        }
+        None => LOCAL_DAEMON_RPC_PORTAL.to_string(),
+    };
 
     // 注意：连接期间**不能**持有 CLIENT_MANAGER 写锁。
     // 历史 bug：这里先拿锁再 connect(5s)，期间其它命令读锁全部超时，
@@ -3976,6 +3982,42 @@ async fn ensure_kernel_service(
     Ok("installed".to_string())
 }
 
+/// 普通模式只需要**内核二进制**：不安装系统服务，也不碰 helper。
+/// 这是唯一需要一次提权的步骤（之后普通模式子进程以用户身份运行）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn ensure_kernel_only(app: AppHandle) -> Result<String, String> {
+    let want = crate::BUILD_VERSION;
+    let need = !kernel::is_installed() || kernel::installed_version().as_deref() != Some(want);
+    if !need {
+        return Ok("current".to_string());
+    }
+    let src = kernel::bundled_kernel(&app).ok_or_else(|| {
+        format!(
+            "未找到随包内核（{}）。请确认安装包完整。",
+            kernel::kernel_bin_name()
+        )
+    })?;
+    let payload = ProvisionPayload {
+        kernel_src: Some(src.display().to_string()),
+        kernel_version: want.to_string(),
+        service: None,
+        helper_src: None,
+        owner_uid: helper::current_uid(),
+    };
+    let json =
+        serde_json::to_string(&payload).map_err(|e| logger::other("cmd:ensure_kernel_only", e))?;
+    logger::record("provision", "kernel=true service=false (normal mode)");
+    run_elevated(&["--provision", &json])?;
+    Ok("installed".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn ensure_kernel_only(_app: AppHandle) -> Result<String, String> {
+    Ok("current".to_string())
+}
+
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
 async fn ensure_kernel_service(
@@ -4639,6 +4681,7 @@ pub fn run_gui() -> std::process::ExitCode {
             get_network_metas,
             init_service,
             ensure_kernel_service,
+            ensure_kernel_only,
             kernel_update_info,
             app_update_info,
             app_download_update,
@@ -4689,7 +4732,17 @@ pub fn run_gui() -> std::process::ExitCode {
         .build(tauri::generate_context!())
         .unwrap();
 
-    app.run(|_app, _event| {});
+    app.run(|_app, event| {
+        // 普通模式内核随 GUI 退出：正常退出时主动 kill（崩溃场景由
+        // Linux 的 PR_SET_PDEATHSIG / 后续 helper、supervisor 兜底）。
+        if matches!(event, tauri::RunEvent::Exit) {
+            crate::supervisor::stop();
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            if let Ok(log_dir) = get_log_dir(_app) {
+                crate::diagnostics::mark_clean_exit(&log_dir);
+            }
+        }
+    });
 
     std::process::ExitCode::SUCCESS
 }

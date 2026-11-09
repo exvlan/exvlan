@@ -227,6 +227,28 @@ pub fn install_kernel(src: &Path, version: &str) -> anyhow::Result<()> {
 
     verify_root_owned(&kernel_path())?;
 
+    #[cfg(target_os = "linux")]
+    {
+        // 普通模式（用户态子进程）要能建 TUN：给内核二进制授予
+        // CAP_NET_ADMIN / CAP_NET_RAW。每次替换内核后都要重做（新 inode 不继承旧 capability）。
+        match std::process::Command::new("setcap")
+            .args(["cap_net_admin,cap_net_raw+ep"])
+            .arg(kernel_path())
+            .status()
+        {
+            Ok(status) if status.success() => {
+                crate::logger::record("kernel.setcap", "cap_net_admin,cap_net_raw granted");
+            }
+            Ok(status) => {
+                crate::logger::record("kernel.setcap", format!("setcap exited with {status}"))
+            }
+            Err(err) => crate::logger::record(
+                "kernel.setcap",
+                format!("setcap 不可用（普通模式 TUN 将需要提权）: {err}"),
+            ),
+        }
+    }
+
     Ok(())
 }
 
