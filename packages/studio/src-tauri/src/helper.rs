@@ -280,6 +280,54 @@ mod imp {
         Ok(())
     }
 
+    /// helper 的运行时 socket（与 helper 侧常量保持一致）。
+    pub const SOCKET_PATH: &str = "/var/run/era.exvlan.studio/helper.sock";
+
+    fn socket_request(op: &str, extra: serde_json::Value) -> Result<String, String> {
+        use std::io::{BufRead as _, BufReader, Write as _};
+        let mut stream = std::os::unix::net::UnixStream::connect(SOCKET_PATH)
+            .map_err(|e| format!("连接 helper socket 失败: {e}"))?;
+        let mut body = serde_json::json!({ "op": op });
+        if let (Some(obj), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
+            for (k, v) in extra {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        writeln!(stream, "{body}").map_err(|e| format!("发送请求失败: {e}"))?;
+        let mut line = String::new();
+        BufReader::new(stream)
+            .read_line(&mut line)
+            .map_err(|e| format!("读取响应失败: {e}"))?;
+        let resp: serde_json::Value =
+            serde_json::from_str(line.trim()).map_err(|e| format!("解析响应失败: {e}"))?;
+        if resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+            Ok(resp
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string())
+        } else {
+            Err(resp
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("helper 返回失败")
+                .to_string())
+        }
+    }
+
+    /// 让 root helper 以**普通模式**启动内核，并随 GUI（`parent_pid`）退出。
+    pub fn spawn_kernel(args: &[String], parent_pid: u32) -> Result<String, String> {
+        socket_request(
+            "spawn",
+            serde_json::json!({ "args": args, "parent_pid": parent_pid }),
+        )
+    }
+
+    /// 停止由 helper 托管的内核。
+    pub fn kill_kernel() -> Result<String, String> {
+        socket_request("kill", serde_json::json!({}))
+    }
+
     /// 安装后健康检查：轮询 `--status`（socket 连通即视为健康）。
     ///
     /// 刚 bootstrap 完的几百毫秒内 socket 还没 bind，`--status` 会报
@@ -378,11 +426,20 @@ mod imp {
     }
 
     pub fn verify_healthy(_timeout: std::time::Duration) {}
+
+    pub fn spawn_kernel(_args: &[String], _parent_pid: u32) -> Result<String, String> {
+        Err("helper 仅 macOS 支持".to_string())
+    }
+
+    pub fn kill_kernel() -> Result<String, String> {
+        Ok("noop".to_string())
+    }
 }
 
 #[allow(unused_imports)]
 pub use imp::{
-    apply_bundled, bundled_helper, install_from, is_installed, is_ready, status, verify_healthy,
+    apply_bundled, bundled_helper, install_from, is_installed, is_ready, kill_kernel, spawn_kernel,
+    status, verify_healthy,
 };
 
 /// 当前进程 uid（供提权安装使用）。

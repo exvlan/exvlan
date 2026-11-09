@@ -3544,6 +3544,12 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
         }
     }
 
+    if args.first().map(String::as_str) == Some("--kernel-supervisor") {
+        return Some(std::process::ExitCode::from(
+            crate::supervisor::run_supervisor() as u8,
+        ));
+    }
+
     let code = match args.first().map(|s| s.as_str()) {
         Some("--elevate-selftest") => {
             report(
@@ -3713,6 +3719,13 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
     // 替换内核二进制前必须先停服务：Windows 上运行中的 exe/dll 被文件锁占用，
     // rename 会直接失败；Unix 上虽然允许覆盖，但运行中的进程仍在跑旧镜像。
     let stopped_for_kernel = req.kernel_src.is_some() && stop_service_if_running();
+
+    // Windows：普通模式的高权限启动器（计划任务）。每次 provision 都幂等更新，
+    // 保证「只选普通模式、没装服务」的用户也有零 UAC 的 TUN 能力。
+    #[cfg(windows)]
+    if let Err(err) = crate::supervisor::ensure_supervisor_task() {
+        crate::logger::record("normal.task", format!("ensure failed: {err:#}"));
+    }
 
     let result = (|| -> anyhow::Result<()> {
         if let Some(src) = req.kernel_src.as_deref() {

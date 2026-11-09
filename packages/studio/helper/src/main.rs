@@ -105,7 +105,16 @@ struct Request {
     op: String,
     #[serde(default)]
     staging: Option<String>,
+    /// `spawn`：内核命令行参数（不含程序路径）。
+    #[serde(default)]
+    args: Option<Vec<String>>,
+    /// `spawn`：调用方 pid，用于随父退出。
+    #[serde(default)]
+    parent_pid: Option<u32>,
 }
+
+/// 当前由 helper 托管的内核 pid（普通模式）。
+static KERNEL_PID: std::sync::Mutex<Option<i32>> = std::sync::Mutex::new(None);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Response {
@@ -124,14 +133,20 @@ fn main() -> ExitCode {
         Some("--apply") => client(Request {
             op: "apply".into(),
             staging: args.get(1).cloned(),
+            args: None,
+            parent_pid: None,
         }),
         Some("--status") => client(Request {
             op: "status".into(),
             staging: None,
+            args: None,
+            parent_pid: None,
         }),
         Some("--restart-service") => client(Request {
             op: "restart_service".into(),
             staging: None,
+            args: None,
+            parent_pid: None,
         }),
         Some("--version") => {
             println!("{}", HELPER_VERSION);
@@ -333,6 +348,22 @@ fn handle_client(stream: &mut std::os::unix::net::UnixStream) -> anyhow::Result<
                 message: "service restarted".into(),
             })
         }
+        "spawn" => {
+            let args = request.args.unwrap_or_default();
+            let parent = request.parent_pid.unwrap_or(0);
+            let pid = spawn_kernel(&args, parent)?;
+            Ok(Response {
+                ok: true,
+                message: format!("spawned pid={pid}"),
+            })
+        }
+        "kill" => {
+            kill_kernel();
+            Ok(Response {
+                ok: true,
+                message: "killed".into(),
+            })
+        }
         "apply" => {
             let staging = request
                 .staging
@@ -346,6 +377,112 @@ fn handle_client(stream: &mut std::os::unix::net::UnixStream) -> anyhow::Result<
         other => bail!("未知操作: {other}"),
     }
 }
+
+/// 以 root 启动内核（普通模式），并保证父进程退出时一并结束。
+#[cfg(target_os = "macos")]
+fn spawn_kernel(args: &[String], parent_pid: u32) -> anyhow::Result<i32> {
+    use platform::*;
+    use std::process::{Command, Stdio};
+
+    kill_kernel();
+    let binary = format!("{KERNEL_DIR}/{KERNEL_BIN}");
+    if !Path::new(&binary).is_file() {
+        bail!("内核不存在: {binary}");
+    }
+
+    let mut child = Command::new(&binary)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("启动内核失败: {binary}"))?;
+    let pid = child.id() as i32;
+    *KERNEL_PID.lock().unwrap_or_else(|e| e.into_inner()) = Some(pid);
+    hlog!("spawn kernel pid={pid} parent={parent_pid}");
+
+    // 回收子进程（避免僵尸），退出后清空 pid
+    std::thread::spawn(move || {
+        let _ = child.wait();
+        let mut guard = KERNEL_PID.lock().unwrap_or_else(|e| e.into_inner());
+        if *guard == Some(pid) {
+            *guard = None;
+        }
+    });
+
+    if parent_pid > 0 {
+        std::thread::spawn(move || unsafe {
+            // kqueue EVFILT_PROC：父进程退出即收到事件（比轮询实时）
+            let kq = libc::kqueue();
+            if kq < 0 {
+                hlog!("kqueue failed, fallback to polling");
+                poll_parent(parent_pid, pid);
+                return;
+            }
+            let mut change: libc::kevent = std::mem::zeroed();
+            change.ident = parent_pid as libc::uintptr_t;
+            change.filter = libc::EVFILT_PROC;
+            change.flags = libc::EV_ADD | libc::EV_ONESHOT;
+            change.fflags = libc::NOTE_EXIT;
+            libc::kevent(kq, &change, 1, std::ptr::null_mut(), 0, std::ptr::null());
+
+            // 注册前父进程可能已经退出：先探测一次
+            if libc::kill(parent_pid as i32, 0) != 0 {
+                libc::close(kq);
+                kill_pid(pid, "parent already gone");
+                return;
+            }
+
+            let mut event: libc::kevent = std::mem::zeroed();
+            let n = libc::kevent(kq, std::ptr::null(), 0, &mut event, 1, std::ptr::null());
+            libc::close(kq);
+            if n > 0 {
+                kill_pid(pid, "parent exited");
+            }
+        });
+    }
+
+    Ok(pid)
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn poll_parent(parent_pid: u32, pid: i32) {
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if unsafe { libc::kill(parent_pid as i32, 0) } != 0 {
+            kill_pid(pid, "parent exited (poll)");
+            return;
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn kill_pid(pid: i32, reason: &str) {
+    hlog!("{reason}, killing kernel pid={pid}");
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    unsafe {
+        libc::kill(pid, libc::SIGKILL);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn kill_kernel() {
+    let pid = KERNEL_PID.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(pid) = pid {
+        kill_pid(pid, "kill requested");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn spawn_kernel(_args: &[String], _parent_pid: u32) -> anyhow::Result<i32> {
+    bail!("helper spawn 仅 macOS 支持")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn kill_kernel() {}
 
 #[cfg(target_os = "macos")]
 fn recorded_owner_uid() -> Option<u32> {
