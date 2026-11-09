@@ -147,8 +147,8 @@ mod tests {
         // 无特殊字符 → 不加引号
         assert_eq!(quote_arg("--provision"), "--provision");
         assert_eq!(
-            quote_arg(r"C:\ProgramData\era.exvlan.studio"),
-            r"C:\ProgramData\era.exvlan.studio"
+            quote_arg(r"C:\Apps\era.exvlan.studio"),
+            r"C:\Apps\era.exvlan.studio"
         );
 
         // 含空格 → 加引号
