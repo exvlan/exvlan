@@ -288,6 +288,22 @@ export async function shareErrorLog() {
   return await invoke<string>("share_error_log");
 }
 
+/** helper 当前状态（macOS 特权组件；移动端恒为 ready）。 */
+export interface HelperState {
+  installed: boolean;
+  ready: boolean;
+  status: string;
+}
+
+export async function helperState() {
+  return await invoke<HelperState>("helper_state");
+}
+
+/** 重试安装 helper（会弹一次系统授权）。 */
+export async function retryHelperInstall() {
+  return await invoke<string>("retry_helper_install");
+}
+
 export interface ServiceDefaultDirs {
   config_dir: string;
   file_log_dir: string;

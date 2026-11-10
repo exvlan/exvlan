@@ -43,6 +43,8 @@ import {
   serviceDefaultDirs,
   serviceReinstall,
   shareErrorLog,
+  helperState,
+  retryHelperInstall,
 } from "~/composables/backend";
 
 const { t } = useI18n();
@@ -93,6 +95,63 @@ async function maybeAutoUploadDiag(detail: string) {
   } catch (e) {
     void logDiagStep("auto_upload_failed", String(e).slice(0, 300));
     console.warn("auto upload diagnostics failed", e);
+  }
+}
+
+/**
+ * helper 就绪状态（macOS 特权组件）。缺失时：顶部横幅提示 + 「重试安装」。
+ *
+ * 启动后**后台自动重试一次**（会弹一次系统授权）：大多数情况是上次升级中途退出，
+ * 自动补装即可恢复；失败后不再自动打扰，交给用户手动点。
+ */
+const helperReady = ref(true);
+const helperStatusText = ref("");
+const retryingHelper = ref(false);
+let helperAutoRetried = false;
+
+async function refreshHelperState() {
+  if (type() === "android" || type() === "ios") {
+    return;
+  }
+  try {
+    const st = await helperState();
+    helperReady.value = st.ready;
+    helperStatusText.value = st.status || "";
+    if (!st.ready && !helperAutoRetried) {
+      helperAutoRetried = true;
+      void logDiagStep("helper_auto_retry", st.status.slice(0, 120));
+      void onRetryHelper(true);
+    }
+  } catch {
+    // 读不到状态就当作就绪，避免误报横幅
+    helperReady.value = true;
+  }
+}
+
+async function onRetryHelper(auto = false) {
+  if (retryingHelper.value) {
+    return;
+  }
+  retryingHelper.value = true;
+  try {
+    await retryHelperInstall();
+    toast.add({
+      severity: "success",
+      summary: t("mode.helper"),
+      detail: t("mode.helper_retry_ok"),
+      life: 6000,
+    });
+  } catch (e: any) {
+    void logDiagStep("helper_retry_failed", String(e).slice(0, 300));
+    toast.add({
+      severity: auto ? "warn" : "error",
+      summary: t("mode.helper"),
+      detail: `${t("mode.helper_retry_failed")}: ${String(e)}`,
+      life: 15000,
+    });
+  } finally {
+    retryingHelper.value = false;
+    await refreshHelperState();
   }
 }
 
@@ -768,6 +827,7 @@ onMounted(async () => {
     void maybeAutoUploadDiag(String(e));
   }
   void maybeCheckAppUpdate();
+  void refreshHelperState();
 
   if (type() === "android") {
     setMobileVpnTileActionHandler(handleMobileVpnTileAction);
@@ -1097,6 +1157,25 @@ const configServerConnectionStatus = computed(() => {
         :label="t('client.share_error_log')"
         icon="pi pi-share-alt"
         @click="onShareErrorLog"
+      />
+    </div>
+
+    <div
+      v-if="!helperReady"
+      class="flex items-center gap-2 border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+    >
+      <i class="pi pi-shield" />
+      <span class="flex-1 break-all">
+        {{ t("mode.helper_missing") }}
+        <span v-if="helperStatusText" class="opacity-70">({{ helperStatusText }})</span>
+      </span>
+      <Button
+        size="small"
+        :label="t('mode.helper_retry')"
+        icon="pi pi-refresh"
+        :loading="retryingHelper"
+        :disabled="retryingHelper"
+        @click="onRetryHelper(false)"
       />
     </div>
 

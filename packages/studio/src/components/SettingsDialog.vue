@@ -17,10 +17,39 @@ import {
   serviceDiagnostics,
   serviceReinstall,
   serviceRestart,
+  retryHelperInstall,
   uploadDiagnostics,
 } from "~/composables/backend";
 import { invoke } from "@tauri-apps/api/core";
 import { mobileVpnDiagnostics } from "~/composables/mobile_vpn";
+
+const retryingHelper = ref(false);
+
+/** 重试安装特权组件（macOS）；失败时把原因体现在 toast 里。 */
+async function onRetryHelper() {
+  if (retryingHelper.value) {
+    return;
+  }
+  retryingHelper.value = true;
+  try {
+    await retryHelperInstall();
+    toast.add({
+      severity: "success",
+      summary: t("mode.helper"),
+      detail: t("mode.helper_retry_ok"),
+      life: 6000,
+    });
+  } catch (e: any) {
+    toast.add({
+      severity: "error",
+      summary: t("mode.helper"),
+      detail: `${t("mode.helper_retry_failed")}: ${String(e)}`,
+      life: 15000,
+    });
+  } finally {
+    retryingHelper.value = false;
+  }
+}
 
 /** 手动重试提权前先清掉"已拒绝"标记，否则后端/前端闸门会继续拦。 */
 async function clearElevateDenied() {
@@ -581,6 +610,14 @@ watch(
                 outlined
                 :loading="reinstalling"
                 @click="reinstallService"
+              />
+              <Button
+                :label="t('mode.helper_retry')"
+                size="small"
+                severity="secondary"
+                outlined
+                :loading="retryingHelper"
+                @click="onRetryHelper"
               />
               <Button
                 :label="t('settings.elevate_selftest')"

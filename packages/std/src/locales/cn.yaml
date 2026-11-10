@@ -773,6 +773,11 @@ mode:
   service: 服务模式
   remote: 远程模式
   normal_description: 直接运行EraXVlan，适合本地使用
+  helper: 特权组件（helper）
+  helper_missing: 特权组件未就绪：普通模式的 TUN 不可用（服务模式不受影响）。
+  helper_retry: 重试安装
+  helper_retry_ok: 特权组件已就绪
+  helper_retry_failed: 重试安装失败
   normal_consent: |-
     普通模式需要通过系统特权组件（macOS helper / Windows 计划任务）以管理员身份启动内核，
     以便创建虚拟网卡（TUN）。退出应用时会自动停止该内核，且与「服务模式」互斥。
