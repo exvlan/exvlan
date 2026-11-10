@@ -87,11 +87,19 @@ async function main() {
   });
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event.reason;
-    void reportFrontendError(
-      "fe:promise",
-      reason instanceof Error ? reason.message : String(reason ?? "unhandled rejection"),
-      reason instanceof Error ? reason.stack : undefined,
-    );
+    // Tauri 的 invoke() 失败时 reject 的是**字符串**，不是 Error：
+    // 必须补一个合成 stack，否则日志里只剩一句 message，找不到调用点。
+    const message =
+      reason instanceof Error
+        ? reason.message
+        : typeof reason === "string"
+          ? reason
+          : String(reason ?? "unhandled rejection");
+    const stack =
+      (reason instanceof Error ? reason.stack : undefined) ??
+      `synthetic (reason type=${typeof reason})
+${new Error("unhandledrejection").stack ?? ""}`;
+    void reportFrontendError("fe:promise", message, stack);
   });
   app.config.errorHandler = (err, _instance, info) => {
     console.error(err);

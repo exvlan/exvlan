@@ -714,19 +714,23 @@ fn dns_txt_srv(host: &str) -> String {
             Ok(builder) => builder.build(),
             Err(err) => return format!("TXT/SRV: resolver init failed: {err}\n"),
         };
+        // 每个查询单独 2s 预算：某个域名解析超时不能拖住整包
+        // （实测 Android/Windows 上 hickory 偶发 5s+ 超时）。
+        let query_timeout = Duration::from_secs(2);
         let mut out = String::new();
-        match resolver.txt_lookup(host).await {
-            Ok(lookup) => {
+        match tokio::time::timeout(query_timeout, resolver.txt_lookup(host)).await {
+            Ok(Ok(lookup)) => {
                 let rows: Vec<String> = lookup.iter().map(|r| r.to_string()).collect();
                 if !rows.is_empty() {
                     out.push_str(&format!("TXT: {}\n", rows.join(" | ")));
                 }
             }
-            Err(err) => out.push_str(&format!("TXT: {err}\n")),
+            Ok(Err(err)) => out.push_str(&format!("TXT: {err}\n")),
+            Err(_) => out.push_str("TXT: timeout after 2s\n"),
         }
         let srv_name = format!("_exvlan._tcp.{host}");
-        match resolver.srv_lookup(&srv_name).await {
-            Ok(lookup) => {
+        match tokio::time::timeout(query_timeout, resolver.srv_lookup(&srv_name)).await {
+            Ok(Ok(lookup)) => {
                 let rows: Vec<String> = lookup
                     .iter()
                     .map(|srv| {
@@ -743,7 +747,8 @@ fn dns_txt_srv(host: &str) -> String {
                     out.push_str(&format!("SRV: {}\n", rows.join(" | ")));
                 }
             }
-            Err(err) => out.push_str(&format!("SRV: {err}\n")),
+            Ok(Err(err)) => out.push_str(&format!("SRV: {err}\n")),
+            Err(_) => out.push_str("SRV: timeout after 2s\n"),
         }
         out
     })
@@ -922,8 +927,11 @@ fn list_dir_newest(dir: &Path, limit: usize) -> String {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return "(unreadable)\n".to_string();
     };
+    // WER / CrashDumps 目录可能有上万条，全量 stat 会拖慢整包（实测 6s+）。
+    // 只扫描前 2000 条，足够覆盖“最近几份崩溃报告”。
     let mut items: Vec<(u64, u64, String)> = entries
         .flatten()
+        .take(2000)
         .filter_map(|entry| {
             let meta = entry.metadata().ok()?;
             if !meta.is_file() {
