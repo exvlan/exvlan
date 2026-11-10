@@ -3167,6 +3167,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "exvlan-service"
+version = "26.410.20712"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "libc",
+ "minisign-verify",
+ "serde",
+ "serde_json",
+ "windows-service",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "exvlan-studio"
 version = "26.410.20712"
 dependencies = [

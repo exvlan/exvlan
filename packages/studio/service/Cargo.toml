@@ -1,0 +1,32 @@
+[package]
+name = "exvlan-service"
+version = "26.410.20712"
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../../exvlan/LICENSE"
+description = "EXVlan privileged service: owns the kernel (service/normal mode), applies signed kernel updates over IPC"
+
+[[bin]]
+name = "exvlan-service"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+minisign-verify = "0.3"
+base64.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-service = "0.8.1"
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
+  "Win32_System_Threading",
+] }

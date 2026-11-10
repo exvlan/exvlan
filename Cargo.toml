@@ -8,6 +8,7 @@ members = [
   "exvlan/api",
   "packages/studio/src-tauri",
   "packages/studio/helper",
+  "packages/studio/service",
   "exvlan/contrib/ffi",
   "exvlan/contrib/uptime",
   "exvlan/contrib/android-jni",

@@ -1,0 +1,1224 @@
+//! EXVlan 特权服务（macOS LaunchDaemon / Windows Service）。
+//!
+//! 职责（合并了原 helper 与内核服务）：
+//! 1. 持有内核：service 模式常驻；normal 模式随 GUI session 起停
+//! 2. 应用内核更新：minisign 校验 → 保留上一版 → 失败自动回滚
+//! 3. 通过 IPC 暴露 status / mode / kernel / apply
+//!
+//! 设计要点：模式只是「生命周期策略」，**切换模式不重启内核**；
+//! 配置与端口两模式一致（单一 config、固定 15999）。
+
+#![cfg_attr(
+    not(any(target_os = "macos", target_os = "windows")),
+    allow(dead_code, unused_imports)
+)]
+
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use anyhow::{Context as _, bail};
+use serde::{Deserialize, Serialize};
+
+// ---------------------------------------------------------------------------
+// 常量
+// ---------------------------------------------------------------------------
+
+const SERVICE_LABEL: &str = "era.exvlan.studio.service";
+const MINISIGN_PUBKEY: &str = "RWSFKUboUUaFQYx/ap73a7ySNbuI5kjDGsiVJBtceshu+Ml99YPMFqe9";
+const PROTO: u32 = 1;
+const RPC_PORTAL: &str = "0.0.0.0:15999";
+const RPC_WHITELIST: &str = "10.254.0.0/16";
+const READY_TIMEOUT: Duration = Duration::from_secs(10);
+const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+// ---------------------------------------------------------------------------
+// 路径
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub struct Paths {
+    pub config: PathBuf,
+    pub core: PathBuf,
+    pub logs: PathBuf,
+    pub kernel: PathBuf,
+    pub kernel_prev: PathBuf,
+    pub service_bin: PathBuf,
+    pub service_json: PathBuf,
+    pub service_log: PathBuf,
+}
+
+fn paths() -> Paths {
+    #[cfg(target_os = "macos")]
+    {
+        let data = PathBuf::from("/Library/Application Support/era.exvlan.studio");
+        let logs = PathBuf::from("/Library/Logs/era.exvlan.studio");
+        let core = data.join("core");
+        Paths {
+            config: data.join("config"),
+            kernel: core.join("exvlan"),
+            kernel_prev: core.join("exvlan.prev"),
+            core,
+            service_bin: PathBuf::from("/Library/PrivilegedHelperTools/era.exvlan.studio.service"),
+            service_json: data.join("service.json"),
+            service_log: logs.join("service.log"),
+            logs,
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let data = PathBuf::from(r"C:\ProgramData\era.exvlan.studio");
+        let core = data.join("core");
+        Paths {
+            config: data.join("config"),
+            kernel: core.join("exvlan.exe"),
+            kernel_prev: core.join("exvlan.exe.prev"),
+            core,
+            logs: data.join("logs"),
+            service_bin: data.join("bin").join("exvlan-service.exe"),
+            service_json: data.join("service.json"),
+            service_log: data.join("logs").join("service.log"),
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let data = PathBuf::from("/var/lib/era.exvlan.studio");
+        let core = data.join("core");
+        Paths {
+            config: data.join("config"),
+            kernel: core.join("exvlan"),
+            kernel_prev: core.join("exvlan.prev"),
+            core,
+            logs: PathBuf::from("/var/log/era.exvlan.studio"),
+            service_bin: PathBuf::from("/usr/local/bin/exvlan-service"),
+            service_json: data.join("service.json"),
+            service_log: PathBuf::from("/var/log/era.exvlan.studio/service.log"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 配置与状态
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    #[default]
+    Service,
+    Normal,
+    Off,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ServiceConfig {
+    #[serde(default)]
+    pub owner_uid: u32,
+    #[serde(default)]
+    pub mode: Mode,
+}
+
+impl Default for ServiceConfig {
+    fn default() -> Self {
+        Self {
+            owner_uid: 0,
+            mode: Mode::Service,
+        }
+    }
+}
+
+fn load_config(p: &Paths) -> ServiceConfig {
+    std::fs::read_to_string(&p.service_json)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+fn save_config(p: &Paths, cfg: &ServiceConfig) -> anyhow::Result<()> {
+    if let Some(dir) = p.service_json.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    let text = serde_json::to_string_pretty(cfg)?;
+    std::fs::write(&p.service_json, text)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(&p.service_json, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 日志（自轮转 8MB × 2）
+// ---------------------------------------------------------------------------
+
+fn log_line(p: &Paths, msg: &str) {
+    use std::io::Write as _;
+    let line = format!("{}\n", format_line(msg));
+    if let Some(dir) = p.service_log.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(meta) = std::fs::metadata(&p.service_log)
+        && meta.len() > 8 * 1024 * 1024
+    {
+        let backup = p.service_log.with_extension("log.1");
+        let _ = std::fs::remove_file(&backup);
+        let _ = std::fs::rename(&p.service_log, &backup);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&p.service_log)
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
+    eprint!("{line}");
+}
+
+fn format_line(msg: &str) -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // 只保留到秒的 UTC 时间，够用且不引依赖。
+    format!("{secs} [service] {msg}")
+}
+
+// ---------------------------------------------------------------------------
+// 协议
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct Request {
+    #[serde(default)]
+    proto: u32,
+    op: String,
+    #[serde(default)]
+    mode: Option<Mode>,
+    #[serde(default)]
+    staging: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct KernelInfo {
+    pid: u32,
+    running: bool,
+    rpc: String,
+}
+
+#[derive(Debug, Serialize)]
+struct Response {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proto: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mode: Option<Mode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kernel: Option<KernelInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+impl Response {
+    fn ok() -> Self {
+        Self {
+            ok: true,
+            proto: None,
+            service: None,
+            mode: None,
+            kernel: None,
+            code: None,
+            message: None,
+        }
+    }
+    fn err(code: &str, message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            proto: None,
+            service: None,
+            mode: None,
+            kernel: None,
+            code: Some(code.to_string()),
+            message: Some(message.into()),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 内核生命周期
+// ---------------------------------------------------------------------------
+
+struct Inner {
+    child: Option<Child>,
+    mode: Mode,
+    config: ServiceConfig,
+    sessions: usize,
+}
+
+pub struct State {
+    paths: Paths,
+    inner: Mutex<Inner>,
+}
+
+impl State {
+    fn new(paths: Paths) -> Self {
+        let config = load_config(&paths);
+        let mode = config.mode;
+        Self {
+            paths,
+            inner: Mutex::new(Inner {
+                child: None,
+                mode,
+                config,
+                sessions: 0,
+            }),
+        }
+    }
+
+    fn log(&self, msg: impl AsRef<str>) {
+        log_line(&self.paths, msg.as_ref());
+    }
+
+    fn kernel_pid(&self) -> u32 {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        take_pid(&mut guard)
+    }
+
+    fn kernel_args(&self) -> Vec<String> {
+        vec![
+            "--config-dir".into(),
+            self.paths.config.display().to_string(),
+            "--rpc-portal".into(),
+            RPC_PORTAL.into(),
+            "--rpc-portal-whitelist".into(),
+            RPC_WHITELIST.into(),
+            "--file-log-dir".into(),
+            self.paths.logs.display().to_string(),
+            "--file-log-level".into(),
+            "info".into(),
+            "--file-log-size".into(),
+            "16".into(),
+            "--file-log-count".into(),
+            "3".into(),
+            "--console-log-level".into(),
+            "off".into(),
+        ]
+    }
+
+    fn ensure_kernel(&self) -> anyhow::Result<KernelInfo> {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(child) = guard.child.as_mut() {
+            match child.try_wait() {
+                Ok(None) => {
+                    return Ok(KernelInfo {
+                        pid: child.id(),
+                        running: true,
+                        rpc: "127.0.0.1:15999".into(),
+                    });
+                }
+                _ => {
+                    guard.child = None;
+                }
+            }
+        }
+
+        if !self.paths.kernel.is_file() {
+            bail!("内核不存在: {}", self.paths.kernel.display());
+        }
+        std::fs::create_dir_all(&self.paths.config).ok();
+        std::fs::create_dir_all(&self.paths.logs).ok();
+
+        let mut cmd = Command::new(&self.paths.kernel);
+        cmd.args(self.kernel_args())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let child = cmd
+            .spawn()
+            .with_context(|| format!("启动内核失败: {}", self.paths.kernel.display()))?;
+        let pid = child.id();
+        guard.child = Some(child);
+        drop(guard);
+        self.log(format!("kernel spawned pid={pid}"));
+
+        if let Err(err) = wait_rpc_ready(READY_TIMEOUT) {
+            self.log(format!("kernel not ready: {err}"));
+            self.stop_kernel().ok();
+            bail!("kernel start failed: {err}");
+        }
+
+        Ok(KernelInfo {
+            pid,
+            running: true,
+            rpc: "127.0.0.1:15999".into(),
+        })
+    }
+
+    fn stop_kernel(&self) -> anyhow::Result<()> {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut child) = guard.child.take() else {
+            return Ok(());
+        };
+        let pid = child.id();
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+        #[cfg(windows)]
+        {
+            let _ = child.kill();
+        }
+        for _ in 0..50 {
+            if let Ok(Some(_)) = child.try_wait() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(guard);
+        self.log(format!("kernel stopped pid={pid}"));
+        Ok(())
+    }
+
+    fn set_mode(&self, mode: Mode) -> anyhow::Result<()> {
+        {
+            let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.mode == mode {
+                // 模式没变：只确保该在跑的在跑。
+                if mode != Mode::Off && guard.child.is_none() {
+                    drop(guard);
+                    self.ensure_kernel()?;
+                }
+                return Ok(());
+            }
+            guard.mode = mode;
+            guard.config.mode = mode;
+            let cfg = guard.config.clone();
+            // 持久化在锁外做，避免阻塞其它请求。
+            drop(guard);
+            save_config(&self.paths, &cfg)?;
+        }
+        self.log(format!("mode set to {mode:?}"));
+        match mode {
+            Mode::Off => self.stop_kernel()?,
+            // service ↔ normal：**不重启内核**，只改变“断开是否停”的策略。
+            Mode::Service | Mode::Normal => {
+                if self.kernel_pid() == 0 {
+                    self.ensure_kernel()?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn apply(&self, staging: &Path) -> anyhow::Result<()> {
+        verify_staging(staging)?;
+        let new_kernel = staging.join("kernel");
+        let new_sig = staging.join("kernel.sig");
+        verify_minisign(&new_kernel, &new_sig)?;
+
+        let version = std::fs::read_to_string(staging.join("version"))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+
+        if let Some(dir) = self.paths.kernel.parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        // 保留上一版，失败可回滚。
+        if self.paths.kernel.is_file() {
+            let _ = std::fs::remove_file(&self.paths.kernel_prev);
+            std::fs::rename(&self.paths.kernel, &self.paths.kernel_prev)
+                .context("备份当前内核失败")?;
+        }
+        std::fs::copy(&new_kernel, &self.paths.kernel).context("安装新内核失败")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = std::fs::set_permissions(
+                &self.paths.kernel,
+                std::fs::Permissions::from_mode(0o755),
+            );
+            chown_root(&self.paths.kernel);
+        }
+        if !version.is_empty() {
+            let _ = std::fs::write(self.paths.kernel.with_file_name("version"), &version);
+        }
+        self.log(format!("kernel installed {version}"));
+
+        let was_running = self.kernel_pid() != 0;
+        if was_running {
+            self.stop_kernel()?;
+            if let Err(err) = self.ensure_kernel() {
+                self.log(format!("new kernel failed ({err}), rolling back"));
+                let _ = std::fs::remove_file(&self.paths.kernel);
+                if self.paths.kernel_prev.is_file() {
+                    std::fs::rename(&self.paths.kernel_prev, &self.paths.kernel).ok();
+                }
+                self.ensure_kernel().ok();
+                return Err(anyhow::anyhow!("kernel_rollback: {err}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn status(&self) -> Response {
+        let pid = self.kernel_pid();
+        let mode = self.inner.lock().unwrap_or_else(|e| e.into_inner()).mode;
+        let mut resp = Response::ok();
+        resp.mode = Some(mode);
+        resp.kernel = Some(KernelInfo {
+            pid,
+            running: pid != 0,
+            rpc: "127.0.0.1:15999".into(),
+        });
+        resp
+    }
+
+    fn handle(&self, req: Request) -> Response {
+        match req.op.as_str() {
+            "hello" => {
+                let mut r = Response::ok();
+                r.proto = Some(PROTO);
+                r.service = Some(env!("CARGO_PKG_VERSION").to_string());
+                r
+            }
+            "ping" => Response::ok(),
+            "status" => self.status(),
+            "mode.get" => {
+                let mut r = Response::ok();
+                r.mode = Some(self.inner.lock().unwrap_or_else(|e| e.into_inner()).mode);
+                r
+            }
+            "mode.set" => match req.mode {
+                Some(mode) => match self.set_mode(mode) {
+                    Ok(()) => self.status(),
+                    Err(err) => Response::err("mode_failed", err.to_string()),
+                },
+                None => Response::err("bad_request", "mode 缺失"),
+            },
+            "kernel.ensure" => match self.ensure_kernel() {
+                Ok(info) => {
+                    let mut r = self.status();
+                    r.kernel = Some(info);
+                    r
+                }
+                Err(err) => Response::err("kernel_start_failed", err.to_string()),
+            },
+            "kernel.stop" => match self.stop_kernel() {
+                Ok(()) => self.status(),
+                Err(err) => Response::err("internal", err.to_string()),
+            },
+            "apply" => match req.staging.as_deref() {
+                Some(dir) => match self.apply(Path::new(dir)) {
+                    Ok(()) => self.status(),
+                    Err(err) => {
+                        let msg = err.to_string();
+                        let code = if msg.contains("kernel_rollback") {
+                            "kernel_rollback"
+                        } else {
+                            "apply_failed"
+                        };
+                        Response::err(code, msg)
+                    }
+                },
+                None => Response::err("bad_request", "staging 缺失"),
+            },
+            other => Response::err("bad_request", format!("未知操作: {other}")),
+        }
+    }
+
+    // ---- session（normal 模式的存活锚点） ----
+
+    fn session_open(&self) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .sessions += 1;
+    }
+
+    fn session_close(&self) {
+        let stop = {
+            let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            guard.sessions = guard.sessions.saturating_sub(1);
+            guard.sessions == 0 && guard.mode == Mode::Normal && guard.child.is_some()
+        };
+        if stop {
+            self.log("last session closed in normal mode → stop kernel");
+            let _ = self.stop_kernel();
+        }
+    }
+}
+
+fn take_pid(inner: &mut Inner) -> u32 {
+    match inner.child.as_mut() {
+        Some(child) => match child.try_wait() {
+            Ok(None) => child.id(),
+            _ => {
+                inner.child = None;
+                0
+            }
+        },
+        None => 0,
+    }
+}
+
+fn wait_rpc_ready(timeout: Duration) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:15999".parse().unwrap(),
+            Duration::from_millis(200),
+        )
+        .is_ok()
+        {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    bail!("rpc 端口 {timeout:?} 内未就绪")
+}
+
+#[cfg(unix)]
+fn chown_root(path: &Path) {
+    use std::os::unix::ffi::OsStrExt as _;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return;
+    };
+    unsafe {
+        libc::chown(c.as_ptr(), 0, 0);
+    }
+}
+#[cfg(not(unix))]
+fn chown_root(_path: &Path) {}
+
+// ---------------------------------------------------------------------------
+// staging / 签名
+// ---------------------------------------------------------------------------
+
+fn verify_staging(dir: &Path) -> anyhow::Result<()> {
+    let meta = std::fs::metadata(dir).context("staging 不存在")?;
+    if !meta.is_dir() {
+        bail!("staging 不是目录");
+    }
+    for name in ["kernel", "kernel.sig"] {
+        if !dir.join(name).is_file() {
+            bail!("staging 缺少 {name}");
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        if meta.mode() & 0o022 != 0 {
+            bail!("staging 可被 group/other 写，拒绝执行");
+        }
+    }
+    Ok(())
+}
+
+fn verify_minisign(file: &Path, signature: &Path) -> anyhow::Result<()> {
+    let public_key =
+        minisign_verify::PublicKey::from_base64(MINISIGN_PUBKEY).context("解析内置公钥失败")?;
+    let signature_text = std::fs::read_to_string(signature)?;
+    let decoded = decode_signature_text(&signature_text);
+    let signature = minisign_verify::Signature::decode(&decoded).context("解析签名文件失败")?;
+    let data = std::fs::read(file)?;
+    public_key
+        .verify(&data, &signature, false)
+        .or_else(|_| public_key.verify(&data, &signature, true))
+        .context("签名不匹配")?;
+    Ok(())
+}
+
+fn decode_signature_text(text: &str) -> String {
+    use base64::Engine as _;
+    let trimmed = text.trim();
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(trimmed) else {
+        return trimmed.to_string();
+    };
+    String::from_utf8(bytes).unwrap_or_else(|_| trimmed.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// 入口
+// ---------------------------------------------------------------------------
+
+fn main() -> anyhow::Result<()> {
+    let p = paths();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("--daemon") => run_daemon(p),
+        Some("--install") => {
+            let uid = args.get(1).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+            install(&p, uid)
+        }
+        Some("--uninstall") => uninstall(&p),
+        Some("--status") => {
+            println!("{}", serde_json::to_string_pretty(&load_config(&p))?);
+            Ok(())
+        }
+        Some("--diagnose") => diagnose(&p),
+        Some("--replace-updater") => {
+            #[cfg(target_os = "windows")]
+            {
+                return replace_updater(&p, args.get(1).map(String::as_str));
+            }
+            #[allow(unreachable_code)]
+            Ok(())
+        }
+        _ => {
+            eprintln!(
+                "usage: exvlan-service --daemon | --install <uid> | --uninstall | --status | --diagnose"
+            );
+            std::process::exit(2);
+        }
+    }
+}
+
+fn run_daemon(p: Paths) -> anyhow::Result<()> {
+    let state = Arc::new(State::new(p.clone()));
+    log_line(&p, &format!("daemon start pid={}", std::process::id()));
+
+    // 服务启动时按持久化 mode 决定是否拉起内核。
+    let mode = state.inner.lock().unwrap_or_else(|e| e.into_inner()).mode;
+    match mode {
+        Mode::Service => {
+            if let Err(err) = state.ensure_kernel() {
+                state.log(format!("boot ensure_kernel failed: {err}"));
+            }
+        }
+        Mode::Normal | Mode::Off => state.log(format!("boot mode={mode:?}: 不自动启动内核")),
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        serve_unix(state)?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        win::run()?;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = state;
+        bail!("exvlan-service 只在 macOS/Windows 上运行");
+    }
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 平台：macOS / Linux（unix socket + peercred）
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+fn socket_path() -> PathBuf {
+    PathBuf::from("/var/run/era.exvlan.studio/service.sock")
+}
+
+#[cfg(unix)]
+fn serve_unix(state: Arc<State>) -> anyhow::Result<()> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::{UnixListener, UnixStream};
+
+    let path = socket_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).context("bind unix socket 失败")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660));
+        chown_root(&path);
+    }
+    state.log(format!("listening on {}", path.display()));
+
+    for stream in listener.incoming() {
+        let Ok(stream) = stream else { continue };
+        if !peer_allowed(&stream, &state) {
+            state.log("rejected: peer uid mismatch");
+            continue;
+        }
+        let state = state.clone();
+        state.session_open();
+        std::thread::spawn(move || {
+            handle_unix_conn(&state, stream);
+            state.session_close();
+        });
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn peer_allowed(stream: &std::os::unix::net::UnixStream, state: &State) -> bool {
+    use std::os::unix::io::AsRawFd as _;
+    let expected = state
+        .inner
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .config
+        .owner_uid;
+    if expected == 0 {
+        return true; // 未记录 owner（首装前）：放行，安装时一定写入
+    }
+    let mut uid: libc::uid_t = 0;
+    #[allow(unused_mut, unused_variables)]
+    let mut gid: libc::gid_t = 0;
+    #[cfg(target_os = "macos")]
+    let ok = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) == 0 };
+    #[cfg(not(target_os = "macos"))]
+    let ok = unsafe {
+        let mut cred: libc::ucred = std::mem::zeroed();
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut _ as *mut libc::c_void,
+            &mut len,
+        ) == 0
+            && {
+                uid = cred.uid;
+                true
+            }
+    };
+    ok && (uid == expected || uid == 0)
+}
+
+#[cfg(unix)]
+fn handle_unix_conn(state: &State, stream: std::os::unix::net::UnixStream) {
+    use std::io::{BufRead, BufReader, Write};
+    let mut reader = BufReader::new(match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    });
+    let mut writer = stream;
+    let mut last = Instant::now();
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        last = Instant::now();
+        let req: Request = match serde_json::from_str(line.trim()) {
+            Ok(r) => r,
+            Err(err) => {
+                let resp = Response::err("bad_request", err.to_string());
+                let _ = writeln!(
+                    writer,
+                    "{}",
+                    serde_json::to_string(&resp).unwrap_or_default()
+                );
+                continue;
+            }
+        };
+        if req.proto != 0 && req.proto != PROTO {
+            let resp = Response::err("proto_mismatch", format!("service proto={PROTO}"));
+            let _ = writeln!(
+                writer,
+                "{}",
+                serde_json::to_string(&resp).unwrap_or_default()
+            );
+            continue;
+        }
+        let resp = state.handle(req);
+        let _ = writeln!(
+            writer,
+            "{}",
+            serde_json::to_string(&resp).unwrap_or_default()
+        );
+    }
+    let _ = last;
+}
+
+// ---------------------------------------------------------------------------
+// 平台：Windows（命名管道 + 服务控制）
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "windows")]
+mod win {
+    use super::*;
+    use windows_service::define_windows_service;
+    use windows_service::service_dispatcher;
+
+    define_windows_service!(ffi_service_main, service_main);
+
+    pub fn run() -> anyhow::Result<()> {
+        service_dispatcher::start("era.exvlan.studio.service", ffi_service_main)
+            .context("启动 Windows 服务失败")?;
+        Ok(())
+    }
+
+    fn service_main(_args: Vec<std::ffi::OsString>) {
+        let state = Arc::new(State::new(paths()));
+        state.log("windows service start");
+        if let Err(err) = pipe_loop(state.clone()) {
+            state.log(format!("pipe loop exited: {err}"));
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
+    use windows_sys::Win32::Foundation::*;
+    use windows_sys::Win32::Storage::FileSystem::*;
+    use windows_sys::Win32::System::Pipes::*;
+
+    let name: Vec<u16> = "\\\\.\\pipe\\era.exvlan.studio.service\0"
+        .encode_utf16()
+        .collect();
+    loop {
+        let handle = unsafe {
+            CreateNamedPipeW(
+                name.as_ptr(),
+                PIPE_ACCESS_DUPLEX,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_UNLIMITED_INSTANCES,
+                64 * 1024,
+                64 * 1024,
+                0,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+        let connected = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) } != 0
+            || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
+        if connected {
+            state.session_open();
+            let st = state.clone();
+            std::thread::spawn(move || {
+                handle_pipe_conn(&st, handle);
+                st.session_close();
+                unsafe {
+                    DisconnectNamedPipe(handle);
+                    CloseHandle(handle);
+                }
+            });
+        } else {
+            unsafe {
+                CloseHandle(handle);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn handle_pipe_conn(state: &State, handle: windows_sys::Win32::Foundation::HANDLE) {
+    use windows_sys::Win32::Foundation::*;
+    use windows_sys::Win32::Storage::FileSystem::*;
+
+    let mut buf = [0u8; 4096];
+    let mut pending = String::new();
+    loop {
+        let mut read = 0u32;
+        let ok = unsafe {
+            ReadFile(
+                handle,
+                buf.as_mut_ptr() as *mut _,
+                buf.len() as u32,
+                &mut read,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 || read == 0 {
+            break;
+        }
+        pending.push_str(&String::from_utf8_lossy(&buf[..read as usize]));
+        while let Some(pos) = pending.find('\n') {
+            let line: String = pending.drain(..=pos).collect();
+            let req: Request = match serde_json::from_str(line.trim()) {
+                Ok(r) => r,
+                Err(err) => {
+                    let resp = Response::err("bad_request", err.to_string());
+                    write_pipe(handle, &resp);
+                    continue;
+                }
+            };
+            let resp = state.handle(req);
+            write_pipe(handle, &resp);
+        }
+        let _ = read;
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn write_pipe(handle: windows_sys::Win32::Foundation::HANDLE, resp: &Response) {
+    use windows_sys::Win32::Storage::FileSystem::WriteFile;
+    let mut line = serde_json::to_string(resp).unwrap_or_default();
+    line.push('\n');
+    let mut written = 0u32;
+    unsafe {
+        WriteFile(
+            handle,
+            line.as_ptr() as *const _,
+            line.len() as u32,
+            &mut written,
+            std::ptr::null_mut(),
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 安装 / 卸载
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
+fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let src = std::env::current_exe()?;
+    let plist = Path::new("/Library/LaunchDaemons/era.exvlan.studio.service.plist");
+    std::fs::create_dir_all(p.service_bin.parent().unwrap()).ok();
+    std::fs::create_dir_all(p.logs.parent().unwrap_or(&p.logs)).ok();
+    std::fs::copy(&src, &p.service_bin)?;
+    std::fs::set_permissions(&p.service_bin, std::fs::Permissions::from_mode(0o755))?;
+    chown_root(&p.service_bin);
+
+    let body = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{SERVICE_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{bin}</string>
+    <string>--daemon</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>{log}</string>
+  <key>StandardErrorPath</key><string>{log}</string>
+</dict>
+</plist>
+"#,
+        bin = p.service_bin.display(),
+        log = p.service_log.display()
+    );
+    std::fs::write(plist, body)?;
+    std::fs::set_permissions(plist, std::fs::Permissions::from_mode(0o644))?;
+    chown_root(plist);
+
+    let cfg = ServiceConfig {
+        owner_uid: uid,
+        mode: load_config(p).mode,
+    };
+    save_config(p, &cfg)?;
+
+    let _ = Command::new("/bin/launchctl")
+        .args(["bootout", &format!("system/{SERVICE_LABEL}")])
+        .output();
+    let _ = Command::new("/bin/launchctl")
+        .args(["enable", &format!("system/{SERVICE_LABEL}")])
+        .output();
+    let out = Command::new("/bin/launchctl")
+        .args(["bootstrap", "system", &plist.display().to_string()])
+        .output()?;
+    if !out.status.success() {
+        bail!(
+            "bootstrap 失败: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    // 等 socket 就绪（≤10s）
+    for _ in 0..50 {
+        if socket_path().exists() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    bail!("服务已加载但 socket 未就绪")
+}
+
+#[cfg(target_os = "windows")]
+fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
+    use windows_service::service::{
+        ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType, ServiceType,
+    };
+    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    let src = std::env::current_exe()?;
+    if let Some(dir) = p.service_bin.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    std::fs::copy(&src, &p.service_bin)?;
+
+    let manager = ServiceManager::local_computer(
+        None::<&str>,
+        ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
+    )?;
+    let info = ServiceInfo {
+        name: windows_service::service::ServiceName::new("era.exvlan.studio.service")?,
+        display_name: windows_service::service::ServiceName::new("Exvlan Service")?,
+        service_type: ServiceType::OWN_PROCESS,
+        start_type: ServiceStartType::AutoStart,
+        error_control: ServiceErrorControl::Normal,
+        executable_path: p.service_bin.clone(),
+        launch_arguments: vec!["--daemon".into()],
+        dependencies: vec![],
+        account_name: None,
+        account_password: None,
+    };
+    let service = manager
+        .create_service(&info, ServiceAccess::START | ServiceAccess::CHANGE_CONFIG)
+        .or_else(|_| manager.open_service(&info.name, ServiceAccess::START))?;
+    service.start(&[] as &[&std::ffi::OsStr]).ok();
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
+    let Some(new_exe) = new_exe else {
+        bail!("--replace-updater 需要新二进制路径");
+    };
+    // 等主服务退出（≤30s）
+    for _ in 0..150 {
+        let out = Command::new("sc")
+            .args(["query", "era.exvlan.studio.service"])
+            .output()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        if text.contains("STOPPED") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let backup = p.service_bin.with_extension("exe.prev");
+    if p.service_bin.is_file() {
+        let _ = std::fs::copy(&p.service_bin, &backup);
+    }
+    std::fs::copy(new_exe, &p.service_bin)?;
+    let start = Command::new("sc")
+        .args(["start", "era.exvlan.studio.service"])
+        .output()?;
+    if !start.status.success() {
+        // 回滚
+        let _ = std::fs::copy(&backup, &p.service_bin);
+        let _ = Command::new("sc")
+            .args(["start", "era.exvlan.studio.service"])
+            .output();
+        bail!("替换后启动失败，已回滚");
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn install(_p: &Paths, _uid: u32) -> anyhow::Result<()> {
+    bail!("exvlan-service 只在 macOS/Windows 上安装")
+}
+
+fn uninstall(_p: &Paths) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("/bin/launchctl")
+            .args(["bootout", &format!("system/{SERVICE_LABEL}")])
+            .output();
+        let _ = std::fs::remove_file("/Library/LaunchDaemons/era.exvlan.studio.service.plist");
+        let _ = std::fs::remove_file(&_p.service_bin);
+        return Ok(());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("sc")
+            .args(["stop", "era.exvlan.studio.service"])
+            .output();
+        let _ = Command::new("sc")
+            .args(["delete", "era.exvlan.studio.service"])
+            .output();
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 诊断
+// ---------------------------------------------------------------------------
+
+fn diagnose(p: &Paths) -> anyhow::Result<()> {
+    let mut out = String::new();
+    out.push_str(&format!("service: {}\n", env!("CARGO_PKG_VERSION")));
+    out.push_str(&format!(
+        "config: {}\n",
+        serde_json::to_string(&load_config(p)).unwrap_or_default()
+    ));
+    out.push_str(&format!("mode(boot): {:?}\n", load_config(p).mode));
+    for (label, path) in [
+        ("service.bin", &p.service_bin),
+        ("kernel", &p.kernel),
+        ("kernel.prev", &p.kernel_prev),
+        ("service.json", &p.service_json),
+        ("socket", &socket_path()),
+    ] {
+        out.push_str(&format!(
+            "{label}: {} exists={}\n",
+            path.display(),
+            path.exists()
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(o) = Command::new("/bin/launchctl")
+            .args(["print", &format!("system/{SERVICE_LABEL}")])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&o.stdout);
+            let head: String = text.lines().take(8).collect::<Vec<_>>().join("\n");
+            out.push_str(&format!("launchctl:\n{head}\n"));
+        }
+        if let Ok(plist) =
+            std::fs::read_to_string("/Library/LaunchDaemons/era.exvlan.studio.service.plist")
+        {
+            out.push_str(&format!("plist bytes: {}\n", plist.len()));
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(o) = Command::new("sc")
+            .args(["query", "era.exvlan.studio.service"])
+            .output()
+        {
+            out.push_str(&format!(
+                "sc query:\n{}\n",
+                String::from_utf8_lossy(&o.stdout)
+            ));
+        }
+    }
+    if let Ok(log) = std::fs::read_to_string(&p.service_log) {
+        let tail: Vec<&str> = log.lines().rev().take(50).collect();
+        out.push_str("--- log tail ---\n");
+        for line in tail.into_iter().rev() {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    print!("{out}");
+
+    // 同时落一份临时文件，方便用户直接发出来。
+    let tmp = std::env::temp_dir().join("era.exvlan.studio-service-diagnose.txt");
+    if std::fs::write(&tmp, &out).is_ok() {
+        eprintln!("\n(saved to {})", tmp.display());
+    }
+    Ok(())
+}
