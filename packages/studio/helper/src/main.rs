@@ -34,8 +34,6 @@ const MINISIGN_PUBKEY: &str = "RWSFKUboUUaFQYx/ap73a7ySNbuI5kjDGsiVJBtceshu+Ml99
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::*;
-
     pub const HELPER_BIN: &str = "/Library/PrivilegedHelperTools/era.exvlan.studio.helper";
     pub const HELPER_PLIST: &str = "/Library/LaunchDaemons/era.exvlan.studio.helper.plist";
     pub const HELPER_VERSION_FILE: &str =

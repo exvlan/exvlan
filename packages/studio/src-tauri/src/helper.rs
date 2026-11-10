@@ -273,7 +273,7 @@ mod imp {
 
         // helper 可能刚被 launchd 拉起：先确认 socket 能应答，再提交 apply，
         // 否则会拿到 EOF 并误判为「helper 不可用」而回退提权。
-        Self::verify_healthy(std::time::Duration::from_secs(5));
+        verify_healthy(std::time::Duration::from_secs(5));
 
         let out = std::process::Command::new(helper_bin())
             .arg("--apply")
@@ -298,7 +298,7 @@ mod imp {
             if attempt > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(200 * attempt));
             }
-            match Self::socket_request_once(op, &extra) {
+            match socket_request_once(op, &extra) {
                 Ok(value) => return Ok(value),
                 Err(err) if err.contains("连接 helper socket 失败") => last = err,
                 Err(err) => return Err(err),
