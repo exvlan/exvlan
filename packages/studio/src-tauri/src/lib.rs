@@ -4923,6 +4923,25 @@ fn service_state() -> crate::service_client::ServiceState {
     crate::service_client::state()
 }
 
+/// 移动端内核在进程内（FFI），没有特权服务组件：恒为「就绪」。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+fn service_state() -> crate::service_client::ServiceState {
+    crate::service_client::ServiceState {
+        installed: false,
+        ready: true,
+        mode: "ffi".to_string(),
+        kernel_pid: 0,
+        status: "unsupported".to_string(),
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn service_install(_app: AppHandle) -> Result<String, String> {
+    Ok("unsupported".to_string())
+}
+
 /// 手动重试安装特权服务（会弹一次系统授权）。成功后返回 installed。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]

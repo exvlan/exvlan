@@ -87,7 +87,7 @@ pub use stub::{
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod imp {
     use super::*;
-    use std::io::{BufRead as _, BufReader, Write as _};
+    use std::io::{BufRead as _, BufReader, Write};
     use std::sync::Mutex;
 
     /// 保持打开的一条 session（normal 模式的存活锚点）。
