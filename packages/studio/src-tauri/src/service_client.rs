@@ -16,6 +16,14 @@ use std::path::PathBuf;
 /// 服务 label（macOS plist / Windows 服务名）。
 pub const SERVICE_LABEL: &str = crate::paths::PRIVILEGED_SERVICE_LABEL;
 
+/// `foo.exe` → `foo.exe.sig`（`with_extension("sig")` 会得到 `foo.sig`，
+/// 而 `tauri signer sign` / CI 生成的是 `<完整文件名>.sig`）。
+pub fn sig_path(bin: &std::path::Path) -> PathBuf {
+    let mut raw = bin.as_os_str().to_os_string();
+    raw.push(".sig");
+    PathBuf::from(raw)
+}
+
 pub fn current_uid() -> u32 {
     #[cfg(unix)]
     unsafe {
@@ -266,7 +274,7 @@ mod imp {
             return Ok(false);
         }
         let src = bundled_service(app).ok_or_else(|| "安装包内未找到服务二进制".to_string())?;
-        let sig = src.with_extension("sig");
+        let sig = sig_path(&src);
         if !sig.is_file() {
             return Err(format!("缺少服务签名 {}", sig.display()));
         }
@@ -351,7 +359,7 @@ mod imp {
     /// 免密换内核：把随包内核 + 签名 + 版本放进 staging，再让服务 apply。
     pub fn apply_bundled(app: &tauri::AppHandle) -> Result<(), String> {
         let kernel = crate::kernel::bundled_kernel(app).ok_or("未找到随包内核")?;
-        let sig = kernel.with_extension("sig");
+        let sig = sig_path(&kernel);
         if !sig.is_file() {
             return Err(format!("缺少内核签名 {}", sig.display()));
         }

@@ -4,6 +4,7 @@
 // 标题栏里显示当前「目标」；点开后可切运行方式、切目标、管理远程。
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { type as osType } from "@tauri-apps/plugin-os";
 import { useToast } from "openvue";
 import {
   LOCAL_TARGET,
@@ -35,6 +36,12 @@ const managerVisible = ref(false);
 const remotes = ref<RemoteTarget[]>(loadRemotes());
 const testing = ref<string | null>(null);
 
+// 移动端内核在进程内（FFI），没有可切换的运行方式；只保留目标。
+const isMobile = computed(() => {
+  const p = osType();
+  return p === "android" || p === "ios";
+});
+
 const targetText = computed(() => {
   if (props.targetId === LOCAL_TARGET) {
     return t("target.local");
@@ -55,26 +62,34 @@ function toggle(event: Event) {
   menu.value?.toggle(event);
 }
 
-const items = computed(() => [
-  {
-    label: t("runtime.title"),
-    items: (["service", "normal", "off"] as RuntimeKind[]).map((kind) => ({
-      label: t(`runtime.${kind}`),
-      icon:
-        props.runtime === kind
-          ? "pi pi-check"
-          : kind === "service"
-            ? "pi pi-server"
-            : kind === "normal"
-              ? "pi pi-desktop"
-              : "pi pi-power-off",
-      command: () => {
-        if (props.runtime !== kind) emit("switch-runtime", kind);
+const runtimeItems = computed(() =>
+  isMobile.value
+    ? null
+    : {
+        label: t("runtime.title"),
+        items: (["service", "normal", "off"] as RuntimeKind[]).map((kind) => ({
+          label: t(`runtime.${kind}`),
+          icon:
+            props.runtime === kind
+              ? "pi pi-check"
+              : kind === "service"
+                ? "pi pi-server"
+                : kind === "normal"
+                  ? "pi pi-desktop"
+                  : "pi pi-power-off",
+          command: () => {
+            if (props.runtime !== kind) emit("switch-runtime", kind);
+          },
+        })),
       },
-    })),
-  },
-  { separator: true },
-  {
+);
+
+const items = computed(() => {
+  const list: Record<string, unknown>[] = [];
+  if (runtimeItems.value) {
+    list.push(runtimeItems.value, { separator: true });
+  }
+  list.push({
     label: t("target.title"),
     items: [
       {
@@ -101,8 +116,9 @@ const items = computed(() => [
         },
       },
     ],
-  },
-]);
+  });
+  return list;
+});
 
 async function testAll() {
   if (remotes.value.length === 0) {
@@ -148,8 +164,10 @@ function onRemotesChanged() {
       <span class="flex items-center gap-1 text-sm">
         <i class="pi pi-globe text-[12px]" />
         <span>{{ targetText }}</span>
-        <span class="text-surface-400">·</span>
-        <span class="text-surface-500">{{ runtimeText }}</span>
+        <template v-if="!isMobile">
+          <span class="text-surface-400">·</span>
+          <span class="text-surface-500">{{ runtimeText }}</span>
+        </template>
         <i class="pi pi-angle-down text-[10px]" />
       </span>
     </Button>
