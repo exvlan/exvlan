@@ -246,7 +246,7 @@ pub fn other<E: Display + 'static>(scope: &'static str, e: E) -> String {
 
 /// 脱敏：把敏感字段的值替换成 `***`。
 ///
-/// 覆盖 JSON（`"key": "value"`）与 key=value 两种形态。
+/// 覆盖 JSON（`"key": "value"`）与 key=value 两种形态；分隔符同时接受半角与全角。
 pub fn redact(input: &str) -> String {
     const KEYS: &[&str] = &[
         "network_secret",
@@ -255,10 +255,18 @@ pub fn redact(input: &str) -> String {
         "local_private_key",
         "private_key",
         "password",
+        "passwd",
         "secret",
         "token",
+        "api_key",
+        "cookie",
         "authorization",
     ];
+
+    /// 半角/全角的 `:` 与 `=`。
+    fn is_delim(ch: char) -> bool {
+        matches!(ch, ':' | '=' | '：' | '＝')
+    }
 
     let mut out = String::with_capacity(input.len());
     let bytes = input.as_bytes();
@@ -267,18 +275,31 @@ pub fn redact(input: &str) -> String {
         if let Some(key) = KEYS.iter().find(|k| matches_key_at(input, i, k)) {
             let key_end = i + key.len();
             out.push_str(&input[i..key_end]);
-            // 找到分隔符
-            let mut j = key_end;
-            while j < bytes.len() && !matches!(bytes[j], b':' | b'=') {
-                out.push(bytes[j] as char);
-                j += 1;
+
+            // 找分隔符：按 `char` 遍历，**不能**按字节转 char（会把 UTF-8 拆成
+            // Latin-1 乱码——曾经把 `token（中文）` 写成 `tokenï¼…`）。
+            let mut delim = None;
+            for (off, ch) in input[key_end..].char_indices() {
+                if is_delim(ch) {
+                    delim = Some(key_end + off);
+                    break;
+                }
             }
-            if j >= bytes.len() {
-                i = j;
+            let Some(delim_at) = delim else {
+                // 没有分隔符：不是「key: value」，原样保留剩余文本。
+                out.push_str(&input[key_end..]);
+                i = bytes.len();
                 continue;
-            }
-            out.push(bytes[j] as char);
-            j += 1;
+            };
+            out.push_str(&input[key_end..delim_at]);
+            let delim_len = input[delim_at..]
+                .chars()
+                .next()
+                .map(char::len_utf8)
+                .unwrap_or(1);
+            out.push_str(&input[delim_at..delim_at + delim_len]);
+            let mut j = delim_at + delim_len;
+
             // 跳过空白
             while j < bytes.len() && matches!(bytes[j], b' ' | b'\t') {
                 out.push(bytes[j] as char);
@@ -298,10 +319,16 @@ pub fn redact(input: &str) -> String {
                     j += 1;
                 }
             } else {
-                while j < bytes.len()
-                    && !matches!(bytes[j], b',' | b'}' | b'\n' | b'\r' | b' ' | b'\t')
-                {
-                    j += 1;
+                // 未加引号的值：按 `char` 前进，遇到分隔符就停。
+                while j < bytes.len() {
+                    let ch = input[j..].chars().next().unwrap_or(' ');
+                    if matches!(
+                        ch,
+                        ',' | '}' | ')' | '）' | '；' | '，' | '\n' | '\r' | ' ' | '\t'
+                    ) {
+                        break;
+                    }
+                    j += ch.len_utf8();
                 }
                 out.push_str("***");
             }
@@ -474,6 +501,44 @@ mod tests {
     fn keeps_non_sensitive_lookalikes() {
         let out = redact("password_hash=abc");
         assert!(out.contains("abc"));
+    }
+
+    #[test]
+    fn keeps_utf8_after_sensitive_key() {
+        // 曾经把 `token（中文）` 写成 `tokenï¼…`：命中 key 后逐字节 `as char`。
+        let out = redact("无法获取上传 token（直连/代理/curl 均失败）；已保存到 Download/Exvlan");
+        assert!(out.contains("（直连/代理/curl 均失败）"), "{out}");
+        assert!(out.contains("已保存到"), "{out}");
+    }
+
+    #[test]
+    fn redacts_value_then_keeps_utf8_suffix() {
+        let out = redact("token=abcd1234；后续中文说明");
+        assert!(!out.contains("abcd1234"));
+        assert!(out.contains("token=***"), "{out}");
+        assert!(out.contains("后续中文说明"), "{out}");
+    }
+
+    #[test]
+    fn supports_fullwidth_delimiters() {
+        let out = redact("token：abcd1234");
+        assert!(!out.contains("abcd1234"), "{out}");
+        assert!(out.contains("token：***"), "{out}");
+
+        let out = redact("api_key＝abcd1234");
+        assert!(!out.contains("abcd1234"), "{out}");
+    }
+
+    #[test]
+    fn redacts_new_keys() {
+        for input in [
+            "cookie: sessionid=abcd1234",
+            "passwd=abcd1234",
+            "api_key: abcd1234",
+        ] {
+            let out = redact(input);
+            assert!(!out.contains("abcd1234"), "{input} -> {out}");
+        }
     }
 
     #[test]
