@@ -2935,6 +2935,7 @@ fn save_to_downloads(
             path: path.display().to_string(),
             mime: Some(mime.to_string()),
             title: None,
+            extra_text: None,
         })
         .map_err(|e| e.to_string())?;
     Ok(resp.path)
