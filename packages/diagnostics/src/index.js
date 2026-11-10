@@ -97,34 +97,21 @@ async function verifyToken(env, request) {
 }
 
 /**
- * 限流：Rate Limiting binding + KV 计数双保险。
+ * 限流：只用 Rate Limiting binding。
  *
- * 实测该账号的 binding 恒返回 `success: true`（不计数），所以 KV 计数才是
- * 真正生效的那一层；binding 保留，账号/区域恢复正常后自动叠加。
+ * 不再用 KV 计数兜底 —— 那会让每个请求多 1–2 次 KV 写，一天几十次上传就能把
+ * 免费额度（1000 写/天）打满，连带 zip 存储一起不可用。binding 不可用时放行，
+ * 宁可少限流也不能把诊断上传全量阻断。
  */
-async function rateLimited(env, request, scope, limit) {
-  const ip = clientIp(request);
+async function rateLimited(env, request, scope) {
   const binding = scope === "token" ? env.RL_TOKEN : env.RL_UPLOAD;
-  if (binding) {
-    try {
-      const { success } = await binding.limit({ key: ip });
-      if (!success) return true;
-    } catch {
-      // 忽略：下面的 KV 计数兜底
-    }
-  }
-  if (!env.DIAG_KV) return false;
-  const bucket = Math.floor(Date.now() / 60000);
-  const key = `rl:${scope}:${ip}:${bucket}`;
+  if (!binding) return false;
   try {
-    const current = Number((await env.DIAG_KV.get(key)) || 0);
-    if (current >= limit) return true;
-    await env.DIAG_KV.put(key, String(current + 1), { expirationTtl: 120 });
+    const { success } = await binding.limit({ key: clientIp(request) });
+    return !success;
   } catch {
-    // 限流器异常时放行，避免因为基础设施问题全量阻断诊断上传
     return false;
   }
-  return false;
 }
 
 function buildSections(payload) {
@@ -193,7 +180,7 @@ async function handleToken(request, env) {
   if (!env.TOKEN_SECRET) {
     return json({ error: "token secret not configured" }, 500);
   }
-  if (await rateLimited(env, request, "token", 10)) {
+  if (await rateLimited(env, request, "token")) {
     return new Response(JSON.stringify({ error: "rate limited" }), {
       status: 429,
       headers: { "content-type": "application/json", "retry-after": "60" },
@@ -219,7 +206,21 @@ async function handleZip(request, env, url) {
   }
 
   const id = randomId();
-  await env.DIAG_KV.put(`zip:${id}`, zip, { expirationTtl: ZIP_TTL_SECONDS });
+  try {
+    await env.DIAG_KV.put(`zip:${id}`, zip, { expirationTtl: ZIP_TTL_SECONDS });
+  } catch (err) {
+    // KV 写入失败（最常见：免费额度 1000 写/天 打满 → 429 / code 10048）。
+    // 不能抛未捕获异常，否则网关返回 `error code: 1101`，客户端无法识别、
+    // 也就无法回退到文本上传。这里给出稳定可判别的 503。
+    return json(
+      {
+        error: "zip storage unavailable",
+        code: "kv_unavailable",
+        detail: String(err).slice(0, 200),
+      },
+      503,
+    );
+  }
 
   const version = url.searchParams.get("version") || "unknown";
   const platform = `${url.searchParams.get("os") || "unknown"}-${url.searchParams.get("arch") || "unknown"}`;
@@ -288,7 +289,7 @@ export default {
     if (!auth.ok) {
       return json({ error: "unauthorized", reason: auth.reason }, 401);
     }
-    if (await rateLimited(env, request, "upload", 20)) {
+    if (await rateLimited(env, request, "upload")) {
       return new Response(JSON.stringify({ error: "rate limited" }), {
         status: 429,
         headers: { "content-type": "application/json", "retry-after": "60" },
