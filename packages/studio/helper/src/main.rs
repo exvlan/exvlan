@@ -26,7 +26,7 @@ use anyhow::{Context as _, bail};
 use serde::{Deserialize, Serialize};
 
 const HELPER_LABEL: &str = "era.exvlan.studio.helper";
-const HELPER_VERSION: u32 = 3;
+const HELPER_VERSION: u32 = 4;
 /// 与服务端/系统路径保持一致。
 const SERVICE_LABEL: &str = "era.exvlan.studio";
 /// 与 `packages/studio/src-tauri/tauri.conf.json` 里 updater 公钥同一条。

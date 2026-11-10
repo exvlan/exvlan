@@ -8,9 +8,10 @@
 /// 必须与 `packages/studio/helper` 的 `HELPER_VERSION` 保持一致。
 ///
 /// pre.11 从 2 → 3：新增「socket 未就绪时重试」，且 apply 前先 verify_healthy。
-/// 提升版本号是为了强制走一次完整重装——否则 `apply` 用的是旧 helper 二进制，
-/// 新逻辑要等旧二进制完成自更新后才生效（首次升级仍会踩 EOF）。
-pub const HELPER_VERSION: u32 = 3;
+/// pre.12 从 3 → 4：bootstrap / 就绪失败时输出完整取证（见 `install_diagnostics`），
+/// **安装算法本身保持不变** —— 先拿到 `print-disabled` / plist / 签名 / quarantine
+/// 的真实数据，再决定是否加 `enable` 或调整顺序。
+pub const HELPER_VERSION: u32 = 4;
 
 #[cfg(target_os = "macos")]
 mod imp {
@@ -144,8 +145,10 @@ mod imp {
             }
         }
         if !booted {
+            let detail = install_diagnostics(&bin, &plist);
+            crate::logger::record("helper.install.diag", &detail);
             bail!(
-                "launchctl bootstrap 失败（3 次）：{last_err}\n{}",
+                "launchctl bootstrap 失败（3 次）：{last_err}\n{}\n{detail}",
                 diag_snapshot()
             );
         }
@@ -173,8 +176,10 @@ mod imp {
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
 
+        let detail = install_diagnostics(&bin, &plist);
+        crate::logger::record("helper.install.diag", &detail);
         bail!(
-            "helper 已安装但未就绪（socket 不可用）：{last}\n{}",
+            "helper 已安装但未就绪（socket 不可用）：{last}\n{}\n{detail}",
             diag_snapshot()
         )
     }
@@ -199,6 +204,94 @@ mod imp {
             })
             .unwrap_or_default();
         format!("launchctl: {print} | log tail: {}", helper_log_tail(2048))
+    }
+
+    /// 安装失败时的取证：`launchctl print-disabled` / 文件属性 / plist 合法性 /
+    /// 代码签名 / quarantine。都是只读命令，用来区分「job 被 disable」「plist 坏了」
+    /// 「二进制未被系统接受」这三类 EIO。
+    pub fn install_diagnostics(bin: &Path, plist: &Path) -> String {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let mut out = String::new();
+        out.push_str("\n[helper.install.diag]");
+
+        // 1) 是否被 launchctl disable 过（会持久化，bootstrap 一律 EIO）
+        if let Ok(o) = std::process::Command::new("/bin/launchctl")
+            .args(["print-disabled", "system"])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&o.stdout);
+            let hits: Vec<&str> = text
+                .lines()
+                .filter(|line| line.to_ascii_lowercase().contains("exvlan"))
+                .map(str::trim)
+                .collect();
+            if hits.is_empty() {
+                out.push_str("\nprint-disabled: (no exvlan entries)");
+            } else {
+                out.push_str(&format!("\nprint-disabled: {}", hits.join(" | ")));
+            }
+        }
+
+        // 2) 文件属性
+        for (label, path) in [
+            ("bin", bin.to_path_buf()),
+            ("plist", plist.to_path_buf()),
+            ("version", helper_version_file()),
+        ] {
+            match std::fs::metadata(&path) {
+                Ok(meta) => out.push_str(&format!(
+                    "\n{label}: {} mode={:o} uid={} gid={} size={}",
+                    path.display(),
+                    meta.mode() & 0o777,
+                    meta.uid(),
+                    meta.gid(),
+                    meta.len()
+                )),
+                Err(err) => out.push_str(&format!("\n{label}: {} missing ({err})", path.display())),
+            }
+        }
+
+        // 3) plist 合法性
+        if let Ok(o) = std::process::Command::new("/usr/bin/plutil")
+            .args(["-lint", &plist.to_string_lossy()])
+            .output()
+        {
+            let mut text = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if text.is_empty() {
+                text = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            }
+            out.push_str(&format!("\nplutil: {}", text.replace('\n', " ")));
+        }
+
+        // 4) 代码签名（未签名/被系统拒绝时这里能看出来）
+        if let Ok(o) = std::process::Command::new("/usr/bin/codesign")
+            .args(["-dv", "--verbose=2", &bin.to_string_lossy()])
+            .output()
+        {
+            let mut text = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            if text.is_empty() {
+                text = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            }
+            let text: String = text.lines().take(4).collect::<Vec<_>>().join(" | ");
+            out.push_str(&format!("\ncodesign: {text}"));
+        }
+
+        // 5) quarantine
+        for (label, path) in [("bin", bin.to_path_buf()), ("plist", plist.to_path_buf())] {
+            let (value, _) =
+                crate::diagnostics::read_xattr(&path.display().to_string(), "com.apple.quarantine");
+            out.push_str(&format!(
+                "\nquarantine[{label}]: {}",
+                if value.is_empty() {
+                    "-"
+                } else {
+                    value.as_str()
+                }
+            ));
+        }
+
+        out
     }
 
     fn strip_quarantine(path: &Path) {

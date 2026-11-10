@@ -233,9 +233,13 @@ async fn collect_network_info(
     let instance_id = instance_id
         .parse()
         .map_err(|e: uuid::Error| logger::other("cmd:collect_network_info", e))?;
-    get_client_manager!()?
-        .handle_collect_network_info(app, Some(vec![instance_id]))
+    // 启动窗口（内核刚换完、服务还没就绪）里这个调用会偶发超时。
+    // 命令层给 15s 上限，避免前端拿到一个过早的 deadline 错误。
+    let client = get_client_manager!()?;
+    let call = client.handle_collect_network_info(app, Some(vec![instance_id]));
+    tokio::time::timeout(std::time::Duration::from_secs(15), call)
         .await
+        .map_err(|_| logger::other("cmd:collect_network_info", "timed out after 15s"))?
         .map_err(|e| logger::other("cmd:collect_network_info", e))
 }
 
@@ -1475,20 +1479,23 @@ fn join_collect(
     handle: std::thread::JoinHandle<crate::diagnostics::Collected>,
     name: &'static str,
     started: std::time::Instant,
-) -> crate::diagnostics::Collected {
+) -> (crate::diagnostics::Collected, u128) {
     let elapsed = started.elapsed().as_millis();
     match handle.join() {
         Ok(collected) => {
             logger::record("diag.item", format!("{} {}ms", collected.name, elapsed));
-            collected
+            (collected, elapsed)
         }
         Err(_) => {
             logger::record("diag.item", format!("{name} panicked after {elapsed}ms"));
-            crate::diagnostics::Collected {
-                name,
-                text: String::new(),
-                error: Some("collector panicked".to_string()),
-            }
+            (
+                crate::diagnostics::Collected {
+                    name,
+                    text: String::new(),
+                    error: Some("collector panicked".to_string()),
+                },
+                elapsed,
+            )
         }
     }
 }
@@ -1500,19 +1507,29 @@ fn latest_files(dir: &std::path::Path, limit: usize) -> Vec<std::path::PathBuf> 
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+    let mut files: Vec<(std::time::SystemTime, u64, std::path::PathBuf)> = entries
         .flatten()
         .filter_map(|entry| {
             let path = entry.path();
             if !path.is_file() {
                 return None;
             }
-            let mtime = entry.metadata().ok()?.modified().ok()?;
-            Some((mtime, path))
+            let meta = entry.metadata().ok()?;
+            Some((meta.modified().ok()?, meta.len(), path))
         })
         .collect();
     files.sort_by_key(|item| std::cmp::Reverse(item.0));
-    files.into_iter().take(limit).map(|(_, p)| p).collect()
+    // 优先取非空文件：内核刚创建还写着 0 字节时，空文件对排查毫无价值。
+    let mut picked: Vec<std::path::PathBuf> = files
+        .iter()
+        .filter(|(_, size, _)| *size > 0)
+        .take(limit)
+        .map(|(_, _, p)| p.clone())
+        .collect();
+    if picked.is_empty() {
+        picked = files.into_iter().take(limit).map(|(_, _, p)| p).collect();
+    }
+    picked
 }
 
 /// 诊断 zip 的输出目录（唯一落点：`<用户日志目录>/diagnostics`）。
@@ -1568,6 +1585,57 @@ fn build_diagnostics_zip(
         error: Option<String>,
     }
     let mut entries: Vec<Entry> = Vec::new();
+
+    // ---- 诊断 v2：系统/网络/服务/DNS/会话 ----
+    // 采集必须在读日志文件**之前**：采集器会往 error.log 写 `[diag.item]` 耗时，
+    // 日志先读完再跑采集的话，包里永远看不到这一轮的采集记录。
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let log_dir = get_log_dir(app).unwrap_or_else(|_| config_dir.clone());
+    let core_dir = crate::kernel::kernel_dir();
+
+    // 各采集项互不依赖，全部并行跑：串行时 Windows 上一次要 70s（PowerShell
+    // 启动占大头），并行后由最慢的一项（`log show` 30s 上限）决定。
+    let collect_started = std::time::Instant::now();
+    let t_sys = {
+        let cfg = config_dir.clone();
+        let logs = log_dir.clone();
+        let core = core_dir.clone();
+        std::thread::spawn(move || crate::diagnostics::collect_system(&cfg, &logs, &core))
+    };
+    let t_net = std::thread::spawn(|| crate::diagnostics::collect_net(None));
+    let t_svc = std::thread::spawn(crate::diagnostics::collect_service);
+    let t_dns = std::thread::spawn(crate::diagnostics::collect_dns_resolve);
+    let t_log = std::thread::spawn(crate::diagnostics::collect_unified_log);
+    let t_crash = std::thread::spawn(crate::diagnostics::collect_crash_reports);
+    let t_fw = std::thread::spawn(crate::diagnostics::collect_firewall);
+
+    // D7–D13：环境 / 网络 / 服务 / DNS / 统一日志 / 崩溃报告 / 防火墙
+    let mut timings: Vec<(String, u128, Option<String>)> = Vec::new();
+    let mut collected_items = vec![
+        join_collect(t_sys, "system.json", collect_started),
+        join_collect(t_net, "net.txt", collect_started),
+        join_collect(t_svc, "service.txt", collect_started),
+        join_collect(t_dns, "dns-resolve.txt", collect_started),
+        join_collect(t_log, "unified-log.txt", collect_started),
+        join_collect(t_crash, "crashes.txt", collect_started),
+        join_collect(t_fw, "firewall.txt", collect_started),
+    ];
+    let collect_total = collect_started.elapsed().as_millis();
+    for (collected, ms) in collected_items.drain(..) {
+        // 统一日志只有 macOS 有；其他平台不要把「not supported」当成一项采集结果。
+        if collected.name == "unified-log.txt" && !cfg!(target_os = "macos") {
+            continue;
+        }
+        timings.push((collected.name.to_string(), ms, collected.error.clone()));
+        entries.push(Entry {
+            name: collected.name.to_string(),
+            bytes: collected.text.into_bytes(),
+            error: collected.error,
+        });
+    }
 
     let mut add_file =
         |name: &str, path: &std::path::Path, cap: usize, redact: bool| match read_capped(path, cap)
@@ -1629,12 +1697,16 @@ fn build_diagnostics_zip(
     if let Ok(prefs_path) = crate::prefs::prefs_path(app) {
         add_file("prefs.toml", &prefs_path, 256 * 1024, true);
     }
-    add_file(
-        "helper.log",
-        &crate::paths::helper_log(),
-        DIAG_LOG_CAP,
-        true,
-    );
+    // helper 只存在于 macOS；其他平台不生成这一项，避免 manifest 里出现误导性的
+    // `helper.log  missing`。
+    if cfg!(target_os = "macos") {
+        add_file(
+            "helper.log",
+            &crate::paths::helper_log(),
+            DIAG_LOG_CAP,
+            true,
+        );
+    }
 
     // 网络自检（由上传流程传入，含前端状态）
     entries.push(Entry {
@@ -1657,47 +1729,6 @@ fn build_diagnostics_zip(
             name: "ui-state.json".to_string(),
             bytes: logger::redact(&text).into_bytes(),
             error: None,
-        });
-    }
-
-    // ---- 诊断 v2：系统/网络/服务/DNS/会话 ----
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let log_dir = get_log_dir(app).unwrap_or_else(|_| config_dir.clone());
-    let core_dir = crate::kernel::kernel_dir();
-
-    // 各采集项互不依赖，全部并行跑：串行时 Windows 上一次要 70s（PowerShell
-    // 启动占大头），并行后由最慢的一项（`log show` 30s 上限）决定。
-    let started = std::time::Instant::now();
-    let t_sys = {
-        let cfg = config_dir.clone();
-        let logs = log_dir.clone();
-        let core = core_dir.clone();
-        std::thread::spawn(move || crate::diagnostics::collect_system(&cfg, &logs, &core))
-    };
-    let t_net = std::thread::spawn(|| crate::diagnostics::collect_net(None));
-    let t_svc = std::thread::spawn(crate::diagnostics::collect_service);
-    let t_dns = std::thread::spawn(crate::diagnostics::collect_dns_resolve);
-    let t_log = std::thread::spawn(crate::diagnostics::collect_unified_log);
-    let t_crash = std::thread::spawn(crate::diagnostics::collect_crash_reports);
-    let t_fw = std::thread::spawn(crate::diagnostics::collect_firewall);
-
-    // D7–D13：环境 / 网络 / 服务 / DNS / 统一日志 / 崩溃报告 / 防火墙
-    for collected in [
-        join_collect(t_sys, "system.json", started),
-        join_collect(t_net, "net.txt", started),
-        join_collect(t_svc, "service.txt", started),
-        join_collect(t_dns, "dns-resolve.txt", started),
-        join_collect(t_log, "unified-log.txt", started),
-        join_collect(t_crash, "crashes.txt", started),
-        join_collect(t_fw, "firewall.txt", started),
-    ] {
-        entries.push(Entry {
-            name: collected.name.to_string(),
-            bytes: collected.text.into_bytes(),
-            error: collected.error,
         });
     }
 
@@ -1736,10 +1767,38 @@ fn build_diagnostics_zip(
         error: None,
     });
 
+    // 采集耗时：给人看的 txt + 机器可读的 manifest 字段。
+    {
+        let mut text = String::new();
+        text.push_str(&format!("total {}ms（并行）\n", collect_total));
+        for (name, ms, err) in &timings {
+            match err {
+                Some(e) => text.push_str(&format!("{name}\t{ms}ms\tERROR: {e}\n")),
+                None => text.push_str(&format!("{name}\t{ms}ms\tok\n")),
+            }
+        }
+        entries.push(Entry {
+            name: "diag-timing.txt".to_string(),
+            bytes: text.into_bytes(),
+            error: None,
+        });
+    }
+
     // manifest（JSON + 文本双份）
-    let meta: Vec<(String, usize, Option<String>)> = entries
+    let ms_by_name: std::collections::HashMap<String, u128> = timings
         .iter()
-        .map(|e| (e.name.clone(), e.bytes.len(), e.error.clone()))
+        .map(|(name, ms, _)| (name.clone(), *ms))
+        .collect();
+    let meta: Vec<(String, usize, Option<String>, Option<u128>)> = entries
+        .iter()
+        .map(|e| {
+            (
+                e.name.clone(),
+                e.bytes.len(),
+                e.error.clone(),
+                ms_by_name.get(&e.name).copied(),
+            )
+        })
         .collect();
     let (manifest_json, manifest_txt) = crate::diagnostics::build_manifest(&meta);
 
@@ -1786,11 +1845,15 @@ async fn upload_diagnostics(
     };
 
     let started = std::time::Instant::now();
+    // 幂等键：一次 upload_diagnostics 一个，三条通道共用。服务端用它把
+    // 「直连超时但实际已建 issue → 代理又发一次」收敛成一个 issue。
+    let idem = Uuid::new_v4().to_string();
     logger::record(
         "upload",
         format!(
-            "start frontend={}B url={DIAG_UPLOAD_URL}zip",
-            frontend.as_deref().map(str::len).unwrap_or(0)
+            "start frontend={}B idem={} url={DIAG_UPLOAD_URL}zip",
+            frontend.as_deref().map(str::len).unwrap_or(0),
+            &idem[..8]
         ),
     );
 
@@ -1843,7 +1906,8 @@ async fn upload_diagnostics(
         .append_pair("version", BUILD_VERSION)
         .append_pair("os", std::env::consts::OS)
         .append_pair("arch", std::env::consts::ARCH)
-        .append_pair("summary", summary.as_str());
+        .append_pair("summary", summary.as_str())
+        .append_pair("idem", idem.as_str());
     upload_url.query_pairs_mut().append_pair(
         "reason",
         match reason.as_deref() {
@@ -1856,8 +1920,9 @@ async fn upload_diagnostics(
     let body = zip_bytes;
     let upload_url_for_task = upload_url.clone();
     let zip_path_for_task = zip_path.clone();
+    let watchdog_secs = if is_mobile() { 90 } else { 60 };
     let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(60),
+        std::time::Duration::from_secs(watchdog_secs),
         upload_with_fallback(&upload_url_for_task, body, &zip_path_for_task),
     )
     .await;
@@ -1881,7 +1946,7 @@ async fn upload_diagnostics(
             logger::record("upload", format!("zip 失败，回退文本上传: {err}"));
             match tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                upload_text_fallback(&app, &network_report, &summary),
+                upload_text_fallback(&app, &network_report, &summary, &idem),
             )
             .await
             {
@@ -1927,6 +1992,14 @@ async fn upload_diagnostics(
     if used_text_fallback {
         text.push_str("\n（zip 存储暂不可用，本次仅上传了文本诊断）");
     }
+    if body_json
+        .get("deduped")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        text.push_str("\n（该诊断包已上传过，沿用原链接）");
+        logger::record("upload", "deduped by idem: 复用已有 issue");
+    }
     logger::event(
         "upload",
         format!(
@@ -1961,6 +2034,27 @@ async fn resolve_upload_addrs(
     }
 }
 
+/// 移动端到 Cloudflare 边缘的连接经常卡在 5s 边缘，放宽到 8s 并允许再跑一轮。
+const MOBILE_CONNECT_TIMEOUT_SECS: u64 = 8;
+const DESKTOP_CONNECT_TIMEOUT_SECS: u64 = 5;
+
+fn is_mobile() -> bool {
+    cfg!(any(target_os = "android", target_os = "ios"))
+}
+
+/// 单次请求超时：移动端放宽（弱网到 CF 边缘经常踩线）。
+fn upload_request_timeout_secs() -> u64 {
+    if is_mobile() { 12 } else { 8 }
+}
+
+fn connect_timeout_secs() -> u64 {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        MOBILE_CONNECT_TIMEOUT_SECS
+    } else {
+        DESKTOP_CONNECT_TIMEOUT_SECS
+    }
+}
+
 /// 构造上传用 client。`use_proxy=false` 时显式绕过系统代理。
 fn build_upload_client(
     use_proxy: bool,
@@ -1970,7 +2064,7 @@ fn build_upload_client(
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
-        .connect_timeout(std::time::Duration::from_secs(5));
+        .connect_timeout(std::time::Duration::from_secs(connect_timeout_secs()));
     if !use_proxy {
         builder = builder.no_proxy();
     }
@@ -2071,18 +2165,24 @@ async fn diag_token() -> Result<String, String> {
         .unwrap_or_default();
     let (ipv4, _) = resolve_upload_addrs(&host, 443).await;
 
-    for (label, use_proxy) in [("A(direct)", false), ("B(proxy)", true)] {
+    let mut attempts: Vec<(&str, bool)> = vec![("A(direct)", false), ("B(proxy)", true)];
+    if is_mobile() {
+        // 移动端没有 curl 兜底，两个通道都踩线时整次上传就废了；多跑一轮直连。
+        attempts.push(("A2(direct)", false));
+    }
+    for (label, use_proxy) in attempts {
         let started = std::time::Instant::now();
-        let client = match build_upload_client(use_proxy, &ipv4, &host, 8) {
-            Ok(c) => c,
-            Err(err) => {
-                logger::record(
-                    "upload",
-                    format!("token {label} client build failed: {err}"),
-                );
-                continue;
-            }
-        };
+        let client =
+            match build_upload_client(use_proxy, &ipv4, &host, upload_request_timeout_secs()) {
+                Ok(c) => c,
+                Err(err) => {
+                    logger::record(
+                        "upload",
+                        format!("token {label} client build failed: {err}"),
+                    );
+                    continue;
+                }
+            };
         match fetch_token_with(&client).await {
             Ok(token) => {
                 logger::record(
@@ -2166,7 +2266,7 @@ async fn upload_once(
     let token = diag_token().await?;
 
     let started = std::time::Instant::now();
-    match build_upload_client(false, &ipv4, &host, 8) {
+    match build_upload_client(false, &ipv4, &host, upload_request_timeout_secs()) {
         Ok(client) => match try_upload(&client, url, body, &token).await {
             Ok(json) => {
                 logger::record(
@@ -2268,6 +2368,7 @@ async fn upload_text_fallback(
     app: &AppHandle,
     network_report: &str,
     summary: &str,
+    idem: &str,
 ) -> Result<serde_json::Value, String> {
     let log_dir = get_log_dir(app).unwrap_or_default();
     let error_log = logger::path()
@@ -2294,25 +2395,26 @@ async fn upload_text_fallback(
     });
     let body = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
 
-    let url = url::Url::parse(DIAG_UPLOAD_URL).map_err(|e| e.to_string())?;
+    let mut url = url::Url::parse(DIAG_UPLOAD_URL).map_err(|e| e.to_string())?;
+    url.query_pairs_mut().append_pair("idem", idem);
     let host = url.host_str().unwrap_or_default().to_string();
     let (ipv4, _ipv6) = resolve_upload_addrs(&host, 443).await;
     let token = diag_token().await?;
 
     let mut errors: Vec<String> = Vec::new();
-    for use_proxy in [false, true] {
-        let label = if use_proxy {
-            "text B(proxy)"
-        } else {
-            "text A(direct)"
-        };
-        let client = match build_upload_client(use_proxy, &ipv4, &host, 8) {
-            Ok(client) => client,
-            Err(err) => {
-                errors.push(format!("{label} 构建客户端失败: {err}"));
-                continue;
-            }
-        };
+    let mut rounds = vec![(false, "text A(direct)"), (true, "text B(proxy)")];
+    if is_mobile() {
+        rounds.push((false, "text A2(direct)"));
+    }
+    for (use_proxy, label) in rounds {
+        let client =
+            match build_upload_client(use_proxy, &ipv4, &host, upload_request_timeout_secs()) {
+                Ok(client) => client,
+                Err(err) => {
+                    errors.push(format!("{label} 构建客户端失败: {err}"));
+                    continue;
+                }
+            };
         match client
             .post(url.clone())
             .header("authorization", format!("Bearer {token}"))
@@ -4109,10 +4211,19 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
             crate::logger::record("provision.service", "installed");
         }
         if let Some(src) = req.helper_src.as_deref() {
-            crate::helper::install_from(std::path::Path::new(src), req.owner_uid)?;
-            crate::logger::record("provision.helper", "installed");
-            // 启动竞态：bootstrap 后 socket 还没 bind，这里轮询 3s 再判定。
-            crate::helper::verify_healthy(std::time::Duration::from_secs(3));
+            // helper 安装失败**不阻断启动**：服务模式（内核由 launchd/SCM 直接跑）
+            // 不需要 helper，只有普通模式的 TUN 需要。失败原因写进 error.log，
+            // 由界面横幅提示 + 「重试安装」按钮处理。
+            match crate::helper::install_from(std::path::Path::new(src), req.owner_uid) {
+                Ok(()) => {
+                    crate::logger::record("provision.helper", "installed");
+                    // 启动竞态：bootstrap 后 socket 还没 bind，这里轮询 3s 再判定。
+                    crate::helper::verify_healthy(std::time::Duration::from_secs(3));
+                }
+                Err(err) => {
+                    crate::logger::record("provision.helper", format!("failed: {err:#}"));
+                }
+            }
         }
         Ok(())
     })();
@@ -4417,6 +4528,65 @@ async fn ensure_kernel_only(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 async fn ensure_kernel_only(_app: AppHandle) -> Result<String, String> {
     Ok("current".to_string())
+}
+
+/// helper 当前状态（供界面判断是否要显示「未就绪」横幅）。
+#[derive(serde::Serialize)]
+struct HelperState {
+    installed: bool,
+    ready: bool,
+    status: String,
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn helper_state() -> HelperState {
+    HelperState {
+        installed: crate::helper::is_installed(),
+        ready: crate::helper::is_ready(),
+        status: crate::helper::status().unwrap_or_else(|e| e),
+    }
+}
+
+/// Windows / Linux / 移动端没有 helper 组件，恒为「就绪」，界面不应弹横幅。
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn helper_state() -> HelperState {
+    HelperState {
+        installed: false,
+        ready: true,
+        status: "unsupported".to_string(),
+    }
+}
+
+/// 手动重试安装 helper（会弹一次系统授权）。成功后返回 installed。
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn retry_helper_install(app: AppHandle) -> Result<String, String> {
+    let src = crate::helper::bundled_helper(&app)
+        .ok_or_else(|| "安装包内未找到 helper（resources/helper）".to_string())?;
+    let payload = ProvisionPayload {
+        kernel_src: None,
+        kernel_version: crate::BUILD_VERSION.to_string(),
+        service: None,
+        helper_src: Some(src.display().to_string()),
+        owner_uid: crate::helper::current_uid(),
+    };
+    let json = serde_json::to_string(&payload).map_err(|e| logger::other("cmd:retry_helper", e))?;
+    logger::record("helper.retry", "manual retry from UI");
+    run_elevated(&["--provision", &json])?;
+    crate::helper::verify_healthy(std::time::Duration::from_secs(5));
+    if crate::helper::is_ready() {
+        Ok("installed".to_string())
+    } else {
+        Err(crate::helper::status().unwrap_or_else(|e| format!("helper 仍未就绪: {e}")))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+async fn retry_helper_install(_app: AppHandle) -> Result<String, String> {
+    Ok("unsupported".to_string())
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -5083,6 +5253,8 @@ pub fn run_gui() -> std::process::ExitCode {
             init_service,
             ensure_kernel_service,
             ensure_kernel_only,
+            helper_state,
+            retry_helper_install,
             kernel_update_info,
             app_update_info,
             app_download_update,

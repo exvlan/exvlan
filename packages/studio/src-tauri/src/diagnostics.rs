@@ -107,11 +107,16 @@ fn os_version() -> (String, Option<String>) {
                 })
                 .unwrap_or_default()
         };
-        let (name, version, build) = (
-            pick("ProductName"),
-            pick("ProductVersion"),
-            pick("BuildVersion"),
-        );
+        let build = {
+            // 13.x 的 plist 用 ProductBuildVersion（`BuildVersion` 是 sw_vers 自己的标签）。
+            let v = pick("ProductBuildVersion");
+            if v.is_empty() {
+                pick("BuildVersion")
+            } else {
+                v
+            }
+        };
+        let (name, version) = (pick("ProductName"), pick("ProductVersion"));
         let detail = if version.is_empty() {
             "SystemVersion.plist unreadable".to_string()
         } else {
@@ -136,7 +141,12 @@ fn os_version() -> (String, Option<String>) {
         };
         return ("windows".to_string(), Some(detail));
     }
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(target_os = "android")]
+    {
+        // Android 没有 /etc/os-release，且内核路径/服务模型与桌面 Linux 完全不同。
+        return ("android".to_string(), None);
+    }
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
     {
         let text = std::fs::read_to_string("/etc/os-release")
             .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
@@ -160,7 +170,7 @@ fn os_version() -> (String, Option<String>) {
 
 /// 读 macOS 扩展属性（`com.apple.quarantine` 等），原生调用避免子进程。
 #[cfg(target_os = "macos")]
-fn read_xattr(path: &str, name: &str) -> (String, Option<String>) {
+pub(crate) fn read_xattr(path: &str, name: &str) -> (String, Option<String>) {
     let Ok(cpath) = std::ffi::CString::new(path) else {
         return (String::new(), Some("invalid path".to_string()));
     };
@@ -230,6 +240,91 @@ fn interfaces_text() -> (String, Option<String>) {
         .collect();
     rows.sort();
     (rows.join("\n"), None)
+}
+
+/// helper 的完整状态（macOS 额外带落点/权限/disabled/签名，用于定位 bootstrap EIO）。
+fn helper_state_json() -> Value {
+    #[allow(unused_mut)]
+    let mut value = json!({
+        "installed": cfg!(target_os = "macos") && crate::helper::is_installed(),
+        // 非 macOS 没有 helper 组件，恒为就绪（否则界面会误报未就绪）。
+        "ready": !cfg!(target_os = "macos") || crate::helper::is_ready(),
+        "status": if cfg!(target_os = "macos") {
+            crate::helper::status().unwrap_or_else(|e| e)
+        } else {
+            "unsupported".to_string()
+        },
+    });
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        if let Some(bin) = crate::paths::helper_bin() {
+            value["bin"] = file_meta(&bin);
+            value["bin_mode"] = json!(
+                std::fs::metadata(&bin)
+                    .ok()
+                    .map(|m| format!("{:o}", m.permissions().mode() & 0o777))
+                    .unwrap_or_else(|| "-".to_string())
+            );
+        }
+        if let Some(plist) = crate::paths::helper_plist() {
+            value["plist"] = file_meta(&plist);
+        }
+        if let Some(vf) = crate::paths::helper_version_file() {
+            value["version_file"] = json!({
+                "path": vf.display().to_string(),
+                "exists": vf.exists(),
+                "text": std::fs::read_to_string(&vf).map(|t| t.trim().to_string()).unwrap_or_default(),
+            });
+        }
+        value["print_disabled"] = json!(launchctl_print_disabled());
+        value["codesign"] = json!(codesign_summary(&crate::paths::helper_bin()));
+    }
+
+    value
+}
+
+/// `launchctl print-disabled system` 里与 exvlan 相关的行。
+#[cfg(target_os = "macos")]
+fn launchctl_print_disabled() -> String {
+    let Ok(out) = std::process::Command::new("/bin/launchctl")
+        .args(["print-disabled", "system"])
+        .output()
+    else {
+        return "unavailable".to_string();
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let hits: Vec<&str> = text
+        .lines()
+        .filter(|line| line.to_ascii_lowercase().contains("exvlan"))
+        .map(str::trim)
+        .collect();
+    if hits.is_empty() {
+        "(no exvlan entries)".to_string()
+    } else {
+        hits.join(" | ")
+    }
+}
+
+/// helper 二进制的签名摘要（未签名/adhoc 会影响 launchd 是否愿意加载）。
+#[cfg(target_os = "macos")]
+fn codesign_summary(bin: &Option<std::path::PathBuf>) -> String {
+    let Some(bin) = bin else {
+        return "no helper binary".to_string();
+    };
+    let Ok(out) = std::process::Command::new("/usr/bin/codesign")
+        .args(["-dv", "--verbose=2", &bin.to_string_lossy()])
+        .output()
+    else {
+        return "codesign unavailable".to_string();
+    };
+    let mut text = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if text.is_empty() {
+        text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    }
+    text.lines().take(4).collect::<Vec<_>>().join(" | ")
 }
 
 /// Windows 用户级（WinINET）代理：直接读注册表，避免 `reg query` 子进程。
@@ -317,10 +412,7 @@ pub fn collect_system(app_config: &Path, app_log: &Path, core_dir: &Path) -> Col
             .into_iter()
             .map(|(name, ok)| json!({"name": name, "present": ok}))
             .collect::<Vec<_>>(),
-        "helper": {
-            "installed": crate::helper::is_installed(),
-            "status": crate::helper::status().unwrap_or_else(|e| e),
-        },
+        "helper": helper_state_json(),
         "signature": sig,
         "quarantine": quarantine,
         "config_dir": {"path": app_config.display().to_string(), "writable": dir_writable(app_config)},
@@ -345,7 +437,17 @@ pub fn collect_net(tun_name: Option<&str>) -> Collected {
     let mut parts: Vec<String> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
 
-    #[cfg(unix)]
+    #[cfg(target_os = "android")]
+    {
+        // Android 没有 ip/ifconfig/scutil/systemctl，只有 native 网卡信息可用。
+        let (ifaces, err) = interfaces_text();
+        if let Some(e) = err {
+            errors.push(format!("interfaces: {e}"));
+        }
+        parts.push(format!("=== interfaces (native) ===\n{ifaces}"));
+    }
+
+    #[cfg(all(unix, not(target_os = "android")))]
     {
         // 网卡/地址走 native API（原来 `ip -o addr || ifconfig -a` 的输出要解析，
         // 且 Windows 上对应的是 PowerShell，启动就要 1–3s）。
@@ -429,7 +531,7 @@ ip -6 route show 10.254.0.0/16 2>/dev/null
             "sh",
             &[
                 "-c",
-                "ss -lntup 2>/dev/null | grep -E ':(11010|11011|11012|15999|22020|11211)\\b' || netstat -an | grep -E '\\.(11010|11011|11012|15999|22020|11211)\\b'",
+                "ss -lntup 2>/dev/null | grep -E ':(11010|11011|11012|15999|22020|11211)([^0-9]|$)' || netstat -an | grep -E '\\.(11010|11011|11012|15999|22020|11211)([^0-9]|$)'",
             ],
             Duration::from_secs(5),
         );
@@ -556,7 +658,7 @@ pub fn collect_service() -> Collected {
         parts.push(format!("=== registry WorkDir ===\n{out}"));
     }
 
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
     {
         for (label_name, args) in [
             ("systemctl cat", vec!["cat", label]),
@@ -730,10 +832,14 @@ pub fn mark_clean_exit(log_dir: &Path) {
 }
 
 /// D1：manifest（JSON + 文本双份）。
-pub fn build_manifest(entries: &[(String, usize, Option<String>)]) -> (String, String) {
+pub fn build_manifest(
+    entries: &[(String, usize, Option<String>, Option<u128>)],
+) -> (String, String) {
     let items: Vec<Value> = entries
         .iter()
-        .map(|(name, size, error)| json!({"name": name, "size": size, "error": error}))
+        .map(
+            |(name, size, error, ms)| json!({"name": name, "size": size, "error": error, "ms": ms}),
+        )
         .collect();
     let value = json!({
         "generated_at": crate::logger::timestamp(),
@@ -744,10 +850,11 @@ pub fn build_manifest(entries: &[(String, usize, Option<String>)]) -> (String, S
     });
     let json_text = serde_json::to_string_pretty(&value).unwrap_or_default();
     let mut txt = String::new();
-    for (name, size, error) in entries {
+    for (name, size, error, ms) in entries {
+        let timing = ms.map(|v| format!("\t{v}ms")).unwrap_or_default();
         match error {
-            Some(err) => txt.push_str(&format!("{name}\t{size}\tERROR: {err}\n")),
-            None => txt.push_str(&format!("{name}\t{size}\tok\n")),
+            Some(err) => txt.push_str(&format!("{name}\t{size}{timing}\tERROR: {err}\n")),
+            None => txt.push_str(&format!("{name}\t{size}{timing}\tok\n")),
         }
     }
     (json_text, txt)
