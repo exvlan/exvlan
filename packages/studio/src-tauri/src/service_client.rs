@@ -74,13 +74,13 @@ pub struct ServiceState {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use imp::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, state, stop, stop_kernel, update,
+    is_installed, is_ready, kernel_status, set_mode, state, stop, stop_kernel, update,
 };
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub use stub::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, state, stop, stop_kernel, update,
+    is_installed, is_ready, kernel_status, set_mode, state, stop, stop_kernel, update,
 };
 
 // ---------------------------------------------------------------------------

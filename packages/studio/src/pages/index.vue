@@ -6,7 +6,8 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-shell";
 import { exit } from "@tauri-apps/plugin-process";
 import { RemoteManagement, Utils } from "@exvlan/std";
-import { useTray } from "~/composables/tray";
+import { MenuItem, PredefinedMenuItem, Submenu } from "@tauri-apps/api/menu";
+import { MenuItemExit, MenuItemShow, useTray, setTrayMenu } from "~/composables/tray";
 import {
   consumePendingMobileVpnTileAction,
   initMobileVpnService,
@@ -26,13 +27,26 @@ import { buildFrontendState } from "~/composables/diagnostics";
 import { useToast, useConfirm } from "openvue";
 import { loadMode, saveModeNow, WebClientConfig, type Mode } from "~/composables/mode";
 import {
+  LOCAL_TARGET,
+  type RuntimeKind,
+  findRemote,
+  loadRemotes,
+  loadRuntime,
+  loadTargetId,
+  remoteUrl,
+  saveRuntime,
+  saveTargetId,
+} from "~/composables/target";
+import {
   saveLastNetworkInstanceId,
   saveLastNetworkInstanceIdNow,
   loadLastNetworkInstanceId,
 } from "~/composables/config";
 import ModeSwitcher from "~/components/ModeSwitcher.vue";
+import TargetSwitcher from "~/components/TargetSwitcher.vue";
 import SettingsDialog from "~/components/SettingsDialog.vue";
 import {
+  runtimeApply,
   appUpdateApply,
   appUpdateInfo,
   diagnosticsInfo,
@@ -291,6 +305,11 @@ const appUpdating = ref(false);
 
 const currentMode = ref<Mode>({ mode: "normal" });
 const editingMode = ref<Mode>({ mode: "normal" });
+
+/** 运行方式（本机内核）与目标（界面连哪里）互相正交。 */
+const runtimeKind = ref<RuntimeKind>(loadRuntime());
+const targetId = ref<string>(loadTargetId());
+
 const isModeSaving = ref(false);
 const manualDisconnect = ref(false);
 
@@ -341,7 +360,46 @@ async function refreshTrayMenu() {
   if (type() === "android" || type() === "ios") {
     return;
   }
-  await setTrayMenu([await MenuItemShow(t("tray.show")), await MenuItemExit(t("tray.exit"))]);
+  const remotes = loadRemotes();
+  const targetItems = [
+    await MenuItem.new({
+      id: `target-${LOCAL_TARGET}`,
+      text: `${targetId.value === LOCAL_TARGET ? "✓ " : ""}${t("target.local")}`,
+      action: async () => {
+        await switchTarget(LOCAL_TARGET);
+      },
+    }),
+    ...(await Promise.all(
+      remotes.map((remote) =>
+        MenuItem.new({
+          id: `target-${remote.id}`,
+          text: `${targetId.value === remote.id ? "✓ " : ""}${remote.name || `${remote.host}:${remote.port}`}`,
+          action: async () => {
+            await switchTarget(remote.id);
+          },
+        }),
+      ),
+    )),
+  ];
+  const runtimeItems = await Promise.all(
+    (["service", "normal", "off"] as RuntimeKind[]).map((kind) =>
+      MenuItem.new({
+        id: `runtime-${kind}`,
+        text: `${runtimeKind.value === kind ? "✓ " : ""}${t(`runtime.${kind}`)}`,
+        action: async () => {
+          await switchRuntime(kind);
+        },
+      }),
+    ),
+  );
+  await setTrayMenu([
+    await MenuItemShow(t("tray.show")),
+    await PredefinedMenuItem.new({ item: "Separator" }),
+    await Submenu.new({ text: t("target.title"), items: targetItems }),
+    await Submenu.new({ text: t("runtime.title"), items: runtimeItems }),
+    await PredefinedMenuItem.new({ item: "Separator" }),
+    await MenuItemExit(t("tray.exit")),
+  ]);
 }
 
 async function getLogDirPath(): Promise<string> {
@@ -484,9 +542,20 @@ async function onStopService() {
 
 async function initWithMode(rawMode: Mode) {
   const mode = await normalizeMode(rawMode);
-  const running_inst_ids =
-    (await remoteClient.value.list_network_instance_ids().catch(() => undefined))
-      ?.running_inst_ids ?? [];
+
+  // 目标：本机 = 连本机内核；远程 = 连 mesh 里的另一台。
+  // 远程时**本机内核照运行方式继续跑**（互不影响），但不再向远程推本地配置。
+  const remote = findRemote(targetId.value);
+  if (!remote && runtimeKind.value === "off") {
+    // 运行方式=停止：本机没有 RPC 可连，界面保持「未运行」并提供重试入口。
+    startupError.value = t("runtime.off_hint");
+    clientRunning.value = false;
+    return;
+  }
+  const running_inst_ids = remote
+    ? []
+    : ((await remoteClient.value.list_network_instance_ids().catch(() => undefined))
+        ?.running_inst_ids ?? []);
 
   // 新架构：service 与 normal 共用同一个常驻 root 守护进程，
   // 区别仅在于「退出应用时是否停实例」。因此切模式**不再**停/卸载服务
@@ -494,6 +563,17 @@ async function initWithMode(rawMode: Mode) {
 
   let url: string | undefined = undefined;
   let retrys = 1;
+
+  if (remote) {
+    // 远程目标：本机内核仍按 runtime 维护（失败不阻塞远程连接，只记日志）。
+    url = remoteUrl(remote);
+    retrys = 3;
+    void ensureRuntimeQuiet();
+    await connectWithRetry(mode, url, retrys);
+    await afterConnect(mode);
+    return;
+  }
+
   switch (mode.mode) {
     case "remote":
       if (!mode.remote_rpc_address) {
@@ -538,10 +618,21 @@ async function initWithMode(rawMode: Mode) {
       url = mode.rpc_portal;
       break;
   }
+  await connectWithRetry(mode, url, retrys);
+  await sendConfigs(running_inst_ids.map(Utils.UuidToStr));
+  if (mode.mode === "normal") {
+    mode.config_server_url = mode.config_server_url || undefined;
+    initWebClient(mode.config_server_url);
+  }
+  await afterConnect(mode);
+}
+
+/** 建连（带重试）；失败时保留用户选择并抛错，由调用方决定怎么提示。 */
+async function connectWithRetry(mode: Mode, url: string | undefined, retrys: number) {
   for (let i = 0; i < retrys; i++) {
     try {
       await connectRpcClient(mode.mode === "normal", url);
-      break;
+      return;
     } catch (e) {
       if (i === retrys - 1) {
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -563,11 +654,10 @@ async function initWithMode(rawMode: Mode) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
-  await sendConfigs(running_inst_ids.map(Utils.UuidToStr));
-  if (mode.mode === "normal") {
-    mode.config_server_url = mode.config_server_url || undefined;
-    initWebClient(mode.config_server_url);
-  }
+}
+
+/** 连接成功后的收尾：记状态、恢复上次网络。 */
+async function afterConnect(mode: Mode) {
   currentMode.value = mode;
   await saveModeNow(mode);
   startupError.value = "";
@@ -578,6 +668,65 @@ async function initWithMode(rawMode: Mode) {
   // 直接使用会导致前端反复 `get_config` 失败（日志里的 `Not found: No such network instance`）。
   const lastId = await knownInstanceOrDrop(loadLastNetworkInstanceId());
   instanceId.value = lastId;
+}
+
+/** 安静地应用当前运行方式（远程目标时用：失败只记日志，不影响远程连接）。 */
+async function ensureRuntimeQuiet() {
+  if (type() === "android" || type() === "ios") return;
+  try {
+    await runtimeApply(runtimeKind.value);
+  } catch (e) {
+    void logDiagStep("runtime_apply_failed", String(e).slice(0, 200));
+  }
+}
+
+/** 切换目标：只换连接，不停本机内核。 */
+async function switchTarget(id: string) {
+  if (isModeSaving.value) return;
+  if (id === targetId.value) return;
+  targetId.value = id;
+  await saveTargetId(id);
+  isModeSaving.value = true;
+  try {
+    instanceId.value = undefined;
+    await initWithMode(currentMode.value);
+  } catch (e: any) {
+    startupError.value = String(e);
+    void reportFrontendError("fe:switch-target", String(e));
+  } finally {
+    isModeSaving.value = false;
+    await refreshTrayMenu().catch(() => {});
+  }
+}
+
+/** 切换运行方式（service / normal / off）。 */
+async function switchRuntime(kind: RuntimeKind) {
+  if (isModeSaving.value) return;
+  if (kind === runtimeKind.value) return;
+  isModeSaving.value = true;
+  try {
+    runtimeKind.value = kind;
+    await saveRuntime(kind);
+    if (kind === "off") {
+      await runtimeApply("off");
+      // 内核已停：本机连接必然失败，交给横幅提示，不再自动重连。
+      clientRunning.value = false;
+      startupError.value = t("runtime.off_hint");
+      return;
+    }
+    const mode = await normalizeMode({ mode: kind } as unknown as Mode);
+    currentMode.value = mode;
+    await saveModeNow(mode);
+    await ensureLocalKernel(mode);
+    await initWithMode(mode);
+  } catch (e: any) {
+    startupError.value = String(e);
+    void reportFrontendError("fe:switch-runtime", String(e));
+    toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 10000 });
+  } finally {
+    isModeSaving.value = false;
+    await refreshTrayMenu().catch(() => {});
+  }
 }
 
 /** 校验「上次选择的网络」在当前内核里是否真的存在。 */
@@ -758,11 +907,24 @@ onMounted(async () => {
   }
 
   cleanupFns.push(await listenGlobalEvents());
-  currentMode.value = await normalizeMode(loadMode());
+
+  // 运行方式 × 目标 是新的权威模型；旧 app_mode 仅在没有 runtime 时用于迁移。
+  runtimeKind.value = loadRuntime();
+  targetId.value = loadTargetId();
+  const hadAppMode = localStorage.getItem("app_mode") !== null;
+  const savedMode = loadMode();
+  // 本机运行方式由 runtimeKind 决定（app_mode 里的 remote 已在 target 迁移中处理）。
+  const derivedMode = (
+    savedMode.mode === "service" || savedMode.mode === "normal"
+      ? { ...savedMode, mode: runtimeKind.value === "off" ? "service" : runtimeKind.value }
+      : { mode: runtimeKind.value === "off" ? "service" : runtimeKind.value }
+  ) as Mode;
+  await saveModeNow(derivedMode);
+  currentMode.value = await normalizeMode(derivedMode);
 
   // 模式丢失（prefs 与 localStorage 都没有）且内核服务已在运行 → 让用户选一次。
   // 历史 bug：prefs 的 app_mode 被并发写覆盖后，每次启动都静默回到普通模式。
-  let modeSource = localStorage.getItem("app_mode") === null ? "default" : "persisted";
+  let modeSource = hadAppMode ? "persisted" : "default";
   if (modeSource === "default" && type() !== "android" && type() !== "ios") {
     const status = await getServiceStatus().catch(() => "NotInstalled");
     if (status === "Running") {
@@ -786,7 +948,7 @@ onMounted(async () => {
 
   // 首次安装/升级后会自动装好内核并（重新）注册系统服务；失败不阻塞进入界面。
   // service 模式由 initWithMode 内部统一处理，避免同一次启动弹两次授权。
-  if (currentMode.value.mode !== "service") {
+  if (currentMode.value.mode !== "service" && runtimeKind.value !== "off") {
     try {
       await ensureLocalKernel(currentMode.value);
     } catch (e: any) {
@@ -1246,7 +1408,13 @@ const configServerConnectionStatus = computed(() => {
           {{ vpnRunning ? t("settings.vpn_running") : t("settings.vpn_stopped") }}
         </span>
       </span>
-      <span class="text-sm text-surface-500">{{ t("mode." + currentMode.mode) }}</span>
+      <TargetSwitcher
+        :runtime="runtimeKind"
+        :target-id="targetId"
+        :disabled="isModeSaving"
+        @switch-runtime="switchRuntime"
+        @switch-target="switchTarget"
+      />
       <span class="flex-1" />
       <Button
         icon="pi pi-cog"

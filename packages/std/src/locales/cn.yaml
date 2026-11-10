@@ -759,6 +759,29 @@ web:
     theme: 主题
     logout: 退出登录
 
+runtime:
+  title: 运行方式
+  service: 服务
+  normal: 普通
+  off: 已停止
+  off_hint: 内核已停止。选择「服务」或「普通」即可重新启动。
+
+target:
+  title: 目标
+  local: 本机
+  missing: 目标已删除
+  manage: 管理远程…
+  add: 添加远程
+  name: 名称（可选）
+  name_placeholder: 例如：家里小主机
+  address: 地址（主机:端口）
+  invalid_address: 地址格式不对，示例 10.254.0.7:15999
+  test: 测试连接
+  test_all: 全部测速
+  hint: |-
+    远程目标只通过 mesh 内网访问（固定 15999，无密钥、无 HTTPS）。
+    切换目标**不会**停止本机内核；「远程 + 本机普通模式」可以同时存在。
+
 mode:
   title: 模式
   switch_mode: 切换模式

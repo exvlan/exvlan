@@ -248,6 +248,16 @@ export async function getServiceStatus() {
   return await invoke<ServiceStatus>("get_service_status");
 }
 
+/** 切换本机运行方式（service / normal / off），不动已建立的连接。 */
+export async function runtimeApply(runtime: string) {
+  return await invoke<string>("runtime_apply", { runtime });
+}
+
+/** 远程目标连通性探测，返回毫秒。只做 TCP 连接，不校验身份。 */
+export async function remotePing(url: string) {
+  return await invoke<number>("remote_ping", { url });
+}
+
 export async function initRpcConnection(isNormalMode: boolean, url?: string) {
   return await invoke("init_rpc_connection", { isNormalMode, url });
 }

@@ -20,6 +20,10 @@ const AUTHORITATIVE_KEYS = new Set([
   "log_level",
   "last_network_instance_id",
   "diag_last_upload",
+  // 7.3：运行方式 × 目标（远程列表）
+  "runtime",
+  "target",
+  "remotes",
 ]);
 
 /**

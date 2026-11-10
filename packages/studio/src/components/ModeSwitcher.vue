@@ -1,249 +1,252 @@
 <script setup lang="ts">
-import type { ServiceStatus } from '~/composables/backend'
-import type { Mode, NormalMode, RemoteMode, ServiceMode } from '~/composables/mode'
-import { appConfigDir, appLogDir, join } from '@tauri-apps/api/path'
-import { computed, onMounted, ref, watch } from 'vue'
-import { getServiceStatus, serviceDefaultDirs } from '~/composables/backend'
+import type { ServiceStatus } from "~/composables/backend";
+import type { Mode, NormalMode, ServiceMode } from "~/composables/mode";
+import { appConfigDir, appLogDir, join } from "@tauri-apps/api/path";
+import { computed, onMounted, ref, watch } from "vue";
+import { getServiceStatus, serviceDefaultDirs } from "~/composables/backend";
 
-const emit = defineEmits(['uninstall-service', 'stop-service'])
+const emit = defineEmits(["uninstall-service", "stop-service"]);
 
-const { t } = useI18n()
+const { t } = useI18n();
 
-const model = defineModel<Mode>({ required: true })
-const defaultConfigDir = ref('')
-const defaultLogDir = ref('')
-const serviceStatus = ref<ServiceStatus>('NotInstalled')
-const isServiceStatusLoaded = ref(false)
+const model = defineModel<Mode>({ required: true });
+const defaultConfigDir = ref("");
+const defaultLogDir = ref("");
+const serviceStatus = ref<ServiceStatus>("NotInstalled");
+const isServiceStatusLoaded = ref(false);
 
 function normalizeRpcListenPort(port: unknown): number {
-  const defaultPort = 15999
-  const numericPort = typeof port === 'number' ? port : Number.parseInt(String(port ?? ''), 10)
-  if (Number.isNaN(numericPort))
-    return defaultPort
-  return Math.min(65535, Math.max(1, Math.floor(numericPort)))
+  const defaultPort = 15999;
+  const numericPort = typeof port === "number" ? port : Number.parseInt(String(port ?? ""), 10);
+  if (Number.isNaN(numericPort)) return defaultPort;
+  return Math.min(65535, Math.max(1, Math.floor(numericPort)));
 }
 
 onMounted(async () => {
   // 服务模式默认目录是系统路径（root 守护进程不能写用户目录）
-  const defaults = await serviceDefaultDirs().catch(() => null)
-  defaultConfigDir.value = defaults?.config_dir || await join(await appConfigDir(), 'config.d')
-  defaultLogDir.value = defaults?.file_log_dir || await appLogDir()
+  const defaults = await serviceDefaultDirs().catch(() => null);
+  defaultConfigDir.value = defaults?.config_dir || (await join(await appConfigDir(), "config.d"));
+  defaultLogDir.value = defaults?.file_log_dir || (await appLogDir());
 
   // the mode watch may have run before these defaults resolved (e.g. when the
   // dialog is opened with service mode preselected), leaving the fields empty.
-  if (model.value.mode === 'service') {
-    const serviceModel = model.value as ServiceMode
-    serviceModel.config_dir = serviceModel.config_dir || defaultConfigDir.value
-    serviceModel.file_log_dir = serviceModel.file_log_dir || defaultLogDir.value
+  if (model.value.mode === "service") {
+    const serviceModel = model.value as ServiceMode;
+    serviceModel.config_dir = serviceModel.config_dir || defaultConfigDir.value;
+    serviceModel.file_log_dir = serviceModel.file_log_dir || defaultLogDir.value;
   }
-})
+});
 
 const modeOptions = computed(() => [
-  { label: t('mode.normal'), value: 'normal' },
-  { label: t('mode.service'), value: 'service' },
-  { label: t('mode.remote'), value: 'remote' },
-])
+  { label: t("mode.normal"), value: "normal" },
+  { label: t("mode.service"), value: "service" },
+]);
 
 const normalMode = computed({
-  get: () => model.value.mode === 'normal' ? model.value as NormalMode : undefined,
+  get: () => (model.value.mode === "normal" ? (model.value as NormalMode) : undefined),
   set: (value) => {
     if (value) {
-      model.value = value
+      model.value = value;
     }
   },
-})
+});
 
 const rpcListenOptions = computed(() => [
-  { label: t('web.common.disable'), value: false },
-  { label: t('web.common.enable'), value: true },
-])
+  { label: t("web.common.disable"), value: false },
+  { label: t("web.common.enable"), value: true },
+]);
 
 const rpcListenEnabled = computed<boolean>({
   get: () => !!normalMode.value?.enable_rpc_port_listen,
   set: (value) => {
-    if (!normalMode.value)
-      return
-    normalMode.value.enable_rpc_port_listen = value
+    if (!normalMode.value) return;
+    normalMode.value.enable_rpc_port_listen = value;
   },
-})
+});
 
 const rpcListenPort = computed<string>({
   get: () => String(normalMode.value?.rpc_listen_port ?? 15999),
   set: (value) => {
-    if (!normalMode.value)
-      return
-    const trimmed = value.trim()
-    if (trimmed === '')
-      return
-    if (!/^\d+$/.test(trimmed))
-      return
-    normalMode.value.rpc_listen_port = Number.parseInt(trimmed, 10)
+    if (!normalMode.value) return;
+    const trimmed = value.trim();
+    if (trimmed === "") return;
+    if (!/^\d+$/.test(trimmed)) return;
+    normalMode.value.rpc_listen_port = Number.parseInt(trimmed, 10);
   },
-})
+});
 
 const serviceMode = computed({
-  get: () => model.value.mode === 'service' ? model.value as ServiceMode : undefined,
+  get: () => (model.value.mode === "service" ? (model.value as ServiceMode) : undefined),
   set: (value) => {
     if (value) {
-      model.value = value
+      model.value = value;
     }
   },
-})
-
-const remoteMode = computed({
-  get: () => model.value.mode === 'remote' ? model.value as RemoteMode : undefined,
-  set: (value) => {
-    if (value) {
-      model.value = value
-    }
-  },
-})
+});
 
 const statusColorClass = computed(() => {
   switch (serviceStatus.value) {
-    case 'Running':
-      return 'text-green-600'
-    case 'Stopped':
-      return 'text-orange-600'
-    case 'NotInstalled':
-      return 'text-gray-600'
+    case "Running":
+      return "text-green-600";
+    case "Stopped":
+      return "text-orange-600";
+    case "NotInstalled":
+      return "text-gray-600";
     default:
-      return 'text-gray-600'
+      return "text-gray-600";
   }
-})
+});
 
-watch(() => [normalMode.value?.enable_rpc_port_listen, normalMode.value?.rpc_listen_port], ([enabled, port]) => {
-  if (!normalMode.value)
-    return
+watch(
+  () => [normalMode.value?.enable_rpc_port_listen, normalMode.value?.rpc_listen_port],
+  ([enabled, port]) => {
+    if (!normalMode.value) return;
 
-  if (!enabled) {
-    normalMode.value.rpc_portal = undefined
-    return
-  }
-
-  const normalizedPort = normalizeRpcListenPort(port)
-  if (normalMode.value.rpc_listen_port !== normalizedPort)
-    normalMode.value.rpc_listen_port = normalizedPort
-
-  const desiredPortal = `tcp://0.0.0.0:${normalizedPort}`
-  if (normalMode.value.rpc_portal !== desiredPortal)
-    normalMode.value.rpc_portal = desiredPortal
-}, { immediate: true })
-
-watch(() => model.value.mode, async (newMode, oldMode) => {
-  if (newMode === oldMode)
-    return
-
-  if (newMode === 'service' && !isServiceStatusLoaded.value) {
-    serviceStatus.value = await getServiceStatus()
-    isServiceStatusLoaded.value = true
-  }
-
-  const oldModelValue = { ...model.value }
-
-  if (newMode === 'normal') {
-    const portal = normalMode.value?.rpc_portal?.trim()
-    model.value = {
-      ...oldModelValue,
-      rpc_portal: portal || undefined,
-      enable_rpc_port_listen: normalMode.value?.enable_rpc_port_listen,
-      rpc_listen_port: normalMode.value?.rpc_listen_port,
-      mode: 'normal',
+    if (!enabled) {
+      normalMode.value.rpc_portal = undefined;
+      return;
     }
-  }
-  else if (newMode === 'service') {
-    model.value = {
-      ...oldModelValue,
-      mode: 'service',
-      config_dir: serviceMode.value?.config_dir || defaultConfigDir.value,
-      rpc_portal: serviceMode.value?.rpc_portal || '127.0.0.1:15999',
-      file_log_level: serviceMode.value?.file_log_level || 'off',
-      file_log_dir: serviceMode.value?.file_log_dir || defaultLogDir.value,
+
+    const normalizedPort = normalizeRpcListenPort(port);
+    if (normalMode.value.rpc_listen_port !== normalizedPort)
+      normalMode.value.rpc_listen_port = normalizedPort;
+
+    const desiredPortal = `tcp://0.0.0.0:${normalizedPort}`;
+    if (normalMode.value.rpc_portal !== desiredPortal) normalMode.value.rpc_portal = desiredPortal;
+  },
+  { immediate: true },
+);
+
+watch(
+  () => model.value.mode,
+  async (newMode, oldMode) => {
+    if (newMode === oldMode) return;
+
+    if (newMode === "service" && !isServiceStatusLoaded.value) {
+      serviceStatus.value = await getServiceStatus();
+      isServiceStatusLoaded.value = true;
     }
-  }
-  else if (newMode === 'remote') {
-    model.value = {
-      ...oldModelValue,
-      mode: 'remote',
-      remote_rpc_address: remoteMode.value?.remote_rpc_address || 'tcp://127.0.0.1:15999',
+
+    const oldModelValue = { ...model.value };
+
+    if (newMode === "normal") {
+      const portal = normalMode.value?.rpc_portal?.trim();
+      model.value = {
+        ...oldModelValue,
+        rpc_portal: portal || undefined,
+        enable_rpc_port_listen: normalMode.value?.enable_rpc_port_listen,
+        rpc_listen_port: normalMode.value?.rpc_listen_port,
+        mode: "normal",
+      };
+    } else if (newMode === "service") {
+      model.value = {
+        ...oldModelValue,
+        mode: "service",
+        config_dir: serviceMode.value?.config_dir || defaultConfigDir.value,
+        rpc_portal: serviceMode.value?.rpc_portal || "127.0.0.1:15999",
+        file_log_level: serviceMode.value?.file_log_level || "off",
+        file_log_dir: serviceMode.value?.file_log_dir || defaultLogDir.value,
+      };
     }
-  }
-}, { immediate: true })
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
   <div class="flex flex-col gap-4">
     <div>
       <SelectButton
-        id="mode-select" v-model="model.mode" :options="modeOptions" option-label="label"
-        option-value="value" fluid
+        id="mode-select"
+        v-model="model.mode"
+        :options="modeOptions"
+        option-label="label"
+        option-value="value"
+        fluid
       />
     </div>
 
     <!-- Mode descriptions -->
     <div v-if="model.mode === 'normal'" class="text-sm text-gray-500">
-      {{ t('mode.normal_description') }}
+      {{ t("mode.normal_description") }}
     </div>
     <div v-else-if="model.mode === 'service'" class="text-sm text-gray-500">
-      {{ t('mode.service_description') }}
-    </div>
-    <div v-else-if="model.mode === 'remote'" class="text-sm text-gray-500">
-      {{ t('mode.remote_description') }}
+      {{ t("mode.service_description") }}
     </div>
 
     <div v-if="normalMode" class="flex flex-col gap-2">
       <div class="flex items-center gap-2">
-        <label for="rpc-listen-toggle">{{ t('mode.enable_rpc_tcp_listen') }}</label>
+        <label for="rpc-listen-toggle">{{ t("mode.enable_rpc_tcp_listen") }}</label>
         <SelectButton
-          id="rpc-listen-toggle" v-model="rpcListenEnabled" :options="rpcListenOptions" option-label="label"
+          id="rpc-listen-toggle"
+          v-model="rpcListenEnabled"
+          :options="rpcListenOptions"
+          option-label="label"
           option-value="value"
         />
       </div>
       <div v-if="rpcListenEnabled" class="flex flex-col gap-2">
         <div class="flex items-center gap-2">
-          <label for="rpc-listen-port">{{ t('mode.rpc_listen_port') }}</label>
-          <InputText id="rpc-listen-port" v-model="rpcListenPort" class="flex-1" inputmode="numeric" />
+          <label for="rpc-listen-port">{{ t("mode.rpc_listen_port") }}</label>
+          <InputText
+            id="rpc-listen-port"
+            v-model="rpcListenPort"
+            class="flex-1"
+            inputmode="numeric"
+          />
         </div>
       </div>
     </div>
 
     <div v-if="serviceMode" class="flex flex-col gap-2">
       <div class="flex items-center gap-2">
-        <label for="config-dir">{{ t('mode.config_dir') }}</label>
+        <label for="config-dir">{{ t("mode.config_dir") }}</label>
         <InputText id="config-dir" v-model="serviceMode.config_dir" class="flex-1" />
       </div>
       <div class="flex items-center gap-2">
-        <label for="rpc-portal">{{ t('mode.rpc_portal') }}</label>
+        <label for="rpc-portal">{{ t("mode.rpc_portal") }}</label>
         <InputText id="rpc-portal" v-model="serviceMode.rpc_portal" class="flex-1" />
       </div>
       <div class="flex items-center gap-2">
-        <label for="log-level">{{ t('mode.log_level') }}</label>
+        <label for="log-level">{{ t("mode.log_level") }}</label>
         <Select
-          id="log-level" v-model="serviceMode.file_log_level"
+          id="log-level"
+          v-model="serviceMode.file_log_level"
           :options="['off', 'warn', 'info', 'debug', 'trace']"
         />
       </div>
       <div class="flex items-center gap-2">
-        <label for="log-dir">{{ t('mode.log_dir') }}</label>
+        <label for="log-dir">{{ t("mode.log_dir") }}</label>
         <InputText id="log-dir" v-model="serviceMode.file_log_dir" class="flex-1" />
       </div>
       <div class="flex items-center gap-2 justify-between">
         <div class="flex items-center gap-2">
-          <label>{{ t('mode.service_status') }}</label>
-          <span :class="statusColorClass">{{ t(`mode.service_status_${serviceStatus.toLowerCase()}`) }}</span>
+          <label>{{ t("mode.service_status") }}</label>
+          <span :class="statusColorClass">{{
+            t(`mode.service_status_${serviceStatus.toLowerCase()}`)
+          }}</span>
         </div>
         <div class="flex items-center gap-2">
-          <Button v-if="serviceStatus === 'Running'" severity="warn" text @click="emit('stop-service')"><i class="pi pi-stop-circle"></i><span>{{ t('mode.stop_service') }}</span></Button>
-          <Button v-if="serviceStatus !== 'NotInstalled'" severity="danger" text @click="emit('uninstall-service')"><i class="pi pi-trash"></i><span>{{ t('mode.uninstall_service') }}</span></Button>
+          <Button
+            v-if="serviceStatus === 'Running'"
+            severity="warn"
+            text
+            @click="emit('stop-service')"
+            ><i class="pi pi-stop-circle"></i><span>{{ t("mode.stop_service") }}</span></Button
+          >
+          <Button
+            v-if="serviceStatus !== 'NotInstalled'"
+            severity="danger"
+            text
+            @click="emit('uninstall-service')"
+            ><i class="pi pi-trash"></i><span>{{ t("mode.uninstall_service") }}</span></Button
+          >
         </div>
       </div>
     </div>
 
-    <div v-if="remoteMode" class="flex flex-col gap-2">
-      <div class="flex items-center gap-2">
-        <label for="remote-addr">{{ t('mode.remote_rpc_address') }}</label>
-        <InputText id="remote-addr" v-model="remoteMode.remote_rpc_address" class="flex-1" />
-      </div>
+    <div class="text-sm text-gray-500">
+      {{ t("target.hint") }}
     </div>
   </div>
 </template>

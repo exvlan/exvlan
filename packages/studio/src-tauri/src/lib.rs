@@ -693,6 +693,105 @@ async fn init_rpc_connection(
     Ok(())
 }
 
+/// 应用运行方式（与「目标」正交）：只负责本机内核的启停，不动已建立的连接。
+///
+/// - `service`：系统服务常驻，退出界面继续跑
+/// - `normal`：内核对齐当前 GUI 会话（关界面即停）
+/// - `off`：停掉内核
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn runtime_apply(_app: AppHandle, runtime: String) -> Result<String, String> {
+    let want = runtime.trim().to_ascii_lowercase();
+    if !matches!(want.as_str(), "service" | "normal" | "off") {
+        return Err(format!("未知运行方式: {runtime}"));
+    }
+    let want2 = want.clone();
+    tokio::task::spawn_blocking(move || -> Result<String, String> {
+        match want2.as_str() {
+            "off" => {
+                crate::service_client::stop_kernel()?;
+                crate::service_client::stop();
+                logger::record("runtime", "kernel stopped (off)");
+                Ok("off".to_string())
+            }
+            other => {
+                crate::service_client::set_mode(other)?;
+                let pid = crate::service_client::ensure_kernel()?;
+                logger::record("runtime", format!("{other} mode, kernel pid={pid}"));
+                Ok(other.to_string())
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("运行方式切换任务失败: {e}"))?
+}
+
+/// 远程目标连通性探测（只做 TCP 连接 + 时延）。不校验身份、不读配置。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn remote_ping(url: String) -> Result<u64, String> {
+    let text = url.trim().trim_start_matches("tcp://").to_string();
+    if text.is_empty() {
+        return Err("地址为空".to_string());
+    }
+    let started = std::time::Instant::now();
+    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        use std::net::ToSocketAddrs as _;
+        let addrs: Vec<std::net::SocketAddr> = text
+            .to_socket_addrs()
+            .map_err(|e| format!("解析 {text} 失败: {e}"))?
+            .collect();
+        if addrs.is_empty() {
+            return Err(format!("{text} 没有可用地址"));
+        }
+        let mut last_err = String::new();
+        for addr in addrs {
+            match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3)) {
+                Ok(_) => return Ok(()),
+                Err(err) => last_err = format!("{addr}: {err}"),
+            }
+        }
+        Err(format!("连接失败: {last_err}"))
+    })
+    .await
+    .map_err(|e| format!("探测任务失败: {e}"))?;
+    outcome?;
+    Ok(started.elapsed().as_millis() as u64)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn runtime_apply(_app: AppHandle, _runtime: String) -> Result<String, String> {
+    Ok("mobile".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn remote_ping(url: String) -> Result<u64, String> {
+    // 移动端也可能管理远程实例：同样只做 TCP 探测。
+    let text = url.trim().trim_start_matches("tcp://").to_string();
+    let started = std::time::Instant::now();
+    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        use std::net::ToSocketAddrs as _;
+        let addrs: Vec<std::net::SocketAddr> = text
+            .to_socket_addrs()
+            .map_err(|e| format!("解析 {text} 失败: {e}"))?
+            .collect();
+        let mut last_err = String::new();
+        for addr in addrs {
+            match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3)) {
+                Ok(_) => return Ok(()),
+                Err(err) => last_err = format!("{addr}: {err}"),
+            }
+        }
+        Err(format!("连接失败: {last_err}"))
+    })
+    .await
+    .map_err(|e| format!("探测任务失败: {e}"))?;
+    outcome?;
+    Ok(started.elapsed().as_millis() as u64)
+}
+
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
 async fn init_rpc_connection(
@@ -5497,6 +5596,8 @@ pub fn run_gui() -> std::process::ExitCode {
             service_restart,
             service_reinstall,
             init_rpc_connection,
+            runtime_apply,
+            remote_ping,
             is_client_running,
             init_web_client,
             is_web_client_connected,

@@ -759,6 +759,30 @@ web:
     theme: Theme
     logout: Logout
 
+runtime:
+  title: Run as
+  service: Service
+  normal: Normal
+  off: Stopped
+  off_hint: Kernel stopped. Pick Service or Normal to start it again.
+
+target:
+  title: Target
+  local: This device
+  missing: Target removed
+  manage: Manage remotes…
+  add: Add remote
+  name: Name (optional)
+  name_placeholder: e.g. home server
+  address: Address (host:port)
+  invalid_address: Invalid address, e.g. 10.254.0.7:15999
+  test: Test connection
+  test_all: Test all
+  hint: |-
+    Remote targets are reached over the mesh network only (fixed port 15999,
+    no key, no HTTPS). Switching target does NOT stop the local kernel;
+    "remote + local normal mode" can coexist.
+
 mode:
   title: Mode
   switch_mode: Switch Mode
