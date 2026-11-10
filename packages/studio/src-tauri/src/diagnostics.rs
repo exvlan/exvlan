@@ -269,8 +269,7 @@ fn service_state_json() -> Value {
                 .map(|m| format!("{:o}", m.permissions().mode() & 0o777))
                 .unwrap_or_else(|| "-".to_string())
         );
-        let plist =
-            std::path::PathBuf::from("/Library/LaunchDaemons/era.exvlan.studio.service.plist");
+        let plist = crate::paths::privileged_service_plist();
         value["plist"] = file_meta(&plist);
         value["print_disabled"] = json!(launchctl_print_disabled());
         value["codesign"] = json!(codesign_summary(&Some(bin)));

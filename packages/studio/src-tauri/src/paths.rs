@@ -13,6 +13,10 @@ use std::path::PathBuf;
 /// 唯一标识：bundle id / applicationId / 服务 label / 目录名 四者一致。
 pub const APP_ID: &str = "era.exvlan.studio";
 
+/// 特权服务 label（macOS LaunchDaemon / Windows 服务名）。
+/// 记住：它 **不是** `APP_ID`（旧的内核 daemon 服务用的才是 `APP_ID`）。
+pub const PRIVILEGED_SERVICE_LABEL: &str = "era.exvlan.studio.service";
+
 /// 系统侧（root 持有）的路径。
 pub struct SystemPaths {
     /// 服务配置目录。
@@ -66,6 +70,40 @@ pub fn service_plist(label: &str) -> Option<PathBuf> {
 #[allow(dead_code)]
 pub fn service_plist(_label: &str) -> Option<PathBuf> {
     None
+}
+
+/// 特权服务（`exvlan-service`）的二进制落点。
+///
+/// 与 `packages/studio/service` 里 `paths()` 的实现**必须一致**：GUI 用这个
+/// 路径判断「是否已安装」并读取 `--version`。
+pub fn privileged_service_bin() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from("/Library/PrivilegedHelperTools").join(PRIVILEGED_SERVICE_LABEL)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        PathBuf::from(r"C:\ProgramData")
+            .join(APP_ID)
+            .join("bin")
+            .join("exvlan-service.exe")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        PathBuf::from("/usr/local/bin/exvlan-service")
+    }
+}
+
+/// 特权服务的 launchd plist（macOS；其它平台返回空路径）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn privileged_service_plist() -> PathBuf {
+    service_plist(PRIVILEGED_SERVICE_LABEL).unwrap_or_default()
+}
+
+/// 特权服务的 unix socket（macOS）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn privileged_service_socket() -> PathBuf {
+    PathBuf::from("/var/run").join(APP_ID).join("service.sock")
 }
 
 /// 系统 LaunchDaemons 目录（macOS）。

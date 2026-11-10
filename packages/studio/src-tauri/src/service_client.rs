@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 
 /// 服务 label（macOS plist / Windows 服务名）。
-pub const SERVICE_LABEL: &str = "era.exvlan.studio.service";
+pub const SERVICE_LABEL: &str = crate::paths::PRIVILEGED_SERVICE_LABEL;
 
 pub fn current_uid() -> u32 {
     #[cfg(unix)]
@@ -47,18 +47,7 @@ pub fn bundled_service(app: &tauri::AppHandle) -> Option<PathBuf> {
 
 /// 已安装的服务二进制落点（必须与 `exvlan-service` 内部的 `paths()` 一致）。
 pub fn installed_service_bin() -> PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        PathBuf::from("/Library/PrivilegedHelperTools/era.exvlan.studio.service")
-    }
-    #[cfg(target_os = "windows")]
-    {
-        PathBuf::from(r"C:\ProgramData\era.exvlan.studio\bin\exvlan-service.exe")
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        PathBuf::from("/usr/local/bin/exvlan-service")
-    }
+    crate::paths::privileged_service_bin()
 }
 
 /// 服务当前状态（供界面判断是否要显示横幅 / 诊断包）。
@@ -104,9 +93,9 @@ mod imp {
 
     #[cfg(target_os = "macos")]
     fn connect() -> Result<Session, String> {
-        let path = "/var/run/era.exvlan.studio/service.sock";
-        let stream = std::os::unix::net::UnixStream::connect(path)
-            .map_err(|e| format!("连接 {path} 失败: {e}"))?;
+        let path = crate::paths::privileged_service_socket();
+        let stream = std::os::unix::net::UnixStream::connect(&path)
+            .map_err(|e| format!("连接 {} 失败: {e}", path.display()))?;
         let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
         let writer = Box::new(stream.try_clone().map_err(|e| e.to_string())?);
         let reader = BufReader::new(Box::new(stream) as Box<dyn std::io::Read + Send>);
@@ -180,9 +169,7 @@ mod imp {
     pub fn is_installed() -> bool {
         #[cfg(target_os = "macos")]
         {
-            installed_service_bin().is_file()
-                && std::path::Path::new("/Library/LaunchDaemons/era.exvlan.studio.service.plist")
-                    .is_file()
+            installed_service_bin().is_file() && crate::paths::privileged_service_plist().is_file()
         }
         #[cfg(target_os = "windows")]
         {
