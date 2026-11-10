@@ -21,6 +21,7 @@ import { executeVpnTileAction } from "~/composables/mobile_vpn_tile";
 import { dedupeNetworkInstances } from "~/composables/instance_dedupe";
 import { GUIRemoteClient } from "~/modules/api";
 import { logDiagStep, uploadDiagnostics } from "~/composables/backend";
+import { buildFrontendState } from "~/composables/diagnostics";
 
 import { useToast, useConfirm } from "openvue";
 import { loadMode, saveModeNow, WebClientConfig, type Mode } from "~/composables/mode";
@@ -195,7 +196,8 @@ async function onCopyDiagnostics() {
 
 async function onShareErrorLog() {
   try {
-    const path = await shareErrorLog();
+    const state = await buildFrontendState().catch(() => "");
+    const path = await shareErrorLog(state);
     if (type() === "android") {
       // 分享面板不可用时，Rust 会兜底落盘到「下载」并以 `saved: ` 前缀返回。
       if (path.startsWith("saved: ")) {

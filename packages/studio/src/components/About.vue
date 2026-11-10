@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import pkg from "~/../package.json";
 import { getExvlanVersion } from "~/composables/backend";
+import { buildFrontendState } from "~/composables/diagnostics";
 import {
   appUpdateApply,
   appUpdateInfo,
@@ -97,7 +98,8 @@ async function copyDiagnostics() {
 
 async function shareLog() {
   try {
-    const path = await shareErrorLog();
+    const state = await buildFrontendState().catch(() => "");
+    const path = await shareErrorLog(state);
     if (path.startsWith("saved: ")) {
       toast.add({
         severity: "warn",

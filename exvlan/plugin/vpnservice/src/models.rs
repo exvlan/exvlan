@@ -24,6 +24,9 @@ pub struct ShareFileRequest {
     pub mime: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
+    /// 附加到分享意图的 `EXTRA_TEXT`（如上传失败链）。
+    #[serde(default)]
+    pub extra_text: Option<String>,
 }
 
 /// 保存到系统「下载」目录的结果（展示路径，如 `Download/Exvlan/xxx.zip`）。

@@ -34,6 +34,7 @@ class ShareFileArgs {
     var path: String = ""
     var mime: String? = null
     var title: String? = null
+    var extraText: String? = null
 }
 
 @InvokeArg
@@ -207,6 +208,9 @@ class VpnServicePlugin(private val activity: Activity) : Plugin(activity) {
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = args.mime ?: "text/plain"
                 putExtra(Intent.EXTRA_STREAM, uri)
+                args.extraText?.takeIf { it.isNotBlank() }?.let {
+                    putExtra(Intent.EXTRA_TEXT, it)
+                }
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }

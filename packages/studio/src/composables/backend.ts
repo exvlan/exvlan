@@ -283,9 +283,10 @@ export async function readErrorLog(tailKb?: number) {
   return await invoke<string>("read_error_log", { tailKb });
 }
 
-/** 分享 error.log：Android 弹系统分享面板；桌面返回路径。 */
-export async function shareErrorLog() {
-  return await invoke<string>("share_error_log");
+/** 分享诊断包：Android 弹系统分享面板；桌面返回路径并打开诊断目录。
+ *  传入 `frontend` 后与「上传诊断」使用同一份前端状态。 */
+export async function shareErrorLog(frontend?: string) {
+  return await invoke<string>("share_error_log", { frontend: frontend ?? null });
 }
 
 /** helper 当前状态（macOS 特权组件；移动端恒为 ready）。 */

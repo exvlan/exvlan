@@ -1480,8 +1480,11 @@ fn join_collect(
     name: &'static str,
     started: std::time::Instant,
 ) -> (crate::diagnostics::Collected, u128) {
+    // 注意：必须**先 join 再取时间**。之前先取 elapsed 再 join，记录的是
+    // “轮到它时的时刻”，比真实耗时要小很多（Android 包 dns 显示 752ms、实际 ~5.9s）。
+    let joined = handle.join();
     let elapsed = started.elapsed().as_millis();
-    match handle.join() {
+    match joined {
         Ok(collected) => {
             logger::record("diag.item", format!("{} {}ms", collected.name, elapsed));
             (collected, elapsed)
@@ -1827,14 +1830,346 @@ fn build_diagnostics_zip(
 ///
 /// 每层都写 `[upload]` 日志（含耗时），失败时错误文本带上 zip 路径，
 /// 前端据此提示并复制路径 —— 不再出现「点了没反应」。
+/// 诊断包：采集 + 打包的产物。上传与分享共用同一份（内容必须一致）。
+struct DiagPackage {
+    path: std::path::PathBuf,
+    /// 仅 Android 分享时用到（桌面分支不起作用）。
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    mime: &'static str,
+    /// true = zip 建不出来，降级为 error.log
+    fallback: bool,
+    summary: String,
+    network_report: String,
+}
+
+/// 采集 + 打包（上传与分享的**唯一**入口）。
+async fn build_diagnostics_package(
+    app: &AppHandle,
+    frontend: Option<&str>,
+) -> Result<DiagPackage, String> {
+    use tauri::Manager as _;
+
+    ensure_error_log(app);
+    let started = std::time::Instant::now();
+
+    let network_report = match build_network_report(app, frontend).await {
+        Ok(report) => report,
+        Err(err) => {
+            // 不再 `unwrap_or_default()` 静默吞掉：采集失败必须写进报告，
+            // 否则诊断包只会缺一大段内容，看不出是"没采到"还是"没问题"。
+            logger::record("diag.collect", format!("network_report failed: {err}"));
+            format!("[collect_errors]\nnetwork_report failed: {err}\n")
+        }
+    };
+
+    // 打包会并行跑 7 个采集器（最慢 30s），必须放到阻塞线程池。
+    let zip_result = {
+        let app = app.clone();
+        let report = network_report.clone();
+        tokio::task::spawn_blocking(move || build_diagnostics_zip(&app, &report))
+            .await
+            .map_err(|e| format!("诊断打包任务失败: {e}"))?
+    };
+
+    let summary_for = |size: usize| {
+        format!(
+            "app: {}\nos: {} ({})\nmode: {}\nlog_dir: {:?}\nsize: {} bytes",
+            BUILD_VERSION,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            app.path()
+                .app_config_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            get_log_dir(app).ok().map(|p| p.display().to_string()),
+            size,
+        )
+    };
+
+    match zip_result {
+        Ok(path) => {
+            let size = std::fs::metadata(&path)
+                .map(|m| m.len() as usize)
+                .unwrap_or(0);
+            logger::record(
+                "diag",
+                format!(
+                    "package ok path={} size={size}B in {}ms",
+                    path.display(),
+                    started.elapsed().as_millis()
+                ),
+            );
+            Ok(DiagPackage {
+                path,
+                mime: "application/zip",
+                fallback: false,
+                summary: summary_for(size),
+                network_report,
+            })
+        }
+        Err(err) => {
+            // 统一降级：上传走文本通道 `/`，分享直接分享 error.log。
+            logger::record("diag", format!("zip failed: {err}; fallback to error.log"));
+            let Some(path) = logger::path() else {
+                return Err(err);
+            };
+            let size = std::fs::metadata(&path)
+                .map(|m| m.len() as usize)
+                .unwrap_or(0);
+            Ok(DiagPackage {
+                path,
+                mime: "text/plain",
+                fallback: true,
+                summary: summary_for(size),
+                network_report,
+            })
+        }
+    }
+}
+
+/// 交付结果（前端据此提示，不再各自解析字符串）。
+#[derive(Debug)]
+#[allow(dead_code)] // 字段用于日志/调试与后续扩展（如 deduped 提示）
+enum DiagOutcome {
+    Uploaded {
+        text: String,
+        deduped: bool,
+        text_fallback: bool,
+    },
+    Shared {
+        path: String,
+        from_upload_fallback: bool,
+    },
+    SavedLocally {
+        path: String,
+        note: String,
+    },
+}
+
+/// 上传（三层通道 + idem + 文本回退）。失败返回失败链字符串。
+async fn deliver_upload(
+    app: &AppHandle,
+    pkg: &DiagPackage,
+    idem: &str,
+    reason: Option<&str>,
+    started: std::time::Instant,
+) -> Result<DiagOutcome, String> {
+    let size = std::fs::metadata(&pkg.path)
+        .map(|m| m.len() as usize)
+        .unwrap_or(0);
+
+    if pkg.fallback {
+        logger::record("diag", "deliver=upload (fallback text)");
+        let json = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            upload_text_fallback(app, &pkg.network_report, &pkg.summary, idem),
+        )
+        .await
+        .map_err(|_| "文本上传超时 30s".to_string())??;
+        return Ok(finish_upload(json, true, started));
+    }
+
+    let mut upload_url = url::Url::parse(&format!("{DIAG_UPLOAD_URL}zip"))
+        .map_err(|e| logger::other("cmd:upload_diagnostics", e.to_string()))?;
+    upload_url
+        .query_pairs_mut()
+        .append_pair("version", BUILD_VERSION)
+        .append_pair("os", std::env::consts::OS)
+        .append_pair("arch", std::env::consts::ARCH)
+        .append_pair("summary", pkg.summary.as_str())
+        .append_pair("idem", idem);
+    upload_url.query_pairs_mut().append_pair(
+        "reason",
+        match reason {
+            Some("install-failed") => "install-failed",
+            _ => "manual",
+        },
+    );
+
+    let body = std::fs::read(&pkg.path).map_err(|e| format!("读取诊断包失败: {e}"))?;
+    let watchdog = if is_mobile() { 90 } else { 60 };
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(watchdog),
+        upload_with_fallback(&upload_url, body, &pkg.path),
+    )
+    .await
+    {
+        Ok(Ok(json)) => Ok(finish_upload(json, false, started)),
+        Ok(Err(err)) => {
+            if !should_text_fallback(&err) {
+                logger::record(
+                    "diag",
+                    format!(
+                        "deliver=upload failed in {}ms: {err}",
+                        started.elapsed().as_millis()
+                    ),
+                );
+                return Err(format!("上传失败：{err}（zip {size}B）"));
+            }
+            logger::record("diag", format!("zip 失败，回退文本上传: {err}"));
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                upload_text_fallback(app, &pkg.network_report, &pkg.summary, idem),
+            )
+            .await
+            {
+                Ok(Ok(json)) => Ok(finish_upload(json, true, started)),
+                Ok(Err(err2)) => {
+                    logger::record("diag", format!("文本兜底失败: {err2}"));
+                    Err(format!("上传失败：{err}；文本兜底也失败：{err2}"))
+                }
+                Err(_) => {
+                    logger::record("diag", "文本兜底超时 30s");
+                    Err(format!("上传失败：{err}；文本兜底超时"))
+                }
+            }
+        }
+        Err(_) => Err(format!("上传超时（{watchdog}s，zip {size}B）")),
+    }
+}
+
+fn finish_upload(
+    body_json: serde_json::Value,
+    text_fallback: bool,
+    started: std::time::Instant,
+) -> DiagOutcome {
+    let mut links = Vec::new();
+    if let Some(arr) = body_json.get("urls").and_then(|v| v.as_array()) {
+        links.extend(arr.iter().filter_map(|v| v.as_str()).map(str::to_owned));
+    }
+    if let Some(zip_url) = body_json.get("zipUrl").and_then(|v| v.as_str()) {
+        links.push(format!("zip: {zip_url}"));
+    }
+    let mut text = links.join("\n");
+    if text_fallback {
+        text.push_str("\n（zip 存储暂不可用，本次仅上传了文本诊断）");
+    }
+    let deduped = body_json
+        .get("deduped")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if deduped {
+        text.push_str("\n（该诊断包已上传过，沿用原链接）");
+        logger::record("diag", "deduped by idem: 复用已有 issue");
+    }
+    logger::event(
+        "diag",
+        format!(
+            "deliver=upload ok ({}ms): {text}",
+            started.elapsed().as_millis()
+        ),
+    );
+    DiagOutcome::Uploaded {
+        text,
+        deduped,
+        text_fallback,
+    }
+}
+
+/// 把上传失败链追加进 zip（`upload-error.txt`），分享时一起带上原因。
+fn append_upload_error(pkg: &DiagPackage, chain: &str) -> bool {
+    use std::io::Write as _;
+    if pkg.fallback {
+        return false;
+    }
+    let Ok(file) = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .open(&pkg.path)
+    else {
+        return false;
+    };
+    let Ok(mut zip) = zip::ZipWriter::new_append(file) else {
+        return false;
+    };
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    if zip.start_file("upload-error.txt", opts).is_err() {
+        return false;
+    }
+    if zip.write_all(chain.as_bytes()).is_err() {
+        return false;
+    }
+    zip.finish().is_ok()
+}
+
+/// 分享（Android 复制 cache → 分享面板；桌面打开诊断目录）。失败落盘。
+async fn deliver_share(
+    app: &AppHandle,
+    pkg: &DiagPackage,
+    extra_text: Option<&str>,
+    from_upload_fallback: bool,
+) -> DiagOutcome {
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_vpnservice::VpnserviceExt;
+
+        let share_path = match copy_to_cache(app, &pkg.path) {
+            Ok(copy) => copy,
+            Err(err) => {
+                logger::record("diag", format!("copy to cache failed: {err}"));
+                return save_and_report(app, pkg, format!("分享不可用（{err}）"));
+            }
+        };
+        let attempt = app
+            .vpnservice()
+            .share_file(tauri_plugin_vpnservice::models::ShareFileRequest {
+                path: share_path.display().to_string(),
+                mime: Some(pkg.mime.to_string()),
+                title: Some("Exvlan 诊断日志".to_string()),
+                extra_text: extra_text.map(str::to_owned),
+            })
+            .map_err(|e| e.to_string());
+        if let Err(err) = attempt {
+            logger::record("diag", format!("share_file failed: {err}"));
+            return save_and_report(app, pkg, format!("分享不可用（{err}）"));
+        }
+        logger::event("diag", "deliver=share ok (android)");
+        DiagOutcome::Shared {
+            path: pkg.path.display().to_string(),
+            from_upload_fallback,
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = extra_text;
+        logger::event("diag", "deliver=share ok (desktop: open dir)");
+        let _ = open_diagnostics_dir(app.clone());
+        DiagOutcome::Shared {
+            path: pkg.path.display().to_string(),
+            from_upload_fallback,
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn save_and_report(app: &AppHandle, pkg: &DiagPackage, note: String) -> DiagOutcome {
+    match save_to_downloads(app, &pkg.path, pkg.mime) {
+        Ok(saved) => DiagOutcome::SavedLocally { path: saved, note },
+        Err(err) => DiagOutcome::SavedLocally {
+            path: pkg.path.display().to_string(),
+            note: format!("{note}；落盘也失败：{err}"),
+        },
+    }
+}
+
+/// 桌面没有分享面板，不会走到“分享失败”；保留同一入口便于将来扩展。
+#[cfg(not(target_os = "android"))]
+#[allow(dead_code)]
+fn save_and_report(_app: &AppHandle, pkg: &DiagPackage, note: String) -> DiagOutcome {
+    DiagOutcome::SavedLocally {
+        path: pkg.path.display().to_string(),
+        note,
+    }
+}
+
 #[tauri::command]
 async fn upload_diagnostics(
     app: AppHandle,
     frontend: Option<String>,
     reason: Option<String>,
 ) -> Result<String, String> {
-    use tauri::Manager as _;
-
     // 单飞：手动连点 / 自动上传与手动撞车时，第二个调用立即返回，不重复采集。
     let _guard = match begin_upload() {
         Some(guard) => guard,
@@ -1845,169 +2180,38 @@ async fn upload_diagnostics(
     };
 
     let started = std::time::Instant::now();
-    // 幂等键：一次 upload_diagnostics 一个，三条通道共用。服务端用它把
-    // 「直连超时但实际已建 issue → 代理又发一次」收敛成一个 issue。
     let idem = Uuid::new_v4().to_string();
     logger::record(
-        "upload",
+        "diag",
         format!(
-            "start frontend={}B idem={} url={DIAG_UPLOAD_URL}zip",
+            "deliver=upload start frontend={}B idem={} url={DIAG_UPLOAD_URL}zip",
             frontend.as_deref().map(str::len).unwrap_or(0),
             &idem[..8]
         ),
     );
 
-    let network_report = match build_network_report(&app, frontend.as_deref()).await {
-        Ok(report) => report,
-        Err(err) => {
-            // 不再 `unwrap_or_default()` 静默吞掉：采集失败必须写进报告，
-            // 否则诊断包只会缺一大段内容，看不出是"没采到"还是"没问题"。
-            logger::record("diag.collect", format!("network_report failed: {err}"));
-            format!("[collect_errors]\nnetwork_report failed: {err}\n")
-        }
-    };
-    // 打包会并行跑 7 个采集器（最慢 30s），必须放到阻塞线程池，
-    // 否则会把 tokio worker 卡住，导致其它命令/心跳一起超时。
-    let zip_path = {
-        let app = app.clone();
-        let report = network_report.clone();
-        tokio::task::spawn_blocking(move || build_diagnostics_zip(&app, &report))
-            .await
-            .map_err(|e| format!("诊断打包任务失败: {e}"))??
-    };
-    let zip_bytes = std::fs::read(&zip_path).map_err(|e| format!("读取诊断包失败: {e}"))?;
-    let zip_size = zip_bytes.len();
-    logger::record(
-        "upload",
-        format!(
-            "zip ok path={} size={zip_size}B in {}ms",
-            zip_path.display(),
-            started.elapsed().as_millis()
-        ),
-    );
-
-    let summary = format!(
-        "app: {}\nos: {} ({})\nmode: {}\nlog_dir: {:?}\nzip: {} bytes",
-        BUILD_VERSION,
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-        app.path()
-            .app_config_dir()
-            .map(|p| p.display().to_string())
-            .unwrap_or_default(),
-        get_log_dir(&app).ok().map(|p| p.display().to_string()),
-        zip_size,
-    );
-
-    let mut upload_url = url::Url::parse(&format!("{DIAG_UPLOAD_URL}zip"))
-        .map_err(|e| logger::other("cmd:upload_diagnostics", e.to_string()))?;
-    upload_url
-        .query_pairs_mut()
-        .append_pair("version", BUILD_VERSION)
-        .append_pair("os", std::env::consts::OS)
-        .append_pair("arch", std::env::consts::ARCH)
-        .append_pair("summary", summary.as_str())
-        .append_pair("idem", idem.as_str());
-    upload_url.query_pairs_mut().append_pair(
-        "reason",
-        match reason.as_deref() {
-            Some("install-failed") => "install-failed",
-            _ => "manual",
-        },
-    );
-
-    // 外层看门狗：无论哪一层卡住，60s 内必须给出结果。
-    let body = zip_bytes;
-    let upload_url_for_task = upload_url.clone();
-    let zip_path_for_task = zip_path.clone();
-    let watchdog_secs = if is_mobile() { 90 } else { 60 };
-    let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(watchdog_secs),
-        upload_with_fallback(&upload_url_for_task, body, &zip_path_for_task),
-    )
-    .await;
-
-    let mut used_text_fallback = false;
-    let body_json = match outcome {
-        Ok(Ok(json)) => json,
-        Ok(Err(err)) => {
-            // zip 存不进 KV（额度用尽）或 5xx/413：改走文本通道，保证 issue 能建出来。
-            if !should_text_fallback(&err) {
-                logger::record(
-                    "upload",
-                    format!("failed in {}ms: {err}", started.elapsed().as_millis()),
-                );
-                return Err(upload_failure_message(
-                    &app,
-                    &format!("上传失败：{err}"),
-                    &zip_path,
-                ));
-            }
-            logger::record("upload", format!("zip 失败，回退文本上传: {err}"));
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                upload_text_fallback(&app, &network_report, &summary, &idem),
-            )
-            .await
-            {
-                Ok(Ok(json)) => {
-                    used_text_fallback = true;
-                    json
-                }
-                Ok(Err(err2)) => {
-                    logger::record("upload", format!("文本兜底失败: {err2}"));
-                    return Err(upload_failure_message(
-                        &app,
-                        &format!("上传失败：{err}；文本兜底也失败：{err2}"),
-                        &zip_path,
-                    ));
-                }
-                Err(_) => {
-                    logger::record("upload", "文本兜底超时 30s");
-                    return Err(upload_failure_message(
-                        &app,
-                        &format!("上传失败：{err}；文本兜底超时"),
-                        &zip_path,
-                    ));
-                }
-            }
-        }
-        Err(_) => {
+    let pkg = build_diagnostics_package(&app, frontend.as_deref()).await?;
+    match deliver_upload(&app, &pkg, &idem, reason.as_deref(), started).await {
+        Ok(DiagOutcome::Uploaded { text, .. }) => Ok(text),
+        Ok(other) => Ok(format!("{other:?}")),
+        Err(chain) => {
+            // 上传彻底失败：把失败链写进包 → 转分享 → 失败再落盘。
             logger::record(
-                "upload",
-                format!("failed in {}ms: 总超时 60s", started.elapsed().as_millis()),
+                "diag",
+                format!("deliver=upload failed, fallback to share: {chain}"),
             );
-            return Err(upload_failure_message(&app, "上传超时（60s）", &zip_path));
+            append_upload_error(&pkg, &chain);
+            match deliver_share(&app, &pkg, Some(&chain), true).await {
+                DiagOutcome::Shared { path, .. } => {
+                    Ok(format!("上传失败，已改为分享：{path}\n原因：{chain}"))
+                }
+                DiagOutcome::SavedLocally { path, note } => {
+                    Err(format!("上传失败，已保存到 {path}（{note}）：{chain}"))
+                }
+                DiagOutcome::Uploaded { text, .. } => Ok(text),
+            }
         }
-    };
-
-    let mut links = Vec::new();
-    if let Some(arr) = body_json.get("urls").and_then(|v| v.as_array()) {
-        links.extend(arr.iter().filter_map(|v| v.as_str()).map(str::to_owned));
     }
-    if let Some(zip_url) = body_json.get("zipUrl").and_then(|v| v.as_str()) {
-        links.push(format!("zip: {zip_url}"));
-    }
-    let mut text = links.join("\n");
-    if used_text_fallback {
-        text.push_str("\n（zip 存储暂不可用，本次仅上传了文本诊断）");
-    }
-    if body_json
-        .get("deduped")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        text.push_str("\n（该诊断包已上传过，沿用原链接）");
-        logger::record("upload", "deduped by idem: 复用已有 issue");
-    }
-    logger::event(
-        "upload",
-        format!(
-            "diagnostics uploaded ({zip_size} bytes, {}ms): {text}",
-            started.elapsed().as_millis()
-        ),
-    );
-    Ok(text)
 }
 
 /// 解析上传目标地址（IPv4 优先，避免 IPv6 黑洞导致连接挂住）。
@@ -2584,21 +2788,6 @@ fn clip_chars(text: &str, max: usize) -> String {
     out
 }
 
-/// 上传失败时的错误文案：移动端先尝试落盘到「下载」，桌面端给出本地路径。
-fn upload_failure_message(app: &AppHandle, prefix: &str, zip_path: &std::path::Path) -> String {
-    #[cfg(target_os = "android")]
-    {
-        if let Ok(saved) = save_to_downloads(app, zip_path, "application/zip") {
-            return format!("{prefix}；诊断包已保存到 {saved}");
-        }
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = app;
-    }
-    format!("{prefix}；诊断包已保存在 {}", zip_path.display())
-}
-
 /// Android：把文件复制到应用 cache（FileProvider 只声明了 `cache-path` / `external-path`，
 /// 而诊断包在 `<dataDir>/logs/diagnostics`，直接分享会抛
 /// `Failed to find configured root that contains ...`）。
@@ -2640,68 +2829,19 @@ fn save_to_downloads(
 
 /// 分享诊断包：Android 弹系统分享面板（zip）；桌面返回路径（前端打开目录）。
 #[tauri::command]
-async fn share_error_log(app: AppHandle) -> Result<String, String> {
-    ensure_error_log(&app);
-    let report = build_network_report(&app, None).await.unwrap_or_default();
-
-    // 打包会并行跑采集器，放到阻塞线程池，避免卡住 tokio worker。
-    let zip_result = {
-        let app = app.clone();
-        let report = report.clone();
-        tokio::task::spawn_blocking(move || build_diagnostics_zip(&app, &report))
-            .await
-            .unwrap_or_else(|e| Err(format!("诊断打包任务失败: {e}")))
-    };
-
-    // zip 建不出来（目录不可写/磁盘满）时降级为分享原始 error.log，
-    // 而不是让「分享」整体失败。
-    let (path, mime, title) = match zip_result {
-        Ok(path) => (path, "application/zip", "Exvlan 诊断日志"),
-        Err(err) => {
-            logger::record("share", format!("zip failed: {err}; fallback to error.log"));
-            match logger::path() {
-                Some(path) => (path, "text/plain", "Exvlan error.log"),
-                None => return Err(err),
-            }
-        }
-    };
-
-    #[cfg(target_os = "android")]
-    {
-        use tauri_plugin_vpnservice::VpnserviceExt;
-        // 先复制到 cache，让 FileProvider 能匹配到根目录。
-        let share_path = match copy_to_cache(&app, &path) {
-            Ok(copy) => copy,
-            Err(err) => {
-                // 连复制都失败（磁盘满/目录不可写）：直接落盘到「下载」。
-                logger::record("share", format!("copy to cache failed: {err}"));
-                let saved = save_to_downloads(&app, &path, mime)?;
-                return Ok(format!("saved: {saved}"));
-            }
-        };
-        let attempt = app
-            .vpnservice()
-            .share_file(tauri_plugin_vpnservice::models::ShareFileRequest {
-                path: share_path.display().to_string(),
-                mime: Some(mime.to_string()),
-                title: Some(title.to_string()),
-            })
-            .map_err(|e| e.to_string());
-        if let Err(err) = attempt {
-            // 没有可用分享目标 / 插件异常：落盘到「下载」，至少用户能拿到文件。
-            logger::record(
-                "share",
-                format!("share_file failed: {err}; fallback to downloads"),
-            );
-            let saved = save_to_downloads(&app, &path, mime)?;
-            return Ok(format!("saved: {saved}"));
-        }
+async fn share_error_log(app: AppHandle, frontend: Option<String>) -> Result<String, String> {
+    let started = std::time::Instant::now();
+    let pkg = build_diagnostics_package(&app, frontend.as_deref()).await?;
+    let outcome = deliver_share(&app, &pkg, None, false).await;
+    logger::event(
+        "diag",
+        format!("deliver=share done in {}ms", started.elapsed().as_millis()),
+    );
+    match outcome {
+        DiagOutcome::Shared { path, .. } => Ok(path),
+        DiagOutcome::SavedLocally { path, note } => Ok(format!("saved: {path}｜{note}")),
+        DiagOutcome::Uploaded { text, .. } => Ok(text),
     }
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = (&app, mime, title);
-    }
-    Ok(path.display().to_string())
 }
 
 #[cfg(not(target_os = "android"))]
@@ -5358,5 +5498,72 @@ mod upload_fallback_tests {
             "error sending request for url (…/zip)"
         ));
         assert!(!should_text_fallback("直连 / 系统代理 / curl 均失败"));
+    }
+}
+
+#[cfg(test)]
+mod diag_pipeline_tests {
+    use super::*;
+
+    fn make_zip(path: &std::path::Path) {
+        use std::io::Write as _;
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default();
+        zip.start_file("a.txt", opts).unwrap();
+        zip.write_all(b"hello").unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn append_upload_error_adds_entry_and_keeps_original() {
+        let dir = std::env::temp_dir().join(format!("exvlan-diag-append-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.zip");
+        make_zip(&path);
+
+        let pkg = DiagPackage {
+            path: path.clone(),
+            mime: "application/zip",
+            fallback: false,
+            summary: String::new(),
+            network_report: String::new(),
+        };
+        assert!(append_upload_error(&pkg, "upload failed: boom"));
+
+        let file = std::fs::File::open(&path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut names: Vec<String> = archive
+            .file_names()
+            .map(|n| n.unwrap_or_default().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["a.txt".to_string(), "upload-error.txt".to_string()]
+        );
+
+        use std::io::Read as _;
+        let mut text = String::new();
+        archive
+            .by_name("upload-error.txt")
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        assert!(text.contains("boom"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn append_upload_error_skips_fallback_package() {
+        let pkg = DiagPackage {
+            path: std::path::PathBuf::from("/nonexistent/error.log"),
+            mime: "text/plain",
+            fallback: true,
+            summary: String::new(),
+            network_report: String::new(),
+        };
+        assert!(!append_upload_error(&pkg, "boom"));
     }
 }
