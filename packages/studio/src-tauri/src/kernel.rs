@@ -20,9 +20,11 @@ use anyhow::{Context as _, bail};
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// 拉起内核进程的统一入口。所有 `exvlan(.exe)` 子进程都必须走这里，
-/// 否则 Windows 上每次调用都会闪一个黑框。
-pub fn kernel_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+/// 拉起控制台子系统程序（内核 / sc / schtasks / curl / cmd …）的统一入口。
+///
+/// Windows 上 GUI 进程没有控制台，系统会为每个控制台子进程新建 conhost 窗口；
+/// 只重定向 stdout/stderr 不够，必须显式传创建标志（clash-verge-rev / Zephyr 同做法）。
+pub fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     #[allow(unused_mut)]
     let mut cmd = Command::new(program);
     #[cfg(windows)]
@@ -31,6 +33,11 @@ pub fn kernel_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd
+}
+
+/// 拉起内核进程。所有 `exvlan(.exe)` 子进程都必须走这里，否则 Windows 上会闪黑框。
+pub fn kernel_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    hidden_command(program)
 }
 
 /// 内核可执行文件名。

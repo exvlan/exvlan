@@ -6,7 +6,11 @@
 #![allow(dead_code)]
 
 /// 必须与 `packages/studio/helper` 的 `HELPER_VERSION` 保持一致。
-pub const HELPER_VERSION: u32 = 2;
+///
+/// pre.11 从 2 → 3：新增「socket 未就绪时重试」，且 apply 前先 verify_healthy。
+/// 提升版本号是为了强制走一次完整重装——否则 `apply` 用的是旧 helper 二进制，
+/// 新逻辑要等旧二进制完成自更新后才生效（首次升级仍会踩 EOF）。
+pub const HELPER_VERSION: u32 = 3;
 
 #[cfg(target_os = "macos")]
 mod imp {
@@ -267,6 +271,10 @@ mod imp {
             }
         }
 
+        // helper 可能刚被 launchd 拉起：先确认 socket 能应答，再提交 apply，
+        // 否则会拿到 EOF 并误判为「helper 不可用」而回退提权。
+        Self::verify_healthy(std::time::Duration::from_secs(5));
+
         let out = std::process::Command::new(helper_bin())
             .arg("--apply")
             .arg(&staging)
@@ -283,6 +291,23 @@ mod imp {
     }
 
     fn socket_request(op: &str, extra: serde_json::Value) -> Result<String, String> {
+        // helper 可能刚被 launchd 拉起，socket 还未就绪；只对「连不上」重试，
+        // 请求已送达但响应异常时不重试（避免 `spawn` 被重复执行）。
+        let mut last = String::new();
+        for attempt in 0..5u64 {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(200 * attempt));
+            }
+            match Self::socket_request_once(op, &extra) {
+                Ok(value) => return Ok(value),
+                Err(err) if err.contains("连接 helper socket 失败") => last = err,
+                Err(err) => return Err(err),
+            }
+        }
+        Err(last)
+    }
+
+    fn socket_request_once(op: &str, extra: &serde_json::Value) -> Result<String, String> {
         use std::io::{BufRead as _, BufReader, Write as _};
         let mut stream = std::os::unix::net::UnixStream::connect(crate::paths::helper_socket())
             .map_err(|e| format!("连接 helper socket 失败: {e}"))?;

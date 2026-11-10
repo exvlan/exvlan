@@ -26,7 +26,7 @@ use anyhow::{Context as _, bail};
 use serde::{Deserialize, Serialize};
 
 const HELPER_LABEL: &str = "era.exvlan.studio.helper";
-const HELPER_VERSION: u32 = 2;
+const HELPER_VERSION: u32 = 3;
 /// 与服务端/系统路径保持一致。
 const SERVICE_LABEL: &str = "era.exvlan.studio";
 /// 与 `packages/studio/src-tauri/tauri.conf.json` 里 updater 公钥同一条。
@@ -658,16 +658,7 @@ fn installed_kernel_version() -> String {
 #[cfg(target_os = "macos")]
 fn client(request: Request) -> ExitCode {
     use platform::SOCKET_PATH;
-    use std::os::unix::net::UnixStream;
 
-    let mut stream = match UnixStream::connect(SOCKET_PATH) {
-        Ok(stream) => stream,
-        Err(err) => {
-            hlog!("connect {SOCKET_PATH} failed: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(600)));
     let payload = match serde_json::to_string(&request) {
         Ok(payload) => payload,
         Err(err) => {
@@ -675,27 +666,48 @@ fn client(request: Request) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if stream.write_all(format!("{payload}\n").as_bytes()).is_err() {
-        return ExitCode::FAILURE;
-    }
-    let mut line = String::new();
-    if BufReader::new(stream).read_line(&mut line).is_err() {
-        return ExitCode::FAILURE;
-    }
-    match serde_json::from_str::<Response>(line.trim()) {
-        Ok(response) => {
-            println!("{}", response.message);
-            if response.ok {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
+    // 守护进程可能刚被 launchd 拉起，socket 还没 ready。单次尝试会拿到 EOF，
+    // 表现为 `decode response failed: EOF while parsing a value at line 1 column 0`
+    // （GUI 侧据此回退提权，属于误判）。这里重试几次。
+    let mut last = String::new();
+    for attempt in 0..6u64 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(200 * attempt));
+        }
+        match client_once(SOCKET_PATH, &payload) {
+            Ok(response) => {
+                println!("{}", response.message);
+                return if response.ok {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                };
             }
-        }
-        Err(err) => {
-            hlog!("decode response failed: {err} ({line})");
-            ExitCode::FAILURE
+            Err(err) => last = err,
         }
     }
+    hlog!("helper request failed after retries: {last}");
+    ExitCode::FAILURE
+}
+
+#[cfg(target_os = "macos")]
+fn client_once(path: &str, payload: &str) -> Result<Response, String> {
+    use std::os::unix::net::UnixStream;
+
+    let mut stream = UnixStream::connect(path).map_err(|e| format!("connect {path}: {e}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(600)));
+    stream
+        .write_all(format!("{payload}\n").as_bytes())
+        .map_err(|e| format!("write request: {e}"))?;
+    let mut line = String::new();
+    BufReader::new(stream)
+        .read_line(&mut line)
+        .map_err(|e| format!("read response: {e}"))?;
+    if line.trim().is_empty() {
+        return Err("empty response".to_string());
+    }
+    serde_json::from_str::<Response>(line.trim())
+        .map_err(|e| format!("decode response: {e} ({line})"))
 }
 
 #[cfg(not(target_os = "macos"))]

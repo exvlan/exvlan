@@ -26,6 +26,14 @@ pub struct ShareFileRequest {
     pub title: Option<String>,
 }
 
+/// 保存到系统「下载」目录的结果（展示路径，如 `Download/Exvlan/xxx.zip`）。
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveToDownloadsResponse {
+    #[serde(default)]
+    pub path: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PingResponse {

@@ -523,7 +523,7 @@ pub mod app {
         }
         #[cfg(target_os = "windows")]
         {
-            std::process::Command::new("cmd")
+            crate::kernel::hidden_command("cmd")
                 .args(["/C", "start", ""])
                 .arg(path)
                 .status()

@@ -1453,6 +1453,8 @@ const DIAG_TOKEN_URL: &str = "https://exvlan-diag.era-x.cn/token";
 
 /// 单份日志进 zip 的上限（压缩后很小，但避免把 10MB 的轮转文件反复读进内存）。
 const DIAG_LOG_CAP: usize = 8 * 1024 * 1024;
+/// 普通模式内核日志：每个文件只取尾部 5MB，最多两个文件（总 ≤ 10MB）。
+const NORMAL_LOG_CAP: usize = 5 * 1024 * 1024;
 
 /// 读取文件尾部（最多 `cap` 字节，保证从行首开始，避免截断出半个字符）。
 fn read_capped(path: &std::path::Path, cap: usize) -> Option<String> {
@@ -1466,6 +1468,51 @@ fn read_capped(path: &std::path::Path, cap: usize) -> Option<String> {
         text = text[pos + 1..].to_owned();
     }
     Some(text)
+}
+
+/// join 采集线程并记录耗时；panic 也转成一条可读错误，而不是让整包失败。
+fn join_collect(
+    handle: std::thread::JoinHandle<crate::diagnostics::Collected>,
+    name: &'static str,
+    started: std::time::Instant,
+) -> crate::diagnostics::Collected {
+    let elapsed = started.elapsed().as_millis();
+    match handle.join() {
+        Ok(collected) => {
+            logger::record("diag.item", format!("{} {}ms", collected.name, elapsed));
+            collected
+        }
+        Err(_) => {
+            logger::record("diag.item", format!("{name} panicked after {elapsed}ms"));
+            crate::diagnostics::Collected {
+                name,
+                text: String::new(),
+                error: Some("collector panicked".to_string()),
+            }
+        }
+    }
+}
+
+/// 取目录下最近修改的 `limit` 个普通文件（不递归）。
+///
+/// 用于采集普通模式内核日志：日志按大小滚动，最新文件才是本次会话的现场。
+fn latest_files(dir: &std::path::Path, limit: usize) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_file() {
+                return None;
+            }
+            let mtime = entry.metadata().ok()?.modified().ok()?;
+            Some((mtime, path))
+        })
+        .collect();
+    files.sort_by_key(|item| std::cmp::Reverse(item.0));
+    files.into_iter().take(limit).map(|(_, p)| p).collect()
 }
 
 /// 诊断 zip 的输出目录（唯一落点：`<用户日志目录>/diagnostics`）。
@@ -1565,6 +1612,20 @@ fn build_diagnostics_zip(
         };
         add_file("exvlan.log", &kernel_log, DIAG_LOG_CAP, true);
     }
+    // 普通模式内核把日志写到 `<log_dir>/normal/`（config/log 目录与服务模式不同），
+    // 不采集的话，普通模式那段时间在 exvlan.log 里是空档，无法判断内核为何退出。
+    if let Ok(dir) = get_log_dir(app) {
+        for (idx, path) in latest_files(&dir.join("normal"), 2).iter().enumerate() {
+            let name = format!(
+                "normal/{}-{}",
+                idx + 1,
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "kernel.log".to_string())
+            );
+            add_file(&name, path, NORMAL_LOG_CAP, true);
+        }
+    }
     if let Ok(prefs_path) = crate::prefs::prefs_path(app) {
         add_file("prefs.toml", &prefs_path, 256 * 1024, true);
     }
@@ -1607,39 +1668,31 @@ fn build_diagnostics_zip(
     let log_dir = get_log_dir(app).unwrap_or_else(|_| config_dir.clone());
     let core_dir = crate::kernel::kernel_dir();
 
-    let sys = crate::diagnostics::collect_system(&config_dir, &log_dir, &core_dir);
-    entries.push(Entry {
-        name: sys.name.to_string(),
-        bytes: sys.text.into_bytes(),
-        error: sys.error,
-    });
+    // 各采集项互不依赖，全部并行跑：串行时 Windows 上一次要 70s（PowerShell
+    // 启动占大头），并行后由最慢的一项（`log show` 30s 上限）决定。
+    let started = std::time::Instant::now();
+    let t_sys = {
+        let cfg = config_dir.clone();
+        let logs = log_dir.clone();
+        let core = core_dir.clone();
+        std::thread::spawn(move || crate::diagnostics::collect_system(&cfg, &logs, &core))
+    };
+    let t_net = std::thread::spawn(|| crate::diagnostics::collect_net(None));
+    let t_svc = std::thread::spawn(crate::diagnostics::collect_service);
+    let t_dns = std::thread::spawn(crate::diagnostics::collect_dns_resolve);
+    let t_log = std::thread::spawn(crate::diagnostics::collect_unified_log);
+    let t_crash = std::thread::spawn(crate::diagnostics::collect_crash_reports);
+    let t_fw = std::thread::spawn(crate::diagnostics::collect_firewall);
 
-    let net = crate::diagnostics::collect_net(None);
-    entries.push(Entry {
-        name: net.name.to_string(),
-        bytes: net.text.into_bytes(),
-        error: net.error,
-    });
-
-    let svc = crate::diagnostics::collect_service();
-    entries.push(Entry {
-        name: svc.name.to_string(),
-        bytes: svc.text.into_bytes(),
-        error: svc.error,
-    });
-
-    let dns = crate::diagnostics::collect_dns_resolve();
-    entries.push(Entry {
-        name: dns.name.to_string(),
-        bytes: dns.text.into_bytes(),
-        error: dns.error,
-    });
-
-    // D11–D13：统一日志 / 崩溃报告 / 防火墙（默认开启，已做密钥脱敏）
+    // D7–D13：环境 / 网络 / 服务 / DNS / 统一日志 / 崩溃报告 / 防火墙
     for collected in [
-        crate::diagnostics::collect_unified_log(),
-        crate::diagnostics::collect_crash_reports(),
-        crate::diagnostics::collect_firewall(),
+        join_collect(t_sys, "system.json", started),
+        join_collect(t_net, "net.txt", started),
+        join_collect(t_svc, "service.txt", started),
+        join_collect(t_dns, "dns-resolve.txt", started),
+        join_collect(t_log, "unified-log.txt", started),
+        join_collect(t_crash, "crashes.txt", started),
+        join_collect(t_fw, "firewall.txt", started),
     ] {
         entries.push(Entry {
             name: collected.name.to_string(),
@@ -1723,6 +1776,15 @@ async fn upload_diagnostics(
 ) -> Result<String, String> {
     use tauri::Manager as _;
 
+    // 单飞：手动连点 / 自动上传与手动撞车时，第二个调用立即返回，不重复采集。
+    let _guard = match begin_upload() {
+        Some(guard) => guard,
+        None => {
+            logger::record("upload", "rejected: 已有上传进行中");
+            return Err("诊断上传进行中，请稍候再试".to_string());
+        }
+    };
+
     let started = std::time::Instant::now();
     logger::record(
         "upload",
@@ -1792,27 +1854,57 @@ async fn upload_diagnostics(
     )
     .await;
 
+    let mut used_text_fallback = false;
     let body_json = match outcome {
         Ok(Ok(json)) => json,
         Ok(Err(err)) => {
-            logger::record(
-                "upload",
-                format!("failed in {}ms: {err}", started.elapsed().as_millis()),
-            );
-            return Err(format!(
-                "上传失败：{err}；诊断包已保存在 {}",
-                zip_path.display()
-            ));
+            // zip 存不进 KV（额度用尽）或 5xx/413：改走文本通道，保证 issue 能建出来。
+            if !should_text_fallback(&err) {
+                logger::record(
+                    "upload",
+                    format!("failed in {}ms: {err}", started.elapsed().as_millis()),
+                );
+                return Err(upload_failure_message(
+                    &app,
+                    &format!("上传失败：{err}"),
+                    &zip_path,
+                ));
+            }
+            logger::record("upload", format!("zip 失败，回退文本上传: {err}"));
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                upload_text_fallback(&app, &network_report, &summary),
+            )
+            .await
+            {
+                Ok(Ok(json)) => {
+                    used_text_fallback = true;
+                    json
+                }
+                Ok(Err(err2)) => {
+                    logger::record("upload", format!("文本兜底失败: {err2}"));
+                    return Err(upload_failure_message(
+                        &app,
+                        &format!("上传失败：{err}；文本兜底也失败：{err2}"),
+                        &zip_path,
+                    ));
+                }
+                Err(_) => {
+                    logger::record("upload", "文本兜底超时 30s");
+                    return Err(upload_failure_message(
+                        &app,
+                        &format!("上传失败：{err}；文本兜底超时"),
+                        &zip_path,
+                    ));
+                }
+            }
         }
         Err(_) => {
             logger::record(
                 "upload",
                 format!("failed in {}ms: 总超时 60s", started.elapsed().as_millis()),
             );
-            return Err(format!(
-                "上传超时（60s）；诊断包已保存在 {}",
-                zip_path.display()
-            ));
+            return Err(upload_failure_message(&app, "上传超时（60s）", &zip_path));
         }
     };
 
@@ -1823,7 +1915,10 @@ async fn upload_diagnostics(
     if let Some(zip_url) = body_json.get("zipUrl").and_then(|v| v.as_str()) {
         links.push(format!("zip: {zip_url}"));
     }
-    let text = links.join("\n");
+    let mut text = links.join("\n");
+    if used_text_fallback {
+        text.push_str("\n（zip 存储暂不可用，本次仅上传了文本诊断）");
+    }
     logger::event(
         "upload",
         format!(
@@ -2128,6 +2223,171 @@ async fn upload_once(
     Err("直连 / 系统代理 / curl 均失败".to_string())
 }
 
+/// 上传互斥：同一时刻只允许一个诊断上传在跑。
+///
+/// 目的是挡住「一秒内手抖点两次」以及自动上传与手动上传撞车——重复上传会
+/// 重复跑一遍采集、重复打 Worker（每次约 2 次 KV 写）。
+static UPLOAD_INFLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+struct UploadGuard;
+
+impl Drop for UploadGuard {
+    fn drop(&mut self) {
+        UPLOAD_INFLIGHT.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn begin_upload() -> Option<UploadGuard> {
+    if UPLOAD_INFLIGHT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        None
+    } else {
+        Some(UploadGuard)
+    }
+}
+
+/// zip 通道失败是否值得改用文本通道（Worker 的 `/` 路由不写 KV）。
+fn should_text_fallback(err: &str) -> bool {
+    err.contains("kv_unavailable")
+        || err.contains("503")
+        || err.contains("413")
+        || err.contains("HTTP 5")
+}
+
+/// 文本兜底：zip 存不进 KV 时，把摘要 + 日志尾部直接 POST 到 `/`。
+///
+/// Worker 的文本路由只建 issue、不写 KV，因此额度用尽时仍然可用。
+async fn upload_text_fallback(
+    app: &AppHandle,
+    network_report: &str,
+    summary: &str,
+) -> Result<serde_json::Value, String> {
+    let log_dir = get_log_dir(app).unwrap_or_default();
+    let error_log = logger::path()
+        .and_then(|p| read_capped(&p, 40 * 1024))
+        .unwrap_or_default();
+    let events_tail = read_capped(&log_dir.join("events.log"), 20 * 1024).unwrap_or_default();
+    let kernel_tail = {
+        let sys = crate::paths::system().logs.join("exvlan.log");
+        read_capped(&sys, 20 * 1024)
+            .or_else(|| read_capped(&log_dir.join("exvlan.log"), 20 * 1024))
+            .unwrap_or_default()
+    };
+
+    let payload = serde_json::json!({
+        "version": BUILD_VERSION,
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "summary": format!("{summary}\nzip 存储不可用，已回退为文本诊断"),
+        "networkReport": logger::redact(network_report),
+        "errorLog": logger::redact(&error_log),
+        "eventsTail": logger::redact(&events_tail),
+        "kernelTail": logger::redact(&kernel_tail),
+    });
+    let body = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
+
+    let url = url::Url::parse(DIAG_UPLOAD_URL).map_err(|e| e.to_string())?;
+    let host = url.host_str().unwrap_or_default().to_string();
+    let (ipv4, _ipv6) = resolve_upload_addrs(&host, 443).await;
+    let token = diag_token().await?;
+
+    let mut errors: Vec<String> = Vec::new();
+    for use_proxy in [false, true] {
+        let label = if use_proxy {
+            "text B(proxy)"
+        } else {
+            "text A(direct)"
+        };
+        let client = match build_upload_client(use_proxy, &ipv4, &host, 8) {
+            Ok(client) => client,
+            Err(err) => {
+                errors.push(format!("{label} 构建客户端失败: {err}"));
+                continue;
+            }
+        };
+        match client
+            .post(url.clone())
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(body.clone())
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                let json: serde_json::Value = match resp.json().await {
+                    Ok(json) => json,
+                    Err(err) => {
+                        errors.push(format!("{label} 解析响应失败: {err}"));
+                        continue;
+                    }
+                };
+                if status.is_success() {
+                    logger::record("upload", format!("{label} ok"));
+                    return Ok(json);
+                }
+                errors.push(format!("{label} HTTP {status}: {json}"));
+            }
+            Err(err) => errors.push(format!("{label} 失败: {err}")),
+        }
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        match curl_post_json(url.as_str(), &body, &token).await {
+            Ok(json) => {
+                logger::record("upload", "text C(curl) ok");
+                return Ok(json);
+            }
+            Err(err) => errors.push(format!("text C(curl) 失败: {err}")),
+        }
+    }
+
+    Err(errors.join("；"))
+}
+
+/// 用系统 curl 发送 JSON（文本兜底的最后一条通道）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn curl_post_json(url: &str, body: &[u8], token: &str) -> Result<serde_json::Value, String> {
+    let path = std::env::temp_dir().join(format!(
+        "era-exvlan-diag-text-{}-{}.json",
+        std::process::id(),
+        crate::logger::timestamp().replace(':', "-")
+    ));
+    std::fs::write(&path, body).map_err(|e| format!("写临时文件失败: {e}"))?;
+    let out = hidden_tokio_command("curl")
+        .args(["-sS", "--max-time", "30", "-X", "POST", url])
+        .arg("-H")
+        .arg(format!("authorization: Bearer {token}"))
+        .arg("-H")
+        .arg("content-type: application/json")
+        .arg("--data-binary")
+        .arg(format!("@{}", path.display()))
+        .output()
+        .await
+        .map_err(|e| format!("spawn curl: {e}"))?;
+    let _ = std::fs::remove_file(&path);
+    if !out.status.success() {
+        return Err(format!(
+            "curl exit {:?}: {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("parse curl body: {e}"))?;
+    if json.get("error").is_some() {
+        return Err(format!("服务端返回错误: {json}"));
+    }
+    Ok(json)
+}
+
+/// 异步版 `kernel::hidden_command`（curl 等控制台程序，Windows 上同样不能闪窗）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn hidden_tokio_command(program: &str) -> tokio::process::Command {
+    // 复用 std 版的创建标志逻辑，再转成 tokio Command。
+    tokio::process::Command::from(crate::kernel::hidden_command(program))
+}
+
 /// 兜底通道：调用系统 curl 上传同一个 zip（桌面端实测可用）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn curl_upload(
@@ -2135,7 +2395,7 @@ async fn curl_upload(
     zip_path: &std::path::Path,
     token: &str,
 ) -> Result<serde_json::Value, String> {
-    let out = tokio::process::Command::new("curl")
+    let out = hidden_tokio_command("curl")
         .args(["-sS", "--max-time", "60", "-X", "POST", url])
         .arg("-H")
         .arg(format!("authorization: Bearer {token}"))
@@ -2153,12 +2413,19 @@ async fn curl_upload(
             String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
-    serde_json::from_slice(&out.stdout).map_err(|e| format!("parse curl body: {e}"))
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("parse curl body: {e}"))?;
+    // curl 默认不把 HTTP 4xx/5xx 当失败，错误响应体也是合法 JSON。
+    // 不在这里拦一道，调用方会把「503 kv_unavailable」当成上传成功。
+    if json.get("error").is_some() || json.get("code").is_some() {
+        return Err(format!("服务端返回错误: {json}"));
+    }
+    Ok(json)
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn curl_token() -> Result<String, String> {
-    let out = tokio::process::Command::new("curl")
+    let out = hidden_tokio_command("curl")
         .args(["-sS", "--max-time", "15", DIAG_TOKEN_URL])
         .output()
         .await
@@ -2196,6 +2463,60 @@ fn open_diagnostics_dir(app: AppHandle) -> Result<String, String> {
     }
 }
 
+/// 上传失败时的错误文案：移动端先尝试落盘到「下载」，桌面端给出本地路径。
+fn upload_failure_message(app: &AppHandle, prefix: &str, zip_path: &std::path::Path) -> String {
+    #[cfg(target_os = "android")]
+    {
+        if let Ok(saved) = save_to_downloads(app, zip_path, "application/zip") {
+            return format!("{prefix}；诊断包已保存到 {saved}");
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+    }
+    format!("{prefix}；诊断包已保存在 {}", zip_path.display())
+}
+
+/// Android：把文件复制到应用 cache（FileProvider 只声明了 `cache-path` / `external-path`，
+/// 而诊断包在 `<dataDir>/logs/diagnostics`，直接分享会抛
+/// `Failed to find configured root that contains ...`）。
+#[cfg(target_os = "android")]
+fn copy_to_cache(app: &AppHandle, path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    use tauri::Manager as _;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("获取 cache 目录失败: {e}"))?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("创建 cache 目录失败: {e}"))?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_owned())
+        .unwrap_or_else(|| std::ffi::OsString::from("exvlan-diagnostics.zip"));
+    let dest = cache.join(name);
+    std::fs::copy(path, &dest).map_err(|e| format!("复制到 cache 失败: {e}"))?;
+    Ok(dest)
+}
+
+/// Android：分享/上传都不可用时，把文件落到系统「下载」目录。
+#[cfg(target_os = "android")]
+fn save_to_downloads(
+    app: &AppHandle,
+    path: &std::path::Path,
+    mime: &str,
+) -> Result<String, String> {
+    use tauri_plugin_vpnservice::VpnserviceExt;
+    let resp = app
+        .vpnservice()
+        .save_to_downloads(tauri_plugin_vpnservice::models::ShareFileRequest {
+            path: path.display().to_string(),
+            mime: Some(mime.to_string()),
+            title: None,
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(resp.path)
+}
+
 /// 分享诊断包：Android 弹系统分享面板（zip）；桌面返回路径（前端打开目录）。
 #[tauri::command]
 async fn share_error_log(app: AppHandle) -> Result<String, String> {
@@ -2218,13 +2539,25 @@ async fn share_error_log(app: AppHandle) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_vpnservice::VpnserviceExt;
-        app.vpnservice()
+        // 先复制到 cache，让 FileProvider 能匹配到根目录。
+        let share_path = copy_to_cache(&app, &path)?;
+        let attempt = app
+            .vpnservice()
             .share_file(tauri_plugin_vpnservice::models::ShareFileRequest {
-                path: path.display().to_string(),
+                path: share_path.display().to_string(),
                 mime: Some(mime.to_string()),
                 title: Some(title.to_string()),
             })
-            .map_err(|e| logger::other("share_error_log", e.to_string()))?;
+            .map_err(|e| e.to_string());
+        if let Err(err) = attempt {
+            // 没有可用分享目标 / 插件异常：落盘到「下载」，至少用户能拿到文件。
+            logger::record(
+                "share",
+                format!("share_file failed: {err}; fallback to downloads"),
+            );
+            let saved = save_to_downloads(&app, &path, mime)?;
+            return Ok(format!("saved: {saved}"));
+        }
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -3147,10 +3480,10 @@ mod service {
 
         #[cfg(target_os = "windows")]
         {
-            let _ = std::process::Command::new("sc")
+            let _ = crate::kernel::hidden_command("sc")
                 .args(["stop", LEGACY])
                 .output();
-            let _ = std::process::Command::new("sc")
+            let _ = crate::kernel::hidden_command("sc")
                 .args(["config", LEGACY, "start=", "disabled"])
                 .output();
             crate::logger::record("service.migrate", format!("stopped legacy {LEGACY}"));
@@ -3184,10 +3517,10 @@ mod service {
 
         #[cfg(target_os = "windows")]
         {
-            let _ = std::process::Command::new("sc")
+            let _ = crate::kernel::hidden_command("sc")
                 .args(["config", LEGACY, "start=", "auto"])
                 .output();
-            let _ = std::process::Command::new("sc")
+            let _ = crate::kernel::hidden_command("sc")
                 .args(["start", LEGACY])
                 .output();
         }
@@ -3749,14 +4082,32 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
     })();
 
     // 只换了内核、没有重装服务 → 把服务拉回来（失败时也拉回，避免用户彻底断网）。
-    if stopped_for_kernel
-        && req.service.is_none()
-        && let Err(err) = service::set_status(true)
-    {
-        crate::logger::record(
-            "provision.service",
-            format!("restart after kernel install failed: {err:#}"),
-        );
+    if stopped_for_kernel && req.service.is_none() {
+        use exvlan_rpc::service_manager::ServiceStatus;
+        match service::set_status(true) {
+            Ok(()) => {
+                // 「已启动」不等于可用：pre.10 上出现过 launchd 显示 Running、
+                // 15999 却三分钟没人监听的情况。这里至少确认进入 Running 并留痕。
+                let mut running = false;
+                for _ in 0..10 {
+                    if matches!(service::status(), Ok(ServiceStatus::Running)) {
+                        running = true;
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+                if !running {
+                    crate::logger::record(
+                        "provision.service",
+                        "restart issued but not Running within 5s（见诊断包 service.txt）",
+                    );
+                }
+            }
+            Err(err) => crate::logger::record(
+                "provision.service",
+                format!("restart after kernel install failed: {err:#}"),
+            ),
+        }
     }
 
     result
@@ -4759,4 +5110,45 @@ pub fn run_gui() -> std::process::ExitCode {
     });
 
     std::process::ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod upload_fallback_tests {
+    use super::should_text_fallback;
+
+    #[test]
+    fn kv_unavailable_triggers_text_fallback() {
+        assert!(should_text_fallback(
+            "HTTP 503 Service Unavailable: {\"code\":\"kv_unavailable\"}"
+        ));
+    }
+
+    #[test]
+    fn server_errors_and_too_large_fall_back() {
+        assert!(should_text_fallback("HTTP 500 Internal Server Error"));
+        assert!(should_text_fallback("HTTP 413 Payload Too Large"));
+    }
+
+    #[test]
+    fn latest_files_picks_newest_first() {
+        let dir = std::env::temp_dir().join(format!("exvlan-diag-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["a.log", "b.log", "c.log"] {
+            std::fs::write(dir.join(name), name).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let picked = super::latest_files(&dir, 2);
+        assert_eq!(picked.len(), 2);
+        assert_eq!(picked[0].file_name().unwrap(), "c.log");
+        assert_eq!(picked[1].file_name().unwrap(), "b.log");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn network_errors_do_not_fall_back() {
+        assert!(!should_text_fallback(
+            "error sending request for url (…/zip)"
+        ));
+        assert!(!should_text_fallback("直连 / 系统代理 / curl 均失败"));
+    }
 }

@@ -1,8 +1,12 @@
 package com.plugin.vpnservice
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.activity.result.ActivityResult
 import app.tauri.annotation.Command
 import app.tauri.annotation.ActivityCallback
@@ -213,6 +217,62 @@ class VpnServicePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve()
         } catch (e: Exception) {
             invoke.reject(e.message ?: "分享失败")
+        }
+    }
+
+    /**
+     * 分享失败 / 上传失败时的兜底：把文件复制到系统「下载」目录。
+     * Android 10+ 走 MediaStore（无需存储权限）；9 及以下写公共 Downloads。
+     */
+    @Command
+    fun saveToDownloads(invoke: Invoke) {
+        val args = invoke.parseArgs(ShareFileArgs::class.java)
+        val file = File(args.path)
+        if (!file.isFile) {
+            invoke.reject("文件不存在: ${args.path}")
+            return
+        }
+        try {
+            val mime = args.mime ?: "application/octet-stream"
+            val name = file.name
+            val displayPath = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val resolver = activity.contentResolver
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(MediaStore.Downloads.MIME_TYPE, mime)
+                    put(
+                        MediaStore.Downloads.RELATIVE_PATH,
+                        "${Environment.DIRECTORY_DOWNLOADS}/Exvlan",
+                    )
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val target = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("无法创建下载文件")
+                resolver.openOutputStream(target)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                } ?: throw IllegalStateException("无法写入下载文件")
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(target, values, null, null)
+                "Download/Exvlan/$name"
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    "Exvlan",
+                )
+                if (!dir.isDirectory && !dir.mkdirs()) {
+                    throw IllegalStateException("无法创建下载目录 ${dir.absolutePath}")
+                }
+                val target = File(dir, name)
+                file.copyTo(target, overwrite = true)
+                "Download/Exvlan/$name"
+            }
+            val ret = JSObject()
+            ret.put("path", displayPath)
+            invoke.resolve(ret)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "保存到下载目录失败")
         }
     }
 

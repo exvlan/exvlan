@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-  <external-path name="my_images" path="." />
-  <cache-path name="my_cache_images" path="." />
+  <!-- 诊断包写在 <dataDir>/logs/diagnostics，既不在 files/ 也不在 cache/，
+       分享前会先复制到 cache；这里补 files-path 作为兼容（避免任何旧路径失效）。 -->
+  <files-path name="files" path="." />
+  <cache-path name="cache" path="." />
+  <external-path name="external" path="." />
 </paths>

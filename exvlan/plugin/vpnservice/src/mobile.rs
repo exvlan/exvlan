@@ -80,4 +80,14 @@ impl<R: Runtime> Vpnservice<R> {
             .run_mobile_plugin::<()>("shareFile", payload)
             .map_err(Into::into)
     }
+
+    /// 分享/上传都失败时，把文件复制到系统「下载」目录（返回展示路径）。
+    pub fn save_to_downloads(
+        &self,
+        payload: ShareFileRequest,
+    ) -> crate::Result<SaveToDownloadsResponse> {
+        self.0
+            .run_mobile_plugin::<SaveToDownloadsResponse>("saveToDownloads", payload)
+            .map_err(Into::into)
+    }
 }

@@ -19,8 +19,12 @@ pub struct Collected {
     pub error: Option<String>,
 }
 
+fn hidden_command(program: &str) -> Command {
+    crate::kernel::hidden_command(program)
+}
+
 fn run(cmd: &str, args: &[&str], timeout: Duration) -> (String, Option<String>) {
-    let mut command = Command::new(cmd);
+    let mut command = hidden_command(cmd);
     command.args(args);
     // macOS 没有 GNU timeout，用线程 + recv_timeout 兜底（超时线程被丢弃，不影响主流程）。
     let (tx, rx) = std::sync::mpsc::channel();
@@ -89,39 +93,164 @@ fn dir_writable(dir: &Path) -> bool {
 fn os_version() -> (String, Option<String>) {
     #[cfg(target_os = "macos")]
     {
-        let (out, _) = run("sw_vers", &[], Duration::from_secs(3));
-        return ("macos".to_string(), Some(out.trim().to_string()));
+        // 原生读 SystemVersion.plist，避免每次诊断起一个 `sw_vers` 进程。
+        let text = std::fs::read_to_string("/System/Library/CoreServices/SystemVersion.plist")
+            .unwrap_or_default();
+        let pick = |key: &str| -> String {
+            let marker = format!("<key>{key}</key>");
+            text.find(&marker)
+                .and_then(|pos| {
+                    let rest = &text[pos + marker.len()..];
+                    let start = rest.find("<string>")? + "<string>".len();
+                    let end = rest[start..].find("</string>")? + start;
+                    Some(rest[start..end].trim().to_string())
+                })
+                .unwrap_or_default()
+        };
+        let (name, version, build) = (
+            pick("ProductName"),
+            pick("ProductVersion"),
+            pick("BuildVersion"),
+        );
+        let detail = if version.is_empty() {
+            "SystemVersion.plist unreadable".to_string()
+        } else {
+            format!("{name}\t\t{version}\nBuildVersion:\t\t{build}")
+        };
+        return ("macos".to_string(), Some(detail));
     }
     #[cfg(windows)]
     {
-        let (out, _) = run("cmd", &["/c", "ver"], Duration::from_secs(3));
-        let (build, _) = run(
-            "reg",
-            &[
-                "query",
-                r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
-                "/v",
-                "CurrentBuildNumber",
-            ],
-            Duration::from_secs(3),
-        );
-        return (
-            "windows".to_string(),
-            Some(format!("{}\n{}", out.trim(), build.trim())),
-        );
+        use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
+        let detail = match winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey_with_flags(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", KEY_READ)
+        {
+            Ok(key) => {
+                let product: String = key.get_value("ProductName").unwrap_or_default();
+                let build: String = key.get_value("CurrentBuildNumber").unwrap_or_default();
+                let display: String = key.get_value("DisplayVersion").unwrap_or_default();
+                let ubr: u32 = key.get_value("UBR").unwrap_or(0);
+                format!("{product}\nVersion {display} (build {build}.{ubr})")
+            }
+            Err(err) => format!("registry error: {err}"),
+        };
+        return ("windows".to_string(), Some(detail));
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let (out, _) = run(
-            "sh",
-            &["-c", "cat /etc/os-release 2>/dev/null | head -8"],
-            Duration::from_secs(3),
-        );
-        return ("linux".to_string(), Some(out.trim().to_string()));
+        let text = std::fs::read_to_string("/etc/os-release")
+            .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+            .unwrap_or_default();
+        let picked: Vec<&str> = text
+            .lines()
+            .filter(|line| {
+                line.starts_with("PRETTY_NAME=")
+                    || line.starts_with("NAME=")
+                    || line.starts_with("VERSION=")
+                    || line.starts_with("ID=")
+            })
+            .collect();
+        return ("linux".to_string(), Some(picked.join("\n")));
     }
     #[allow(unreachable_code)]
     {
         (std::env::consts::OS.to_string(), None)
+    }
+}
+
+/// 读 macOS 扩展属性（`com.apple.quarantine` 等），原生调用避免子进程。
+#[cfg(target_os = "macos")]
+fn read_xattr(path: &str, name: &str) -> (String, Option<String>) {
+    let Ok(cpath) = std::ffi::CString::new(path) else {
+        return (String::new(), Some("invalid path".to_string()));
+    };
+    let Ok(cname) = std::ffi::CString::new(name) else {
+        return (String::new(), Some("invalid attr name".to_string()));
+    };
+    // 查询长度；ENOATTR（属性不存在）是正常情况，不算错误。
+    let size = unsafe {
+        libc::getxattr(
+            cpath.as_ptr(),
+            cname.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+        )
+    };
+    if size < 0 {
+        return (String::new(), None);
+    }
+    let mut buf = vec![0u8; size as usize];
+    let got = unsafe {
+        libc::getxattr(
+            cpath.as_ptr(),
+            cname.as_ptr(),
+            buf.as_mut_ptr().cast::<libc::c_void>(),
+            buf.len(),
+            0,
+            0,
+        )
+    };
+    if got < 0 {
+        return (
+            String::new(),
+            Some(format!(
+                "getxattr failed: {}",
+                std::io::Error::last_os_error()
+            )),
+        );
+    }
+    buf.truncate(got as usize);
+    (String::from_utf8_lossy(&buf).into_owned(), None)
+}
+
+/// 网卡与地址（native，三端一套；不解析命令输出、不弹窗）。
+fn interfaces_text() -> (String, Option<String>) {
+    let list = match if_addrs::get_if_addrs() {
+        Ok(list) => list,
+        Err(err) => return (String::new(), Some(format!("if-addrs: {err}"))),
+    };
+    let mut rows: Vec<String> = list
+        .into_iter()
+        .map(|iface| {
+            let (family, addr, prefix) = match &iface.addr {
+                if_addrs::IfAddr::V4(v4) => ("inet", v4.ip.to_string(), v4.prefixlen),
+                if_addrs::IfAddr::V6(v6) => ("inet6", v6.ip.to_string(), v6.prefixlen),
+            };
+            format!(
+                "{:<14} {:<6} {}/{} {}",
+                iface.name,
+                family,
+                addr,
+                prefix,
+                if iface.is_p2p { "p2p" } else { "" }
+            )
+        })
+        .collect();
+    rows.sort();
+    (rows.join("\n"), None)
+}
+
+/// Windows 用户级（WinINET）代理：直接读注册表，避免 `reg query` 子进程。
+#[cfg(windows)]
+fn windows_proxy_text() -> String {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
+
+    match winreg::RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
+        r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        KEY_READ,
+    ) {
+        Ok(key) => {
+            let enable: u32 = key.get_value("ProxyEnable").unwrap_or(0);
+            let server: String = key.get_value("ProxyServer").unwrap_or_default();
+            let bypass: String = key.get_value("ProxyOverride").unwrap_or_default();
+            let pac: String = key.get_value("AutoConfigURL").unwrap_or_default();
+            format!(
+                "ProxyEnable={enable}\nProxyServer={server}\nProxyOverride={bypass}\nAutoConfigURL={pac}"
+            )
+        }
+        Err(err) => format!("registry error: {err}"),
     }
 }
 
@@ -164,23 +293,21 @@ pub fn collect_system(app_config: &Path, app_log: &Path, core_dir: &Path) -> Col
     #[cfg(target_os = "macos")]
     {
         for target in [&exe, &core_dir.join("exvlan")] {
-            let (out, err) = run(
-                "xattr",
-                &["-p", "com.apple.quarantine", &target.display().to_string()],
-                Duration::from_secs(3),
-            );
+            // 原生 getxattr，避免 `xattr -p` 子进程
+            let (xattr, err) = read_xattr(&target.display().to_string(), "com.apple.quarantine");
             quarantine.push(
-                json!({"target": target.display().to_string(), "xattr": out.trim(), "error": err}),
+                json!({"target": target.display().to_string(), "xattr": xattr, "error": err}),
             );
         }
     }
 
+    let (os_name, os_detail) = os_version();
     let mut value = json!({
         "app_version": crate::BUILD_VERSION,
         "exe": exe.display().to_string(),
         "translocated": is_translocated(&exe),
-        "os": os_version().0,
-        "os_detail": os_version().1,
+        "os": os_name,
+        "os_detail": os_detail,
         "arch": std::env::consts::ARCH,
         "kernel": file_meta(&core_dir.join(crate::kernel::kernel_bin_name())),
         "kernel_version_file": std::fs::read_to_string(core_dir.join("version"))
@@ -220,15 +347,26 @@ pub fn collect_net(tun_name: Option<&str>) -> Collected {
 
     #[cfg(unix)]
     {
-        let (addr, err) = run(
-            "sh",
-            &["-c", "ip -o addr 2>/dev/null || ifconfig -a 2>/dev/null"],
-            Duration::from_secs(5),
-        );
+        // 网卡/地址走 native API（原来 `ip -o addr || ifconfig -a` 的输出要解析，
+        // 且 Windows 上对应的是 PowerShell，启动就要 1–3s）。
+        let (ifaces, err) = interfaces_text();
         if let Some(e) = err {
             errors.push(format!("interfaces: {e}"));
         }
-        parts.push(format!("=== interfaces ===\n{addr}"));
+        parts.push(format!("=== interfaces (native) ===\n{ifaces}"));
+
+        let (mtu, err) = run(
+            "sh",
+            &[
+                "-c",
+                "ip -o link show 2>/dev/null || ifconfig -a 2>/dev/null | grep -Ei '^[a-z0-9]+:|mtu'",
+            ],
+            Duration::from_secs(5),
+        );
+        if let Some(e) = err {
+            errors.push(format!("mtu: {e}"));
+        }
+        parts.push(format!("=== mtu ===\n{mtu}"));
 
         let route_script = r#"
 ip -4 route show default 2>/dev/null
@@ -300,16 +438,24 @@ ip -6 route show 10.254.0.0/16 2>/dev/null
 
     #[cfg(windows)]
     {
+        // 网卡/地址走 native API（原来靠 PowerShell Get-NetIPAddress，1–3s + 一个黑窗）
+        let (ifaces, err) = interfaces_text();
+        if let Some(e) = err {
+            errors.push(format!("interfaces: {e}"));
+        }
+        parts.push(format!("=== interfaces (native) ===\n{ifaces}"));
+
+        let (mtu, err) = run(
+            "netsh",
+            &["interface", "ipv4", "show", "subinterfaces"],
+            Duration::from_secs(5),
+        );
+        if let Some(e) = err {
+            errors.push(format!("mtu: {e}"));
+        }
+        parts.push(format!("=== mtu ===\n{mtu}"));
+
         for (label, cmd, args) in [
-            (
-                "interfaces",
-                "powershell",
-                vec![
-                    "-NoProfile",
-                    "-Command",
-                    "Get-NetIPAddress | Select-Object InterfaceAlias,IPAddress,PrefixLength,AddressFamily | Format-Table -AutoSize",
-                ],
-            ),
             ("routes", "route", vec!["print", "-4"]),
             (
                 "rules",
@@ -317,7 +463,7 @@ ip -6 route show 10.254.0.0/16 2>/dev/null
                 vec!["interface", "ipv4", "show", "interfaces"],
             ),
             ("dns", "ipconfig", vec!["/all"]),
-            ("proxy", "netsh", vec!["winhttp", "show", "proxy"]),
+            ("winhttp proxy", "netsh", vec!["winhttp", "show", "proxy"]),
             ("listeners", "netstat", vec!["-ano"]),
         ] {
             let (out, err) = run(cmd, &args, Duration::from_secs(8));
@@ -326,16 +472,8 @@ ip -6 route show 10.254.0.0/16 2>/dev/null
             }
             parts.push(format!("=== {label} ===\n{out}"));
         }
-        // WinINET 代理（用户级）
-        let (out, _) = run(
-            "reg",
-            &[
-                "query",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
-            ],
-            Duration::from_secs(5),
-        );
-        parts.push(format!("=== wininet proxy ===\n{out}"));
+        // WinINET 代理（用户级）：读注册表，不再起 `reg query`
+        parts.push(format!("=== wininet proxy ===\n{}", windows_proxy_text()));
     }
 
     let mut value = json!({
@@ -460,6 +598,55 @@ pub fn collect_service() -> Collected {
     }
 }
 
+/// TXT / SRV 查询（hickory-resolver，系统 DNS 配置；三端一致）。
+fn dns_txt_srv(host: &str) -> String {
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(err) => return format!("TXT/SRV: runtime error {err}\n"),
+    };
+    rt.block_on(async {
+        let resolver = match hickory_resolver::TokioResolver::builder_tokio() {
+            Ok(builder) => builder.build(),
+            Err(err) => return format!("TXT/SRV: resolver init failed: {err}\n"),
+        };
+        let mut out = String::new();
+        match resolver.txt_lookup(host).await {
+            Ok(lookup) => {
+                let rows: Vec<String> = lookup.iter().map(|r| r.to_string()).collect();
+                if !rows.is_empty() {
+                    out.push_str(&format!("TXT: {}\n", rows.join(" | ")));
+                }
+            }
+            Err(err) => out.push_str(&format!("TXT: {err}\n")),
+        }
+        let srv_name = format!("_exvlan._tcp.{host}");
+        match resolver.srv_lookup(&srv_name).await {
+            Ok(lookup) => {
+                let rows: Vec<String> = lookup
+                    .iter()
+                    .map(|srv| {
+                        format!(
+                            "{} {} {} {}",
+                            srv.priority(),
+                            srv.weight(),
+                            srv.port(),
+                            srv.target()
+                        )
+                    })
+                    .collect();
+                if !rows.is_empty() {
+                    out.push_str(&format!("SRV: {}\n", rows.join(" | ")));
+                }
+            }
+            Err(err) => out.push_str(&format!("SRV: {err}\n")),
+        }
+        out
+    })
+}
+
 /// D10：关键域名的 DNS 解析结果（A/AAAA + TXT/SRV 尽力而为）。
 pub fn collect_dns_resolve() -> Collected {
     let mut out = String::new();
@@ -478,30 +665,8 @@ pub fn collect_dns_resolve() -> Collected {
             }
             Err(err) => out.push_str(&format!("addr: ERROR {err}\n")),
         }
-        // TXT / SRV：用系统工具（存在才用）
-        for (kind, cmd, args) in [
-            (
-                "TXT",
-                "dig",
-                vec!["+short", "+time=3", "+tries=1", "TXT", host],
-            ),
-            (
-                "SRV",
-                "dig",
-                vec![
-                    "+short",
-                    "+time=3",
-                    "+tries=1",
-                    "SRV",
-                    &format!("_exvlan._tcp.{host}"),
-                ],
-            ),
-        ] {
-            let (text, err) = run(cmd, &args, Duration::from_secs(5));
-            if err.is_none() && !text.trim().is_empty() {
-                out.push_str(&format!("{kind}: {}\n", text.trim()));
-            }
-        }
+        // TXT / SRV：走解析器（原生命令行 dig 在 Windows 上不存在）
+        out.push_str(&dns_txt_srv(host));
     }
     Collected {
         name: "dns-resolve.txt",
@@ -592,28 +757,47 @@ pub fn build_manifest(entries: &[(String, usize, Option<String>)]) -> (String, S
 pub fn collect_unified_log() -> Collected {
     #[cfg(target_os = "macos")]
     {
-        let (out, err) = run(
-            "log",
-            &[
-                "show",
-                "--style",
-                "compact",
-                "--last",
-                "10m",
-                "--predicate",
-                r#"process == "exvlan" OR process == "exvlan-helper" OR eventMessage CONTAINS "era.exvlan.studio""#,
-            ],
-            Duration::from_secs(12),
-        );
-        let mut text = out;
-        if text.len() > 512 * 1024 {
-            text.truncate(512 * 1024);
-            text.push_str("\n[truncated at 512KB]\n");
+        // `log show --last 10m` 在日志量大时能跑到 15s 以上，12s 超时会整项丢失。
+        // 先给 30s；超时再降级成 2 分钟窗口重试一次，保证至少有一段统一日志。
+        let predicate = r#"process == "exvlan" OR process == "exvlan-helper" OR eventMessage CONTAINS "era.exvlan.studio""#;
+        let mut last_error = None;
+        for (window, timeout) in [("10m", 30u64), ("2m", 15u64)] {
+            let (out, err) = run(
+                "log",
+                &[
+                    "show",
+                    "--style",
+                    "compact",
+                    "--last",
+                    window,
+                    "--predicate",
+                    predicate,
+                ],
+                Duration::from_secs(timeout),
+            );
+            let timed_out = err.as_deref().is_some_and(|e| e.contains("timeout"));
+            if timed_out {
+                last_error = err;
+                continue;
+            }
+            let mut text = out;
+            if text.len() > 512 * 1024 {
+                text.truncate(512 * 1024);
+                text.push_str("\n[truncated at 512KB]\n");
+            }
+            if window != "10m" {
+                text.insert_str(0, &format!("[fallback window --last {window}]\n"));
+            }
+            return Collected {
+                name: "unified-log.txt",
+                text,
+                error: err,
+            };
         }
         return Collected {
             name: "unified-log.txt",
-            text,
-            error: err,
+            text: String::new(),
+            error: last_error.or_else(|| Some("log show timed out".to_string())),
         };
     }
     #[cfg(not(target_os = "macos"))]
@@ -626,6 +810,76 @@ pub fn collect_unified_log() -> Collected {
     }
 }
 
+/// 列目录里最新的若干文件（原生，避免 `ls -lt | head` 子进程）。
+fn list_dir_newest(dir: &Path, limit: usize) -> String {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return "(unreadable)\n".to_string();
+    };
+    let mut items: Vec<(u64, u64, String)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            Some((
+                mtime,
+                meta.len(),
+                entry.file_name().to_string_lossy().into_owned(),
+            ))
+        })
+        .collect();
+    items.sort_by_key(|item| std::cmp::Reverse(item.0));
+    items
+        .into_iter()
+        .take(limit)
+        .map(|(mtime, size, name)| format!("{name}\t{size}\t{mtime}\n"))
+        .collect()
+}
+
+/// 最新一个匹配后缀的文件。
+#[allow(dead_code)] // 仅 macOS / Windows 的崩溃报告采集使用
+fn newest_file_with_ext(dir: &Path, exts: &[&str]) -> Option<std::path::PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut items: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_file() {
+                return None;
+            }
+            let matched = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| exts.iter().any(|want| want.eq_ignore_ascii_case(ext)));
+            if !matched {
+                return None;
+            }
+            Some((entry.metadata().ok()?.modified().ok()?, path))
+        })
+        .collect();
+    items.sort_by_key(|item| std::cmp::Reverse(item.0));
+    items.into_iter().next().map(|(_, p)| p)
+}
+
+/// 读文件开头 `cap` 字节（用于崩溃报告正文）。
+#[allow(dead_code)] // 仅 macOS / Windows 的崩溃报告采集使用
+fn read_head(path: &Path, cap: usize) -> String {
+    use std::io::Read as _;
+    let Ok(file) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let mut buf = Vec::new();
+    let _ = file.take(cap as u64).read_to_end(&mut buf);
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 /// D12：崩溃报告（只列元信息；macOS 取最近的一份正文，Windows 只列 CrashDumps）。
 pub fn collect_crash_reports() -> Collected {
     let mut out = String::new();
@@ -634,32 +888,14 @@ pub fn collect_crash_reports() -> Collected {
         let dir = std::env::var("HOME")
             .map(|h| format!("{h}/Library/Logs/DiagnosticReports"))
             .unwrap_or_default();
-        let (list, err) = run(
-            "sh",
-            &["-c", &format!("ls -lt '{dir}' 2>/dev/null | head -8")],
-            Duration::from_secs(5),
-        );
-        out.push_str(&format!("=== {} ===\n{list}\n", dir));
-        if let Some(e) = err {
-            out.push_str(&format!("[list error] {e}\n"));
-        }
-        // 最近一份正文（最多 64KB）
-        let (newest, _) = run(
-            "sh",
-            &[
-                "-c",
-                &format!("ls -t '{dir}'/*.ips '{dir}'/*.crash 2>/dev/null | head -1"),
-            ],
-            Duration::from_secs(5),
-        );
-        let newest = newest.trim();
-        if !newest.is_empty() {
-            let (body, _) = run(
-                "sh",
-                &["-c", &format!("head -c 65536 '{newest}' 2>/dev/null")],
-                Duration::from_secs(6),
-            );
-            out.push_str(&format!("=== {newest} ===\n{body}\n"));
+        let dir_path = Path::new(&dir);
+        out.push_str(&format!("=== {dir} ===\n{}", list_dir_newest(dir_path, 8)));
+        if let Some(newest) = newest_file_with_ext(dir_path, &["ips", "crash"]) {
+            out.push_str(&format!(
+                "=== {} ===\n{}\n",
+                newest.display(),
+                read_head(&newest, 64 * 1024)
+            ));
         }
     }
     #[cfg(windows)]
@@ -667,48 +903,31 @@ pub fn collect_crash_reports() -> Collected {
         let dir = std::env::var("LOCALAPPDATA")
             .map(|d| format!("{d}\\CrashDumps"))
             .unwrap_or_default();
-        let (list, err) = run(
-            "powershell",
-            &[
-                "-NoProfile",
-                "-Command",
-                &format!(
-                    "Get-ChildItem -Path '{dir}' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 8 Name,Length,LastWriteTime | Format-Table -AutoSize"
-                ),
-            ],
-            Duration::from_secs(8),
-        );
-        out.push_str(&format!("=== {dir} ===\n{list}\n"));
-        if let Some(e) = err {
-            out.push_str(&format!("[list error] {e}\n"));
-        }
+        out.push_str(&format!(
+            "=== {dir} ===\n{}",
+            list_dir_newest(Path::new(&dir), 8)
+        ));
         if let Ok(watchdog) = std::env::var("PROGRAMDATA") {
             let wd = format!("{watchdog}\\Microsoft\\Windows\\WER\\ReportArchive");
-            let (list, _) = run(
-                "powershell",
-                &[
-                    "-NoProfile",
-                    "-Command",
-                    &format!(
-                        "Get-ChildItem -Path '{wd}' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 8 Name,LastWriteTime | Format-Table -AutoSize"
-                    ),
-                ],
-                Duration::from_secs(8),
-            );
-            out.push_str(&format!("=== {wd} ===\n{list}\n"));
+            out.push_str(&format!(
+                "=== {wd} ===\n{}",
+                list_dir_newest(Path::new(&wd), 8)
+            ));
         }
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let (list, _) = run(
-            "sh",
-            &[
-                "-c",
-                "ls -lt ~/.local/share/systemd/coredump 2>/dev/null | head -8; ls -lt /var/crash 2>/dev/null | head -8",
-            ],
-            Duration::from_secs(5),
-        );
-        out.push_str(&list);
+        for dir in [
+            std::env::var("HOME")
+                .map(|h| format!("{h}/.local/share/systemd/coredump"))
+                .unwrap_or_default(),
+            "/var/crash".to_string(),
+        ] {
+            out.push_str(&format!(
+                "=== {dir} ===\n{}",
+                list_dir_newest(Path::new(&dir), 8)
+            ));
+        }
     }
     Collected {
         name: "crashes.txt",
@@ -776,5 +995,39 @@ pub fn collect_firewall() -> Collected {
         name: "firewall.txt",
         text: out,
         error: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interfaces_are_collected_natively() {
+        let (text, err) = interfaces_text();
+        assert!(err.is_none(), "if-addrs failed: {err:?}");
+        // 至少 loopback 一定存在
+        assert!(text.contains("lo") || text.contains("Loopback"), "{text}");
+    }
+
+    #[test]
+    fn net_collector_returns_readable_text() {
+        let collected = collect_net(None);
+        assert_eq!(collected.name, "net.txt");
+        assert!(collected.text.contains("=== interfaces (native) ==="));
+    }
+
+    #[test]
+    fn os_version_is_detected() {
+        let (name, detail) = os_version();
+        assert!(!name.is_empty());
+        assert!(detail.is_some());
+    }
+
+    #[test]
+    fn dns_txt_srv_never_panics() {
+        // 离线环境下查询会失败，但必须返回可读文本而不是 panic。
+        let text = dns_txt_srv("example.com");
+        assert!(!text.is_empty());
     }
 }

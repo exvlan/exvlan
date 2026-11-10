@@ -22,22 +22,71 @@ pub struct NormalKernel {
     child: Option<std::process::Child>,
     /// Windows：与 supervisor 的 lease 连接；关闭即代表 GUI 退出。
     lease: Option<std::net::TcpStream>,
+    /// macOS：helper 回报的内核 pid（用于探活；helper 托管时没有 Child 句柄）。
+    helper_pid: Option<u32>,
+    /// 拉起时刻与次数：用于退避重启与「反复退出」判定。
+    spawned_at: std::time::Instant,
     pub rpc_portal: String,
     pub log_dir: PathBuf,
 }
 
+/// 进程是否还在（`kill(pid, 0)`，不发信号）。
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(windows)]
+fn process_alive(_pid: u32) -> bool {
+    // Windows 上有 Child / lease 两条路径，无需按 pid 探活。
+    true
+}
+
 impl NormalKernel {
     fn alive(&mut self) -> bool {
-        match self.child.as_mut() {
-            Some(child) => matches!(child.try_wait(), Ok(None)),
-            // 由 helper / supervisor 托管：对方会在 GUI 退出时清理，这里视为存活
+        if let Some(child) = self.child.as_mut() {
+            return matches!(child.try_wait(), Ok(None));
+        }
+        match self.helper_pid {
+            Some(pid) => process_alive(pid),
+            // 拿不到 pid（helper 老版本/响应解析失败）：无法探活，按存活处理，
+            // 但 spawn 时会记一条明确的日志，避免静默。
             None => true,
         }
     }
 
     fn pid(&self) -> u32 {
-        self.child.as_ref().map(|c| c.id()).unwrap_or(0)
+        if let Some(child) = self.child.as_ref() {
+            return child.id();
+        }
+        self.helper_pid.unwrap_or(0)
     }
+}
+
+/// 从 helper 的 `spawned pid=22441` 里取 pid。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_spawn_pid(message: &str) -> Option<u32> {
+    message
+        .split("pid=")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|num| num.parse().ok())
+}
+
+/// 60 秒内最多重启 3 次；返回本次是第几次（从 0 开始）。
+fn allow_restart() -> Option<usize> {
+    static RESTARTS: Mutex<Vec<std::time::Instant>> = Mutex::new(Vec::new());
+    let now = std::time::Instant::now();
+    let mut guard = RESTARTS.lock().unwrap_or_else(|e| e.into_inner());
+    guard.retain(|at| now.duration_since(*at) < std::time::Duration::from_secs(60));
+    if guard.len() >= 3 {
+        return None;
+    }
+    guard.push(now);
+    Some(guard.len() - 1)
 }
 
 static NORMAL: Mutex<Option<NormalKernel>> = Mutex::new(None);
@@ -49,7 +98,32 @@ pub fn ensure(app: &tauri::AppHandle) -> anyhow::Result<String> {
         if kernel.alive() {
             return Ok(kernel.rpc_portal.clone());
         }
-        crate::logger::record("normal", "child exited, restarting");
+        let lived = kernel.spawned_at.elapsed();
+        let log_dir = kernel.log_dir.clone();
+        crate::logger::record(
+            "normal",
+            format!(
+                "kernel exited (pid={}, lived={}ms), restarting",
+                kernel.pid(),
+                lived.as_millis()
+            ),
+        );
+        let Some(restarts) = allow_restart() else {
+            *guard = None;
+            bail!(
+                "普通模式内核反复退出（60 秒内 3 次），已停止重启；请切回服务模式，日志见 {}",
+                log_dir.display()
+            );
+        };
+        // 退避：0 / 0 / 1 / 5 秒，避免瞬间连续拉起。
+        let wait = match restarts {
+            0 | 1 => 0,
+            2 => 1,
+            _ => 5,
+        };
+        if wait > 0 {
+            std::thread::sleep(std::time::Duration::from_secs(wait));
+        }
     }
 
     let kernel = spawn(app)?;
@@ -110,10 +184,22 @@ fn spawn(app: &tauri::AppHandle) -> anyhow::Result<NormalKernel> {
     // helper 用 kqueue 监听本进程，GUI 退出（含崩溃）即杀掉内核。
     #[cfg(target_os = "macos")]
     {
-        crate::helper::spawn_kernel(&args, std::process::id()).map_err(|e| anyhow::anyhow!(e))?;
+        let reply = crate::helper::spawn_kernel(&args, std::process::id())
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let helper_pid = parse_spawn_pid(&reply);
+        if helper_pid.is_none() {
+            // 没有 pid 就没法探活/停止，必须留痕（曾经这里直接丢弃了返回值，
+            // 日志里只剩 `spawned kernel pid=0`，出问题无从下手）。
+            crate::logger::record(
+                "normal",
+                format!("helper 未返回内核 pid（reply={reply:?}）；本次无法探活"),
+            );
+        }
         return Ok(NormalKernel {
             child: None,
             lease: None,
+            helper_pid,
+            spawned_at: std::time::Instant::now(),
             rpc_portal,
             log_dir,
         });
@@ -127,6 +213,8 @@ fn spawn(app: &tauri::AppHandle) -> anyhow::Result<NormalKernel> {
                 return Ok(NormalKernel {
                     child: None,
                     lease: Some(lease),
+                    helper_pid: None,
+                    spawned_at: std::time::Instant::now(),
                     rpc_portal: portal,
                     log_dir,
                 });
@@ -159,6 +247,8 @@ fn spawn(app: &tauri::AppHandle) -> anyhow::Result<NormalKernel> {
         Ok(NormalKernel {
             child: Some(child),
             lease: None,
+            helper_pid: None,
+            spawned_at: std::time::Instant::now(),
             rpc_portal,
             log_dir,
         })
@@ -187,7 +277,7 @@ pub fn stop() {
         #[cfg(windows)]
         {
             // 兜底：确保计划任务里没有残留实例
-            let _ = std::process::Command::new("schtasks")
+            let _ = crate::kernel::hidden_command("schtasks")
                 .args(["/end", "/tn", SUPERVISOR_TASK])
                 .output();
         }
@@ -206,7 +296,7 @@ pub const SUPERVISOR_TASK: &str = "EXVlan Kernel Supervisor";
 pub fn ensure_supervisor_task() -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("定位自身可执行文件失败")?;
     let tr = format!("\"{}\" --kernel-supervisor", exe.display());
-    let out = std::process::Command::new("schtasks")
+    let out = crate::kernel::hidden_command("schtasks")
         .args([
             "/create",
             "/tn",
@@ -246,7 +336,7 @@ fn start_windows_supervisor(
     let portal = portal_path(log_dir);
     let _ = std::fs::remove_file(&portal);
 
-    let out = std::process::Command::new("schtasks")
+    let out = crate::kernel::hidden_command("schtasks")
         .args(["/run", "/tn", SUPERVISOR_TASK])
         .output()
         .context("执行 schtasks /run 失败")?;
@@ -352,5 +442,24 @@ pub fn run_supervisor() -> i32 {
             crate::logger::record("normal.supervisor", format!("{err:#}"));
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_spawn_pid;
+
+    #[test]
+    fn parses_helper_spawn_reply() {
+        // helper 的真实返回（曾在这里丢弃 pid，日志只剩 `spawned kernel pid=0`）。
+        assert_eq!(parse_spawn_pid("spawned pid=22441"), Some(22441));
+        assert_eq!(parse_spawn_pid("spawned pid=7 trailing"), Some(7));
+    }
+
+    #[test]
+    fn missing_or_malformed_pid_is_none() {
+        assert_eq!(parse_spawn_pid("killed"), None);
+        assert_eq!(parse_spawn_pid("spawned pid="), None);
+        assert_eq!(parse_spawn_pid("spawned pid=abc"), None);
     }
 }
