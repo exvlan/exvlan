@@ -256,6 +256,7 @@ async function runNetworkCheck() {
 }
 
 const uploading = ref(false);
+const lastUploadAt = ref(0);
 const CONSENT_KEY = "diag_upload_consent";
 const consentVisible = ref(false);
 let consentResolve: ((ok: boolean) => void) | null = null;
@@ -318,7 +319,16 @@ async function onOpenDiagnosticsDir() {
   }
 }
 
+const UPLOAD_DEBOUNCE_MS = 3000;
+
 async function onUploadDiagnostics() {
+  // 防误点：上传中、或 3 秒内的重复点击直接忽略（后端还有 inflight 兜底）。
+  const now = Date.now();
+  if (uploading.value || now - lastUploadAt.value < UPLOAD_DEBOUNCE_MS) {
+    diagStep("upload_ignored", uploading.value ? "inflight" : "debounce");
+    return;
+  }
+  lastUploadAt.value = now;
   diagStep("upload_click");
   if (!(await askUploadConsent())) {
     diagStep("upload_consent_declined");
@@ -671,6 +681,7 @@ watch(
                 size="small"
                 icon="pi pi-cloud-upload"
                 :loading="uploading"
+                :disabled="uploading"
                 @click="onUploadDiagnostics"
               />
             </div>

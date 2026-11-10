@@ -98,6 +98,15 @@ async function copyDiagnostics() {
 async function shareLog() {
   try {
     const path = await shareErrorLog();
+    if (path.startsWith("saved: ")) {
+      toast.add({
+        severity: "warn",
+        summary: t("about.error_log"),
+        detail: `分享不可用，已保存到 ${path.slice(7)}`,
+        life: 15000,
+      });
+      return;
+    }
     if (!isDesktop.value) {
       return;
     }

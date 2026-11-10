@@ -47,6 +47,8 @@ import {
 
 const { t } = useI18n();
 const confirm = useConfirm();
+/** 本次启动是否已经自动上传过诊断（进程内状态，重启即重置）。 */
+let autoUploadedThisLaunch = false;
 /**
  * 安装失败时自动上传诊断（helper / 服务 / 内核安装失败）。
  *
@@ -57,6 +59,12 @@ async function maybeAutoUploadDiag(detail: string) {
   if (type() === "ios") {
     return;
   }
+  // 每次启动最多自动上传一次：重试/多次失败不再重复打 Worker。
+  if (autoUploadedThisLaunch) {
+    void logDiagStep("auto_upload_skipped", "already uploaded this launch");
+    return;
+  }
+  autoUploadedThisLaunch = true;
   try {
     if (localStorage.getItem("diag_upload_consent") !== "1") {
       const accepted = await new Promise<boolean>((resolve) => {
@@ -129,15 +137,25 @@ async function onCopyDiagnostics() {
 async function onShareErrorLog() {
   try {
     const path = await shareErrorLog();
-    if (type() !== "android") {
-      await writeText(path);
-      toast.add({
-        severity: "info",
-        summary: t("client.share_error_log"),
-        detail: path,
-        life: 6000,
-      });
+    if (type() === "android") {
+      // 分享面板不可用时，Rust 会兜底落盘到「下载」并以 `saved: ` 前缀返回。
+      if (path.startsWith("saved: ")) {
+        toast.add({
+          severity: "warn",
+          summary: t("client.share_error_log"),
+          detail: `分享不可用，已保存到 ${path.slice(7)}`,
+          life: 15000,
+        });
+      }
+      return;
     }
+    await writeText(path);
+    toast.add({
+      severity: "info",
+      summary: t("client.share_error_log"),
+      detail: path,
+      life: 6000,
+    });
     return;
   } catch (e: any) {
     // 系统分享不可用（插件命令缺失/无分享目标）：兜底把 error.log 复制到剪贴板
@@ -305,10 +323,29 @@ async function onModeSave() {
   if (isModeSaving.value) {
     return;
   }
+  // 首次切到普通模式：确认一次（会通过特权组件以管理员身份启动内核）。
+  if (editingMode.value.mode === "normal" && localStorage.getItem("normal_mode_consent") !== "1") {
+    const accepted = await new Promise<boolean>((resolve) => {
+      confirm.require({
+        header: t("mode.normal"),
+        message: t("mode.normal_consent"),
+        icon: "pi pi-exclamation-triangle",
+        accept: () => resolve(true),
+        reject: () => resolve(false),
+      });
+    });
+    if (!accepted) {
+      return;
+    }
+    localStorage.setItem("normal_mode_consent", "1");
+  }
   isModeSaving.value = true;
   try {
     // 先落盘并等待后端确认，再做连接（连接失败也保留用户选择）。
     await saveModeNow(editingMode.value);
+    // 切模式后内核的配置目录/实例集合可能不同：先清空上次选择，
+    // 由 initWithMode 按新内核的真实列表恢复，避免对着不存在的实例反复 get_config。
+    instanceId.value = undefined;
     await initWithMode(editingMode.value);
     modeDialogVisible.value = false;
   } catch (e: any) {
@@ -476,9 +513,31 @@ async function initWithMode(rawMode: Mode) {
   clientRunning.value = await isClientRunning();
 
   // 连接成功后再恢复一次上次网络（不依赖 clientRunning 的 false→true 翻转）
-  const lastId = loadLastNetworkInstanceId();
-  if (lastId && !instanceId.value) {
-    instanceId.value = lastId;
+  // 注意：切模式后配置目录不同，上次的网络 ID 可能在新内核里不存在，
+  // 直接使用会导致前端反复 `get_config` 失败（日志里的 `Not found: No such network instance`）。
+  const lastId = await knownInstanceOrDrop(loadLastNetworkInstanceId());
+  instanceId.value = lastId;
+}
+
+/** 校验「上次选择的网络」在当前内核里是否真的存在。 */
+async function knownInstanceOrDrop(
+  candidate: string | null | undefined,
+): Promise<string | undefined> {
+  if (!candidate) {
+    return undefined;
+  }
+  try {
+    const ids = await remoteClient.value.list_network_instance_ids();
+    const known = [...(ids.running_inst_ids ?? []), ...(ids.disabled_inst_ids ?? [])].map(
+      Utils.UuidToStr,
+    );
+    if (known.length === 0 || known.includes(candidate)) {
+      return candidate;
+    }
+    void logDiagStep("instance_stale", `drop ${candidate} (known=${known.length})`);
+    return undefined;
+  } catch {
+    return candidate;
   }
 }
 
