@@ -19,6 +19,8 @@
 const MAX_BODY = 60000;
 const MAX_ZIP = 20 * 1024 * 1024;
 const ZIP_TTL_SECONDS = 3 * 24 * 60 * 60;
+// 幂等记录只挡「同一次上传的重试/双击」，1 小时足够，也不会误合并跨天的重新上传。
+const IDEM_TTL_SECONDS = 60 * 60;
 const TOKEN_TTL_SECONDS = 600;
 
 const enc = new TextEncoder();
@@ -194,6 +196,14 @@ async function handleZip(request, env, url) {
   if (declared > MAX_ZIP) {
     return json({ error: "zip too large" }, 413);
   }
+  // 幂等：同一次上传的重试（直连失败→代理再发、双击）会带同一个 idem，
+  // 直接复用第一次的 issue，避免同一份 zip 建出多个 issue。
+  const idem = parseIdem(url);
+  const replay = await idemGet(env, idem);
+  if (replay) {
+    return json({ urls: replay.urls, zipUrl: replay.zipUrl, deduped: true });
+  }
+
   const zip = await request.arrayBuffer();
   if (zip.byteLength === 0) {
     return json({ error: "empty zip" }, 400);
@@ -242,7 +252,35 @@ async function handleZip(request, env, url) {
   } catch (err) {
     return json({ error: String(err) }, 502);
   }
+  await idemPut(env, idem, { urls: [issueUrl], zipUrl });
   return json({ urls: [issueUrl], zipUrl });
+}
+
+/** 幂等键：客户端生成的 uuid，只接受安全字符集。 */
+function parseIdem(url) {
+  const raw = (url.searchParams.get("idem") || "").trim();
+  return /^[0-9a-zA-Z_-]{8,64}$/.test(raw) ? raw : "";
+}
+
+async function idemGet(env, idem) {
+  if (!idem || !env.DIAG_KV) return null;
+  try {
+    const text = await env.DIAG_KV.get(`idem:${idem}`);
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null; // 基础设施异常时按「未命中」处理
+  }
+}
+
+async function idemPut(env, idem, value) {
+  if (!idem || !env.DIAG_KV) return;
+  try {
+    await env.DIAG_KV.put(`idem:${idem}`, JSON.stringify(value), {
+      expirationTtl: IDEM_TTL_SECONDS,
+    });
+  } catch {
+    // 写不进去不影响本次结果，只是下次无法去重
+  }
 }
 
 async function handleDownload(env, id) {
@@ -307,6 +345,12 @@ export default {
       return json({ error: "invalid json" }, 400);
     }
 
+    const idem = parseIdem(url);
+    const replay = await idemGet(env, idem);
+    if (replay) {
+      return json({ urls: replay.urls, deduped: true });
+    }
+
     const version = payload.version || "unknown";
     const platform = `${payload.os || "unknown"}-${payload.arch || "unknown"}`;
     const pages = chunk(buildSections(payload));
@@ -324,6 +368,7 @@ export default {
     } catch (err) {
       return json({ error: String(err) }, 502);
     }
+    await idemPut(env, idem, { urls });
     return json({ urls });
   },
 };
