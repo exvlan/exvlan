@@ -31,7 +31,6 @@ const PROTO: u32 = 1;
 const RPC_PORTAL: &str = "0.0.0.0:15999";
 const RPC_WHITELIST: &str = "10.254.0.0/16";
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
-const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ---------------------------------------------------------------------------
 // 路径
@@ -191,6 +190,8 @@ fn format_line(msg: &str) -> String {
 
 #[derive(Debug, Deserialize)]
 struct Request {
+    // 只有 unix 分支读它（Windows 管道由 ACL 限制），但两端都要反序列化。
+    #[cfg_attr(not(unix), allow(dead_code))]
     #[serde(default)]
     proto: u32,
     op: String,
@@ -654,6 +655,7 @@ fn chown_root(path: &Path) {
     }
 }
 #[cfg(not(unix))]
+#[allow(dead_code)]
 fn chown_root(_path: &Path) {}
 
 // ---------------------------------------------------------------------------
@@ -837,8 +839,7 @@ fn socket_path() -> PathBuf {
 
 #[cfg(unix)]
 fn serve_unix(state: Arc<State>) -> anyhow::Result<()> {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::os::unix::net::UnixListener;
 
     let path = socket_path();
     if let Some(dir) = path.parent() {
@@ -1012,7 +1013,11 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
         if connected {
             state.session_open();
             let st = state.clone();
+            let pipe = SendHandle(handle);
             std::thread::spawn(move || {
+                // 必须走方法调用：直接读 `pipe.0` 会被闭包按字段精确捕获，
+                // 从而绕过 SendHandle 的 Send 实现。
+                let handle = pipe.into_inner();
                 handle_pipe_conn(&st, handle);
                 st.session_close();
                 unsafe {
@@ -1028,9 +1033,20 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
     }
 }
 
+/// `HANDLE` 是 `*mut c_void`，不实现 Send；句柄本身可跨线程使用。
+#[cfg(target_os = "windows")]
+struct SendHandle(windows_sys::Win32::Foundation::HANDLE);
+#[cfg(target_os = "windows")]
+unsafe impl Send for SendHandle {}
+#[cfg(target_os = "windows")]
+impl SendHandle {
+    fn into_inner(self) -> windows_sys::Win32::Foundation::HANDLE {
+        self.0
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn handle_pipe_conn(state: &State, handle: windows_sys::Win32::Foundation::HANDLE) {
-    use windows_sys::Win32::Foundation::*;
     use windows_sys::Win32::Storage::FileSystem::*;
 
     let mut buf = [0u8; 4096];
@@ -1219,8 +1235,9 @@ fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
     )?;
     let info = ServiceInfo {
-        name: windows_service::service::ServiceName::new("era.exvlan.studio.service")?,
-        display_name: windows_service::service::ServiceName::new("Exvlan Service")?,
+        // windows-service 0.8 的 name/display_name 是 OsString（0.6/0.7 才是 ServiceName）。
+        name: std::ffi::OsString::from(SERVICE_LABEL),
+        display_name: std::ffi::OsString::from("Exvlan Service"),
         service_type: ServiceType::OWN_PROCESS,
         start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
@@ -1375,13 +1392,19 @@ fn diagnose(p: &Paths) -> anyhow::Result<()> {
         serde_json::to_string(&load_config(p)).unwrap_or_default()
     ));
     out.push_str(&format!("mode(boot): {:?}\n", load_config(p).mode));
-    for (label, path) in [
+    #[allow(unused_mut)]
+    let mut probes: Vec<(&str, &Path)> = vec![
         ("service.bin", &p.service_bin),
         ("kernel", &p.kernel),
         ("kernel.prev", &p.kernel_prev),
         ("service.json", &p.service_json),
-        ("socket", &socket_path()),
-    ] {
+    ];
+    #[cfg(unix)]
+    {
+        let sock = socket_path();
+        probes.push(("socket", Box::leak(sock.into_boxed_path())));
+    }
+    for (label, path) in probes {
         out.push_str(&format!(
             "{label}: {} exists={}\n",
             path.display(),

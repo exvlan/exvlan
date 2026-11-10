@@ -11,7 +11,10 @@ mod networks;
 mod paths;
 mod prefs;
 mod service_client;
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(all(
+    not(any(target_os = "macos", target_os = "windows")),
+    not(any(target_os = "android", target_os = "ios"))
+))]
 mod supervisor;
 // upgrade 全平台编译：kernel 子模块在移动端返回“不支持”，app 子模块移动端走 APK 流程。
 mod upgrade;

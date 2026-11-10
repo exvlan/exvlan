@@ -439,12 +439,21 @@ mod stub {
     pub fn kernel_status() -> Result<(u32, bool), String> {
         Ok((0, false))
     }
+    /// 移动端内核在进程内（FFI），没有可拉起的子进程。
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    pub fn ensure_normal(_app: &tauri::AppHandle) -> Result<String, String> {
+        Ok("ffi".to_string())
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn ensure_normal(app: &tauri::AppHandle) -> Result<String, String> {
         crate::supervisor::ensure(app).map_err(|e| format!("{e:#}"))
     }
     pub fn ensure_service(_app: &tauri::AppHandle) -> Result<String, String> {
         Ok("127.0.0.1:15999".to_string())
     }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    pub fn stop() {}
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn stop() {
         crate::supervisor::stop();
     }
