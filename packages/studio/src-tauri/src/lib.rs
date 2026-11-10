@@ -1803,7 +1803,15 @@ async fn upload_diagnostics(
             format!("[collect_errors]\nnetwork_report failed: {err}\n")
         }
     };
-    let zip_path = build_diagnostics_zip(&app, &network_report)?;
+    // 打包会并行跑 7 个采集器（最慢 30s），必须放到阻塞线程池，
+    // 否则会把 tokio worker 卡住，导致其它命令/心跳一起超时。
+    let zip_path = {
+        let app = app.clone();
+        let report = network_report.clone();
+        tokio::task::spawn_blocking(move || build_diagnostics_zip(&app, &report))
+            .await
+            .map_err(|e| format!("诊断打包任务失败: {e}"))??
+    };
     let zip_bytes = std::fs::read(&zip_path).map_err(|e| format!("读取诊断包失败: {e}"))?;
     let zip_size = zip_bytes.len();
     logger::record(
@@ -2523,9 +2531,18 @@ async fn share_error_log(app: AppHandle) -> Result<String, String> {
     ensure_error_log(&app);
     let report = build_network_report(&app, None).await.unwrap_or_default();
 
+    // 打包会并行跑采集器，放到阻塞线程池，避免卡住 tokio worker。
+    let zip_result = {
+        let app = app.clone();
+        let report = report.clone();
+        tokio::task::spawn_blocking(move || build_diagnostics_zip(&app, &report))
+            .await
+            .unwrap_or_else(|e| Err(format!("诊断打包任务失败: {e}")))
+    };
+
     // zip 建不出来（目录不可写/磁盘满）时降级为分享原始 error.log，
     // 而不是让「分享」整体失败。
-    let (path, mime, title) = match build_diagnostics_zip(&app, &report) {
+    let (path, mime, title) = match zip_result {
         Ok(path) => (path, "application/zip", "Exvlan 诊断日志"),
         Err(err) => {
             logger::record("share", format!("zip failed: {err}; fallback to error.log"));
