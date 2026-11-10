@@ -2540,7 +2540,15 @@ async fn share_error_log(app: AppHandle) -> Result<String, String> {
     {
         use tauri_plugin_vpnservice::VpnserviceExt;
         // 先复制到 cache，让 FileProvider 能匹配到根目录。
-        let share_path = copy_to_cache(&app, &path)?;
+        let share_path = match copy_to_cache(&app, &path) {
+            Ok(copy) => copy,
+            Err(err) => {
+                // 连复制都失败（磁盘满/目录不可写）：直接落盘到「下载」。
+                logger::record("share", format!("copy to cache failed: {err}"));
+                let saved = save_to_downloads(&app, &path, mime)?;
+                return Ok(format!("saved: {saved}"));
+            }
+        };
         let attempt = app
             .vpnservice()
             .share_file(tauri_plugin_vpnservice::models::ShareFileRequest {
