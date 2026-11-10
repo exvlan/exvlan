@@ -2286,7 +2286,8 @@ async fn upload_text_fallback(
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "summary": format!("{summary}\nzip 存储不可用，已回退为文本诊断"),
-        "networkReport": logger::redact(network_report),
+        // Worker 单段上限 60KB，超了会被截断并可能切成多页，这里先收敛一次。
+        "networkReport": logger::redact(&clip_chars(network_report, 50_000)),
         "errorLog": logger::redact(&error_log),
         "eventsTail": logger::redact(&events_tail),
         "kernelTail": logger::redact(&kernel_tail),
@@ -2469,6 +2470,16 @@ fn open_diagnostics_dir(app: AppHandle) -> Result<String, String> {
         cmd.spawn().map_err(|e| format!("打开目录失败: {e}"))?;
         Ok(dir.display().to_string())
     }
+}
+
+/// 按字符截断（不破坏 UTF-8），用于控制文本上传的请求体大小。
+fn clip_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max).collect();
+    out.push_str("\n[truncated]\n");
+    out
 }
 
 /// 上传失败时的错误文案：移动端先尝试落盘到「下载」，桌面端给出本地路径。
