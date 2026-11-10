@@ -46,10 +46,12 @@ exvlan-rpc = { version = "26.410.20712", path = "exvlan/rpc", default-features =
 futures = "0.3"
 gethostname = "1.1"
 guarden = "0.3"
+hickory-resolver = "0.25.2"
 hmac = "0.13.0"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
+if-addrs = "0.15"
 indoc = "2.0.7"
 log = "0.4"
 mimalloc = "*"
@@ -90,6 +92,7 @@ tracing-subscriber = { version = "0.3", default-features = false }
 url = "2.5"
 uuid = "1.26.1"
 winapi = "0.3.9"
+winreg = "0.56"
 windows = "0.62"
 x25519-dalek = "2.0.1"
 # zerocopy 0.8 requires migrating the packet layout and casting APIs.
