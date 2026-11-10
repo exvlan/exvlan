@@ -15,7 +15,7 @@ import {
   serviceDiagnostics,
   serviceReinstall,
   serviceRestart,
-  retryHelperInstall,
+  serviceInstall,
   uploadDiagnostics,
 } from "~/composables/backend";
 import { invoke } from "@tauri-apps/api/core";
@@ -30,7 +30,7 @@ async function onRetryHelper() {
   }
   retryingHelper.value = true;
   try {
-    await retryHelperInstall();
+    await serviceInstall();
     toast.add({
       severity: "success",
       summary: t("mode.helper"),

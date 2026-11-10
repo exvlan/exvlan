@@ -135,29 +135,38 @@ jobs:
           chmod +x packages/studio/src-tauri/resources/kernel/exvlan || true
           ls -l packages/studio/src-tauri/resources/kernel/
 
-      # helper（macOS）：独立小二进制，随包安装；首次授权一次，之后升级不再弹密码。
-      - name: Build privileged helper (macOS)
-        if: ${{ contains(matrix.GUI_TARGET, 'darwin') }}
+      # 特权服务（macOS + Windows）：唯一的常驻特权进程。
+      # 首次安装授权一次；之后的升级通过 IPC 自更新（`service.update`），零弹窗。
+      - name: Build privileged service
         run: |
           set -euo pipefail
-          cargo build --release -p exvlan-helper --target "$GUI_TARGET"
-          mkdir -p packages/studio/src-tauri/resources/helper
-          cp "target/$GUI_TARGET/release/exvlan-helper" packages/studio/src-tauri/resources/helper/
-          chmod +x packages/studio/src-tauri/resources/helper/exvlan-helper
-          ls -l packages/studio/src-tauri/resources/helper/
+          cargo build --release -p exvlan-service --target "$GUI_TARGET"
+          BIN=exvlan-service
+          [[ "$GUI_TARGET" =~ windows ]] && BIN=exvlan-service.exe
+          mkdir -p packages/studio/src-tauri/resources/service
+          cp "target/$GUI_TARGET/release/$BIN" packages/studio/src-tauri/resources/service/
+          chmod +x "packages/studio/src-tauri/resources/service/$BIN" || true
+          ls -l packages/studio/src-tauri/resources/service/
 
-      # 内核签名：helper 只安装 minisign 校验通过的包（复用 updater 私钥，无需新 secret）。
-      - name: Sign kernel for privileged helper (macOS)
-        if: ${{ contains(matrix.GUI_TARGET, 'darwin') }}
+      # 内核 + 服务本体签名：服务只安装 minisign 校验通过的包
+      # （复用 updater 私钥，无需新 secret）。
+      - name: Sign kernel and service (minisign)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
           set -euo pipefail
           cd packages/studio
-          pnpm tauri signer sign src-tauri/resources/kernel/exvlan
-          pnpm tauri signer sign src-tauri/resources/helper/exvlan-helper
-          ls -l src-tauri/resources/kernel/ src-tauri/resources/helper/
+          if [[ "$GUI_TARGET" =~ windows ]]; then
+            KERNEL=exvlan.exe
+            SERVICE=exvlan-service.exe
+          else
+            KERNEL=exvlan
+            SERVICE=exvlan-service
+          fi
+          pnpm tauri signer sign "src-tauri/resources/kernel/$KERNEL"
+          pnpm tauri signer sign "src-tauri/resources/service/$SERVICE"
+          ls -l src-tauri/resources/kernel/ src-tauri/resources/service/
 
       - name: copy correct DLLs (Windows)
         if: ${{ contains(matrix.GUI_TARGET, 'windows') }}
@@ -207,6 +216,16 @@ jobs:
       # - macOS：路径固定（.app/Contents/Resources），严格失败
       # - Windows：Tauri 只把资源塞进 MSI/NSIS（CAB 内容 7z 不可列），
       #   输出目录没有副本属正常 → 校验 staging 并告警，不阻塞
+      - name: Verify service bundled
+        run: |
+          set -euo pipefail
+          BIN=exvlan-service
+          [[ "$GUI_TARGET" =~ windows ]] && BIN=exvlan-service.exe
+          test -f "packages/studio/src-tauri/resources/service/$BIN" \
+            || { echo "::error::staging 目录缺少 $BIN"; exit 1; }
+          test -f "packages/studio/src-tauri/resources/service/$BIN.sig" \
+            || { echo "::error::缺少服务签名 $BIN.sig"; exit 1; }
+
       - name: Verify kernel bundled
         run: |
           set -euo pipefail

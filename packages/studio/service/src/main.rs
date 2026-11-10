@@ -198,6 +198,8 @@ struct Request {
     mode: Option<Mode>,
     #[serde(default)]
     staging: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -537,12 +539,61 @@ impl State {
                 },
                 None => Response::err("bad_request", "staging 缺失"),
             },
+            "service.update" => match req.staging.as_deref() {
+                Some(dir) => match self.update_self(Path::new(dir), req.version.as_deref()) {
+                    Ok(()) => Response::ok(),
+                    Err(err) => Response::err("update_failed", err.to_string()),
+                },
+                None => Response::err("bad_request", "staging 缺失"),
+            },
             other => Response::err("bad_request", format!("未知操作: {other}")),
         }
     }
 
-    // ---- session（normal 模式的存活锚点） ----
+    /// 免密自更新：校验签名 → 拉起独立替换进程 → 由它替换并重启。
+    ///
+    /// 这里**不做替换动作本身**：Windows 上运行中的 exe 被锁，必须先由新进程
+    /// 停服务；macOS 上 kickstart 会杀掉本进程，同样不能由自己做。
+    fn update_self(&self, staging: &Path, version: Option<&str>) -> anyhow::Result<()> {
+        verify_staging_dir(staging)?;
+        let bin_name = if cfg!(windows) {
+            "exvlan-service.exe"
+        } else {
+            "exvlan-service"
+        };
+        let new_bin = staging.join(bin_name);
+        let sig = staging.join("service.sig");
+        if !new_bin.is_file() {
+            bail!("staging 缺少服务二进制");
+        }
+        if !sig.is_file() {
+            bail!("staging 缺少服务签名");
+        }
+        verify_minisign(&new_bin, &sig)?;
 
+        let exe = std::env::current_exe().context("定位自身可执行文件失败")?;
+        let mut cmd = Command::new(&exe);
+        cmd.arg("--replace-updater")
+            .arg(&new_bin)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            cmd.creation_flags(DETACHED_PROCESS);
+        }
+        let child = cmd.spawn().context("拉起替换进程失败")?;
+        self.log(format!(
+            "service.update requested → {} (updater pid={})",
+            version.unwrap_or("-"),
+            child.id()
+        ));
+        Ok(())
+    }
+
+    // ---- session（normal 模式的存活锚点） ----
     fn session_open(&self) {
         self.inner
             .lock()
@@ -629,6 +680,22 @@ fn verify_staging(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// staging 目录的基本校验（只查权限，不查具体文件名）。
+fn verify_staging_dir(dir: &Path) -> anyhow::Result<()> {
+    let meta = std::fs::metadata(dir).context("staging 不存在")?;
+    if !meta.is_dir() {
+        bail!("staging 不是目录");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        if meta.mode() & 0o022 != 0 {
+            bail!("staging 可被 group/other 写，拒绝执行");
+        }
+    }
+    Ok(())
+}
+
 fn verify_minisign(file: &Path, signature: &Path) -> anyhow::Result<()> {
     let public_key =
         minisign_verify::PublicKey::from_base64(MINISIGN_PUBKEY).context("解析内置公钥失败")?;
@@ -660,6 +727,10 @@ fn main() -> anyhow::Result<()> {
     let p = paths();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--version") => {
+            println!("exvlan-service {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         Some("--daemon") => run_daemon(p),
         Some("--install") => {
             let uid = args.get(1).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
@@ -671,21 +742,56 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some("--diagnose") => diagnose(&p),
-        Some("--replace-updater") => {
-            #[cfg(target_os = "windows")]
-            {
-                return replace_updater(&p, args.get(1).map(String::as_str));
-            }
-            #[allow(unreachable_code)]
-            Ok(())
-        }
+        // 提权入口：重启服务本体（不改配置、不换二进制）。
+        Some("--restart") => restart_service(),
+        // 自更新落点：由运行中的服务 fork 出来，等它退出后替换二进制并拉起。
+        Some("--replace-updater") => replace_updater(&p, args.get(1).map(String::as_str)),
         _ => {
             eprintln!(
-                "usage: exvlan-service --daemon | --install <uid> | --uninstall | --status | --diagnose"
+                "usage: exvlan-service --daemon | --install <uid> | --uninstall | --status | --diagnose | --restart"
             );
             std::process::exit(2);
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn restart_service() -> anyhow::Result<()> {
+    let out = Command::new("/bin/launchctl")
+        .args(["kickstart", "-k", &format!("system/{SERVICE_LABEL}")])
+        .output()?;
+    if !out.status.success() {
+        bail!(
+            "launchctl kickstart 失败: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn restart_service() -> anyhow::Result<()> {
+    let _ = Command::new("sc").args(["stop", SERVICE_LABEL]).output();
+    for _ in 0..150 {
+        let out = Command::new("sc").args(["query", SERVICE_LABEL]).output()?;
+        if String::from_utf8_lossy(&out.stdout).contains("STOPPED") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let out = Command::new("sc").args(["start", SERVICE_LABEL]).output()?;
+    if !out.status.success() {
+        bail!(
+            "sc start 失败: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn restart_service() -> anyhow::Result<()> {
+    bail!("exvlan-service 只在 macOS/Windows 上运行")
 }
 
 fn run_daemon(p: Paths) -> anyhow::Result<()> {
@@ -990,9 +1096,17 @@ fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
     let plist = Path::new("/Library/LaunchDaemons/era.exvlan.studio.service.plist");
     std::fs::create_dir_all(p.service_bin.parent().unwrap()).ok();
     std::fs::create_dir_all(p.logs.parent().unwrap_or(&p.logs)).ok();
-    std::fs::copy(&src, &p.service_bin)?;
+    // 从已安装位置原地重装时 src == dst：`fs::copy` 会报 EBUSY/EINVAL。
+    if src != p.service_bin {
+        std::fs::copy(&src, &p.service_bin)?;
+    }
     std::fs::set_permissions(&p.service_bin, std::fs::Permissions::from_mode(0o755))?;
     chown_root(&p.service_bin);
+
+    // 旧模型（内核直跑 launchd / 旧 helper）与新版抢 15999 与 TUN，必须先清掉。
+    // 注意：列表里**不能**包含当前的 SERVICE_LABEL，否则会删掉刚写好、
+    // 或者（更糟）正在用的 plist（pre.12 的 bootstrap EIO 就是这个原因）。
+    cleanup_legacy_macos();
 
     let body = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1042,14 +1156,45 @@ fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
-    // 等 socket 就绪（≤10s）
+    // 等 socket 就绪（≤10s）：必须真连上，而不是只看文件存在
+    // （上一版崩溃留下的 stale socket 会让“文件存在”恒为真）。
     for _ in 0..50 {
-        if socket_path().exists() {
+        if std::os::unix::net::UnixStream::connect(socket_path()).is_ok() {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(200));
     }
     bail!("服务已加载但 socket 未就绪")
+}
+
+/// 清理旧模型留下的守护进程（幂等）。当前 SERVICE_LABEL 绝不在列表里。
+#[cfg(target_os = "macos")]
+fn cleanup_legacy_macos() {
+    const LEGACY_LABELS: &[&str] = &[
+        "era.exvlan.studio",
+        "era.exvlan.studio.helper",
+        "com.exvlan.studio",
+        "com.exvlan.studio.helper",
+        "exvlan-studio",
+    ];
+    for label in LEGACY_LABELS {
+        if *label == SERVICE_LABEL {
+            continue;
+        }
+        let _ = Command::new("/bin/launchctl")
+            .args(["bootout", &format!("system/{label}")])
+            .output();
+        for dir in ["/Library/LaunchDaemons", "/Library/LaunchAgents"] {
+            let _ = std::fs::remove_file(format!("{dir}/{label}.plist"));
+        }
+    }
+    // 旧 helper 二进制
+    for stale in [
+        "/Library/PrivilegedHelperTools/era.exvlan.studio.helper",
+        "/Library/PrivilegedHelperTools/com.exvlan.studio.helper",
+    ] {
+        let _ = std::fs::remove_file(stale);
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -1063,7 +1208,11 @@ fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
     if let Some(dir) = p.service_bin.parent() {
         std::fs::create_dir_all(dir).ok();
     }
-    std::fs::copy(&src, &p.service_bin)?;
+    // 从已安装位置原地重装时 src == dst。
+    if src != p.service_bin {
+        std::fs::copy(&src, &p.service_bin)?;
+    }
+    cleanup_legacy_windows();
 
     let manager = ServiceManager::local_computer(
         None::<&str>,
@@ -1088,39 +1237,101 @@ fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 清理旧模型留下的守护进程/计划任务（幂等）。当前服务名绝不在列表里。
+#[cfg(target_os = "windows")]
+fn cleanup_legacy_windows() {
+    // 旧「内核直跑」服务
+    for stale in ["era.exvlan.studio", "exvlan-studio"] {
+        if stale == SERVICE_LABEL {
+            continue;
+        }
+        let _ = Command::new("sc").args(["stop", stale]).output();
+        let _ = Command::new("sc").args(["delete", stale]).output();
+    }
+    // 旧「普通模式高权限启动器」计划任务
+    for task in ["era.exvlan.studio", "ExvlanKernelSupervisor"] {
+        let _ = Command::new("schtasks")
+            .args(["/Delete", "/TN", task, "/F"])
+            .output();
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
     let Some(new_exe) = new_exe else {
         bail!("--replace-updater 需要新二进制路径");
     };
-    // 等主服务退出（≤30s）
+    // 给主服务时间把 IPC 响应写完再动手。
+    std::thread::sleep(Duration::from_millis(1200));
+
+    // 1) 停服务（运行中的 exe 被文件锁占用）
+    let _ = Command::new("sc").args(["stop", SERVICE_LABEL]).output();
     for _ in 0..150 {
-        let out = Command::new("sc")
-            .args(["query", "era.exvlan.studio.service"])
-            .output()?;
+        let out = Command::new("sc").args(["query", SERVICE_LABEL]).output()?;
         let text = String::from_utf8_lossy(&out.stdout);
         if text.contains("STOPPED") {
             break;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
+
+    // 2) 备份 → 替换
     let backup = p.service_bin.with_extension("exe.prev");
     if p.service_bin.is_file() {
         let _ = std::fs::copy(&p.service_bin, &backup);
     }
-    std::fs::copy(new_exe, &p.service_bin)?;
-    let start = Command::new("sc")
-        .args(["start", "era.exvlan.studio.service"])
-        .output()?;
+    if let Err(err) = std::fs::copy(new_exe, &p.service_bin) {
+        let _ = Command::new("sc").args(["start", SERVICE_LABEL]).output();
+        return Err(anyhow::anyhow!("替换服务二进制失败: {err}"));
+    }
+
+    // 3) 拉起；失败回滚
+    let start = Command::new("sc").args(["start", SERVICE_LABEL]).output()?;
     if !start.status.success() {
-        // 回滚
         let _ = std::fs::copy(&backup, &p.service_bin);
-        let _ = Command::new("sc")
-            .args(["start", "era.exvlan.studio.service"])
-            .output();
+        let _ = Command::new("sc").args(["start", SERVICE_LABEL]).output();
         bail!("替换后启动失败，已回滚");
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Some(new_exe) = new_exe else {
+        bail!("--replace-updater 需要新二进制路径");
+    };
+    // 给主服务时间把 IPC 响应写完再动手。
+    std::thread::sleep(Duration::from_millis(1200));
+
+    let backup = p.service_bin.with_extension("prev");
+    if p.service_bin.is_file() {
+        let _ = std::fs::copy(&p.service_bin, &backup);
+    }
+    std::fs::copy(new_exe, &p.service_bin).context("替换服务二进制失败")?;
+    let _ = std::fs::set_permissions(&p.service_bin, std::fs::Permissions::from_mode(0o755));
+    chown_root(&p.service_bin);
+
+    // kickstart -k：杀掉旧进程并按 plist 重新拉起（此时已是新二进制）。
+    let out = Command::new("/bin/launchctl")
+        .args(["kickstart", "-k", &format!("system/{SERVICE_LABEL}")])
+        .output()?;
+    if !out.status.success() {
+        let _ = std::fs::copy(&backup, &p.service_bin);
+        let _ = Command::new("/bin/launchctl")
+            .args(["kickstart", "-k", &format!("system/{SERVICE_LABEL}")])
+            .output();
+        bail!(
+            "替换后重启失败，已回滚: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn replace_updater(_p: &Paths, _new_exe: Option<&str>) -> anyhow::Result<()> {
+    bail!("exvlan-service 只在 macOS/Windows 上运行")
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

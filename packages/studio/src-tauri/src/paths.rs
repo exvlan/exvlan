@@ -52,9 +52,9 @@ pub fn system() -> SystemPaths {
     }
 }
 
-/// helper 日志文件（系统日志根下，与内核日志同级）。
-pub fn helper_log() -> PathBuf {
-    system().logs.join("helper.log")
+/// 特权服务日志（`exvlan-service` 自轮转）。GUI 侧只读，用于诊断包。
+pub fn service_log() -> PathBuf {
+    system().logs.join("service.log")
 }
 
 /// 服务（内核daemon）的 launchd plist（仅 macOS）。
@@ -66,48 +66,6 @@ pub fn service_plist(label: &str) -> Option<PathBuf> {
 #[allow(dead_code)]
 pub fn service_plist(_label: &str) -> Option<PathBuf> {
     None
-}
-
-#[cfg(target_os = "macos")]
-pub fn helper_bin() -> Option<PathBuf> {
-    Some(PathBuf::from("/Library/PrivilegedHelperTools").join(format!("{APP_ID}.helper")))
-}
-#[cfg(not(target_os = "macos"))]
-#[allow(dead_code)]
-pub fn helper_bin() -> Option<PathBuf> {
-    None
-}
-
-#[cfg(target_os = "macos")]
-pub fn helper_plist() -> Option<PathBuf> {
-    Some(PathBuf::from("/Library/LaunchDaemons").join(format!("{APP_ID}.helper.plist")))
-}
-#[cfg(not(target_os = "macos"))]
-#[allow(dead_code)]
-pub fn helper_plist() -> Option<PathBuf> {
-    None
-}
-
-#[cfg(target_os = "macos")]
-pub fn helper_version_file() -> Option<PathBuf> {
-    Some(PathBuf::from("/Library/PrivilegedHelperTools").join(format!("{APP_ID}.helper.version")))
-}
-#[cfg(not(target_os = "macos"))]
-#[allow(dead_code)]
-pub fn helper_version_file() -> Option<PathBuf> {
-    None
-}
-
-/// helper 的运行时 socket（macOS）。
-#[cfg(target_os = "macos")]
-pub fn helper_socket() -> PathBuf {
-    PathBuf::from("/var/run").join(APP_ID).join("helper.sock")
-}
-
-#[cfg(not(target_os = "macos"))]
-#[allow(dead_code)]
-pub fn helper_socket() -> PathBuf {
-    PathBuf::new()
 }
 
 /// 系统 LaunchDaemons 目录（macOS）。

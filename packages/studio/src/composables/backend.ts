@@ -289,20 +289,22 @@ export async function shareErrorLog(frontend?: string) {
   return await invoke<string>("share_error_log", { frontend: frontend ?? null });
 }
 
-/** helper 当前状态（macOS 特权组件；移动端恒为 ready）。 */
-export interface HelperState {
+/** 特权服务当前状态（`exvlan-service`；移动端恒为 ready）。 */
+export interface ServiceState {
   installed: boolean;
   ready: boolean;
+  mode: string;
+  kernel_pid: number;
   status: string;
 }
 
-export async function helperState() {
-  return await invoke<HelperState>("helper_state");
+export async function serviceState() {
+  return await invoke<ServiceState>("service_state");
 }
 
-/** 重试安装 helper（会弹一次系统授权）。 */
-export async function retryHelperInstall() {
-  return await invoke<string>("retry_helper_install");
+/** 重试安装特权服务（会弹一次系统授权）。 */
+export async function serviceInstall() {
+  return await invoke<string>("service_install");
 }
 
 export interface ServiceDefaultDirs {

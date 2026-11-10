@@ -20,7 +20,7 @@ GITHUB_REF_NAME=v26.410.20712-pre.8 bash script/ci/build-version.sh   # tag：26
 ## 1. 本地检查
 
 ```bash
-cargo check -p exvlan -p exvlan-studio -p exvlan-helper
+cargo check -p exvlan -p exvlan-studio -p exvlan-service
 cargo test  -p exvlan-studio --lib
 bash script/ci/check-paths.sh        # 绝对路径字面量只允许在 paths.rs
 ```
@@ -71,7 +71,7 @@ for i in $(seq 1 11); do curl -s -o /dev/null -w '%{http_code} ' $BASE/token; do
 
 - 资产命名带预览标记：`…_26.104.207.12-pre.8_x64_en-US.msi`、`…_26.410.20712-pre.8_x64.dmg`
 - Release：公开 prerelease，中文说明
-- 核验：`.app` 内 `Resources/resources/helper/exvlan-helper` 与 `kernel/exvlan` 存在，签名可验
+- 核验：`.app` 内 `Resources/resources/service/exvlan-service` 与 `kernel/exvlan` 存在，minisign 可验
 
 ## 5. 验收门槛（4 条全过）
 

@@ -242,45 +242,38 @@ fn interfaces_text() -> (String, Option<String>) {
     (rows.join("\n"), None)
 }
 
-/// helper 的完整状态（macOS 额外带落点/权限/disabled/签名，用于定位 bootstrap EIO）。
-fn helper_state_json() -> Value {
+/// 特权服务（`exvlan-service`）的完整状态：落点/权限/disabled/签名，
+/// 用于定位「服务显示 Running 但 15999 没人监听」这类问题。
+fn service_state_json() -> Value {
+    let st = crate::service_client::state();
     #[allow(unused_mut)]
     let mut value = json!({
-        "installed": cfg!(target_os = "macos") && crate::helper::is_installed(),
-        // 非 macOS 没有 helper 组件，恒为就绪（否则界面会误报未就绪）。
-        "ready": !cfg!(target_os = "macos") || crate::helper::is_ready(),
-        "status": if cfg!(target_os = "macos") {
-            crate::helper::status().unwrap_or_else(|e| e)
-        } else {
-            "unsupported".to_string()
-        },
+        "installed": st.installed,
+        "ready": st.ready,
+        "mode": st.mode,
+        "kernel_pid": st.kernel_pid,
+        "status": st.status,
+        "installed_version": crate::service_client::installed_version(),
+        "bin": crate::service_client::installed_service_bin().display().to_string(),
     });
 
     #[cfg(target_os = "macos")]
     {
         use std::os::unix::fs::PermissionsExt as _;
 
-        if let Some(bin) = crate::paths::helper_bin() {
-            value["bin"] = file_meta(&bin);
-            value["bin_mode"] = json!(
-                std::fs::metadata(&bin)
-                    .ok()
-                    .map(|m| format!("{:o}", m.permissions().mode() & 0o777))
-                    .unwrap_or_else(|| "-".to_string())
-            );
-        }
-        if let Some(plist) = crate::paths::helper_plist() {
-            value["plist"] = file_meta(&plist);
-        }
-        if let Some(vf) = crate::paths::helper_version_file() {
-            value["version_file"] = json!({
-                "path": vf.display().to_string(),
-                "exists": vf.exists(),
-                "text": std::fs::read_to_string(&vf).map(|t| t.trim().to_string()).unwrap_or_default(),
-            });
-        }
+        let bin = crate::service_client::installed_service_bin();
+        value["bin_meta"] = file_meta(&bin);
+        value["bin_mode"] = json!(
+            std::fs::metadata(&bin)
+                .ok()
+                .map(|m| format!("{:o}", m.permissions().mode() & 0o777))
+                .unwrap_or_else(|| "-".to_string())
+        );
+        let plist =
+            std::path::PathBuf::from("/Library/LaunchDaemons/era.exvlan.studio.service.plist");
+        value["plist"] = file_meta(&plist);
         value["print_disabled"] = json!(launchctl_print_disabled());
-        value["codesign"] = json!(codesign_summary(&crate::paths::helper_bin()));
+        value["codesign"] = json!(codesign_summary(&Some(bin)));
     }
 
     value
@@ -308,11 +301,11 @@ fn launchctl_print_disabled() -> String {
     }
 }
 
-/// helper 二进制的签名摘要（未签名/adhoc 会影响 launchd 是否愿意加载）。
+/// 服务二进制的签名摘要（未签名/adhoc 会影响 launchd 是否愿意加载）。
 #[cfg(target_os = "macos")]
 fn codesign_summary(bin: &Option<std::path::PathBuf>) -> String {
     let Some(bin) = bin else {
-        return "no helper binary".to_string();
+        return "no service binary".to_string();
     };
     let Ok(out) = std::process::Command::new("/usr/bin/codesign")
         .args(["-dv", "--verbose=2", &bin.to_string_lossy()])
@@ -412,7 +405,7 @@ pub fn collect_system(app_config: &Path, app_log: &Path, core_dir: &Path) -> Col
             .into_iter()
             .map(|(name, ok)| json!({"name": name, "present": ok}))
             .collect::<Vec<_>>(),
-        "helper": helper_state_json(),
+        "service": service_state_json(),
         "signature": sig,
         "quarantine": quarantine,
         "config_dir": {"path": app_config.display().to_string(), "writable": dir_writable(app_config)},
@@ -593,9 +586,9 @@ ip -6 route show 10.254.0.0/16 2>/dev/null
     }
 }
 
-/// D9：服务定义与运行态。
+/// D9：服务定义与运行态（自 7.3 起只有一个特权服务 `exvlan-service`）。
 pub fn collect_service() -> Collected {
-    let label = crate::SERVICE_LABEL;
+    let label = crate::service_client::SERVICE_LABEL;
     let mut parts: Vec<String> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
 
@@ -618,22 +611,17 @@ pub fn collect_service() -> Collected {
         }
         parts.push(format!("=== launchctl print system/{label} ===\n{out}"));
 
-        let helper_label = "era.exvlan.studio.helper";
-        let (out, err) = run(
-            "launchctl",
-            &["print", &format!("system/{helper_label}")],
-            Duration::from_secs(5),
-        );
-        if let Some(e) = err {
-            errors.push(format!("launchctl print helper: {e}"));
-        }
-        parts.push(format!(
-            "=== launchctl print system/{helper_label} ===\n{out}"
-        ));
-        if let Some(plist) = crate::paths::helper_plist() {
-            if let Ok(text) = std::fs::read_to_string(&plist) {
-                parts.push(format!("=== helper plist {} ===\n{text}", plist.display()));
-            }
+        // 旧模型的 label 也打一份（升级后排查残留）
+        for legacy in ["era.exvlan.studio", "era.exvlan.studio.helper"] {
+            let (out, _err) = run(
+                "launchctl",
+                &["print", &format!("system/{legacy}")],
+                Duration::from_secs(5),
+            );
+            let brief: String = out.lines().take(12).collect::<Vec<_>>().join("\n");
+            parts.push(format!(
+                "=== launchctl print system/{legacy} (legacy) ===\n{brief}"
+            ));
         }
     }
 
@@ -871,7 +859,7 @@ pub fn collect_unified_log() -> Collected {
     {
         // `log show --last 10m` 在日志量大时能跑到 15s 以上，12s 超时会整项丢失。
         // 先给 30s；超时再降级成 2 分钟窗口重试一次，保证至少有一段统一日志。
-        let predicate = r#"process == "exvlan" OR process == "exvlan-helper" OR eventMessage CONTAINS "era.exvlan.studio""#;
+        let predicate = r#"process == "exvlan" OR process == "exvlan-service" OR eventMessage CONTAINS "era.exvlan.studio""#;
         let mut last_error = None;
         for (window, timeout) in [("10m", 30u64), ("2m", 15u64)] {
             let (out, err) = run(

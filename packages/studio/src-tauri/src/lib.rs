@@ -5,12 +5,13 @@ mod diagnostics;
 mod elevate;
 #[cfg(target_os = "android")]
 mod ffi;
-mod helper;
 mod kernel;
 mod logger;
 mod networks;
 mod paths;
 mod prefs;
+mod service_client;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod supervisor;
 // upgrade 全平台编译：kernel 子模块在移动端返回“不支持”，app 子模块移动端走 APK 流程。
 mod upgrade;
@@ -650,11 +651,22 @@ async fn init_rpc_connection(
     let client_url = match explicit {
         Some(url) => url,
         None if is_normal_mode => {
-            let portal = crate::supervisor::ensure(&app)
-                .map_err(|e| format!("启动普通模式内核失败: {e:#}"))?;
+            let app2 = app.clone();
+            let portal =
+                tokio::task::spawn_blocking(move || crate::service_client::ensure_normal(&app2))
+                    .await
+                    .map_err(|e| format!("普通模式启动任务失败: {e}"))?
+                    .map_err(|e| format!("启动普通模式内核失败: {e}"))?;
             format!("tcp://{portal}")
         }
-        None => LOCAL_DAEMON_RPC_PORTAL.to_string(),
+        None => {
+            let app2 = app.clone();
+            tokio::task::spawn_blocking(move || crate::service_client::ensure_service(&app2))
+                .await
+                .map_err(|e| format!("服务模式启动任务失败: {e}"))?
+                .map_err(|e| format!("启动服务模式内核失败: {e}"))?;
+            LOCAL_DAEMON_RPC_PORTAL.to_string()
+        }
     };
 
     // 注意：连接期间**不能**持有 CLIENT_MANAGER 写锁。
@@ -1700,12 +1712,11 @@ fn build_diagnostics_zip(
     if let Ok(prefs_path) = crate::prefs::prefs_path(app) {
         add_file("prefs.toml", &prefs_path, 256 * 1024, true);
     }
-    // helper 只存在于 macOS；其他平台不生成这一项，避免 manifest 里出现误导性的
-    // `helper.log  missing`。
-    if cfg!(target_os = "macos") {
+    // 特权服务日志（`exvlan-service` 自轮转 8MB×2；只有 macOS/Windows 有）
+    if cfg!(any(target_os = "macos", target_os = "windows")) {
         add_file(
-            "helper.log",
-            &crate::paths::helper_log(),
+            "service.log",
+            &crate::paths::service_log(),
             DIAG_LOG_CAP,
             true,
         );
@@ -4155,12 +4166,6 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
         }
     }
 
-    if args.first().map(String::as_str) == Some("--kernel-supervisor") {
-        return Some(std::process::ExitCode::from(
-            crate::supervisor::run_supervisor() as u8,
-        ));
-    }
-
     let code = match args.first().map(|s| s.as_str()) {
         Some("--elevate-selftest") => {
             report(
@@ -4168,7 +4173,7 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 &format!(
                     "ok pid={} uid={} exe={}",
                     std::process::id(),
-                    helper::current_uid(),
+                    crate::service_client::current_uid(),
                     std::env::current_exe()
                         .map(|p| p.display().to_string())
                         .unwrap_or_default()
@@ -4190,6 +4195,43 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 Err(err) => {
                     report("kernel", &format!("安装失败: {err:#}"));
                     ExitCode::FAILURE
+                }
+            }
+        }
+        Some("--install-exvlan-service") => {
+            // 新模型：唯一的特权组件是 `exvlan-service`，由它自己完成
+            // 「复制到特权目录 + 注册 launchd/SCM + 起服务」。
+            let src = args.get(1).cloned().unwrap_or_default();
+            let uid = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| crate::service_client::current_uid().to_string());
+            if src.is_empty() || !std::path::Path::new(&src).is_file() {
+                report("service", &format!("随包服务二进制不存在: {src:?}"));
+                ExitCode::FAILURE
+            } else {
+                match std::process::Command::new(&src)
+                    .arg("--install")
+                    .arg(&uid)
+                    .output()
+                {
+                    Ok(out) if out.status.success() => ExitCode::SUCCESS,
+                    Ok(out) => {
+                        report(
+                            "service",
+                            &format!(
+                                "install exit={} stdout={} stderr={}",
+                                out.status,
+                                String::from_utf8_lossy(&out.stdout).trim(),
+                                String::from_utf8_lossy(&out.stderr).trim()
+                            ),
+                        );
+                        ExitCode::FAILURE
+                    }
+                    Err(err) => {
+                        report("service", &format!("无法执行 {src}: {err}"));
+                        ExitCode::FAILURE
+                    }
                 }
             }
         }
@@ -4264,6 +4306,33 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 }
             }
         }
+        Some("--exvlan-service-ctl") => {
+            // 重启特权服务（提权）：交给服务二进制自己做，GUI 不碰 launchd/SC。
+            let bin = crate::service_client::installed_service_bin();
+            if !bin.is_file() {
+                report("service", &format!("服务未安装: {}", bin.display()));
+                ExitCode::FAILURE
+            } else {
+                match std::process::Command::new(&bin).arg("--restart").output() {
+                    Ok(out) if out.status.success() => ExitCode::SUCCESS,
+                    Ok(out) => {
+                        report(
+                            "service",
+                            &format!(
+                                "restart exit={} stderr={}",
+                                out.status,
+                                String::from_utf8_lossy(&out.stderr).trim()
+                            ),
+                        );
+                        ExitCode::FAILURE
+                    }
+                    Err(err) => {
+                        report("service", &format!("无法执行 --restart: {err}"));
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+        }
         Some("--service-ctl") => {
             let action = args.get(1).map(|s| s.as_str()).unwrap_or("start");
             if action == "restart" {
@@ -4299,44 +4368,60 @@ pub struct ProvisionPayload {
     pub kernel_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<service::ServiceOptions>,
-    /// 随包 helper 路径（macOS；为空表示不需要安装）。
+    /// 随包 `exvlan-service` 路径（为空表示不需要安装特权服务）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub helper_src: Option<String>,
-    /// 安装者 uid（helper 只接受该用户的请求）。
+    pub service_src: Option<String>,
+    /// 安装者 uid（服务只接受该用户的 IPC 请求）。
     #[serde(default)]
     pub owner_uid: u32,
 }
 
+/// 停掉当前内核（由 `exvlan-service` 托管；Linux 下是 supervisor 子进程）。
+/// 返回 true 表示「此前确实在跑」， caller 负责换完后重新拉起。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn stop_service_if_running() -> bool {
-    use exvlan_rpc::service_manager::ServiceStatus;
-    if !matches!(service::status(), Ok(ServiceStatus::Running)) {
-        return false;
+fn stop_kernel_if_running() -> bool {
+    match crate::service_client::kernel_status() {
+        Ok((_pid, true)) => match crate::service_client::stop_kernel() {
+            Ok(()) => {
+                crate::logger::record("provision.kernel", "stopped before kernel replace");
+                true
+            }
+            Err(err) => {
+                crate::logger::record("provision.kernel", format!("stop failed: {err}"));
+                false
+            }
+        },
+        _ => false,
     }
-    match service::set_status(false) {
-        Ok(()) => {
-            crate::logger::record("provision.service", "stopped before kernel replace");
-            true
-        }
-        Err(err) => {
-            crate::logger::record("provision.service", format!("stop failed: {err:#}"));
-            false
-        }
+}
+
+/// 跑随包 `exvlan-service --install <uid>`（调用方必须是**已提权**的进程）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn install_privileged_service(src: &std::path::Path, uid: u32) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    if !src.is_file() {
+        anyhow::bail!("随包服务二进制不存在: {}", src.display());
     }
+    let out = std::process::Command::new(src)
+        .arg("--install")
+        .arg(uid.to_string())
+        .output()
+        .with_context(|| format!("无法执行 {}", src.display()))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "install exit={}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
-    // 替换内核二进制前必须先停服务：Windows 上运行中的 exe/dll 被文件锁占用，
+    // 替换内核二进制前必须先停内核：Windows 上运行中的 exe/dll 被文件锁占用，
     // rename 会直接失败；Unix 上虽然允许覆盖，但运行中的进程仍在跑旧镜像。
-    let stopped_for_kernel = req.kernel_src.is_some() && stop_service_if_running();
-
-    // Windows：普通模式的高权限启动器（计划任务）。每次 provision 都幂等更新，
-    // 保证「只选普通模式、没装服务」的用户也有零 UAC 的 TUN 能力。
-    #[cfg(windows)]
-    if let Err(err) = crate::supervisor::ensure_supervisor_task() {
-        crate::logger::record("normal.task", format!("ensure failed: {err:#}"));
-    }
+    let stopped_for_kernel = req.kernel_src.is_some() && stop_kernel_if_running();
 
     let result = (|| -> anyhow::Result<()> {
         if let Some(src) = req.kernel_src.as_deref() {
@@ -4346,55 +4431,32 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
                 format!("installed {}", req.kernel_version),
             );
         }
+        #[cfg(target_os = "linux")]
         if let Some(opts) = req.service.clone() {
             service::install(opts)?;
-            crate::logger::record("provision.service", "installed");
+            crate::logger::record("provision.service", "systemd unit installed");
         }
-        if let Some(src) = req.helper_src.as_deref() {
-            // helper 安装失败**不阻断启动**：服务模式（内核由 launchd/SCM 直接跑）
-            // 不需要 helper，只有普通模式的 TUN 需要。失败原因写进 error.log，
-            // 由界面横幅提示 + 「重试安装」按钮处理。
-            match crate::helper::install_from(std::path::Path::new(src), req.owner_uid) {
+        if let Some(src) = req.service_src.as_deref() {
+            // 特权服务安装失败**不阻断启动**：记录到 error.log，由界面横幅
+            // 提示 + 「重试安装」按钮处理。
+            match install_privileged_service(std::path::Path::new(src), req.owner_uid) {
                 Ok(()) => {
-                    crate::logger::record("provision.helper", "installed");
-                    // 启动竞态：bootstrap 后 socket 还没 bind，这里轮询 3s 再判定。
-                    crate::helper::verify_healthy(std::time::Duration::from_secs(3));
+                    crate::logger::record("provision.service", "privileged service installed")
                 }
                 Err(err) => {
-                    crate::logger::record("provision.helper", format!("failed: {err:#}"));
+                    crate::logger::record("provision.service", format!("failed: {err:#}"));
                 }
             }
         }
         Ok(())
     })();
 
-    // 只换了内核、没有重装服务 → 把服务拉回来（失败时也拉回，避免用户彻底断网）。
-    if stopped_for_kernel && req.service.is_none() {
-        use exvlan_rpc::service_manager::ServiceStatus;
-        match service::set_status(true) {
-            Ok(()) => {
-                // 「已启动」不等于可用：pre.10 上出现过 launchd 显示 Running、
-                // 15999 却三分钟没人监听的情况。这里至少确认进入 Running 并留痕。
-                let mut running = false;
-                for _ in 0..10 {
-                    if matches!(service::status(), Ok(ServiceStatus::Running)) {
-                        running = true;
-                        break;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                }
-                if !running {
-                    crate::logger::record(
-                        "provision.service",
-                        "restart issued but not Running within 5s（见诊断包 service.txt）",
-                    );
-                }
-            }
-            Err(err) => crate::logger::record(
-                "provision.service",
-                format!("restart after kernel install failed: {err:#}"),
-            ),
-        }
+    // 只换了内核、没有重装服务 → 把内核拉回来（失败时也拉回，避免用户彻底断网）。
+    if stopped_for_kernel && let Err(err) = crate::service_client::ensure_kernel() {
+        crate::logger::record(
+            "provision.kernel",
+            format!("restart after install failed: {err}"),
+        );
     }
 
     result
@@ -4551,8 +4613,10 @@ fn normalize_service_options(opts: &mut service::ServiceOptions) {
 
 /// 确保「内核已安装 + 服务定义与当前配置一致」。
 ///
-/// 返回值：`"installed"`（本次新装/重装）或 `"current"`（无需动作）。
-/// 需要提权时只会弹一次系统授权框；指纹一致时**不会**提权。
+/// 返回值：`"installed"`（本次新装/升级）或 `"current"`（无需动作）。
+///
+/// 一次提权只在「服务还没装」时发生；此后升级/切模式/换内核全部走 IPC，
+/// **零弹窗**。`opts` 仅为兼容前端签名保留（新模型下服务参数固定）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn ensure_kernel_service(
@@ -4562,40 +4626,37 @@ async fn ensure_kernel_service(
     let mut opts = opts;
     normalize_service_options(&mut opts);
 
-    // 一次提权完成「内核（版本不一致时覆盖）+ 服务（指纹不一致时重装）」，
-    // 避免首次安装连弹两次密码。
-    // 必须用带构建标识的串：同一基线下的预览版之间（26.410.20712 → -pre.9+sha）
-    // 若只比 CARGO_PKG_VERSION 会永远判为“已是最新”，内核与 helper 都不更新。
-    let want_version = crate::BUILD_VERSION;
-    let need_kernel =
-        !kernel::is_installed() || kernel::installed_version().as_deref() != Some(want_version);
-    let need_service = !service::is_current(&opts);
-    // helper 仅 macOS 存在；其它平台恒为 false，否则每次启动都会判定「需要安装」
-    // → 反复提权。
-    #[cfg(target_os = "macos")]
-    let need_helper = !helper::is_ready();
-    #[cfg(not(target_os = "macos"))]
-    let need_helper = false;
+    // Linux 不引入常驻特权服务：服务模式仍是 systemd unit（准备给内核 + setcap），
+    // 普通模式是 GUI 子进程（PDEATHSIG）。保持原有行为。
+    #[cfg(target_os = "linux")]
+    {
+        return linux_ensure(&app, &opts).await;
+    }
 
-    if !need_kernel && !need_service && !need_helper {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let app2 = app.clone();
+        let done = tokio::task::spawn_blocking(move || ensure_service_and_kernel(&app2))
+            .await
+            .map_err(|e| format!("安装任务失败: {e}"))??;
+        service::mark_current(&opts);
+        Ok(done)
+    }
+}
+
+/// Linux：内核 + systemd unit 一起装（一次提权），指纹一致时不动。
+#[cfg(target_os = "linux")]
+async fn linux_ensure(app: &AppHandle, opts: &service::ServiceOptions) -> Result<String, String> {
+    let want = crate::BUILD_VERSION;
+    let need_kernel =
+        !kernel::is_installed() || kernel::installed_version().as_deref() != Some(want);
+    let need_service = !service::is_current(opts);
+    if !need_kernel && !need_service {
         return Ok("current".to_string());
     }
-
-    // 只需换内核、且 helper 已就绪 → 交给 helper，**不弹授权**。
-    #[cfg(target_os = "macos")]
-    if need_kernel && !need_service && !need_helper {
-        match helper::apply_bundled(&app) {
-            Ok(()) => {
-                logger::record("helper.apply", format!("kernel → {want_version}"));
-                return Ok("installed".to_string());
-            }
-            Err(err) => logger::record("helper.apply", format!("{err:#}（回退提权）")),
-        }
-    }
-
     let kernel_src = if need_kernel {
         Some(
-            kernel::bundled_kernel(&app)
+            kernel::bundled_kernel(app)
                 .ok_or_else(|| {
                     format!(
                         "未找到随包内核（{}）。请确认安装包完整。",
@@ -4608,35 +4669,118 @@ async fn ensure_kernel_service(
     } else {
         None
     };
-
-    let helper_src = if need_helper {
-        helper::bundled_helper(&app).map(|p| p.display().to_string())
-    } else {
-        None
-    };
     let payload = ProvisionPayload {
         kernel_src,
-        kernel_version: want_version.to_string(),
+        kernel_version: want.to_string(),
         service: need_service.then(|| opts.clone()),
-        helper_src,
-        owner_uid: helper::current_uid(),
+        service_src: None,
+        owner_uid: crate::service_client::current_uid(),
     };
-    let json = serde_json::to_string(&payload)
-        .map_err(|e| logger::other("cmd:ensure_kernel_service", e))?;
+    let json = serde_json::to_string(&payload).map_err(|e| logger::other("cmd:linux_ensure", e))?;
     logger::record(
         "provision",
-        format!("kernel={need_kernel} service={need_service}"),
+        format!("linux kernel={need_kernel} systemd={need_service}"),
     );
     run_elevated(&["--provision", &json])?;
-    // 指纹必须由 GUI（当前用户）写入：提权子进程没有 Tauri 上下文，
-    // 之前写到 root 侧目录，导致 GUI 永远读不到 → 每次启动都重装服务。
-    service::mark_current(&opts);
+    service::mark_current(opts);
     Ok("installed".to_string())
 }
 
-/// 普通模式只需要**内核二进制**：不安装系统服务，也不碰 helper。
-/// 这是唯一需要一次提权的步骤（之后普通模式子进程以用户身份运行）。
+/// 保证「特权服务已装 + 服务二进制最新 + 内核最新」，返回是否做了动作。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn ensure_service_and_kernel(app: &AppHandle) -> Result<String, String> {
+    let want = crate::BUILD_VERSION;
+
+    let installed = crate::service_client::is_installed();
+    let need_service_version =
+        installed && crate::service_client::installed_version().as_deref() != Some(want);
+    let need_kernel =
+        !kernel::is_installed() || kernel::installed_version().as_deref() != Some(want);
+
+    if installed && !need_service_version && !need_kernel {
+        return Ok("current".to_string());
+    }
+
+    let mut acted = false;
+
+    if !installed {
+        logger::record("service.install", "首次安装特权服务（一次提权）");
+        crate::service_client::install(app)?;
+        acted = true;
+    } else if need_service_version {
+        // 免密升级：服务已经常驻，新二进制交给它自己替换。
+        match crate::service_client::update(app) {
+            Ok(true) => {
+                logger::record("service.update", format!("自更新 → {want}"));
+                acted = true;
+            }
+            Ok(false) => {}
+            Err(err) => {
+                // 自更新失败（签名缺失 / 旧版本不支持）→ 回退一次提权安装。
+                logger::record("service.update", format!("自更新失败，回退提权安装: {err}"));
+                crate::service_client::install(app)?;
+                acted = true;
+            }
+        }
+    }
+
+    if need_kernel {
+        match crate::service_client::apply_bundled(app) {
+            Ok(()) => {
+                logger::record("service.apply", format!("kernel → {want}"));
+                acted = true;
+            }
+            Err(err) => {
+                // 内核未签名（例如 CI 还没签名）或服务暂不可用 → 回退提权安装。
+                logger::record("service.apply", format!("免密换内核失败，回退提权: {err}"));
+                let src = kernel::bundled_kernel(app)
+                    .ok_or_else(|| {
+                        format!(
+                            "未找到随包内核（{}）。请确认安装包完整。",
+                            kernel::kernel_bin_name()
+                        )
+                    })?
+                    .display()
+                    .to_string();
+                let payload = ProvisionPayload {
+                    kernel_src: Some(src),
+                    kernel_version: want.to_string(),
+                    service: None,
+                    service_src: None,
+                    owner_uid: crate::service_client::current_uid(),
+                };
+                let json = serde_json::to_string(&payload)
+                    .map_err(|e| logger::other("cmd:ensure_kernel_service", e))?;
+                run_elevated(&["--provision", &json])?;
+                acted = true;
+            }
+        }
+    }
+
+    if need_kernel || !crate::service_client::is_ready() {
+        // 换完内核后确认内核真的起来了（否则用户表现为「已连接却不通」）。
+        crate::service_client::ensure_kernel()?;
+    }
+
+    Ok(if acted {
+        "installed".to_string()
+    } else {
+        "current".to_string()
+    })
+}
+
+/// 普通模式与「服务模式」共用同一个特权服务：内核由服务拉起，只是生命周期策略不同。
+#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "linux")))]
+#[tauri::command]
+async fn ensure_kernel_only(app: AppHandle) -> Result<String, String> {
+    let app2 = app.clone();
+    tokio::task::spawn_blocking(move || ensure_service_and_kernel(&app2))
+        .await
+        .map_err(|e| format!("安装任务失败: {e}"))?
+}
+
+/// Linux 普通模式：只需内核二进制（setcap 由 install_kernel 完成），不装 systemd。
+#[cfg(target_os = "linux")]
 #[tauri::command]
 async fn ensure_kernel_only(app: AppHandle) -> Result<String, String> {
     let want = crate::BUILD_VERSION;
@@ -4654,12 +4798,12 @@ async fn ensure_kernel_only(app: AppHandle) -> Result<String, String> {
         kernel_src: Some(src.display().to_string()),
         kernel_version: want.to_string(),
         service: None,
-        helper_src: None,
-        owner_uid: helper::current_uid(),
+        service_src: None,
+        owner_uid: crate::service_client::current_uid(),
     };
     let json =
         serde_json::to_string(&payload).map_err(|e| logger::other("cmd:ensure_kernel_only", e))?;
-    logger::record("provision", "kernel=true service=false (normal mode)");
+    logger::record("provision", "linux kernel=true systemd=false (normal mode)");
     run_elevated(&["--provision", &json])?;
     Ok("installed".to_string())
 }
@@ -4670,63 +4814,28 @@ async fn ensure_kernel_only(_app: AppHandle) -> Result<String, String> {
     Ok("current".to_string())
 }
 
-/// helper 当前状态（供界面判断是否要显示「未就绪」横幅）。
-#[derive(serde::Serialize)]
-struct HelperState {
-    installed: bool,
-    ready: bool,
-    status: String,
+/// 特权服务当前状态（供界面判断是否要显示「未就绪」横幅 / 诊断包）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+fn service_state() -> crate::service_client::ServiceState {
+    crate::service_client::state()
 }
 
-#[cfg(target_os = "macos")]
+/// 手动重试安装特权服务（会弹一次系统授权）。成功后返回 installed。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
-fn helper_state() -> HelperState {
-    HelperState {
-        installed: crate::helper::is_installed(),
-        ready: crate::helper::is_ready(),
-        status: crate::helper::status().unwrap_or_else(|e| e),
-    }
-}
-
-/// Windows / Linux / 移动端没有 helper 组件，恒为「就绪」，界面不应弹横幅。
-#[cfg(not(target_os = "macos"))]
-#[tauri::command]
-fn helper_state() -> HelperState {
-    HelperState {
-        installed: false,
-        ready: true,
-        status: "unsupported".to_string(),
-    }
-}
-
-/// 手动重试安装 helper（会弹一次系统授权）。成功后返回 installed。
-#[cfg(target_os = "macos")]
-#[tauri::command]
-async fn retry_helper_install(app: AppHandle) -> Result<String, String> {
-    let src = crate::helper::bundled_helper(&app)
-        .ok_or_else(|| "安装包内未找到 helper（resources/helper）".to_string())?;
-    let payload = ProvisionPayload {
-        kernel_src: None,
-        kernel_version: crate::BUILD_VERSION.to_string(),
-        service: None,
-        helper_src: Some(src.display().to_string()),
-        owner_uid: crate::helper::current_uid(),
-    };
-    let json = serde_json::to_string(&payload).map_err(|e| logger::other("cmd:retry_helper", e))?;
-    logger::record("helper.retry", "manual retry from UI");
-    run_elevated(&["--provision", &json])?;
-    crate::helper::verify_healthy(std::time::Duration::from_secs(5));
-    if crate::helper::is_ready() {
+async fn service_install(app: AppHandle) -> Result<String, String> {
+    logger::record("service.install", "manual retry from UI");
+    let app2 = app.clone();
+    tokio::task::spawn_blocking(move || crate::service_client::install(&app2))
+        .await
+        .map_err(|e| format!("安装任务失败: {e}"))??;
+    let state = crate::service_client::state();
+    if state.ready {
         Ok("installed".to_string())
     } else {
-        Err(crate::helper::status().unwrap_or_else(|e| format!("helper 仍未就绪: {e}")))
+        Err(state.status)
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-#[tauri::command]
-async fn retry_helper_install(_app: AppHandle) -> Result<String, String> {
-    Ok("unsupported".to_string())
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -4744,9 +4853,15 @@ async fn ensure_kernel_service(
 fn service_diagnostics(rpc_portal: Option<String>) -> Result<String, String> {
     let dirs = service_default_dirs();
     let portal = rpc_portal.unwrap_or_else(|| "127.0.0.1:15999".to_string());
-    let status = service::status()
-        .map(|s| format!("{s:?}"))
-        .unwrap_or_else(|e| format!("unknown({e})"));
+    let svc_state = crate::service_client::state();
+    let status = format!(
+        "installed={} ready={} mode={} kernel_pid={} {}",
+        svc_state.installed,
+        svc_state.ready,
+        svc_state.mode,
+        svc_state.kernel_pid,
+        svc_state.status
+    );
 
     let reachable = {
         let addr = portal
@@ -4791,10 +4906,15 @@ fn service_diagnostics(rpc_portal: Option<String>) -> Result<String, String> {
         daemon_tail,
     );
     let mut report = report;
+    let svc = crate::service_client::state();
     report.push_str(&format!(
-        "[helper] installed={} status={}\n",
-        helper::is_installed(),
-        helper::status().unwrap_or_else(|e| e)
+        "[service] installed={} ready={} mode={} kernel_pid={} status={}\n",
+        svc.installed, svc.ready, svc.mode, svc.kernel_pid, svc.status
+    ));
+    report.push_str(&format!(
+        "[service.bin] {} installed_version={}\n",
+        crate::service_client::installed_service_bin().display(),
+        crate::service_client::installed_version().unwrap_or_else(|| "-".to_string())
     ));
     // 内核运行时依赖（Windows 上 Packet.dll / wintun.dll / WinDivert*.sys 缺一不可）
     let deps = kernel::runtime_dep_status();
@@ -4818,12 +4938,13 @@ fn service_diagnostics(rpc_portal: Option<String>) -> Result<String, String> {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 fn service_restart() -> Result<(), String> {
-    run_elevated(&["--service-ctl", "restart"])?;
+    run_elevated(&["--exvlan-service-ctl", "restart"])?;
     logger::record("service.restart", "done");
     Ok(())
 }
 
-/// 强制重装服务（提权，含 bootout + 目录预建 + 真连自检）。
+/// 强制重装特权服务（提权一次）：等价于「重新跑一遍 --install」，
+/// 会 bootout 旧实例、重写 plist/SCM 注册、再等 IPC 就绪。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn service_reinstall(
@@ -4832,46 +4953,15 @@ async fn service_reinstall(
 ) -> Result<(), String> {
     let mut opts = opts;
     normalize_service_options(&mut opts);
-
-    // 内核没装时不能只重装服务（服务指向的二进制不存在）——走完整 provision。
+    let app2 = app.clone();
+    tokio::task::spawn_blocking(move || crate::service_client::install(&app2))
+        .await
+        .map_err(|e| format!("重装任务失败: {e}"))??;
     if !kernel::is_installed() {
-        let kernel_src = kernel::bundled_kernel(&app)
-            .ok_or_else(|| {
-                format!(
-                    "未找到随包内核（{}）。请确认安装包完整。",
-                    kernel::kernel_bin_name()
-                )
-            })?
-            .display()
-            .to_string();
-        let payload = ProvisionPayload {
-            kernel_src: Some(kernel_src),
-            kernel_version: crate::BUILD_VERSION.to_string(),
-            service: Some(opts.clone()),
-            helper_src: {
-                #[cfg(target_os = "macos")]
-                {
-                    helper::bundled_helper(&app).map(|p| p.display().to_string())
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    None
-                }
-            },
-            owner_uid: helper::current_uid(),
-        };
-        let json = serde_json::to_string(&payload)
-            .map_err(|e| logger::other("cmd:service_reinstall", e))?;
-        logger::record("provision", "kernel=false(missing) service=true");
-        run_elevated(&["--provision", &json])?;
-        service::mark_current(&opts);
-        logger::record("service.reinstall", "done (with kernel)");
-        return Ok(());
+        // 服务已装但内核缺失：交给同一个入口补齐。
+        ensure_service_and_kernel(&app)?;
     }
-
-    let payload =
-        serde_json::to_string(&opts).map_err(|e| logger::other("cmd:service_reinstall", e))?;
-    run_elevated(&["--service-reinstall", &payload])?;
+    crate::service_client::ensure_kernel()?;
     service::mark_current(&opts);
     logger::record("service.reinstall", "done");
     Ok(())
@@ -5126,7 +5216,7 @@ fn spawn_network_info_watchdog(app: AppHandle) {
 /// 以 root 重新拉起自身执行内部子命令（桌面端）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[cfg(target_os = "macos")]
-fn run_elevated(args: &[&str]) -> Result<(), String> {
+pub(crate) fn run_elevated(args: &[&str]) -> Result<(), String> {
     fn shell_quote(value: &str) -> String {
         format!("'{}'", value.replace('\'', "'\\''"))
     }
@@ -5204,7 +5294,7 @@ fn elevate_log_tail_since_begin(max_lines: usize) -> String {
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-fn run_elevated(args: &[&str]) -> Result<(), String> {
+pub(crate) fn run_elevated(args: &[&str]) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("无法定位自身可执行文件: {e}"))?;
     let mut cmd = std::process::Command::new(exe);
     #[cfg(not(target_os = "macos"))]
@@ -5245,7 +5335,7 @@ fn run_elevated(args: &[&str]) -> Result<(), String> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-fn run_elevated(_args: &[&str]) -> Result<(), String> {
+pub(crate) fn run_elevated(_args: &[&str]) -> Result<(), String> {
     Err("提权仅桌面端支持".to_string())
 }
 /// 提权链路自检：跑一次 `--elevate-selftest`，返回真实退出码/错误。
@@ -5393,8 +5483,8 @@ pub fn run_gui() -> std::process::ExitCode {
             init_service,
             ensure_kernel_service,
             ensure_kernel_only,
-            helper_state,
-            retry_helper_install,
+            service_state,
+            service_install,
             kernel_update_info,
             app_update_info,
             app_download_update,
@@ -5449,7 +5539,7 @@ pub fn run_gui() -> std::process::ExitCode {
         // 普通模式内核随 GUI 退出：正常退出时主动 kill（崩溃场景由
         // Linux 的 PR_SET_PDEATHSIG / 后续 helper、supervisor 兜底）。
         if matches!(event, tauri::RunEvent::Exit) {
-            crate::supervisor::stop();
+            crate::service_client::stop();
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Ok(log_dir) = get_log_dir(_app) {
                 crate::diagnostics::mark_clean_exit(&log_dir);

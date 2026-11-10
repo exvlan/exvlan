@@ -44,8 +44,8 @@ import {
   serviceDefaultDirs,
   serviceReinstall,
   shareErrorLog,
-  helperState,
-  retryHelperInstall,
+  serviceState,
+  serviceInstall,
 } from "~/composables/backend";
 
 const { t } = useI18n();
@@ -115,7 +115,7 @@ async function refreshHelperState() {
     return;
   }
   try {
-    const st = await helperState();
+    const st = await serviceState();
     helperReady.value = st.ready;
     helperStatusText.value = st.status || "";
     if (!st.ready && !helperAutoRetried) {
@@ -135,7 +135,7 @@ async function onRetryHelper(auto = false) {
   }
   retryingHelper.value = true;
   try {
-    await retryHelperInstall();
+    await serviceInstall();
     toast.add({
       severity: "success",
       summary: t("mode.helper"),
