@@ -147,3 +147,26 @@ POST /zip  Authorization: Bearer <token>
 | Windows 安装包 | `tauri.windows.conf.json` 的 `resources` 数组会**整体替换**基础配置 → 补回 `resources/kernel/*`（否则 MSI 里没有内核，整个 Windows 端不可用） |
 | Android 版本串 | APK 由 `mobile.yml` 构建，需补 `build-version.sh` 注入，否则版本串缺 `-pre.N+sha`                                                             |
 | MSI 版本       | 预览 `1000+序号`、正式 `60000+patch`，保证严格递增                                                                                            |
+
+---
+
+## 10. pre.11 补充决策（上传 / 诊断 / 普通模式 / Android）
+
+| 项                   | 结论                                                                                                                                                                                                                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker 限流          | 删除 KV 计数兜底，只用 Rate Limiting binding（拿不到计数就放行）。原因：KV 兜底每请求 1–2 次写，一天几十次上传就能把免费额度（1000 写/天）打满，连带 zip 存储一起不可用                                                                                                      |
+| Worker zip 存储失败  | `DIAG_KV.put` 包 try/catch，返回 `503 {"code":"kv_unavailable"}`，不再让网关吐 `error code: 1101`                                                                                                                                                                            |
+| 上传兜底             | 客户端在 `/zip` 返回 `503/5xx/413` 时自动 POST 文本（`error.log` 尾部 + 网络自检）到 `/`（该路由不写 KV）                                                                                                                                                                    |
+| 上传防误点           | 前端 3 秒防抖 + 按钮置灰；后端 `UPLOAD_INFLIGHT` 单飞（第二个调用立即返回「上传进行中」）；自动上传每次启动最多 1 次。**不做**长冷却、zip 复用、跨重启持久化                                                                                                                 |
+| 诊断闪窗             | 所有控制台子进程统一走 `kernel::hidden_command`（Windows `CREATE_NO_WINDOW`）；覆盖 `diagnostics::run`、`sc`、`schtasks`、`curl`、`cmd`                                                                                                                                      |
+| 诊断提速             | 采集器并行（std 线程 + 独立超时），日志记录每项耗时；Windows 上 70s → 预计 5–10s                                                                                                                                                                                             |
+| 诊断原生化           | OS 版本（`SystemVersion.plist` / 注册表 / `/etc/os-release`）、网卡与地址（`if-addrs`）、macOS quarantine（`getxattr`）、DNS TXT/SRV（`hickory-resolver`）、崩溃报告与 WER 目录（文件系统）。路由表 / 服务定义 / 代码签名 / 防火墙仍调系统命令（无稳定原生 API），只隐藏窗口 |
+| 统一日志超时         | `log show --last 10m` 给 30s；超时降级 `--last 2m` 重试一次（实测 12s 会整项丢失）                                                                                                                                                                                           |
+| 普通模式日志         | 诊断包新增 `<log_dir>/normal/` 下最新 2 个文件、各取尾部 5MB（此前普通模式那段时间在 `exvlan.log` 里是空档）                                                                                                                                                                 |
+| macOS 普通模式       | 解析 helper 的 `spawned pid=N` 用于探活；内核消失按 0/0/1/5 秒退避重启，60 秒内最多 3 次，超限提示切回服务模式                                                                                                                                                               |
+| helper 竞态          | helper CLI 连接/响应重试 6 次（200ms 递增）；`apply` 前先 `verify_healthy(5s)`，消除「daemon 刚起 → EOF → 误判回退提权」。`HELPER_VERSION` 2 → 3 强制完整重装（否则首次升级仍执行旧二进制）                                                                                  |
+| 模式切换             | 切换时清空当前网络选择，并按新内核的真实实例列表恢复（消除 `get_config: No such network instance` 反复重试）；首次切到普通模式弹一次确认                                                                                                                                     |
+| Android 分享         | 分享前把文件复制到 `cache/`（FileProvider 只声明 `cache`/`files`/`external`）；失败时自动落盘 `Download/Exvlan/` 并回传路径                                                                                                                                                  |
+| Android 上传失败     | 同样落盘到 `Download/Exvlan/`，错误文案里直接给出路径（不新增独立按钮）                                                                                                                                                                                                      |
+| TURN                 | 移除 coturn 的 TURN 中继，只保留 STUN；跨 NAT 兜底交给内核内置 peer relay（节点本身是网络里的 peer，打洞失败即经它转发）                                                                                                                                                     |
+| Linux 打包（pre.12） | `.deb` / `.rpm` / `.AppImage`，不签名，AppImage 附 zsync                                                                                                                                                                                                                     |
