@@ -7,11 +7,20 @@ on:
         description: 'Build targets: JSON array of target triples, or "all"'
         type: string
         default: "all"
+      kernel_from_previous:
+        description: >-
+          为 'true' 时不在本 run 构建内核，而是从最近一次成功的 pipeline 运行
+          复用桌面内核产物（纯前端改动时用，省掉 12 个内核 target 的构建）。
+        type: string
+        default: "false"
   workflow_dispatch:
     inputs:
       targets:
         description: 'Build targets: JSON array of target triples, or "all"'
         default: "all"
+      kernel_from_previous:
+        description: "从最近一次成功运行复用内核产物（true/false）"
+        default: "false"
 
 permissions:
   contents: read
@@ -118,11 +127,42 @@ jobs:
           cache-targets: true
 
       # 内核二进制来自 core 产物（不再由 GUI 编译），放进 bundle resources。
+      # 内核来自本 run（正常路径）
       - name: Fetch kernel from core artifact
+        if: inputs.kernel_from_previous != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: core-${{ matrix.ARTIFACT_NAME }}
           path: ./core-artifacts
+
+      # 复用最近一次成功运行的内核（纯前端改动，内核没变）
+      - name: Resolve previous core run
+        if: inputs.kernel_from_previous == 'true'
+        id: kernel_src
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_REF_NAME}"
+          run_id=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/pipeline.yml/runs?branch=${branch}&status=success&per_page=30" \
+            --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | .[0].id // empty')
+          if [[ -z "$run_id" ]]; then
+            echo "::error::找不到可复用的成功运行（branch=${branch}），无法获取内核产物"
+            exit 1
+          fi
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          echo "reuse core artifacts from run ${run_id} (branch=${branch})"
+
+      - name: Fetch kernel from previous core run
+        if: inputs.kernel_from_previous == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: core-${{ matrix.ARTIFACT_NAME }}
+          path: ./core-artifacts
+          run-id: ${{ steps.kernel_src.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Stage kernel into bundle resources
         run: |

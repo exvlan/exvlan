@@ -787,6 +787,7 @@ target:
   test_all: 全部测速
   port_hint: 端口固定为 {port}（远程只走 mesh，无密钥、无 HTTPS）。
   port_fixed: 远程目标固定使用端口 {port}，请去掉其他端口后重试。
+  remote_rejected: 已连上 {addr}，但对方没有应答。通常是对端内核的 RPC 白名单未包含本机 —— 请确认对端已升级到 pre.14 及以上（旧版本默认只允许回环）。
   switch_hint: 在状态栏或托盘切换
   hint: |-
     远程目标只通过 mesh 内网访问（固定 15999，无密钥、无 HTTPS）。

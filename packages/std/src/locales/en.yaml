@@ -787,6 +787,7 @@ target:
   test_all: Test all
   port_hint: Port is fixed at {port} (remote access goes over the mesh only, no key, no HTTPS).
   port_fixed: Remote targets always use port {port}; remove the other port and retry.
+  remote_rejected: Connected to {addr} but it never replies. Usually the remote kernel RPC whitelist does not include this machine — make sure the remote runs pre.14 or newer (older builds only allow loopback).
   switch_hint: switch from the status bar or tray
   hint: |-
     Remote targets are reached over the mesh network only (fixed port 15999,

@@ -27,6 +27,7 @@ import { buildFrontendState } from "~/composables/diagnostics";
 import { useToast, useConfirm } from "openvue";
 import { loadMode, WebClientConfig, type Mode } from "~/composables/mode";
 import {
+  DEFAULT_RPC_PORT,
   LOCAL_TARGET,
   type RuntimeKind,
   findRemote,
@@ -490,6 +491,23 @@ async function initWithMode(rawMode: Mode) {
     retrys = 3;
     void ensureRuntimeQuiet();
     await connectWithRetry(mode, url, retrys);
+
+    // TCP 连上 ≠ 能管：对端内核的 RPC 白名单可能不含本机 —— 表现为
+    // 连接建立但每个请求都 deadline，界面只会显示「无法连接」。
+    // 这里探一次，把原因说清楚（最常见：对端还是 pre.12 的旧内核）。
+    const manageable = await remoteClient.value
+      .list_network_instance_ids()
+      .then(() => true)
+      .catch(() => false);
+    if (!manageable) {
+      startupError.value = t("target.remote_rejected", {
+        addr: `${remote.host}:${DEFAULT_RPC_PORT}`,
+      });
+      clientRunning.value = false;
+      void reportFrontendError("fe:remote-rejected", startupError.value);
+      return;
+    }
+
     await afterConnect(mode);
     return;
   }

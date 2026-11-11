@@ -66,6 +66,7 @@ jobs:
       nix: ${{ steps.filter.outputs.nix }}
       ohos: ${{ steps.filter.outputs.ohos }}
       deps: ${{ steps.filter.outputs.deps }}
+      core: ${{ steps.filter.outputs.core }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - id: filter
@@ -104,6 +105,18 @@ jobs:
               - '**/go.sum'
               - '.cargo/audit.toml'
               - '.github/workflows/audit.yml'
+            # 内核二进制是否可能变化。纯 packages/studio（前端/服务）改动
+            # 命中不了这里 → 非 tag 的 develop push 可以跳过 12 个内核 target。
+            core:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - 'exvlan/**'
+              - 'packages/ui/**'
+              - 'packages/std/**'
+              - '.github/workflows/core.yml'
+              - '.github/actions/**'
 
   tests:
     name: Core Tests
@@ -178,7 +191,9 @@ jobs:
     needs: [changes, web_dist]
     if: >-
       github.event_name != 'schedule' && github.event_name != 'pull_request' &&
-      github.ref_name != 'feature'
+      github.ref_name != 'feature' &&
+      (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' ||
+       needs.changes.outputs.core == 'true')
     uses: ./.github/workflows/core.yml
     with:
       targets: '["x86_64-apple-darwin","x86_64-pc-windows-msvc"]'
@@ -193,7 +208,13 @@ jobs:
     # 这里只建非桌面 target（桌面两个在 core_desktop），避免重复构建；
     # magisk 依赖 linux-aarch64，所以留在本作业。
     needs: [changes, web_dist]
-    if: github.event_name != 'schedule'
+    # tag / dispatch 必须全量（release 要用全部内核资产）；develop/main push
+    # 只在真的改了内核相关路径时才建这 12 个 target。
+    if: >-
+      github.event_name != 'schedule' &&
+      (github.event_name == 'pull_request' || github.ref_type == 'tag' ||
+       github.event_name == 'workflow_dispatch' ||
+       needs.changes.outputs.core == 'true')
     uses: ./.github/workflows/core.yml
     with:
       targets: ${{ github.ref_name == 'feature' && '["x86_64-unknown-linux-musl"]' || '["x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","riscv64gc-unknown-linux-musl","loongarch64-unknown-linux-musl","armv7-unknown-linux-musleabihf","armv7-unknown-linux-musleabi","arm-unknown-linux-musleabihf","arm-unknown-linux-musleabi","x86_64-unknown-freebsd","aarch64-apple-darwin","i686-pc-windows-msvc","aarch64-pc-windows-msvc"]' }}
@@ -304,6 +325,10 @@ jobs:
       github.ref_name != 'feature' &&
       (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped')
     uses: ./.github/workflows/studio.yml
+    with:
+      # core_desktop 被路径门控跳过时，studio 从最近一次成功的 pipeline 运行
+      # 取桌面内核产物（内核没变，没必要重建）。
+      kernel_from_previous: ${{ needs.core_desktop.result == 'skipped' && 'true' || 'false' }}
     secrets: inherit
 
   mobile:
