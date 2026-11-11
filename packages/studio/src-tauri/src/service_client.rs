@@ -58,6 +58,13 @@ pub fn installed_service_bin() -> PathBuf {
     crate::paths::privileged_service_bin()
 }
 
+/// 二进制旁边的 `service.version`（服务在 install / 自更新时写入，0644）。
+pub fn version_file_path(bin: &std::path::Path) -> PathBuf {
+    let mut raw = bin.as_os_str().to_os_string();
+    raw.push(".version");
+    PathBuf::from(raw)
+}
+
 /// 服务当前状态（供界面判断是否要显示横幅 / 诊断包）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ServiceState {
@@ -185,13 +192,20 @@ mod imp {
         }
     }
 
-    /// 已安装服务二进制自报的版本（`--version`）。
+    /// 已安装服务的版本：优先读版本文件（零子进程、零窗口），
+    /// 文件缺失时才回退到 `--version`（用 `hidden_command` 避免闪 cmd 窗口）。
     pub fn installed_version() -> Option<String> {
         let bin = installed_service_bin();
         if !bin.is_file() {
             return None;
         }
-        let out = std::process::Command::new(&bin)
+        if let Ok(text) = std::fs::read_to_string(version_file_path(&bin)) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        let out = crate::kernel::hidden_command(&bin)
             .arg("--version")
             .output()
             .ok()?;

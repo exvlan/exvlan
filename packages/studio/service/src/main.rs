@@ -12,6 +12,10 @@
     not(any(target_os = "macos", target_os = "windows")),
     allow(dead_code, unused_imports)
 )]
+// Windows 上用 GUI 子系统：进程根本不分配控制台，从根上不会闪 cmd 窗口。
+// `Command::output()` 通过管道仍能拿到 stdout（`--version` 的兜底路径），
+// 只是用户手动在 cmd 里跑时看不到输出（`--diagnose` 本来就写临时文件）。
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -59,6 +63,37 @@ pub struct Paths {
     pub service_bin: PathBuf,
     pub service_json: PathBuf,
     pub service_log: PathBuf,
+}
+
+/// Windows：拉起控制台程序（`sc` / `schtasks`）时不要弹 cmd 窗口。
+///
+/// `Command::output()` 只重定向 stdio，**不会**阻止 Windows 分配 conhost；
+/// 必须显式 `CREATE_NO_WINDOW`。pre.11 修过一轮，pre.13 的服务改造又漏回来了。
+#[cfg(target_os = "windows")]
+fn hidden(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    use std::os::windows::process::CommandExt as _;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut cmd = Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+/// 二进制旁边的版本文件（0644，GUI 直接读，避免每次启动 fork 一次 `--version`）。
+fn version_path(bin: &Path) -> PathBuf {
+    let mut raw = bin.as_os_str().to_os_string();
+    raw.push(".version");
+    PathBuf::from(raw)
+}
+
+fn write_version_file(p: &Paths) -> std::io::Result<()> {
+    let path = version_path(&p.service_bin);
+    std::fs::write(&path, format!("{BUILD_VERSION}\n"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
+    }
+    Ok(())
 }
 
 fn paths() -> Paths {
@@ -786,15 +821,15 @@ fn restart_service() -> anyhow::Result<()> {
 
 #[cfg(target_os = "windows")]
 fn restart_service() -> anyhow::Result<()> {
-    let _ = Command::new("sc").args(["stop", SERVICE_LABEL]).output();
+    let _ = hidden("sc").args(["stop", SERVICE_LABEL]).output();
     for _ in 0..150 {
-        let out = Command::new("sc").args(["query", SERVICE_LABEL]).output()?;
+        let out = hidden("sc").args(["query", SERVICE_LABEL]).output()?;
         if String::from_utf8_lossy(&out.stdout).contains("STOPPED") {
             break;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    let out = Command::new("sc").args(["start", SERVICE_LABEL]).output()?;
+    let out = hidden("sc").args(["start", SERVICE_LABEL]).output()?;
     if !out.status.success() {
         bail!(
             "sc start 失败: {}",
@@ -809,11 +844,31 @@ fn restart_service() -> anyhow::Result<()> {
     bail!("exvlan-service 只在 macOS/Windows 上运行")
 }
 
+/// Windows：**先** `StartServiceCtrlDispatcherW`，再由 `service_main` 干活。
+///
+/// 之前这里先建 `State`、拉内核（含最多 10s 等 RPC），dispatcher 还没注册，
+/// SCM 直接判定「未响应」→ 1067 终止进程，`service_main` 根本没跑到。
+#[cfg(target_os = "windows")]
+fn run_daemon(p: Paths) -> anyhow::Result<()> {
+    win::run(p)
+}
+
+/// macOS：unix socket + peercred。
+#[cfg(target_os = "macos")]
 fn run_daemon(p: Paths) -> anyhow::Result<()> {
     let state = Arc::new(State::new(p.clone()));
     log_line(&p, &format!("daemon start pid={}", std::process::id()));
+    boot(&state);
+    serve_unix(state)
+}
 
-    // 服务启动时按持久化 mode 决定是否拉起内核。
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn run_daemon(_p: Paths) -> anyhow::Result<()> {
+    bail!("exvlan-service 只在 macOS/Windows 上运行")
+}
+
+/// 服务启动时按持久化 mode 决定是否拉起内核（macOS / Windows 共用）。
+fn boot(state: &State) {
     let mode = state.inner.lock().unwrap_or_else(|e| e.into_inner()).mode;
     match mode {
         Mode::Service => {
@@ -823,22 +878,6 @@ fn run_daemon(p: Paths) -> anyhow::Result<()> {
         }
         Mode::Normal | Mode::Off => state.log(format!("boot mode={mode:?}: 不自动启动内核")),
     }
-
-    #[cfg(target_os = "macos")]
-    {
-        serve_unix(state)?;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        win::run()?;
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        let _ = state;
-        bail!("exvlan-service 只在 macOS/Windows 上运行");
-    }
-    #[allow(unreachable_code)]
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -975,24 +1014,123 @@ fn handle_unix_conn(state: &State, stream: std::os::unix::net::UnixStream) {
 #[cfg(target_os = "windows")]
 mod win {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use windows_service::define_windows_service;
+    use windows_service::service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    };
+    use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
     use windows_service::service_dispatcher;
 
     define_windows_service!(ffi_service_main, service_main);
 
-    pub fn run() -> anyhow::Result<()> {
-        service_dispatcher::start("era.exvlan.studio.service", ffi_service_main)
+    /// dispatcher 与 service_main 之间传路径（`Paths` 不是 'static 友好类型）。
+    static PATHS: OnceLock<Paths> = OnceLock::new();
+    /// 收到 Stop/Shutdown 时拉低，pipe_loop 退出并清理内核。
+    pub(super) static RUNNING: AtomicBool = AtomicBool::new(true);
+
+    pub fn run(p: Paths) -> anyhow::Result<()> {
+        let _ = PATHS.set(p);
+        service_dispatcher::start(SERVICE_LABEL, ffi_service_main)
             .context("启动 Windows 服务失败")?;
         Ok(())
     }
 
-    fn service_main(_args: Vec<std::ffi::OsString>) {
-        let state = Arc::new(State::new(paths()));
+    fn service_main(_args: Vec<OsString>) {
+        let p = PATHS.get().cloned().unwrap_or_else(paths);
+        let state = Arc::new(State::new(p.clone()));
         state.log("windows service start");
+
+        // 必须注册控制句柄并上报 RUNNING：不做这一步 SCM 会在超时后
+        // 直接终止进程（表现为 STOPPED + WIN32_EXIT_CODE 1067）。
+        let handler = {
+            let state = state.clone();
+            move |event| -> ServiceControlHandlerResult {
+                match event {
+                    ServiceControl::Stop | ServiceControl::Shutdown => {
+                        state.log("SCM stop/shutdown requested");
+                        RUNNING.store(false, Ordering::SeqCst);
+                        // ConnectNamedPipe 在阻塞 accept 中，自连一次把它唤醒。
+                        let _ = std::fs::OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open(r"\\.\pipe\era.exvlan.studio.service");
+                        ServiceControlHandlerResult::NoError
+                    }
+                    ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+                    _ => ServiceControlHandlerResult::NotImplemented,
+                }
+            }
+        };
+        let status_handle = match service_control_handler::register(SERVICE_LABEL, handler) {
+            Ok(h) => h,
+            Err(err) => {
+                state.log(format!("register control handler failed: {err}"));
+                return;
+            }
+        };
+        let status = |state: ServiceState| ServiceStatus {
+            service_type: ServiceType::OWN_PROCESS,
+            current_state: state,
+            controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
+            exit_code: ServiceExitCode::Win32(0),
+            checkpoint: 0,
+            wait_hint: Duration::default(),
+            process_id: None,
+        };
+        if let Err(err) = status_handle.set_service_status(status(ServiceState::Running)) {
+            state.log(format!("report RUNNING failed: {err}"));
+        }
+
+        // 现在才干活：按 mode 拉起内核，再进入管道 accept 循环。
+        boot(&state);
         if let Err(err) = pipe_loop(state.clone()) {
             state.log(format!("pipe loop exited: {err}"));
         }
+
+        // 退出前把内核一并收掉（否则会留下孤儿内核占着 15999 和 TUN）。
+        if let Err(err) = state.stop_kernel() {
+            state.log(format!("stop kernel on exit failed: {err}"));
+        }
+        let _ = status_handle.set_service_status(status(ServiceState::Stopped));
+        state.log("windows service stopped");
     }
+}
+
+/// 命名管道的安全描述符：`D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)`。
+///
+/// 失败时返回 `None`，退回系统默认 ACL（并记日志），保证服务仍能用。
+#[cfg(target_os = "windows")]
+fn pipe_security_attributes() -> Option<windows_sys::Win32::Security::SECURITY_ATTRIBUTES> {
+    use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
+    use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+
+    const SDDL_REVISION_1: u32 = 1;
+    let sddl: Vec<u16> = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)\0"
+        .encode_utf16()
+        .collect();
+    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    let ok = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut sd,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        log_line(&paths(), "pipe SDDL 构造失败，退回默认 ACL");
+        return None;
+    }
+    // 故意不 LocalFree：整个进程生命周期复用同一份描述符。
+    Some(SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: sd,
+        bInheritHandle: 0,
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -1004,7 +1142,15 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
     let name: Vec<u16> = "\\\\.\\pipe\\era.exvlan.studio.service\0"
         .encode_utf16()
         .collect();
-    loop {
+    // 显式 DACL：不依赖 LocalSystem 的默认 ACL（默认值随 Windows 版本/策略变化，
+    // macOS 那次已经证明「默认权限」不可假设）。
+    //   SY = LocalSystem  GA、BA = Administrators  GA、IU = 交互式登录用户  GRGW
+    let sa = pipe_security_attributes();
+    let sa_ptr = match &sa {
+        Some(s) => s as *const windows_sys::Win32::Security::SECURITY_ATTRIBUTES,
+        None => std::ptr::null(),
+    };
+    while win::RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
         let handle = unsafe {
             CreateNamedPipeW(
                 name.as_ptr(),
@@ -1014,7 +1160,7 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
                 64 * 1024,
                 64 * 1024,
                 0,
-                std::ptr::null_mut(),
+                sa_ptr,
             )
         };
         if handle == INVALID_HANDLE_VALUE {
@@ -1044,6 +1190,7 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
 }
 
 /// `HANDLE` 是 `*mut c_void`，不实现 Send；句柄本身可跨线程使用。
@@ -1164,6 +1311,8 @@ fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
     std::fs::set_permissions(plist, std::fs::Permissions::from_mode(0o644))?;
     chown_root(plist);
 
+    let _ = write_version_file(p);
+
     let cfg = ServiceConfig {
         owner_uid: uid,
         mode: load_config(p).mode,
@@ -1237,12 +1386,26 @@ fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
     if let Some(dir) = p.service_bin.parent() {
         std::fs::create_dir_all(dir).ok();
     }
-    // 从已安装位置原地重装时 src == dst。
-    if src != p.service_bin {
-        std::fs::copy(&src, &p.service_bin)?;
-    }
+
+    // 1) 服务可能正在跑：直接覆盖 exe 会报「另一个程序正在使用此文件」(os error 32)。
+    stop_service_blocking();
     cleanup_legacy_windows();
 
+    // 2) 复制（带重试：SCM/杀软释放文件句柄需要一点时间）
+    if src != p.service_bin {
+        copy_with_retry(&src, &p.service_bin)?;
+    }
+    let _ = write_version_file(p);
+
+    // 3) 持久化配置（此前 Windows 分支漏了 save_config → owner_uid/mode 缺失，
+    //    `--diagnose` 只能显示默认值）。
+    let cfg = ServiceConfig {
+        owner_uid: 0,
+        mode: load_config(p).mode,
+    };
+    save_config(p, &cfg)?;
+
+    // 4) 注册（已存在则复用同一个服务项）
     let manager = ServiceManager::local_computer(
         None::<&str>,
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
@@ -1260,11 +1423,75 @@ fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
         account_name: None,
         account_password: None,
     };
+    let access = ServiceAccess::START | ServiceAccess::CHANGE_CONFIG;
     let service = manager
-        .create_service(&info, ServiceAccess::START | ServiceAccess::CHANGE_CONFIG)
-        .or_else(|_| manager.open_service(&info.name, ServiceAccess::START))?;
-    service.start(&[] as &[&std::ffi::OsStr]).ok();
-    Ok(())
+        .create_service(&info, access)
+        .or_else(|_| manager.open_service(&info.name, access))?;
+
+    // 5) 启动：不再 `.ok()` 吞错。起不来时必须让 GUI/安装器看到原因，
+    //    否则表现为「装上但 STOPPED + 1067」，只能靠翻日志猜。
+    if let Err(err) = service.start(&[] as &[&std::ffi::OsStr]) {
+        // 已经 RUNNING（1056）之类的良性错误：只要管道能连就算成功。
+        if !wait_pipe(Duration::from_secs(3)) {
+            return Err(anyhow::anyhow!("服务已注册但启动失败: {err}"));
+        }
+    }
+
+    // 6) 等命名管道可连（≤10s）。这一步同时验证了管道 ACL。
+    if wait_pipe(Duration::from_secs(10)) {
+        return Ok(());
+    }
+    bail!("服务已启动但命名管道未就绪（见 service.log）")
+}
+
+/// `sc stop` 并等到 STOPPED（或本来就没装）。
+#[cfg(target_os = "windows")]
+fn stop_service_blocking() {
+    let _ = hidden("sc").args(["stop", SERVICE_LABEL]).output();
+    for _ in 0..100 {
+        let Ok(out) = hidden("sc").args(["query", SERVICE_LABEL]).output() else {
+            return;
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        if text.contains("STOPPED") || text.contains("1060") {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// 复制二进制，遇到「文件被占用」时退避重试。
+#[cfg(target_os = "windows")]
+fn copy_with_retry(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    let mut last = String::new();
+    for _ in 0..25 {
+        match std::fs::copy(src, dst) {
+            Ok(_) => return Ok(()),
+            Err(err) => {
+                last = err.to_string();
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+    bail!("复制服务二进制失败（{dst:?}）: {last}")
+}
+
+/// 能否连上命名管道（服务真正 accepting 的判据）。
+#[cfg(target_os = "windows")]
+fn wait_pipe(timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(r"\\.\pipe\era.exvlan.studio.service")
+            .is_ok()
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    false
 }
 
 /// 清理旧模型留下的守护进程/计划任务（幂等）。当前服务名绝不在列表里。
@@ -1275,12 +1502,12 @@ fn cleanup_legacy_windows() {
         if stale == SERVICE_LABEL {
             continue;
         }
-        let _ = Command::new("sc").args(["stop", stale]).output();
-        let _ = Command::new("sc").args(["delete", stale]).output();
+        let _ = hidden("sc").args(["stop", stale]).output();
+        let _ = hidden("sc").args(["delete", stale]).output();
     }
     // 旧「普通模式高权限启动器」计划任务
     for task in ["era.exvlan.studio", "ExvlanKernelSupervisor"] {
-        let _ = Command::new("schtasks")
+        let _ = hidden("schtasks")
             .args(["/Delete", "/TN", task, "/F"])
             .output();
     }
@@ -1295,9 +1522,9 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
     std::thread::sleep(Duration::from_millis(1200));
 
     // 1) 停服务（运行中的 exe 被文件锁占用）
-    let _ = Command::new("sc").args(["stop", SERVICE_LABEL]).output();
+    let _ = hidden("sc").args(["stop", SERVICE_LABEL]).output();
     for _ in 0..150 {
-        let out = Command::new("sc").args(["query", SERVICE_LABEL]).output()?;
+        let out = hidden("sc").args(["query", SERVICE_LABEL]).output()?;
         let text = String::from_utf8_lossy(&out.stdout);
         if text.contains("STOPPED") {
             break;
@@ -1311,15 +1538,16 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
         let _ = std::fs::copy(&p.service_bin, &backup);
     }
     if let Err(err) = std::fs::copy(new_exe, &p.service_bin) {
-        let _ = Command::new("sc").args(["start", SERVICE_LABEL]).output();
+        let _ = hidden("sc").args(["start", SERVICE_LABEL]).output();
         return Err(anyhow::anyhow!("替换服务二进制失败: {err}"));
     }
+    let _ = write_version_file(p);
 
     // 3) 拉起；失败回滚
-    let start = Command::new("sc").args(["start", SERVICE_LABEL]).output()?;
+    let start = hidden("sc").args(["start", SERVICE_LABEL]).output()?;
     if !start.status.success() {
         let _ = std::fs::copy(&backup, &p.service_bin);
-        let _ = Command::new("sc").args(["start", SERVICE_LABEL]).output();
+        let _ = hidden("sc").args(["start", SERVICE_LABEL]).output();
         bail!("替换后启动失败，已回滚");
     }
     Ok(())
@@ -1341,6 +1569,7 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
     std::fs::copy(new_exe, &p.service_bin).context("替换服务二进制失败")?;
     let _ = std::fs::set_permissions(&p.service_bin, std::fs::Permissions::from_mode(0o755));
     chown_root(&p.service_bin);
+    let _ = write_version_file(p);
 
     // kickstart -k：杀掉旧进程并按 plist 重新拉起（此时已是新二进制）。
     let out = Command::new("/bin/launchctl")
@@ -1381,10 +1610,10 @@ fn uninstall(_p: &Paths) -> anyhow::Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("sc")
+        let _ = hidden("sc")
             .args(["stop", "era.exvlan.studio.service"])
             .output();
-        let _ = Command::new("sc")
+        let _ = hidden("sc")
             .args(["delete", "era.exvlan.studio.service"])
             .output();
         return Ok(());
@@ -1442,7 +1671,7 @@ fn diagnose(p: &Paths) -> anyhow::Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        if let Ok(o) = Command::new("sc")
+        if let Ok(o) = hidden("sc")
             .args(["query", "era.exvlan.studio.service"])
             .output()
         {
