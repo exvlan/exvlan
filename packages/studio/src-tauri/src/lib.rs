@@ -5050,6 +5050,41 @@ async fn port_cleanup() -> Result<(), String> {
     crate::service_client::port_cleanup()
 }
 
+// ---- 移动端 stub ----
+//
+// `generate_handler!` 是**无条件注册**的：任何写进去的命令都必须在所有平台存在，
+// 否则 Android/iOS 构建会报 `cannot find macro __cmd__<name>`。
+// 桌面专属命令统一在这里给移动端一个"不支持"的实现。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn service_uninstall(_runtime: String) -> Result<String, String> {
+    Err("移动端没有特权服务".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn service_whitelist_info() -> Result<serde_json::Value, String> {
+    Err("移动端没有特权服务".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn service_extra_whitelist_set(_extra: Vec<String>) -> Result<serde_json::Value, String> {
+    Err("移动端没有特权服务".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn port_owner_info() -> Result<serde_json::Value, String> {
+    Err("移动端没有特权服务".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn port_cleanup() -> Result<(), String> {
+    Err("移动端没有特权服务".to_string())
+}
+
 /// 服务自检（只读）：内核/服务状态、RPC 端口连通性、daemon 日志尾部。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
