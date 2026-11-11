@@ -2,7 +2,7 @@
 // 目标切换器：运行方式（本机内核怎么活）× 目标（界面连哪里）。
 //
 // 标题栏里显示当前「目标」；点开后可切运行方式、切目标、管理远程。
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { type as osType } from "@tauri-apps/plugin-os";
 import { useToast } from "openvue";
@@ -65,8 +65,12 @@ function refresh() {
   remotes.value = loadRemotes();
 }
 
-function toggle(event: Event) {
+async function toggle(event: Event) {
+  // 必须先 refresh **再等一次 flush**：Menu 在自己的 toggle() 里同步读取
+  // `model` props，若同一个 tick 里刚改完 remotes，子组件拿到的还是上一份
+  // 列表（实测：刚添加的远程目标不出现在「目标」子菜单里，要再开一次才有）。
   refresh();
+  await nextTick();
   menu.value?.toggle(event);
 }
 
