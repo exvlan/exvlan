@@ -750,6 +750,9 @@ web:
     address: Address
 
   settings:
+    privileged_service: Privileged service
+    privileged_service_ready: Installed and running
+    privileged_service_missing: Not installed or not ready
     title: Settings
     change_password: Change Password
     old_password: Old Password
@@ -778,10 +781,31 @@ target:
   invalid_address: Invalid address, e.g. 10.254.0.7:15999
   test: Test connection
   test_all: Test all
+  switch_hint: switch from the status bar or tray
   hint: |-
     Remote targets are reached over the mesh network only (fixed port 15999,
     no key, no HTTPS). Switching target does NOT stop the local kernel;
     "remote + local normal mode" can coexist.
+
+service_settings:
+  rpc_scope: RPC access scope
+  rpc_scope_hint: Derived automatically from each network virtual subnet (loopback always included). Restart the kernel after changing a subnet.
+  needs_restart: The configured subnet changed but the running kernel still uses the old whitelist — remote management will not work for the new subnet yet.
+  apply_and_restart: Apply and restart kernel
+  restarted: Service restarted
+  extra: Extra allowed subnets
+  extra_hint: "Only for WSL / LAN cases outside the mesh; private or link-local CIDRs only, max {max}."
+  extra_saved: Extra subnets saved (effective after kernel restart)
+  port: Port 15999
+  port_free: Port is free
+  port_foreign: The listener is not our kernel and will not be cleaned up automatically
+  port_kill: Terminate stale kernel process
+  uninstall: Uninstall privileged service
+  uninstall_hint: The kernel will no longer be managed by the system service and will fall back to normal mode.
+  uninstall_confirm: I understand this removes the system service (re-authorisation is required to reinstall)
+  uninstall_done: Service uninstalled
+  uninstall_done_detail: Run mode fell back to {mode}
+  needs_restart_banner: Network subnet changed — restart the kernel to apply it to remote management
 
 mode:
   title: Mode

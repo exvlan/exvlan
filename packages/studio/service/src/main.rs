@@ -32,6 +32,8 @@ use serde::{Deserialize, Serialize};
 const SERVICE_LABEL: &str = "era.exvlan.studio.service";
 
 /// 应用 ID（目录名 / 旧 label 前缀）。与服务侧 `paths.rs` 的 `APP_ID` 一致。
+/// 仅 unix 分支用到（Windows 走命名管道与 ProgramData 字面量）。
+#[cfg(unix)]
 const APP_ID: &str = "era.exvlan.studio";
 
 /// 构建版本串：`<标准版本>[-<channel>.<n>][+<sha6>]`。
@@ -359,6 +361,8 @@ impl Response {
 // ---------------------------------------------------------------------------
 
 struct Inner {
+    /// 当前内核实际启动时用的白名单（用于判断「配置改了但还没重启」）。
+    applied_whitelist: Option<String>,
     child: Option<Child>,
     mode: Mode,
     config: ServiceConfig,
@@ -675,6 +679,7 @@ impl State {
         Self {
             paths,
             inner: Mutex::new(Inner {
+                applied_whitelist: None,
                 child: None,
                 mode,
                 config,
@@ -704,8 +709,18 @@ impl State {
             .clone();
         let (effective, more_notes) = self.rpc_whitelist();
         notes.extend(more_notes);
+        let applied = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .applied_whitelist
+            .clone();
+        // 配置改了但内核还没重启时，新网段暂时不生效（远程管理会连不上）。
+        let needs_restart = applied.as_deref().is_some_and(|a| a != effective);
         serde_json::json!({
             "effective": effective,
+            "applied": applied,
+            "needs_restart": needs_restart,
             "loopback": RPC_LOOPBACK,
             "networks": networks,
             "extra": extra,
@@ -796,6 +811,10 @@ impl State {
         self.log(format!("rpc whitelist = {whitelist}"));
         for note in notes {
             self.log(format!("rpc whitelist: {note}"));
+        }
+        {
+            let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            guard.applied_whitelist = Some(whitelist.clone());
         }
 
         let mut cmd = Command::new(&self.paths.kernel);

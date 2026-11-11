@@ -62,6 +62,8 @@ function diagStep(step: string, detail?: string) {
 const props = defineProps<{
   visible: boolean;
   mode: Mode;
+  /** 特权服务是否就绪（index.vue 的 serviceState().ready） */
+  serviceReady?: boolean;
   clientRunning: boolean;
   configServerStatus: string;
   logLevel: string;
@@ -70,8 +72,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "update:visible", value: boolean): void;
-  (e: "open-mode"): void;
-  (e: "open-autostart"): void;
+  (e: "open-service"): void;
   (e: "open-config-server"): void;
   (e: "open-log-dir"): void;
   (e: "copy-log-dir"): void;
@@ -110,6 +111,15 @@ const logLevels = ["off", "warn", "info", "debug", "trace"];
 const logLevelLabel = (level: string) => t(`logging_level_${level}`);
 
 const modeLabel = computed(() => t(`mode.${props.mode.mode}`));
+
+// 「设置 → 服务」的摘要：授权状态由 index.vue 通过 serviceState() 传入，
+// 这里只做展示，不自己调后端（避免重复轮询）。
+const serviceSummary = computed(() => {
+  if (!props.serviceReady) {
+    return t("settings.privileged_service_missing");
+  }
+  return t("settings.privileged_service_ready");
+});
 
 const configServerLabel = computed(() => {
   if (!["normal", "service"].includes(props.mode.mode)) {
@@ -456,29 +466,28 @@ watch(
             />
           </div>
 
+          <!-- 运行方式已收敛到状态栏/托盘的切换器：这里只读展示，避免两处状态打架 -->
           <div class="settings-row">
             <div class="flex-1">
               <div class="font-medium">{{ t("settings.mode") }}</div>
-              <div class="text-sm text-surface-500">{{ modeLabel }}</div>
+              <div class="text-sm text-surface-500">
+                {{ modeLabel
+                }}<template v-if="isDesktop"> · {{ t("target.switch_hint") }}</template>
+              </div>
             </div>
-            <Button
-              v-if="isDesktop"
-              :label="t('web.common.edit')"
-              size="small"
-              severity="secondary"
-              @click="emit('open-mode')"
-            />
           </div>
 
+          <!-- 特权服务：白名单、维护操作 -->
           <div v-if="isDesktop" class="settings-row">
             <div class="flex-1">
-              <div class="font-medium">{{ t("settings.autostart") }}</div>
+              <div class="font-medium">{{ t("settings.privileged_service") }}</div>
+              <div class="text-sm text-surface-500">{{ serviceSummary }}</div>
             </div>
             <Button
               :label="t('web.common.edit')"
               size="small"
               severity="secondary"
-              @click="emit('open-autostart')"
+              @click="emit('open-service')"
             />
           </div>
         </div>

@@ -240,7 +240,7 @@ async function handleZip(request, env, url) {
 
   const body = [
     summary ? `## 摘要\n\n\`\`\`\n${clip(summary, 4000)}\n\`\`\`\n` : "",
-    `## 完整诊断包\n\n${zipUrl}\n\n> zip 含 error.log、events.log、studio/exvlan/helper 日志、网络自检、ui-state（均已脱敏）。`,
+    `## 完整诊断包\n\n${zipUrl}\n\n> zip 含 error.log、events.log、studio/exvlan/service 日志、网络自检、ui-state（均已脱敏）。`,
     `> 链接 ${ZIP_TTL_SECONDS / 86400} 天后过期（${zip.byteLength} bytes）。`,
   ]
     .filter(Boolean)

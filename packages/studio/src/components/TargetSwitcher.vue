@@ -25,6 +25,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "switch-runtime", runtime: RuntimeKind): void;
   (e: "switch-target", id: string): void;
+  (e: "remotes-changed"): void;
 }>();
 
 const { t } = useI18n();
@@ -145,6 +146,7 @@ async function testAll() {
 
 function onRemotesChanged() {
   refresh();
+  emit("remotes-changed");
   if (props.targetId !== LOCAL_TARGET && !remotes.value.some((r) => r.id === props.targetId)) {
     emit("switch-target", LOCAL_TARGET);
   }

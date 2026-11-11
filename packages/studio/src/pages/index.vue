@@ -25,7 +25,7 @@ import { logDiagStep, uploadDiagnostics } from "~/composables/backend";
 import { buildFrontendState } from "~/composables/diagnostics";
 
 import { useToast, useConfirm } from "openvue";
-import { loadMode, saveModeNow, WebClientConfig, type Mode } from "~/composables/mode";
+import { loadMode, WebClientConfig, type Mode } from "~/composables/mode";
 import {
   LOCAL_TARGET,
   type RuntimeKind,
@@ -42,16 +42,17 @@ import {
   saveLastNetworkInstanceIdNow,
   loadLastNetworkInstanceId,
 } from "~/composables/config";
-import ModeSwitcher from "~/components/ModeSwitcher.vue";
 import TargetSwitcher from "~/components/TargetSwitcher.vue";
+import ServiceSettings from "~/components/ServiceSettings.vue";
 import SettingsDialog from "~/components/SettingsDialog.vue";
 import {
   runtimeApply,
+  serviceRestart,
+  serviceWhitelistInfo,
   appUpdateApply,
   appUpdateInfo,
   diagnosticsInfo,
   ensureKernelService,
-  getServiceStatus,
   readErrorLog,
   reportBootState,
   reportFrontendError,
@@ -119,35 +120,35 @@ async function maybeAutoUploadDiag(detail: string) {
  * 启动后**后台自动重试一次**（会弹一次系统授权）：大多数情况是上次升级中途退出，
  * 自动补装即可恢复；失败后不再自动打扰，交给用户手动点。
  */
-const helperReady = ref(true);
-const helperStatusText = ref("");
-const retryingHelper = ref(false);
-let helperAutoRetried = false;
+const serviceReady = ref(true);
+const serviceStatusText = ref("");
+const retryingService = ref(false);
+let serviceAutoRetried = false;
 
-async function refreshHelperState() {
+async function refreshServiceState() {
   if (type() === "android" || type() === "ios") {
     return;
   }
   try {
     const st = await serviceState();
-    helperReady.value = st.ready;
-    helperStatusText.value = st.status || "";
-    if (!st.ready && !helperAutoRetried) {
-      helperAutoRetried = true;
-      void logDiagStep("helper_auto_retry", st.status.slice(0, 120));
-      void onRetryHelper(true);
+    serviceReady.value = st.ready;
+    serviceStatusText.value = st.status || "";
+    if (!st.ready && !serviceAutoRetried) {
+      serviceAutoRetried = true;
+      void logDiagStep("service_auto_retry", st.status.slice(0, 120));
+      void onRetryService(true);
     }
   } catch {
     // 读不到状态就当作就绪，避免误报横幅
-    helperReady.value = true;
+    serviceReady.value = true;
   }
 }
 
-async function onRetryHelper(auto = false) {
-  if (retryingHelper.value) {
+async function onRetryService(auto = false) {
+  if (retryingService.value) {
     return;
   }
-  retryingHelper.value = true;
+  retryingService.value = true;
   try {
     await serviceInstall();
     toast.add({
@@ -157,16 +158,16 @@ async function onRetryHelper(auto = false) {
       life: 6000,
     });
   } catch (e: any) {
-    void logDiagStep("helper_retry_failed", String(e).slice(0, 300));
+    void logDiagStep("service_retry_failed", String(e).slice(0, 300));
     toast.add({
       severity: auto ? "warn" : "error",
       summary: t("mode.helper"),
-      detail: `${t("mode.helper_retry_failed")}: ${String(e)}`,
+      detail: `${t("mode.service_retry_failed")}: ${String(e)}`,
       life: 15000,
     });
   } finally {
-    retryingHelper.value = false;
-    await refreshHelperState();
+    retryingService.value = false;
+    await refreshServiceState();
   }
 }
 
@@ -188,8 +189,10 @@ async function normalizeMode(mode: Mode): Promise<Mode> {
     ...mode,
     config_dir: configDir,
     file_log_dir: logDir,
-    file_log_level: svc.file_log_level || saved.file_log_level || "info",
-    rpc_portal: svc.rpc_portal || saved.rpc_portal || "127.0.0.1:15999",
+    file_log_level: "info",
+    // 端口固定：服务与普通模式都只用 15999，任何"保存过的自定义端口"都是
+    // pre.12 的残留，照它连会连到没人监听的地址。
+    rpc_portal: LOCAL_RPC_PORTAL,
   } as Mode;
 }
 
@@ -297,7 +300,6 @@ async function retryStartup() {
   }
   await initWithMode(currentMode.value);
 }
-const modeDialogVisible = ref(false);
 const appUpdateDialogVisible = ref(false);
 const appUpdateVersion = ref("");
 const appUpdateNotes = ref("");
@@ -310,6 +312,41 @@ const editingMode = ref<Mode>({ mode: "normal" });
 const runtimeKind = ref<RuntimeKind>(loadRuntime());
 const targetId = ref<string>(loadTargetId());
 
+/** 两种运行方式共用的固定本地端口（服务与 supervisor 都写死这个值）。 */
+const LOCAL_RPC_PORTAL = "127.0.0.1:15999";
+
+const serviceDialogVisible = ref(false);
+/** 配置里的网段变了但内核还没重启 → 远程管理对新网段暂不生效。 */
+const whitelistNeedsRestart = ref(false);
+const whitelistApplying = ref(false);
+
+async function refreshWhitelistState() {
+  if (type() === "android" || type() === "ios") return;
+  try {
+    const info = await serviceWhitelistInfo();
+    whitelistNeedsRestart.value = !!info.needs_restart;
+  } catch {
+    whitelistNeedsRestart.value = false;
+  }
+}
+
+async function onApplyWhitelist() {
+  whitelistApplying.value = true;
+  try {
+    await serviceRestart();
+    await refreshWhitelistState();
+    toast.add({
+      severity: "success",
+      summary: t("settings.privileged_service"),
+      detail: t("service_settings.restarted"),
+      life: 4000,
+    });
+  } catch (e: any) {
+    toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 12000 });
+  } finally {
+    whitelistApplying.value = false;
+  }
+}
 const isModeSaving = ref(false);
 const manualDisconnect = ref(false);
 
@@ -423,130 +460,6 @@ async function onSetLogLevel(level: string) {
 const configServerDialogVisible = ref(false);
 const configServerConnected = ref(false);
 
-const showAutostartHint = ref(false);
-
-async function openModeDialog() {
-  editingMode.value = JSON.parse(JSON.stringify(loadMode()));
-  showAutostartHint.value = false;
-  modeDialogVisible.value = true;
-}
-
-async function openAutostartDialog() {
-  editingMode.value = JSON.parse(JSON.stringify(loadMode()));
-  editingMode.value.mode = "service";
-  showAutostartHint.value = true;
-  modeDialogVisible.value = true;
-}
-
-async function onModeSave() {
-  if (isModeSaving.value) {
-    return;
-  }
-  // 首次切到普通模式：确认一次（会通过特权组件以管理员身份启动内核）。
-  if (editingMode.value.mode === "normal" && localStorage.getItem("normal_mode_consent") !== "1") {
-    const accepted = await new Promise<boolean>((resolve) => {
-      confirm.require({
-        header: t("mode.normal"),
-        message: t("mode.normal_consent"),
-        icon: "pi pi-exclamation-triangle",
-        accept: () => resolve(true),
-        reject: () => resolve(false),
-      });
-    });
-    if (!accepted) {
-      return;
-    }
-    localStorage.setItem("normal_mode_consent", "1");
-  }
-  isModeSaving.value = true;
-  try {
-    // 先落盘并等待后端确认，再做连接（连接失败也保留用户选择）。
-    await saveModeNow(editingMode.value);
-    // 运行方式是独立权威键：不同步写会在下次启动时与 app_mode 漂移。
-    if (editingMode.value.mode === "service" || editingMode.value.mode === "normal") {
-      runtimeKind.value = editingMode.value.mode;
-      targetId.value = LOCAL_TARGET;
-      await saveRuntime(editingMode.value.mode);
-      await saveTargetId(LOCAL_TARGET);
-    }
-    // 切模式后内核的配置目录/实例集合可能不同：先清空上次选择，
-    // 由 initWithMode 按新内核的真实列表恢复，避免对着不存在的实例反复 get_config。
-    instanceId.value = undefined;
-    await initWithMode(editingMode.value);
-    modeDialogVisible.value = false;
-  } catch (e: any) {
-    // 不再用旧模式重新初始化：那会把刚保存的模式写回旧值（历史 bug）。
-    // 保留用户选择，只在横幅/日志里说明原因。
-    startupError.value = String(e);
-    void reportFrontendError("fe:mode-save", String(e));
-    toast.add({
-      severity: "error",
-      summary: t("client.startup_failed"),
-      detail: String(e),
-      life: 10000,
-    });
-    console.error("Error switching mode", e, currentMode.value, editingMode.value);
-  } finally {
-    isModeSaving.value = false;
-  }
-}
-
-async function onUninstallService() {
-  confirm.require({
-    message: t("mode.uninstall_service_confirm"),
-    header: t("mode.uninstall_service"),
-    icon: "pi pi-exclamation-triangle",
-    rejectProps: {
-      label: t("web.common.cancel"),
-      severity: "secondary",
-      outlined: true,
-    },
-    acceptProps: {
-      label: t("mode.uninstall_service"),
-      severity: "danger",
-    },
-    accept: async () => {
-      isModeSaving.value = true;
-      try {
-        await initWithMode({ ...currentMode.value, mode: "normal" });
-        await initService(undefined);
-        toast.add({
-          severity: "success",
-          summary: t("web.common.success"),
-          detail: t("mode.uninstall_service_success"),
-          life: 3000,
-        });
-        modeDialogVisible.value = false;
-      } catch (e: any) {
-        toast.add({ severity: "error", summary: t("error"), detail: e, life: 10000 });
-        console.error("Error uninstalling service", e);
-      } finally {
-        isModeSaving.value = false;
-      }
-    },
-  });
-}
-
-async function onStopService() {
-  isModeSaving.value = true;
-  manualDisconnect.value = true;
-  try {
-    await setServiceStatus(false);
-    toast.add({
-      severity: "success",
-      summary: t("web.common.success"),
-      detail: t("mode.stop_service_success"),
-      life: 3000,
-    });
-    modeDialogVisible.value = false;
-  } catch (e: any) {
-    toast.add({ severity: "error", summary: t("error"), detail: e, life: 10000 });
-    console.error("Error stopping service", e);
-  } finally {
-    isModeSaving.value = false;
-  }
-}
-
 async function initWithMode(rawMode: Mode) {
   const mode = await normalizeMode(rawMode);
 
@@ -582,47 +495,17 @@ async function initWithMode(rawMode: Mode) {
   }
 
   switch (mode.mode) {
-    case "remote":
-      if (!mode.remote_rpc_address) {
-        // 不再静默降级为普通模式：保留用户选择，失败原因留在顶部横幅。
-        startupError.value = t("mode.remote_rpc_address_empty");
-        toast.add({
-          severity: "error",
-          summary: t("client.startup_failed"),
-          detail: startupError.value,
-          life: 10000,
-        });
-        return;
-      }
-      url = mode.remote_rpc_address;
-      break;
     case "service": {
-      if (!mode.config_dir || !mode.file_log_dir || !mode.file_log_level || !mode.rpc_portal) {
-        startupError.value = t("mode.service_config_empty");
-        toast.add({
-          severity: "error",
-          summary: t("client.startup_failed"),
-          detail: startupError.value,
-          life: 10000,
-        });
-        return;
-      }
-      // 是否（重）装服务只由**服务指纹**决定：内核路径 + 启动参数完全一致时
-      // ensureKernelService 直接返回 current，不会触发授权（历史 bug：用版本号比较，
-      // 而 exvlan_version 现在返回内核版本，导致每次启动都判定需要重装 → 反复弹密码）。
+      // 端口与目录都是固定的，不再校验用户填的字段；ensureLocalKernel 幂等地
+      // 完成「装服务 + 换内核」，版本一致时不会提权。
       mode.config_server_url = mode.config_server_url || undefined;
-      // 与启动时同一个入口：内部会补默认值、按指纹判断是否真的需要提权。
       await ensureLocalKernel(mode);
-      let serviceStatus = await getServiceStatus();
-      if (serviceStatus === "Stopped") {
-        await setServiceStatus(true);
-      }
-      url = "tcp://" + mode.rpc_portal.replace("0.0.0.0", "127.0.0.1");
+      url = "tcp://" + LOCAL_RPC_PORTAL;
       retrys = 5;
       break;
     }
     case "normal":
-      url = mode.rpc_portal;
+      url = "tcp://" + LOCAL_RPC_PORTAL;
       break;
   }
   await connectWithRetry(mode, url, retrys);
@@ -666,7 +549,6 @@ async function connectWithRetry(mode: Mode, url: string | undefined, retrys: num
 /** 连接成功后的收尾：记状态、恢复上次网络。 */
 async function afterConnect(mode: Mode) {
   currentMode.value = mode;
-  await saveModeNow(mode);
   startupError.value = "";
   clientRunning.value = await isClientRunning();
 
@@ -743,7 +625,6 @@ async function switchRuntime(kind: RuntimeKind) {
     }
     const mode = await normalizeMode({ mode: kind } as unknown as Mode);
     currentMode.value = mode;
-    await saveModeNow(mode);
     await ensureLocalKernel(mode);
     await initWithMode(mode);
   } catch (e: any) {
@@ -797,6 +678,11 @@ async function loadElevateDenied() {
   }
 }
 
+async function onServiceDialogChanged() {
+  await refreshServiceState();
+  await refreshTrayMenu().catch(() => {});
+}
+
 function isElevateCancel(err: unknown): boolean {
   const text = String(err).toLowerCase();
   return text.includes("cancel") || text.includes("取消");
@@ -834,7 +720,6 @@ async function ensureKernelServiceGuarded(opts: {
 async function ensureLocalKernel(mode: Mode) {
   const platform = type();
   if (platform === "android" || platform === "ios") return;
-  if (mode.mode === "remote") return;
 
   // daemon 参数与模式无关：优先取当前 mode 上的字段（service 模式有），
   // 否则回退到已保存的 app_mode 里的同名字段，最后才用默认值。
@@ -949,31 +834,9 @@ onMounted(async () => {
       ? { ...savedMode, mode: runtimeKind.value === "off" ? "service" : runtimeKind.value }
       : { mode: runtimeKind.value === "off" ? "service" : runtimeKind.value }
   ) as Mode;
-  await saveModeNow(derivedMode);
   currentMode.value = await normalizeMode(derivedMode);
-
-  // 模式丢失（prefs 与 localStorage 都没有）且内核服务已在运行 → 让用户选一次。
-  // 历史 bug：prefs 的 app_mode 被并发写覆盖后，每次启动都静默回到普通模式。
-  let modeSource = hadAppMode ? "persisted" : "default";
-  if (modeSource === "default" && type() !== "android" && type() !== "ios") {
-    const status = await getServiceStatus().catch(() => "NotInstalled");
-    if (status === "Running") {
-      const useService = await new Promise<boolean>((resolve) => {
-        confirm.require({
-          header: t("settings.mode"),
-          message: t("settings.mode_missing_service_running"),
-          accept: () => resolve(true),
-          reject: () => resolve(false),
-        });
-      });
-      const chosen = await normalizeMode(
-        (useService ? { mode: "service" } : { mode: "normal" }) as Mode,
-      );
-      await saveModeNow(chosen);
-      currentMode.value = chosen;
-      modeSource = "dialog";
-    }
-  }
+  // 运行方式是唯一权威（prefs 的 runtime）：`app_mode` 只读不写，仅用于旧数据迁移。
+  const modeSource = hadAppMode ? "persisted" : "default";
   void reportBootState(currentMode.value.mode, loadLastNetworkInstanceId(), null, modeSource);
 
   // 首次安装/升级后会自动装好内核并（重新）注册系统服务；失败不阻塞进入界面。
@@ -1021,7 +884,7 @@ onMounted(async () => {
     void maybeAutoUploadDiag(String(e));
   }
   void maybeCheckAppUpdate();
-  void refreshHelperState();
+  void refreshServiceState();
 
   if (type() === "android") {
     setMobileVpnTileActionHandler(handleMobileVpnTileAction);
@@ -1127,8 +990,9 @@ onMounted(async () => {
   });
 });
 async function reconnectClient() {
-  editingMode.value = JSON.parse(JSON.stringify(loadMode()));
-  await onModeSave();
+  // 只重连，不改任何模式状态（运行方式由状态栏/托盘切换）。
+  startupError.value = "";
+  await initWithMode(currentMode.value);
 }
 
 onMounted(async () => {
@@ -1189,7 +1053,11 @@ async function onConfigServerSave() {
     });
   }
   console.log("Saving config server url", (editingMode.value as WebClientConfig).config_server_url);
-  await onModeSave();
+  currentMode.value = {
+    ...currentMode.value,
+    config_server_url: (editingMode.value as WebClientConfig).config_server_url,
+  } as Mode;
+  await initWithMode(currentMode.value);
   configServerDialogVisible.value = false;
 }
 onMounted(() => {
@@ -1246,37 +1114,6 @@ const configServerConnectionStatus = computed(() => {
         />
       </template>
     </Dialog>
-    <Dialog
-      v-model:visible="modeDialogVisible"
-      modal
-      :header="t('mode.switch_mode')"
-      :style="{ width: '50vw' }"
-    >
-      <Message v-if="showAutostartHint" severity="info" :closable="false" class="mb-4">
-        {{ t("mode.autostart_hint") }}
-      </Message>
-      <ModeSwitcher
-        v-model="editingMode"
-        @uninstall-service="onUninstallService"
-        @stop-service="onStopService"
-      />
-      <template #footer>
-        <Button
-          :label="t('web.common.cancel')"
-          icon="pi pi-times"
-          @click="modeDialogVisible = false"
-          text
-        />
-        <Button
-          :label="t('web.common.save')"
-          icon="pi pi-save"
-          @click="onModeSave"
-          autofocus
-          :loading="isModeSaving"
-        />
-      </template>
-    </Dialog>
-
     <Dialog
       v-model:visible="configServerDialogVisible"
       modal
@@ -1354,22 +1191,37 @@ const configServerConnectionStatus = computed(() => {
       />
     </div>
 
+    <!-- 网段改了但内核还没重启：远程管理对新网段暂不生效 -->
     <div
-      v-if="!helperReady"
+      v-if="whitelistNeedsRestart"
+      class="flex items-center gap-2 border-l-4 border-sky-500 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:bg-sky-950 dark:text-sky-200"
+    >
+      <i class="pi pi-info-circle" />
+      <span class="flex-1">{{ t("service_settings.needs_restart_banner") }}</span>
+      <Button
+        size="small"
+        :label="t('service_settings.apply_and_restart')"
+        :loading="whitelistApplying"
+        @click="onApplyWhitelist"
+      />
+    </div>
+
+    <div
+      v-if="!serviceReady"
       class="flex items-center gap-2 border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
     >
       <i class="pi pi-shield" />
       <span class="flex-1 break-all">
         {{ t("mode.helper_missing") }}
-        <span v-if="helperStatusText" class="opacity-70">({{ helperStatusText }})</span>
+        <span v-if="serviceStatusText" class="opacity-70">({{ serviceStatusText }})</span>
       </span>
       <Button
         size="small"
         :label="t('mode.helper_retry')"
         icon="pi pi-refresh"
-        :loading="retryingHelper"
-        :disabled="retryingHelper"
-        @click="onRetryHelper(false)"
+        :loading="retryingService"
+        :disabled="retryingService"
+        @click="onRetryService(false)"
       />
     </div>
 
@@ -1444,6 +1296,7 @@ const configServerConnectionStatus = computed(() => {
         :disabled="isModeSaving"
         @switch-runtime="switchRuntime"
         @switch-target="switchTarget"
+        @remotes-changed="refreshTrayMenu()"
       />
       <span class="flex-1" />
       <Button
@@ -1463,15 +1316,17 @@ const configServerConnectionStatus = computed(() => {
       />
     </div>
 
+    <ServiceSettings v-model:visible="serviceDialogVisible" @changed="onServiceDialogChanged" />
+
     <SettingsDialog
       v-model:visible="settingsVisible"
       :initial-section="settingsSection"
       :mode="currentMode"
       :client-running="clientRunning"
+      :service-ready="serviceReady"
       :config-server-status="configServerConnectionStatus"
       :log-level="logLevel"
-      @open-mode="openModeDialog"
-      @open-autostart="openAutostartDialog"
+      @open-service="serviceDialogVisible = true"
       @open-config-server="openConfigServerDialog"
       @open-log-dir="onOpenLogDir"
       @copy-log-dir="onCopyLogDir"

@@ -312,6 +312,52 @@ export async function serviceState() {
   return await invoke<ServiceState>("service_state");
 }
 
+/** 生效的 RPC 白名单：回环 + 各虚拟网段 + 额外追加。 */
+export interface WhitelistInfo {
+  effective: string;
+  applied?: string | null;
+  needs_restart?: boolean;
+  loopback: string[];
+  networks: string[];
+  extra: string[];
+  notes: string[];
+  dhcp_fallback: string;
+  max_extra: number;
+}
+
+export async function serviceWhitelistInfo() {
+  return await invoke<WhitelistInfo>("service_whitelist_info");
+}
+
+/** 设置额外允许的网段（后端做 CIDR 校验，拒绝公网段）。 */
+export async function serviceExtraWhitelistSet(extra: string[]) {
+  return await invoke<WhitelistInfo>("service_extra_whitelist_set", { extra });
+}
+
+/** 卸载特权服务（提权），返回卸载后的运行方式（normal/off）。 */
+export async function serviceUninstall(runtime: string) {
+  return await invoke<string>("service_uninstall", { runtime });
+}
+
+export interface PortOwnerInfo {
+  port: number;
+  free?: boolean;
+  pid?: number;
+  name?: string;
+  path?: string;
+  is_our_kernel?: boolean;
+}
+
+/** 谁占着 15999（诊断用）。 */
+export async function portOwnerInfo() {
+  return await invoke<PortOwnerInfo>("port_owner_info");
+}
+
+/** 结束占用 15999 的自家内核（后端校验进程路径，非自家拒绝）。 */
+export async function portCleanup() {
+  return await invoke<void>("port_cleanup");
+}
+
 /** 重试安装特权服务（会弹一次系统授权）。 */
 export async function serviceInstall() {
   return await invoke<string>("service_install");

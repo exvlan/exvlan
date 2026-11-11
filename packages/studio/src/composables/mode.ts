@@ -1,53 +1,47 @@
-import { type } from '@tauri-apps/plugin-os'
+import { type } from "@tauri-apps/plugin-os";
 
 export interface WebClientConfig {
-  config_server_url?: string
+  config_server_url?: string;
 }
 
 export interface NormalMode extends WebClientConfig {
-  mode: 'normal'
+  mode: "normal";
   // if not provided will use ring tunnel rpc server
-  rpc_portal?: string
-  enable_rpc_port_listen?: boolean
-  rpc_listen_port?: number
+  rpc_portal?: string;
+  enable_rpc_port_listen?: boolean;
+  rpc_listen_port?: number;
 }
 
 export interface ServiceMode extends WebClientConfig {
-  mode: 'service'
-  config_dir: string
-  rpc_portal: string
-  file_log_level: 'off' | 'warn' | 'info' | 'debug' | 'trace'
-  file_log_dir: string
-  installed_core_version?: string
-}
-
-export interface RemoteMode {
-  mode: 'remote'
-  remote_rpc_address: string
+  mode: "service";
+  config_dir: string;
+  rpc_portal: string;
+  file_log_level: "off" | "warn" | "info" | "debug" | "trace";
+  file_log_dir: string;
+  installed_core_version?: string;
 }
 
 export function saveMode(mode: Mode) {
-  localStorage.setItem('app_mode', JSON.stringify(mode))
+  localStorage.setItem("app_mode", JSON.stringify(mode));
 }
 
 /** 关键路径：写完立即落盘并等待后端确认（退出/切模式时用）。 */
 export async function saveModeNow(mode: Mode) {
-  const { persistUiStateNow } = await import('./persist')
-  await persistUiStateNow('app_mode', JSON.stringify(mode))
+  const { persistUiStateNow } = await import("./persist");
+  await persistUiStateNow("app_mode", JSON.stringify(mode));
 }
 
 export function loadMode(): Mode {
-  const modeStr = localStorage.getItem('app_mode')
+  const modeStr = localStorage.getItem("app_mode");
   if (modeStr) {
-    const mode = JSON.parse(modeStr) as Mode
-    if (type() === 'android') {
-      return { ...mode, mode: 'normal' }
+    const mode = JSON.parse(modeStr) as Mode;
+    if (type() === "android") {
+      return { ...mode, mode: "normal" };
     }
-    return mode
-  }
-  else {
-    return { mode: 'normal' }
+    return mode;
+  } else {
+    return { mode: "normal" };
   }
 }
 
-export type Mode = NormalMode | ServiceMode | RemoteMode
+export type Mode = NormalMode | ServiceMode;

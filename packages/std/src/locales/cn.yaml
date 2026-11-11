@@ -750,6 +750,9 @@ web:
     address: 地址
 
   settings:
+    privileged_service: 特权服务
+    privileged_service_ready: 已安装并运行中
+    privileged_service_missing: 未安装或未就绪
     title: 设置
     change_password: 修改密码
     old_password: 旧密码
@@ -778,9 +781,30 @@ target:
   invalid_address: 地址格式不对，示例 10.254.0.7:15999
   test: 测试连接
   test_all: 全部测速
+  switch_hint: 在状态栏或托盘切换
   hint: |-
     远程目标只通过 mesh 内网访问（固定 15999，无密钥、无 HTTPS）。
     切换目标**不会**停止本机内核；「远程 + 本机普通模式」可以同时存在。
+
+service_settings:
+  rpc_scope: RPC 访问范围
+  rpc_scope_hint: 自动由各网络的虚拟网段推导（回环始终包含）。改过网段后需重启内核才生效。
+  needs_restart: 配置里的网段已变化，当前内核仍在用旧白名单 —— 远程管理对新网段暂时无效。
+  apply_and_restart: 应用并重启内核
+  restarted: 服务已重启
+  extra: 额外允许的网段
+  extra_hint: "仅用于 WSL / 局域网等非 mesh 场景；只接受私网或链路本地网段，最多 {max} 条。"
+  extra_saved: 额外网段已保存（重启内核后生效）
+  port: 15999 端口
+  port_free: 端口空闲
+  port_foreign: 占用者不是本产品内核，不会自动清理
+  port_kill: 结束残留内核进程
+  uninstall: 卸载特权服务
+  uninstall_hint: 卸载后内核不再由系统服务托管，会自动回落为普通模式。
+  uninstall_confirm: 我理解这会移除系统服务（需要重新授权才能装回）
+  uninstall_done: 服务已卸载
+  uninstall_done_detail: 运行方式已回落为 {mode}
+  needs_restart_banner: 网络网段已变化，重启内核对远程管理生效
 
 mode:
   title: 模式
