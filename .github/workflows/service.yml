@@ -1,0 +1,93 @@
+name: Service Standalone
+
+# 快速验证通道：只构建 `exvlan-service`，不打包、不依赖 core 产物。
+#
+# 用途：服务侧改动（socket 权限、管道 ACL、自更新…）要立刻上真机验证时，
+# 不必等 `pipeline.yml` 的完整链路（约 90 分钟）。正常发版仍只走 pipeline。
+#
+# 按 `AGENTS.md` 约束：非 pipeline 的工作流只允许 `workflow_call` /
+# `workflow_dispatch`，不得自带 `on: push/pull_request/tags`。
+#
+# 用法：
+#   gh workflow run service.yml --ref develop \
+#     -f version=26.410.20712-pre.13+c5ac59
+# 传入与已装 App 完全一致的版本串，产物装好后 GUI 不会触发 `service.update`，
+# 可以直接观察 install / 命名管道 / 内核拉起 这条真实路径。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "覆盖 EXVLAN_BUILD_VERSION（留空则按 build-version.sh 推导）"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, name: windows-x86_64 }
+          - { target: x86_64-apple-darwin, os: macos-latest, name: macos-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Compute build version
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "EXVLAN_BUILD_VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+          else
+            bash script/ci/build-version.sh
+          fi
+          grep '^EXVLAN_BUILD_VERSION=' "$GITHUB_ENV"
+
+      # rustflags 置空：`.cargo/config.toml` 里 linux 目标带 `-fuse-ld=mold`，
+      # 这里只构建 windows/darwin，避免把 mold 依赖带进来。
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        with:
+          toolchain: 1.95
+          target: ${{ matrix.target }}
+          cache: false
+          rustflags: ""
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: service-${{ matrix.target }}
+
+      - name: Build exvlan-service
+        run: |
+          set -euo pipefail
+          cargo build --release -p exvlan-service --target "${{ matrix.target }}"
+          BIN="target/${{ matrix.target }}/release/exvlan-service"
+          if [[ "${{ matrix.target }}" =~ windows ]]; then
+            BIN="$BIN.exe"
+          fi
+          ls -l "$BIN"
+
+      # 只在 Windows 上实跑：macOS runner 是 arm64，跑 x86_64 二进制需要 Rosetta。
+      - name: Self-check (--version)
+        if: ${{ contains(matrix.target, 'windows') }}
+        run: |
+          set -euo pipefail
+          ./target/${{ matrix.target }}/release/exvlan-service.exe --version
+          echo "expected: exvlan-service ${EXVLAN_BUILD_VERSION}"
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: exvlan-service-${{ matrix.name }}
+          path: |
+            target/${{ matrix.target }}/release/exvlan-service
+            target/${{ matrix.target }}/release/exvlan-service.exe
+          if-no-files-found: error
+          retention-days: 14

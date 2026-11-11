@@ -26,6 +26,19 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 const SERVICE_LABEL: &str = "era.exvlan.studio.service";
+
+/// 构建版本串：`<标准版本>[-<channel>.<n>][+<sha6>]`。
+///
+/// 由 CI 的 `script/ci/build-version.sh` 通过 `EXVLAN_BUILD_VERSION` 注入，
+/// 本地构建没有该变量时回落到 crate 版本。
+///
+/// **必须与 GUI 的 `BUILD_VERSION` 同源**：GUI 用 `--version` 的输出来判断
+/// 「服务是否需要自更新」。若这里报 crate 版本（永远不含 `-pre.N+sha`），
+/// 每次启动都会被判定为需要升级 → 反复替换二进制 + 重启服务。
+const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
 const MINISIGN_PUBKEY: &str = "RWSFKUboUUaFQYx/ap73a7ySNbuI5kjDGsiVJBtceshu+Ml99YPMFqe9";
 const PROTO: u32 = 1;
 const RPC_PORTAL: &str = "0.0.0.0:15999";
@@ -496,7 +509,7 @@ impl State {
             "hello" => {
                 let mut r = Response::ok();
                 r.proto = Some(PROTO);
-                r.service = Some(env!("CARGO_PKG_VERSION").to_string());
+                r.service = Some(BUILD_VERSION.to_string());
                 r
             }
             "ping" => Response::ok(),
@@ -730,7 +743,7 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--version") => {
-            println!("exvlan-service {}", env!("CARGO_PKG_VERSION"));
+            println!("exvlan-service {BUILD_VERSION}");
             Ok(())
         }
         Some("--daemon") => run_daemon(p),
@@ -1386,7 +1399,7 @@ fn uninstall(_p: &Paths) -> anyhow::Result<()> {
 
 fn diagnose(p: &Paths) -> anyhow::Result<()> {
     let mut out = String::new();
-    out.push_str(&format!("service: {}\n", env!("CARGO_PKG_VERSION")));
+    out.push_str(&format!("service: {BUILD_VERSION}\n"));
     out.push_str(&format!(
         "config: {}\n",
         serde_json::to_string(&load_config(p)).unwrap_or_default()
