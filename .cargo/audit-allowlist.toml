@@ -28,3 +28,29 @@ reason = "crypto-bigint 0.5.5（timing 变异性）经 openidconnect 4.0.1→p25
 id = "RUSTSEC-2026-0459"
 review_by = "2026-12-31"
 reason = "libsqlite3-sys 0.30.1 SQLite CVE-2026-119375（2026-10-30 披露）；位于 sqlx-sqlite 内置 SQLite。修复需 libsqlite3-sys>=0.39，受 sea-orm 1.1.20→sqlx 0.8 锁定。仅 API 侧本地 sqlite 文件使用，攻击面为本地数据库；到期前随 sqlx/sea-orm 升级移除。"
+
+# --- hickory-proto 0.25.2 的 2026-09-03 批次（上游统一在 0.26.2 修复）---
+# 共同背景：内核直接 pin 了 hickory-proto/client/resolver/server 0.25.2
+# （`exvlan/exvlan/src/common/dns.rs`，dns-resolver feature）。0.26 的
+# proto/resolver/server 已是 0.26.3，但 **hickory-client 仍只有 0.26.0-alpha.1**，
+# 四件套无法协同升级。四条的触发条件都需要**恶意/异常 DNS 响应**，
+# 且都发生在 tokio task 内（panic 只让该任务失败，不会带走进程）。
+[[allow]]
+id = "RUSTSEC-2026-0487"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 解析 SVCB/HTTPS 的 alpn 文本时 panic；需恶意 DNS 响应。同 0.26 四件套阻塞。"
+
+[[allow]]
+id = "RUSTSEC-2026-0489"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 SVCB/HTTPS 参数为单引号时 panic；需恶意 DNS 响应。同 0.26 四件套阻塞。"
+
+[[allow]]
+id = "RUSTSEC-2026-0490"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 zone file lexer 对 >=4096 字符 token panic；仓内不解析外部 zone file，攻击面仅限异常输入。"
+
+[[allow]]
+id = "RUSTSEC-2026-0491"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 头部 record count 造成内存放大；诊断的 TXT/SRV 查询有 2s 预算与线程超时，影响有限。"

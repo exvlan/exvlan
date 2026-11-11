@@ -9,6 +9,13 @@ ignore = [
   # hickory-proto 0.25.2 —— 上游 0.26.x 才有补丁（见 issues #1 / #6）；Dependabot 亦列为可修。
   "RUSTSEC-2026-0118",
   "RUSTSEC-2026-0119",
+  # hickory-proto 0.25.2 —— 2026-09-03 新披露的 4 条（同上，0.26 四件套仍未齐：
+  # hickory-client 只有 0.26.0-alpha.1）。全部需要**恶意 DNS 响应**触发，
+  # 影响面是内核/GUI 的 DNS 解析路径（在 tokio task 内，panic 不会带走进程）。
+  "RUSTSEC-2026-0487",
+  "RUSTSEC-2026-0489",
+  "RUSTSEC-2026-0490",
+  "RUSTSEC-2026-0491",
   # crypto-bigint 0.5.5 —— 经 openidconnect 4.0.1 → p256 0.13 → ecdsa 0.16 → elliptic-curve 0.13 引入；
   # 上游 openidconnect 尚无 0.7 链路（最新仍 4.0.1），仅影响 API 的 OIDC 签名验证路径。见 issue #7。
   "RUSTSEC-2026-0387",
