@@ -66,6 +66,16 @@ const DHCP_FALLBACK_POOL: &str = "10.254.0.0/16";
 /// 额外白名单允许的上限（防止把整张表塞进来）。
 const MAX_EXTRA_WHITELIST: usize = 8;
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
+/// 本地 RPC 地址（内核固定监听这个端口）。
+const LOCAL_RPC: &str = "127.0.0.1:15999";
+/// 看门狗等待上限：超过这个时间内核还没起来，就认为 boot 卡住了。
+const BOOT_WATCHDOG: Duration = Duration::from_secs(20);
+
+/// 看门狗用的**无锁**状态：故意不碰 `inner` 互斥量 ——
+/// 它要能检测「boot 因为持锁而卡死」这种情况，自己去拿锁就一起卡住了。
+static KERNEL_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 本次启动是否**期望**内核（mode == service）。
+static EXPECT_KERNEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
 // 路径
@@ -363,6 +373,8 @@ impl Response {
 struct Inner {
     /// 当前内核实际启动时用的白名单（用于判断「配置改了但还没重启」）。
     applied_whitelist: Option<String>,
+    /// 已有线程正在启动内核（避免并发重复 spawn）。
+    starting: bool,
     child: Option<Child>,
     mode: Mode,
     config: ServiceConfig,
@@ -486,7 +498,10 @@ fn configured_networks(config_dir: &Path) -> (Vec<String>, Vec<String>) {
             notes.push(format!("{name}: 无法读取，已跳过"));
             continue;
         };
-        let Ok(value) = text.parse::<toml::Value>() else {
+        // 注意：`str::parse::<toml::Value>()` 解析的是「值」而不是文档，
+        // 必须用 `toml::from_str`（否则每个网络配置都会被当成解析失败，
+        // 白名单退化成只有回环 → 远程管理静默失效）。
+        let Ok(value) = toml::from_str::<toml::Value>(&text) else {
             notes.push(format!("{name}: TOML 解析失败，已跳过"));
             continue;
         };
@@ -672,6 +687,30 @@ fn terminate_pid(_pid: u32) -> anyhow::Result<()> {
     bail!("不支持终止进程")
 }
 
+/// 生效白名单 = 回环 + 各虚拟网段 + 用户额外追加。
+///
+/// **无锁纯函数**：调用方可以在任意状态（包括持锁）安全调用。
+fn compute_whitelist(config_dir: &Path, extra: &[String]) -> (String, Vec<String>) {
+    let (networks, mut notes) = configured_networks(config_dir);
+    let mut list: Vec<String> = RPC_LOOPBACK.iter().map(|s| s.to_string()).collect();
+    for cidr in networks {
+        if !list.contains(&cidr) {
+            list.push(cidr);
+        }
+    }
+    for raw in extra {
+        match validate_cidr(raw) {
+            Ok(cidr) => {
+                if !list.contains(&cidr) {
+                    list.push(cidr);
+                }
+            }
+            Err(err) => notes.push(format!("额外白名单 {raw} 已忽略: {err}")),
+        }
+    }
+    (list.join(","), notes)
+}
+
 impl State {
     fn new(paths: Paths) -> Self {
         let config = load_config(&paths);
@@ -680,12 +719,18 @@ impl State {
             paths,
             inner: Mutex::new(Inner {
                 applied_whitelist: None,
+                starting: false,
                 child: None,
                 mode,
                 config,
                 sessions: 0,
             }),
         }
+    }
+
+    /// 统一取锁（毒化也继续用）。
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn log(&self, msg: impl AsRef<str>) {
@@ -707,7 +752,7 @@ impl State {
             .config
             .rpc_extra_whitelist
             .clone();
-        let (effective, more_notes) = self.rpc_whitelist();
+        let (effective, more_notes) = compute_whitelist(&self.paths.config, &extra);
         notes.extend(more_notes);
         let applied = self
             .inner
@@ -733,44 +778,14 @@ impl State {
     /// 计算生效的 RPC 白名单：回环 + 各虚拟网段 + 用户额外追加。
     ///
     /// 返回 `(逗号分隔参数, 提示/告警)`，提示会写进 service.log 与诊断包。
-    fn rpc_whitelist(&self) -> (String, Vec<String>) {
-        let (networks, mut notes) = configured_networks(&self.paths.config);
-
-        let extra = self
-            .inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .config
-            .rpc_extra_whitelist
-            .clone();
-
-        let mut list: Vec<String> = RPC_LOOPBACK.iter().map(|s| s.to_string()).collect();
-        for cidr in networks {
-            if !list.contains(&cidr) {
-                list.push(cidr);
-            }
-        }
-        for raw in extra {
-            match validate_cidr(&raw) {
-                Ok(cidr) => {
-                    if !list.contains(&cidr) {
-                        list.push(cidr);
-                    }
-                }
-                Err(err) => notes.push(format!("额外白名单 {raw} 已忽略: {err}")),
-            }
-        }
-        (list.join(","), notes)
-    }
-
-    fn kernel_args(&self) -> Vec<String> {
+    fn kernel_args(&self, whitelist: &str) -> Vec<String> {
         vec![
             "--config-dir".into(),
             self.paths.config.display().to_string(),
             "--rpc-portal".into(),
             RPC_PORTAL.into(),
             "--rpc-portal-whitelist".into(),
-            self.rpc_whitelist().0,
+            whitelist.to_string(),
             "--file-log-dir".into(),
             self.paths.logs.display().to_string(),
             "--file-log-level".into(),
@@ -784,41 +799,97 @@ impl State {
         ]
     }
 
+    /// 确保内核在跑，返回它的 pid。
+    ///
+    /// **锁纪律**：`inner` 只在「读/写 child 字段」时短暂持有；
+    /// `spawn` 与最长 10s 的 `wait_rpc_ready` 一律在锁外完成。
+    /// （pre.14 事故：早期实现在持锁状态下调用 `rpc_whitelist()`，
+    /// 同一线程二次 lock → 永久阻塞，SCM 只看到 RUNNING 却永远没有内核。）
     fn ensure_kernel(&self) -> anyhow::Result<KernelInfo> {
-        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(child) = guard.child.as_mut() {
-            match child.try_wait() {
-                Ok(None) => {
+        // 1) 快路径：已有活着的子进程
+        // 2) 已有别的线程在启动：等它的结果，不要重复 spawn
+        {
+            let mut guard = self.lock_inner();
+            let pid = take_pid(&mut guard);
+            if pid != 0 {
+                return Ok(KernelInfo {
+                    pid,
+                    running: true,
+                    rpc: LOCAL_RPC.into(),
+                });
+            }
+            if guard.starting {
+                drop(guard);
+                return self.await_kernel_start();
+            }
+            guard.starting = true;
+        }
+
+        let outcome = self.start_kernel();
+
+        let mut guard = self.lock_inner();
+        guard.starting = false;
+        match outcome {
+            Ok((child, whitelist)) => {
+                let pid = child.id();
+                guard.child = Some(child);
+                guard.applied_whitelist = Some(whitelist);
+                drop(guard);
+                KERNEL_UP.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(KernelInfo {
+                    pid,
+                    running: true,
+                    rpc: LOCAL_RPC.into(),
+                })
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// 另一个线程正在启动内核时的等待路径（全程不持锁）。
+    fn await_kernel_start(&self) -> anyhow::Result<KernelInfo> {
+        let deadline = Instant::now() + READY_TIMEOUT + Duration::from_secs(2);
+        loop {
+            {
+                let mut guard = self.lock_inner();
+                let pid = take_pid(&mut guard);
+                if pid != 0 {
                     return Ok(KernelInfo {
-                        pid: child.id(),
+                        pid,
                         running: true,
-                        rpc: "127.0.0.1:15999".into(),
+                        rpc: LOCAL_RPC.into(),
                     });
                 }
-                _ => {
-                    guard.child = None;
+                if !guard.starting {
+                    // 对端已经结束但没有留下存活的内核 → 它失败了
+                    bail!("内核启动失败（见 service.log）");
                 }
             }
+            if Instant::now() >= deadline {
+                bail!("等待内核启动超时（{}s）", READY_TIMEOUT.as_secs());
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    /// 真正的启动动作。**不持有 `inner` 锁**，只读一次配置快照。
+    fn start_kernel(&self) -> anyhow::Result<(Child, String)> {
+        let extra = self.lock_inner().config.rpc_extra_whitelist.clone();
+        let (whitelist, notes) = compute_whitelist(&self.paths.config, &extra);
+        self.log(format!("rpc whitelist = {whitelist}"));
+        for note in notes {
+            self.log(format!("rpc whitelist: {note}"));
         }
 
         if !self.paths.kernel.is_file() {
+            // 没有内核也要先把白名单写进日志：CI 冒烟以此判断 boot 是否走完。
             bail!("内核不存在: {}", self.paths.kernel.display());
         }
         std::fs::create_dir_all(&self.paths.config).ok();
         std::fs::create_dir_all(&self.paths.logs).ok();
 
-        let (whitelist, notes) = self.rpc_whitelist();
-        self.log(format!("rpc whitelist = {whitelist}"));
-        for note in notes {
-            self.log(format!("rpc whitelist: {note}"));
-        }
-        {
-            let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            guard.applied_whitelist = Some(whitelist.clone());
-        }
-
         let mut cmd = Command::new(&self.paths.kernel);
-        cmd.args(self.kernel_args())
+        cmd.args(self.kernel_args(&whitelist))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -829,48 +900,36 @@ impl State {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let child = cmd
+        let mut child = cmd
             .spawn()
             .with_context(|| format!("启动内核失败: {}", self.paths.kernel.display()))?;
         let pid = child.id();
-        guard.child = Some(child);
-        drop(guard);
         self.log(format!("kernel spawned pid={pid}"));
 
         if let Err(err) = wait_rpc_ready(READY_TIMEOUT) {
             self.log(format!("kernel not ready: {err}"));
-            self.stop_kernel().ok();
+            let _ = child.kill();
+            let _ = child.wait();
             bail!("kernel start failed: {err}");
         }
         // `wait_rpc_ready` 只看端口通不通：若 15999 已被**残留**的旧内核占着，
         // 我们刚拉起的这个会因 bind 失败立刻退出，而探活仍会“成功”。
-        // 必须再确认子进程还活着，否则会一路错下去（pre.13 实测出现多个孤儿内核）。
-        {
-            let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(child) = guard.child.as_mut()
-                && let Ok(Some(status)) = child.try_wait()
-            {
-                guard.child = None;
-                self.log(format!("kernel exited immediately: {status}"));
-                bail!(
-                    "内核启动后立即退出（{status}）：很可能是 15999 端口被残留进程占用，\
-                     请结束遗留的 exvlan 进程后重试"
-                );
-            }
+        if let Ok(Some(status)) = child.try_wait() {
+            self.log(format!("kernel exited immediately: {status}"));
+            bail!(
+                "内核启动后立即退出（{status}）：很可能是 15999 端口被残留进程占用，\
+                 请结束遗留的 exvlan 进程后重试"
+            );
         }
-
-        Ok(KernelInfo {
-            pid,
-            running: true,
-            rpc: "127.0.0.1:15999".into(),
-        })
+        Ok((child, whitelist))
     }
 
     fn stop_kernel(&self) -> anyhow::Result<()> {
-        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(mut child) = guard.child.take() else {
+        // 先把 child 摘出来，等待进程退出时**不持锁**（否则 status 会被卡住）。
+        let Some(mut child) = self.lock_inner().child.take() else {
             return Ok(());
         };
+        KERNEL_UP.store(false, std::sync::atomic::Ordering::SeqCst);
         let pid = child.id();
         #[cfg(unix)]
         unsafe {
@@ -888,7 +947,6 @@ impl State {
         }
         let _ = child.kill();
         let _ = child.wait();
-        drop(guard);
         self.log(format!("kernel stopped pid={pid}"));
         Ok(())
     }
@@ -1406,6 +1464,7 @@ fn run_daemon(p: Paths) -> anyhow::Result<()> {
 fn run_daemon(p: Paths) -> anyhow::Result<()> {
     let state = Arc::new(State::new(p.clone()));
     log_line(&p, &format!("daemon start pid={}", std::process::id()));
+    spawn_boot_watchdog(p.clone());
     boot(&state);
     serve_unix(state)
 }
@@ -1415,9 +1474,42 @@ fn run_daemon(_p: Paths) -> anyhow::Result<()> {
     bail!("exvlan-service 只在 macOS/Windows 上运行")
 }
 
+/// 启动看门狗：`boot()` 卡住时主动退出，让 launchd/SCM 重启服务。
+///
+/// 背景：pre.14 的第一次实现里 `ensure_kernel` 持锁调用了会再次取锁的函数，
+/// 结果服务进程活着、SCM 显示 RUNNING、但内核永远起不来，日志里也看不出
+/// 任何异常 —— 这种状态用户无法自救。看门狗把「静默卡死」变成「重启」。
+fn spawn_boot_watchdog(paths: Paths) {
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + BOOT_WATCHDOG;
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(500));
+            if KERNEL_UP.load(std::sync::atomic::Ordering::SeqCst)
+                || !EXPECT_KERNEL.load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+        }
+        if !KERNEL_UP.load(std::sync::atomic::Ordering::SeqCst)
+            && EXPECT_KERNEL.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            log_line(
+                &paths,
+                &format!(
+                    "boot watchdog: 内核未在 {}s 内启动（boot 卡住？），主动退出以便重启",
+                    BOOT_WATCHDOG.as_secs()
+                ),
+            );
+            std::process::exit(70);
+        }
+    });
+}
+
 /// 服务启动时按持久化 mode 决定是否拉起内核（macOS / Windows 共用）。
 fn boot(state: &State) {
-    let mode = state.inner.lock().unwrap_or_else(|e| e.into_inner()).mode;
+    let mode = state.lock_inner().mode;
+    // 看门狗只读原子量，绝不碰 mutex（否则它自己也会被卡住）。
+    EXPECT_KERNEL.store(mode == Mode::Service, std::sync::atomic::Ordering::SeqCst);
     match mode {
         Mode::Service => {
             if let Err(err) = state.ensure_kernel() {
@@ -1670,6 +1762,7 @@ mod win {
         }
 
         // 现在才干活：按 mode 拉起内核，再进入管道 accept 循环。
+        spawn_boot_watchdog(p.clone());
         boot(&state);
         if let Err(err) = pipe_loop(state.clone()) {
             state.log(format!("pipe loop exited: {err}"));
@@ -2295,7 +2388,53 @@ fn diagnose(p: &Paths) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod whitelist_tests {
-    use super::{cidr_network, validate_cidr};
+    use super::{cidr_network, compute_whitelist, validate_cidr};
+    use std::path::Path;
+
+    /// 端到端：从 `<config-dir>/*.toml` 推导出网段。
+    /// 用真实临时目录，覆盖「用户改了网段」这个 pre.13 会静默失效的场景。
+    #[test]
+    fn derives_networks_from_config_dir() {
+        let dir = std::env::temp_dir().join(format!("exvlan-wl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("net1.toml"), "ipv4 = \"10.254.1.22/27\"\n").unwrap();
+        std::fs::write(dir.join("net2.toml"), "ipv4 = \"192.168.50.7/24\"\n").unwrap();
+        // DHCP 实例：没有静态地址 → 回退默认池
+        std::fs::write(dir.join("net3.toml"), "dhcp = true\n").unwrap();
+        // 坏文件不应导致 panic
+        std::fs::write(dir.join("broken.toml"), "this is not = toml [[[").unwrap();
+        std::fs::write(dir.join("ignored.txt"), "ipv4 = \"10.9.9.9/24\"\n").unwrap();
+
+        let (effective, notes) = compute_whitelist(&dir, &[]);
+        let list: Vec<&str> = effective.split(',').collect();
+        assert!(list.contains(&"127.0.0.0/8"), "{effective}");
+        assert!(list.contains(&"::1/128"), "{effective}");
+        assert!(list.contains(&"10.254.1.0/27"), "{effective}");
+        assert!(list.contains(&"192.168.50.0/24"), "{effective}");
+        assert!(
+            list.contains(&"10.254.0.0/16"),
+            "DHCP 回退池缺失: {effective}"
+        );
+        assert!(notes.iter().any(|n| n.contains("DHCP")), "{notes:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extra_whitelist_is_validated_not_trusted() {
+        let dir = Path::new("/nonexistent-exvlan-config");
+        let extra = vec![
+            "172.20.0.0/16".to_string(),
+            "0.0.0.0/0".to_string(),  // 必须被拒绝
+            "8.8.8.0/24".to_string(), // 公网，必须被拒绝
+        ];
+        let (effective, notes) = compute_whitelist(dir, &extra);
+        assert!(effective.contains("172.20.0.0/16"), "{effective}");
+        assert!(!effective.contains("0.0.0.0/0"), "{effective}");
+        assert!(!effective.contains("8.8.8.0/24"), "{effective}");
+        assert_eq!(notes.iter().filter(|n| n.contains("已忽略")).count(), 2);
+    }
 
     #[test]
     fn masks_host_bits() {

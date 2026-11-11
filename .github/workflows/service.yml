@@ -82,6 +82,47 @@ jobs:
           ./target/${{ matrix.target }}/release/exvlan-service.exe --version
           echo "expected: exvlan-service ${EXVLAN_BUILD_VERSION}"
 
+      # 真实安装一遍并确认 boot 走完。
+      #
+      # pre.14 的事故是「服务 RUNNING 但内核永远起不来」（持锁自死锁），
+      # 编译与单元测试都拦不住 —— 只有真跑一次 sc create + 看日志才能发现。
+      # runner 以管理员运行，可以创建服务；没有内核二进制是预期的，
+      # 所以「kernel spawned」与「boot ensure_kernel failed: 内核不存在」都算走完。
+      - name: Smoke install service
+        if: ${{ contains(matrix.target, 'windows') }}
+        shell: pwsh
+        run: |
+          $exe = "target/${{ matrix.target }}/release/exvlan-service.exe"
+          & $exe --install 0
+          $log = "C:\ProgramData\era.exvlan.studio\logs\service.log"
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Get-Date) -lt $deadline) {
+            if (Test-Path $log) {
+              $text = Get-Content $log -Raw
+              if ($text -match 'rpc whitelist = ' -and ($text -match 'kernel spawned' -or $text -match 'boot ensure_kernel failed')) { break }
+            }
+            Start-Sleep -Milliseconds 500
+          }
+          Write-Host "--- service.log ---"
+          if (Test-Path $log) { Get-Content $log -Tail 30 }
+          $svc = Get-Service era.exvlan.studio.service -ErrorAction SilentlyContinue
+          if (-not $svc -or $svc.Status -ne 'Running') { throw "service not Running: $($svc.Status)" }
+          $text = if (Test-Path $log) { Get-Content $log -Raw } else { "" }
+          if ($text -notmatch 'rpc whitelist = ') { throw "boot 未走完：缺少 rpc whitelist 日志（疑似启动卡死）" }
+          if (-not ($text -match 'kernel spawned' -or $text -match 'boot ensure_kernel failed')) {
+            throw "boot 未走完：既没有 kernel spawned 也没有失败日志（疑似启动卡死）"
+          }
+
+      - name: Smoke cleanup
+        if: ${{ always() && contains(matrix.target, 'windows') }}
+        shell: pwsh
+        run: |
+          $exe = "target/${{ matrix.target }}/release/exvlan-service.exe"
+          if (Test-Path $exe) { & $exe --uninstall }
+          sc.exe delete era.exvlan.studio.service 2>$null
+          Get-Process exvlan -ErrorAction SilentlyContinue | Stop-Process -Force
+          exit 0
+
       - name: Upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
