@@ -462,6 +462,13 @@ async function onModeSave() {
   try {
     // 先落盘并等待后端确认，再做连接（连接失败也保留用户选择）。
     await saveModeNow(editingMode.value);
+    // 运行方式是独立权威键：不同步写会在下次启动时与 app_mode 漂移。
+    if (editingMode.value.mode === "service" || editingMode.value.mode === "normal") {
+      runtimeKind.value = editingMode.value.mode;
+      targetId.value = LOCAL_TARGET;
+      await saveRuntime(editingMode.value.mode);
+      await saveTargetId(LOCAL_TARGET);
+    }
     // 切模式后内核的配置目录/实例集合可能不同：先清空上次选择，
     // 由 initWithMode 按新内核的真实列表恢复，避免对着不存在的实例反复 get_config。
     instanceId.value = undefined;
@@ -666,8 +673,28 @@ async function afterConnect(mode: Mode) {
   // 连接成功后再恢复一次上次网络（不依赖 clientRunning 的 false→true 翻转）
   // 注意：切模式后配置目录不同，上次的网络 ID 可能在新内核里不存在，
   // 直接使用会导致前端反复 `get_config` 失败（日志里的 `Not found: No such network instance`）。
-  const lastId = await knownInstanceOrDrop(loadLastNetworkInstanceId());
+  //
+  // 换内核/重启服务后 RPC 会在最初几秒里 `deadline has elapsed`（实测 Windows 上
+  // 连上后立刻查实例列表必然超时），所以这里退避重试，而不是一次就放弃。
+  const lastId = await knownInstanceOrDropWithRetry(loadLastNetworkInstanceId());
   instanceId.value = lastId;
+}
+
+/** 换内核后实例列表可能短暂不可用：300/600/1200ms 退避重试。 */
+async function knownInstanceOrDropWithRetry(
+  candidate: string | null | undefined,
+): Promise<string | undefined> {
+  for (const wait of [0, 300, 600, 1200]) {
+    if (wait > 0) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+    try {
+      return await knownInstanceOrDrop(candidate);
+    } catch (e) {
+      void logDiagStep("instance_restore_retry", String(e).slice(0, 120));
+    }
+  }
+  return knownInstanceOrDrop(candidate);
 }
 
 /** 安静地应用当前运行方式（远程目标时用：失败只记日志，不影响远程连接）。 */
@@ -911,6 +938,9 @@ onMounted(async () => {
   // 运行方式 × 目标 是新的权威模型；旧 app_mode 仅在没有 runtime 时用于迁移。
   runtimeKind.value = loadRuntime();
   targetId.value = loadTargetId();
+  // 首次从 app_mode 迁移时把结果写回 prefs.toml，避免两个来源长期漂移。
+  void saveRuntime(runtimeKind.value).catch(() => {});
+  void saveTargetId(targetId.value).catch(() => {});
   const hadAppMode = localStorage.getItem("app_mode") !== null;
   const savedMode = loadMode();
   // 本机运行方式由 runtimeKind 决定（app_mode 里的 remote 已在 target 迁移中处理）。

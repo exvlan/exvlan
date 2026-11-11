@@ -265,9 +265,14 @@ mod imp {
 
     /// 首次安装（提权一次）：跑随包 `exvlan-service --install <uid>`。
     pub fn install(app: &tauri::AppHandle) -> Result<(), String> {
-        let src = bundled_service(app).ok_or_else(|| {
-            "安装包内未找到服务二进制（resources/service/exvlan-service）".to_string()
-        })?;
+        // 按平台拼文件名：Windows 是 .exe，写死会让错误信息本身就无法执行。
+        let bin = if cfg!(windows) {
+            "exvlan-service.exe"
+        } else {
+            "exvlan-service"
+        };
+        let src = bundled_service(app)
+            .ok_or_else(|| format!("安装包内未找到服务二进制（resources/service/{bin}）"))?;
         let uid = current_uid().to_string();
         crate::run_elevated(&["--install-exvlan-service", &src.display().to_string(), &uid])?;
         // 安装脚本内部已等 socket 就绪，这里再兜一次（避免 launchd 抖动）。

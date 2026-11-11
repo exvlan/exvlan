@@ -46,7 +46,13 @@ const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
 const MINISIGN_PUBKEY: &str = "RWSFKUboUUaFQYx/ap73a7ySNbuI5kjDGsiVJBtceshu+Ml99YPMFqe9";
 const PROTO: u32 = 1;
 const RPC_PORTAL: &str = "0.0.0.0:15999";
-const RPC_WHITELIST: &str = "10.254.0.0/16";
+/// RPC 白名单：**必须包含回环**。
+///
+/// 内核的默认白名单是 `127.0.0.0/8` + `::1/128`；一旦显式传 `--rpc-portal-whitelist`，
+/// 就是**整体替换**而不是追加。pre.13 只写了 `10.254.0.0/16` → GUI 从 127.0.0.1
+/// 连进来被 `on_new_client` 拒绝（TCP 能建连、请求无人应答），表现为
+/// `[cmd:list_network_instance_ids] Timeout: deadline has elapsed`。
+const RPC_WHITELIST: &str = "127.0.0.0/8,::1/128,10.254.0.0/16";
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------
@@ -83,6 +89,31 @@ fn version_path(bin: &Path) -> PathBuf {
     let mut raw = bin.as_os_str().to_os_string();
     raw.push(".version");
     PathBuf::from(raw)
+}
+
+/// 安装者 uid 的旁路记录（0644）。`service.json` 是 0600 root，服务自身能读，
+/// 但一旦它损坏/缺失，socket 属主就无从得知 —— 那时退化成 `0660 root:wheel`，
+/// 正是 pre.13 让普通用户 EACCES 的原因。这里留一份可读的副本。
+#[cfg(unix)]
+fn owner_path(bin: &Path) -> PathBuf {
+    let mut raw = bin.as_os_str().to_os_string();
+    raw.push(".owner");
+    PathBuf::from(raw)
+}
+
+#[cfg(unix)]
+fn write_owner_file(p: &Paths, uid: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let path = owner_path(&p.service_bin);
+    std::fs::write(&path, format!("{uid}\n"))?;
+    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
+    Ok(())
+}
+
+#[cfg(unix)]
+fn read_owner_file(p: &Paths) -> Option<u32> {
+    let text = std::fs::read_to_string(owner_path(&p.service_bin)).ok()?;
+    text.trim().parse().ok().filter(|uid| *uid != 0)
 }
 
 fn write_version_file(p: &Paths) -> std::io::Result<()> {
@@ -409,6 +440,22 @@ impl State {
             self.stop_kernel().ok();
             bail!("kernel start failed: {err}");
         }
+        // `wait_rpc_ready` 只看端口通不通：若 15999 已被**残留**的旧内核占着，
+        // 我们刚拉起的这个会因 bind 失败立刻退出，而探活仍会“成功”。
+        // 必须再确认子进程还活着，否则会一路错下去（pre.13 实测出现多个孤儿内核）。
+        {
+            let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(child) = guard.child.as_mut()
+                && let Ok(Some(status)) = child.try_wait()
+            {
+                guard.child = None;
+                self.log(format!("kernel exited immediately: {status}"));
+                bail!(
+                    "内核启动后立即退出（{status}）：很可能是 15999 端口被残留进程占用，\
+                     请结束遗留的 exvlan 进程后重试"
+                );
+            }
+        }
 
         Ok(KernelInfo {
             pid,
@@ -693,6 +740,18 @@ fn wait_rpc_ready(timeout: Duration) -> anyhow::Result<()> {
 }
 
 #[cfg(unix)]
+fn chown_to(path: &Path, uid: u32) {
+    use std::os::unix::ffi::OsStrExt as _;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return;
+    };
+    // gid 保持 0（wheel）：属主已是目标用户，组权限无实际作用。
+    unsafe {
+        libc::chown(c.as_ptr(), uid, 0);
+    }
+}
+
+#[cfg(unix)]
 fn chown_root(path: &Path) {
     use std::os::unix::ffi::OsStrExt as _;
     let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
@@ -896,16 +955,52 @@ fn serve_unix(state: Arc<State>) -> anyhow::Result<()> {
     let path = socket_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).ok();
+        // launchd 下 umask 常为 077 → `create_dir_all` 会建成 0700 root，
+        // 普通用户连目录都穿越不进去（同样是 connect EACCES）。
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755));
+        }
     }
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).context("bind unix socket 失败")?;
-    #[cfg(unix)]
+
+    // socket 属主必须是**调用方**（GUI 用户）：pre.13 用的是 0660 + root:wheel，
+    // 普通用户不在 wheel 组里 → connect 直接 EACCES（服务 running、socket 在，
+    // 但 GUI 永远「未就绪」）。属主来源三级：service.json → .owner 文件 → 收紧。
+    let owner = {
+        let from_json = state
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config
+            .owner_uid;
+        if from_json != 0 {
+            from_json
+        } else {
+            read_owner_file(&state.paths).unwrap_or(0)
+        }
+    };
     {
         use std::os::unix::fs::PermissionsExt as _;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660));
-        chown_root(&path);
+        if owner != 0 {
+            chown_to(&path, owner);
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        } else {
+            // 拿不到属主时**不放宽**：0o666 会让任意本地用户都能连（peercred 在
+            // expected==0 时也会放行）→ 本地可反复停内核。宁可让 GUI 显示横幅。
+            chown_root(&path);
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            log_line(
+                &state.paths,
+                "socket owner 未知（service.json 与 .owner 都不可用），已收紧为 0600 root",
+            );
+        }
     }
-    state.log(format!("listening on {}", path.display()));
+    state.log(format!(
+        "listening on {} (owner_uid={owner})",
+        path.display()
+    ));
 
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -1299,19 +1394,19 @@ fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Interactive</string>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>StandardOutPath</key><string>{log}</string>
-  <key>StandardErrorPath</key><string>{log}</string>
+  <key>StandardErrorPath</key><string>{errlog}</string>
 </dict>
 </plist>
 "#,
         bin = p.service_bin.display(),
-        log = p.service_log.display()
+        errlog = p.service_log.with_file_name("service.stderr.log").display()
     );
     std::fs::write(plist, body)?;
     std::fs::set_permissions(plist, std::fs::Permissions::from_mode(0o644))?;
     chown_root(plist);
 
     let _ = write_version_file(p);
+    let _ = write_owner_file(p, uid);
 
     let cfg = ServiceConfig {
         owner_uid: uid,
@@ -1629,10 +1724,15 @@ fn uninstall(_p: &Paths) -> anyhow::Result<()> {
 fn diagnose(p: &Paths) -> anyhow::Result<()> {
     let mut out = String::new();
     out.push_str(&format!("service: {BUILD_VERSION}\n"));
-    out.push_str(&format!(
-        "config: {}\n",
-        serde_json::to_string(&load_config(p)).unwrap_or_default()
-    ));
+    // `service.json` 是 0600 root：普通用户跑 `--diagnose` 读不到它。
+    // 明确报出来，而不是用 `unwrap_or_default()` 打印一份假的 {owner_uid:0}。
+    match std::fs::read_to_string(&p.service_json) {
+        Ok(text) => out.push_str(&format!("config: {}\n", text.trim())),
+        Err(err) => out.push_str(&format!(
+            "config: <unreadable: {err}> path={}\n",
+            p.service_json.display()
+        )),
+    }
     out.push_str(&format!("mode(boot): {:?}\n", load_config(p).mode));
     #[allow(unused_mut)]
     let mut probes: Vec<(&str, &Path)> = vec![

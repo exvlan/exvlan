@@ -797,15 +797,15 @@ mode:
   service: Service
   remote: Remote
   normal_description: Run Exvlan directly, suitable for local use.
-  helper: Privileged helper
-  helper_missing: "Privileged helper is not ready: TUN in normal mode is unavailable (service mode is unaffected)."
+  helper: Privileged service
+  helper_missing: "The privileged service is not ready. Both run modes need it (it owns the kernel and the TUN device)."
   helper_retry: Retry install
-  helper_retry_ok: Helper is ready
+  helper_retry_ok: Privileged service is ready
   helper_retry_failed: Retry failed
   normal_consent: |-
-    Normal mode launches the kernel as administrator through a privileged helper
-    (macOS helper / Windows scheduled task) so it can create the virtual adapter (TUN).
-    The kernel is stopped when you quit the app, and it is mutually exclusive with service mode.
+    In normal mode the kernel is still owned by the privileged service
+    (exvlan-service); it just stops when you quit the app.
+    The first install asks for authorisation once — switching and upgrading never prompt again.
     Switch now?
   service_description: Run as a system service, supporting auto-startup and background operation. The service continues to run in the background after exiting the GUI.
   remote_description: Connect to a remote RPC service to manage and control remote nodes.

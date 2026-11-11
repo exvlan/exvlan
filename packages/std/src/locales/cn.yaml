@@ -796,14 +796,14 @@ mode:
   service: 服务模式
   remote: 远程模式
   normal_description: 直接运行EraXVlan，适合本地使用
-  helper: 特权组件（helper）
-  helper_missing: 特权组件未就绪：普通模式的 TUN 不可用（服务模式不受影响）。
+  helper: 特权服务
+  helper_missing: 特权服务未就绪：两种运行方式都需要它（TUN 与内核都由它托管）。
   helper_retry: 重试安装
-  helper_retry_ok: 特权组件已就绪
+  helper_retry_ok: 特权服务已就绪
   helper_retry_failed: 重试安装失败
   normal_consent: |-
-    普通模式需要通过系统特权组件（macOS helper / Windows 计划任务）以管理员身份启动内核，
-    以便创建虚拟网卡（TUN）。退出应用时会自动停止该内核，且与「服务模式」互斥。
+    普通模式下内核仍由特权服务（exvlan-service）托管，只是「关闭界面即停」。
+    首次安装需要一次系统授权，之后切换/升级都不会再弹。
     确定切换吗？
   service_description: 作为系统服务运行，支持开机自启和后台运行。退出GUI后服务仍在后台运行。
   remote_description: 连接到远程RPC服务，管理和控制远程节点

@@ -1563,11 +1563,11 @@ fn kernel_log_text(dir: &std::path::Path, max_bytes: usize) -> Option<String> {
 }
 
 /// 诊断上传服务（Cloudflare Worker，见 packages/diagnostics）。
-const DIAG_UPLOAD_URL: &str = "https://exvlan-diag.era-x.cn/";
+const DIAG_UPLOAD_URL: &str = "https://diag.exvlan.era-x.cn/";
 /// 短期 token 端点（Worker 用 `TOKEN_SECRET` 签发，绑定请求 IP，10 分钟有效）。
 ///
 /// 客户端**不再内置任何长期密钥**；token 取到后在有效期内复用。
-const DIAG_TOKEN_URL: &str = "https://exvlan-diag.era-x.cn/token";
+const DIAG_TOKEN_URL: &str = "https://diag.exvlan.era-x.cn/token";
 
 /// 单份日志进 zip 的上限（压缩后很小，但避免把 10MB 的轮转文件反复读进内存）。
 const DIAG_LOG_CAP: usize = 8 * 1024 * 1024;

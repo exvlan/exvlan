@@ -271,11 +271,42 @@ fn service_state_json() -> Value {
         );
         let plist = crate::paths::privileged_service_plist();
         value["plist"] = file_meta(&plist);
+
+        // socket 属主/权限：pre.13 的「服务 running 但 GUI 连不上」就是这里
+        // 看到 0660 root:wheel，一眼可判。目录权限同样要（launchd umask 会建 0700）。
+        let sock = crate::paths::privileged_service_socket();
+        value["socket"] = file_meta(&sock);
+        if let Some(dir) = sock.parent() {
+            value["socket_dir"] = file_meta(dir);
+        }
+        value["socket_perms"] = json!(unix_perms(&sock));
+        value["socket_dir_perms"] = json!(
+            sock.parent()
+                .map(unix_perms)
+                .unwrap_or_else(|| "-".to_string())
+        );
         value["print_disabled"] = json!(launchctl_print_disabled());
         value["codesign"] = json!(codesign_summary(&Some(bin)));
     }
 
     value
+}
+
+/// `uid:gid mode` 摘要（诊断包用）。
+#[cfg(unix)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn unix_perms(path: &Path) -> String {
+    use std::os::unix::fs::MetadataExt as _;
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => format!("{}:{} {:o}", meta.uid(), meta.gid(), meta.mode() & 0o7777),
+        Err(err) => format!("<{err}>"),
+    }
+}
+
+#[cfg(not(unix))]
+#[allow(dead_code)]
+fn unix_perms(_path: &Path) -> String {
+    "-".to_string()
 }
 
 /// `launchctl print-disabled system` 里与 exvlan 相关的行。
@@ -741,6 +772,24 @@ fn dns_txt_srv(host: &str) -> String {
     })
 }
 
+/// 带超时预算的 A/AAAA 解析（阻塞解析放到独立线程，超时即放弃）。
+fn resolve_addrs_budget(host: &str, timeout: Duration) -> Result<Vec<String>, String> {
+    let name = host.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = (name.as_str(), 443)
+            .to_socket_addrs()
+            .map(|it| it.map(|a| a.ip().to_string()).collect::<Vec<_>>())
+            .map_err(|e| e.to_string());
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(list)) => Ok(list),
+        Ok(Err(err)) => Err(err),
+        Err(_) => Err(format!("timeout after {}s", timeout.as_secs())),
+    }
+}
+
 /// D10：关键域名的 DNS 解析结果（A/AAAA + TXT/SRV 尽力而为）。
 pub fn collect_dns_resolve() -> Collected {
     let mut out = String::new();
@@ -751,12 +800,11 @@ pub fn collect_dns_resolve() -> Collected {
         "config-server.xvlan.era-x.cn",
     ] {
         out.push_str(&format!("=== {host} ===\n"));
-        // A/AAAA：标准库解析（不依赖外部命令）
-        match (host, 443).to_socket_addrs() {
-            Ok(addrs) => {
-                let list: Vec<String> = addrs.map(|a| a.ip().to_string()).collect();
-                out.push_str(&format!("addr: {}\n", list.join(", ")));
-            }
+        // A/AAAA：标准库解析（不依赖外部命令），但**必须**加预算：
+        // 系统解析器对一个不存在的域名会卡到 5s+，四个域名串起来就是实测的
+        // 11.6s（整包最慢的一项）。
+        match resolve_addrs_budget(host, Duration::from_secs(2)) {
+            Ok(addrs) => out.push_str(&format!("addr: {}\n", addrs.join(", "))),
             Err(err) => out.push_str(&format!("addr: ERROR {err}\n")),
         }
         // TXT / SRV：走解析器（原生命令行 dig 在 Windows 上不存在）
