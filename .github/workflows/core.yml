@@ -11,6 +11,13 @@ on:
         description: "Build the Magisk module"
         type: boolean
         default: true
+      variant:
+        description: >-
+          concurrency 组判别符。同一个 run 里可能调用本工作流多次
+          （core_desktop 与 core），必须区分，否则两次调用会用同一个
+          `core-<ref>` 组互相取消（实测整条 pipeline 被标记 cancelled）。
+        type: string
+        default: "all"
   workflow_dispatch:
     inputs:
       targets:
@@ -21,9 +28,14 @@ on:
         description: "Build the Magisk module"
         type: boolean
         default: true
+      variant:
+        description: "concurrency 组判别符（见 workflow_call 中的说明）"
+        type: string
+        default: "all"
 
 concurrency:
-  group: core-${{ github.ref }}
+  # variant 用来区分「同一 run 内的多次调用」；不同 ref 之间仍然互相取代。
+  group: core-${{ github.ref }}-${{ inputs.variant }}
   cancel-in-progress: true
 
 env:
@@ -51,6 +63,10 @@ jobs:
         }}
     steps:
       - id: skip_check
+        # 同一个 run 里可能调用本工作流两次（core / core_desktop）。
+        # fkirc 的 cancel_others 会把「同内容更新的一次」当成重复并取消，
+        # 与上面的 concurrency 是两处独立误伤 —— desktop 那次直接跳过它。
+        if: inputs.variant == 'all'
         uses: fkirc/skip-duplicate-actions@b974a9395958c231af965b70070979a577efa578 # v5
         with:
           concurrent_skipping: "same_content_newer"

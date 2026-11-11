@@ -183,6 +183,8 @@ jobs:
     with:
       targets: '["x86_64-apple-darwin","x86_64-pc-windows-msvc"]'
       build_magisk: false
+      # 必须与下面 core 的 variant 不同：否则同一 run 内两次调用会互相取消
+      variant: desktop
     secrets: inherit
 
   core:
@@ -196,6 +198,7 @@ jobs:
     with:
       targets: ${{ github.ref_name == 'feature' && '["x86_64-unknown-linux-musl"]' || '["x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","riscv64gc-unknown-linux-musl","loongarch64-unknown-linux-musl","armv7-unknown-linux-musleabihf","armv7-unknown-linux-musleabi","arm-unknown-linux-musleabihf","arm-unknown-linux-musleabi","x86_64-unknown-freebsd","aarch64-apple-darwin","i686-pc-windows-msvc","aarch64-pc-windows-msvc"]' }}
       build_magisk: ${{ github.ref_name != 'feature' }}
+      variant: main
     secrets: inherit
 
   # 旁路组件：develop/main push 按路径门控；tag/dispatch 全量；feature/PR 跳过。
