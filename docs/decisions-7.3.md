@@ -208,3 +208,95 @@ POST /zip  Authorization: Bearer <token>
 | 自建上传服务        | Cloudflare Worker 只**下线**（删 DNS/route），代码与 `deploy.sh` 保留作灾备。sgp 上 `diag` 容器（oven/bun，hostNetwork，127.0.0.1:22100）+ `diag.exvlan.era-x.cn`（灰云 A → 8.219.215.202）                                                                                                                        |
 | 旧 label 清理       | 保留「发现 `era.exvlan.studio` / `com.exvlan.*` / `exvlan-studio` 就 bootout/删除」的幂等扫描；**清理列表绝不包含当前 label**（pre.12 的 `bootstrap EIO` 就是列表里含当前 label 导致刚写的 plist 被删）                                                                                                            |
 | 诊断采集修正        | `join_collect` 先 join 再计时；DNS TXT/SRV 每查询 2s 预算；`list_dir_newest` 只扫 2000 条；Android/iOS 直接短路托盘/菜单调用；`unhandledrejection` 补合成 stack                                                                                                                                                    |
+
+---
+
+## 13. pre.14 决策与事故复盘（pre.13 的三个阻断级 bug）
+
+pre.13 发布后经 macOS / Windows 真机实测，发现 **6 个阻断级问题**，全部在 pre.14 修复。
+
+### 事故一：Windows 安装包里没有 `exvlan-service.exe`
+
+`tauri.windows.conf.json` 的 `bundle.resources` 会**整体替换**基础配置，pre.13 只补了
+`resources/kernel/*` 而漏了 `resources/service/*` → `bundled_service()` 返回 None →
+安装必然失败（issue #47）。CI 只校验了构建机的 staging 目录，所以照常通过。
+
+修：补全 resources；新增 `script/ci/check-tauri-resources.py`（平台覆盖必须是基础的超集，
+PR 阶段拦截）；`Verify service bundled` 增加**真实产物**断言（macOS 查 `.app/Contents`，
+Windows 用 `7z l *-setup.exe` 列 NSIS 内容）。
+
+### 事故二：Windows 服务启动即 1067
+
+`--daemon` 在 `StartServiceCtrlDispatcherW` **之前**就建 State、拉内核（含最多 10s 等 RPC），
+SCM 判定未响应直接终止；`service_main` 从未执行，`service.log` 只剩 `daemon start`。
+且 `service_main` 不注册控制句柄、不上报 `SERVICE_RUNNING`。
+
+修：`run_daemon` 拆三平台版本，Windows 只调 `win::run(p)`（先注册 dispatcher）；
+`service_main` 内注册控制句柄 + 上报 RUNNING + 单一 `State` + 退出前 `stop_kernel()`。
+
+### 事故三：macOS socket 权限 `0660 root:wheel` → 普通用户 EACCES
+
+服务 `running`、socket 也在，但 GUI `connect` 直接 EACCES（`events.log`
+`Permission denied (os error 13)`），界面永远显示「特权服务未就绪」。
+另外 launchd 的 umask 会把 `/var/run/<id>` 建成 0700 root，连目录穿越都被拒。
+
+修：目录显式 0755；socket `chown(owner_uid)` + 0600；属主来源三级
+（`service.json` → 0644 的 `.owner` 旁路文件 → 收紧为 0600 root 并告警，**不 fail-open**）。
+
+### 事故四：RPC 白名单丢掉回环 → `deadline has elapsed`
+
+`--rpc-portal-whitelist` 是**整体替换**而非追加。pre.13 只写 `10.254.0.0/16`，
+GUI 从 127.0.0.1 连进来被 `on_new_client` 拒绝 —— TCP 能建连、请求无人应答，
+表现为 `[cmd:list_network_instance_ids] Timeout: deadline has elapsed` 与
+「无法连接至远程客户端」。macOS / Windows 同时中招。
+
+修：白名单改为**由已配置的虚拟网段推导**（见 §12 的 RPC 暴露条目）。
+
+### 事故五：`exvlan-service --version` 报 crate 版本 → 每次启动重装服务
+
+`env!("CARGO_PKG_VERSION")` 永远不含 `-pre.N+sha`，GUI 用 `--version` 与
+`BUILD_VERSION` 比较 → 恒不相等 → 每次启动都替换服务二进制并重启。
+修：改用 `option_env!("EXVLAN_BUILD_VERSION")`（与 GUI 同源），并在二进制旁写
+`service.version`（0644），GUI 优先读文件（零子进程），缺失才回退 `--version`。
+
+### 事故六：`ensure_kernel` 持锁自死锁 → 服务 RUNNING 但没有内核
+
+`ensure_kernel` 持 `inner` 锁时调用 `rpc_whitelist()` / `kernel_args()`，两者内部又
+`self.inner.lock()`；`std::sync::Mutex` 不可重入 → 同线程永久阻塞。表现为
+`sc query` RUNNING、日志停在 `windows service start`、内核从未 spawn，
+且连 `rpc whitelist =` 那行都没有。macOS 更严重（`boot()` 在 `serve_unix` 之前，
+连 socket 都不 bind）。
+
+修（锁纪律）：
+
+- 白名单计算改为**无锁纯函数** `compute_whitelist(config_dir, extra)`；
+  `kernel_args(&whitelist)` 接收参数
+- `ensure_kernel` 只在读写 child 字段时短暂持锁，`spawn` 与 10s 探活移到锁外
+- `starting` 标志 + `await_kernel_start()`：并发不重复 spawn，等待方不持锁
+- `stop_kernel` 先摘出 child 再等退出（等待期间不持锁）
+
+看门狗：`BOOT_DONE` / `KERNEL_UP` 两个原子量 + 监视线程（**不碰 mutex**）。
+`BOOT_DONE` 20s 未置位 → 写日志并 `exit(70)` 让 launchd/SCM 重启。
+注意判据是「boot 是否走完」而不是「内核是否起来」—— 后者会让「内核缺失」
+这类可解释的失败变成重启风暴。
+
+CI 硬门禁：`service.yml` 的 Windows 作业真实 `--install` 一次，断言日志出现
+`rpc whitelist =` 且（`kernel spawned` 或 `boot ensure_kernel failed`），随后清理。
+编译与单测都拦不住「启动卡死」，只有真跑一遍才行。
+
+### 顺带修掉的其它不一致
+
+| 项                    | 结论                                                                                                                             |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 闪 cmd 窗口           | `exvlan-service` 改 GUI 子系统（不分配控制台）+ 所有 `sc`/`schtasks` 走 `CREATE_NO_WINDOW`                                       |
+| 命名管道 ACL          | 显式 SDDL `D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)`，不依赖 LocalSystem 默认 DACL                                               |
+| 运行方式真源          | `runtime`（prefs）唯一权威；`app_mode` 停止写入，只读迁移                                                                        |
+| `rpc_portal`          | 强制 `127.0.0.1:15999`（服务与 supervisor 都写死；旧数据里的自定义端口会连不上）                                                 |
+| 模式 UI               | 删除 `ModeSwitcher` 与 6 个在 mac/win 不生效的字段；设置新增「服务」页；「模式」改只读摘要                                       |
+| 假成功按钮            | 「停止服务」「卸载服务」原调旧 label 命令，对新服务无效 → 改为 `runtime_apply('off')` / `service_uninstall`                      |
+| `service.json` 读不到 | Windows `install()` 从不调 `save_config`；`--diagnose` 用 `unwrap_or_default()` 伪造 `{owner_uid:0}` → 改为明确报 `<unreadable>` |
+| 日志重复              | plist 的 `StandardOutPath` 与自写文件重叠（每行两遍）→ 去掉 StdOut，stderr 独立 `service.stderr.log`                             |
+| 15999 被占用          | 新增 `port.owner` / `port.cleanup`（只终止路径等于 `<core>/exvlan` 的进程）                                                      |
+| DHCP 实例             | 读不到静态地址时回退 `10.254.0.0/16` 并在日志注明                                                                                |
+| 诊断域名              | `DIAG_UPLOAD_URL` / `DIAG_TOKEN_URL` → `https://diag.exvlan.era-x.cn`（灰云直连）；旧 Worker 保留待 pre.14 覆盖足够后再下线      |
+| `toml` 解析           | `str::parse::<toml::Value>()` 解析的是「值」不是文档 → 每个网络配置都被当成失败、白名单退化只剩回环；改用 `toml::from_str`       |

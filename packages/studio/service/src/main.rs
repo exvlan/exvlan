@@ -74,8 +74,11 @@ const BOOT_WATCHDOG: Duration = Duration::from_secs(20);
 /// 看门狗用的**无锁**状态：故意不碰 `inner` 互斥量 ——
 /// 它要能检测「boot 因为持锁而卡死」这种情况，自己去拿锁就一起卡住了。
 static KERNEL_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// 本次启动是否**期望**内核（mode == service）。
-static EXPECT_KERNEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// `boot()` 是否已经**走完**（成功或失败都算）。
+///
+/// 看门狗只关心「卡住」，不关心「失败」：内核缺失/端口冲突属于可解释的失败，
+/// 已经写进日志，不该因为看门狗把服务反复重启（那会变成重启风暴）。
+static BOOT_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
 // 路径
@@ -1484,32 +1487,25 @@ fn spawn_boot_watchdog(paths: Paths) {
         let deadline = Instant::now() + BOOT_WATCHDOG;
         while Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(500));
-            if KERNEL_UP.load(std::sync::atomic::Ordering::SeqCst)
-                || !EXPECT_KERNEL.load(std::sync::atomic::Ordering::SeqCst)
-            {
-                return;
+            if BOOT_DONE.load(std::sync::atomic::Ordering::SeqCst) {
+                return; // boot 走完了（成功或失败都算，失败已在日志里）
             }
         }
-        if !KERNEL_UP.load(std::sync::atomic::Ordering::SeqCst)
-            && EXPECT_KERNEL.load(std::sync::atomic::Ordering::SeqCst)
-        {
-            log_line(
-                &paths,
-                &format!(
-                    "boot watchdog: 内核未在 {}s 内启动（boot 卡住？），主动退出以便重启",
-                    BOOT_WATCHDOG.as_secs()
-                ),
-            );
-            std::process::exit(70);
-        }
+        log_line(
+            &paths,
+            &format!(
+                "boot watchdog: boot 在 {}s 内未完成（疑似卡死；内核已起={}），主动退出以便重启",
+                BOOT_WATCHDOG.as_secs(),
+                KERNEL_UP.load(std::sync::atomic::Ordering::SeqCst)
+            ),
+        );
+        std::process::exit(70);
     });
 }
 
 /// 服务启动时按持久化 mode 决定是否拉起内核（macOS / Windows 共用）。
 fn boot(state: &State) {
     let mode = state.lock_inner().mode;
-    // 看门狗只读原子量，绝不碰 mutex（否则它自己也会被卡住）。
-    EXPECT_KERNEL.store(mode == Mode::Service, std::sync::atomic::Ordering::SeqCst);
     match mode {
         Mode::Service => {
             if let Err(err) = state.ensure_kernel() {
@@ -1518,6 +1514,8 @@ fn boot(state: &State) {
         }
         Mode::Normal | Mode::Off => state.log(format!("boot mode={mode:?}: 不自动启动内核")),
     }
+    // 无论成功失败，boot 到这里就算走完：看门狗据此区分「卡住」与「失败」。
+    BOOT_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 // ---------------------------------------------------------------------------
