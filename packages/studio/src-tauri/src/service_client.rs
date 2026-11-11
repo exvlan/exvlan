@@ -326,7 +326,21 @@ mod imp {
             }),
         );
         let _ = std::fs::remove_dir_all(&staging);
-        result.map(|_| true)
+        result?;
+
+        // 服务侧只负责「拉住 updater 并立即返回」，真正的替换是异步的。
+        // 这里必须确认版本真的变了，否则会在「装不上 → 下次启动又重装」
+        // 之间死循环（pre.14 实测每 3 秒一次 sc stop/start）。
+        for _ in 0..30 {
+            if installed_version().as_deref() == Some(want) {
+                return Ok(true);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        Err(format!(
+            "服务自更新后版本仍为 {:?}（期望 {want}，见 service.log），改走提权安装",
+            installed_version()
+        ))
     }
 
     pub fn set_mode(mode: &str) -> Result<(), String> {
@@ -422,10 +436,17 @@ mod imp {
         std::fs::copy(&sig, staging.join("kernel.sig")).map_err(|e| e.to_string())?;
         std::fs::write(staging.join("version"), crate::BUILD_VERSION).map_err(|e| e.to_string())?;
 
-        let result = request(
-            "apply",
-            serde_json::json!({ "staging": staging.display().to_string() }),
-        );
+        let body = serde_json::json!({ "staging": staging.display().to_string() });
+        // 服务正在重启（例如刚做完自更新）时会读到空响应；等它起来再试一次。
+        let result = match request("apply", body.clone()) {
+            Err(err)
+                if err.contains("空响应") || err.contains("os error 2") || err.contains("拒绝") =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                request("apply", body)
+            }
+            other => other,
+        };
         let _ = std::fs::remove_dir_all(&staging);
         result.map(|_| ())
     }

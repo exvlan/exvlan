@@ -113,7 +113,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           prefix-key: ""
-          shared-key: "exvlan-shared"
+          # 每个 target 独立 key（之前两个 target 共用一个，命中率互相挤）
+          shared-key: "studio-${{ matrix.GUI_TARGET }}"
           cache-targets: true
 
       # 内核二进制来自 core 产物（不再由 GUI 编译），放进 bundle resources。

@@ -4517,18 +4517,37 @@ pub struct ProvisionPayload {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn stop_kernel_if_running() -> bool {
     match crate::service_client::kernel_status() {
-        Ok((_pid, true)) => match crate::service_client::stop_kernel() {
-            Ok(()) => {
-                crate::logger::record("provision.kernel", "stopped before kernel replace");
-                true
-            }
-            Err(err) => {
-                crate::logger::record("provision.kernel", format!("stop failed: {err}"));
-                false
-            }
-        },
-        _ => false,
+        Ok((_pid, true)) => {}
+        Ok((_pid, false)) => return false,
+        Err(err) => {
+            // 读不到状态（服务正在重启/IPC 打不通）：不能假定"没在跑"，
+            // 否则后面 rename 覆盖运行中的 exe 会得到一个没头没脑的 os error 5。
+            crate::logger::record(
+                "provision.kernel",
+                format!("kernel status unavailable before replace: {err}"),
+            );
+            return false;
+        }
     }
+    if let Err(err) = crate::service_client::stop_kernel() {
+        crate::logger::record("provision.kernel", format!("stop failed: {err}"));
+        return false;
+    }
+    // Windows 上必须等文件锁真正释放，否则 `rename` 替换 exe 会失败。
+    for _ in 0..30 {
+        match crate::service_client::kernel_status() {
+            Ok((_, false)) => {
+                crate::logger::record("provision.kernel", "stopped before kernel replace");
+                return true;
+            }
+            _ => std::thread::sleep(std::time::Duration::from_millis(200)),
+        }
+    }
+    crate::logger::record(
+        "provision.kernel",
+        "kernel 仍在运行（等待 6s 超时），替换内核可能失败",
+    );
+    true
 }
 
 /// 跑随包 `exvlan-service --install <uid>`（调用方必须是**已提权**的进程）。
@@ -4561,7 +4580,12 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
 
     let result = (|| -> anyhow::Result<()> {
         if let Some(src) = req.kernel_src.as_deref() {
-            kernel::install_kernel(std::path::Path::new(src), &req.kernel_version)?;
+            kernel::install_kernel(std::path::Path::new(src), &req.kernel_version)
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "替换内核失败（旧内核可能仍在运行或被占用；请关闭所有 Exvlan 进程后重试）: {e:#}"
+                    )
+                })?;
             crate::logger::record(
                 "provision.kernel",
                 format!("installed {}", req.kernel_version),

@@ -170,14 +170,31 @@ jobs:
             --branch main \
             --commit-dirty=true
 
+  # 桌面内核单独一个作业：GUI 矩阵只消费这两个 target。
+  # 拆开后 studio 不必等 12 个无关 target（含最慢的 macos-aarch64，实测 45m）。
+  # 只会在真正构建 GUI 的场景跑（develop/main push、tag、dispatch）。
+  core_desktop:
+    name: Build Core (desktop)
+    needs: [changes, web_dist]
+    if: >-
+      github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+      github.ref_name != 'feature'
+    uses: ./.github/workflows/core.yml
+    with:
+      targets: '["x86_64-apple-darwin","x86_64-pc-windows-msvc"]'
+      build_magisk: false
+    secrets: inherit
+
   core:
     name: Build Core
     # 不再等 tests：core 构建不消费测试结果；tests 仍作为 release 的门禁。
+    # 这里只建非桌面 target（桌面两个在 core_desktop），避免重复构建；
+    # magisk 依赖 linux-aarch64，所以留在本作业。
     needs: [changes, web_dist]
     if: github.event_name != 'schedule'
     uses: ./.github/workflows/core.yml
     with:
-      targets: ${{ github.ref_name == 'feature' && '["x86_64-unknown-linux-musl"]' || 'all' }}
+      targets: ${{ github.ref_name == 'feature' && '["x86_64-unknown-linux-musl"]' || '["x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","riscv64gc-unknown-linux-musl","loongarch64-unknown-linux-musl","armv7-unknown-linux-musleabihf","armv7-unknown-linux-musleabi","arm-unknown-linux-musleabihf","arm-unknown-linux-musleabi","x86_64-unknown-freebsd","aarch64-apple-darwin","i686-pc-windows-msvc","aarch64-pc-windows-msvc"]' }}
       build_magisk: ${{ github.ref_name != 'feature' }}
     secrets: inherit
 
@@ -277,21 +294,23 @@ jobs:
 
   studio:
     name: Build Studio GUI
-    needs: core
+    # 只等桌面内核（GUI 矩阵只下载 core-macos-*/core-windows-*）
+    needs: core_desktop
     if: >-
       github.event_name != 'schedule' && github.event_name != 'pull_request' &&
       github.ref_name != 'feature' &&
-      (needs.core.result == 'success' || needs.core.result == 'skipped')
+      (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped')
     uses: ./.github/workflows/studio.yml
     secrets: inherit
 
   mobile:
     name: Build Studio Mobile
-    needs: core
+    # 移动端只用 mobile-kernel-* 产物，不需要等内核作业
+    needs: core_desktop
     if: >-
       github.event_name != 'schedule' && github.event_name != 'pull_request' &&
       github.ref_name != 'feature' &&
-      (needs.core.result == 'success' || needs.core.result == 'skipped')
+      (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped')
     uses: ./.github/workflows/mobile.yml
     secrets: inherit
 
@@ -351,7 +370,7 @@ jobs:
         needs.mobile.result == 'success'
       )
     # tests 必须在列：core 已不再 needs tests，release 要自己把测试门禁接回来
-    needs: [tests, core, studio, mobile, publish_sdk, publish_go]
+    needs: [tests, core, core_desktop, studio, mobile, publish_sdk, publish_go]
     uses: ./.github/workflows/release.yml
     with:
       version: ${{ github.ref_name }} # tag 名即为版本号，如 v26.410.20712

@@ -1202,10 +1202,21 @@ impl State {
         }
         verify_minisign(&new_bin, &sig)?;
 
+        // 关键：GUI 在收到 IPC 响应后会立刻删除 staging 目录，而 updater 是
+        // 异步的（等主进程退出）。所以必须**同步**把新二进制搬到服务自己的
+        // 目录，updater 只用这个稳定路径。（pre.14 实测：staging 被删后
+        // updater 报 os error 3，然后每次启动都重试，形成死循环。）
+        let staged = {
+            let mut raw = self.paths.service_bin.as_os_str().to_os_string();
+            raw.push(".new");
+            PathBuf::from(raw)
+        };
+        std::fs::copy(&new_bin, &staged).context("暂存新服务二进制失败")?;
+
         let exe = std::env::current_exe().context("定位自身可执行文件失败")?;
         let mut cmd = Command::new(&exe);
         cmd.arg("--replace-updater")
-            .arg(&new_bin)
+            .arg(&staged)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -1505,6 +1516,9 @@ fn spawn_boot_watchdog(paths: Paths) {
 
 /// 服务启动时按持久化 mode 决定是否拉起内核（macOS / Windows 共用）。
 fn boot(state: &State) {
+    // 每次启动都写一遍版本文件：替换二进制成功后（新进程启动时）版本立刻反映，
+    // 不必等下一次 install/update；也顺带修复「版本文件丢失」的情况。
+    let _ = write_version_file(&state.paths);
     let mode = state.lock_inner().mode;
     match mode {
         Mode::Service => {
