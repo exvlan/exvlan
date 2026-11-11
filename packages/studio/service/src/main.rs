@@ -31,6 +31,9 @@ use serde::{Deserialize, Serialize};
 
 const SERVICE_LABEL: &str = "era.exvlan.studio.service";
 
+/// 应用 ID（目录名 / 旧 label 前缀）。与服务侧 `paths.rs` 的 `APP_ID` 一致。
+const APP_ID: &str = "era.exvlan.studio";
+
 /// 构建版本串：`<标准版本>[-<channel>.<n>][+<sha6>]`。
 ///
 /// 由 CI 的 `script/ci/build-version.sh` 通过 `EXVLAN_BUILD_VERSION` 注入，
@@ -46,13 +49,20 @@ const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
 const MINISIGN_PUBKEY: &str = "RWSFKUboUUaFQYx/ap73a7ySNbuI5kjDGsiVJBtceshu+Ml99YPMFqe9";
 const PROTO: u32 = 1;
 const RPC_PORTAL: &str = "0.0.0.0:15999";
-/// RPC 白名单：**必须包含回环**。
+/// 回环：GUI 自己从这里连进来，**任何情况下都不能少**。
 ///
-/// 内核的默认白名单是 `127.0.0.0/8` + `::1/128`；一旦显式传 `--rpc-portal-whitelist`，
-/// 就是**整体替换**而不是追加。pre.13 只写了 `10.254.0.0/16` → GUI 从 127.0.0.1
-/// 连进来被 `on_new_client` 拒绝（TCP 能建连、请求无人应答），表现为
+/// 内核的默认白名单是 `127.0.0.0/8` + `::1/128`；一旦显式传
+/// `--rpc-portal-whitelist`，就是**整体替换**而不是追加。pre.13 只写了
+/// `10.254.0.0/16` → GUI 从 127.0.0.1 连进来被 `on_new_client` 拒绝
+/// （TCP 能建连、请求无人应答），表现为
 /// `[cmd:list_network_instance_ids] Timeout: deadline has elapsed`。
-const RPC_WHITELIST: &str = "127.0.0.0/8,::1/128,10.254.0.0/16";
+const RPC_LOOPBACK: [&str; 2] = ["127.0.0.0/8", "::1/128"];
+
+/// DHCP 实例读不到静态地址时的回退池（保守值，会写进日志提醒）。
+const DHCP_FALLBACK_POOL: &str = "10.254.0.0/16";
+
+/// 额外白名单允许的上限（防止把整张表塞进来）。
+const MAX_EXTRA_WHITELIST: usize = 8;
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------
@@ -195,6 +205,10 @@ pub struct ServiceConfig {
     pub owner_uid: u32,
     #[serde(default)]
     pub mode: Mode,
+    /// 用户额外允许访问 RPC 的网段（逃生口，例如 WSL 的 172.x）。
+    /// 默认空：实际白名单由 `<config-dir>/*.toml` 里的虚拟网段自动推导。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rpc_extra_whitelist: Vec<String>,
 }
 
 impl Default for ServiceConfig {
@@ -202,6 +216,7 @@ impl Default for ServiceConfig {
         Self {
             owner_uid: 0,
             mode: Mode::Service,
+            rpc_extra_whitelist: Vec::new(),
         }
     }
 }
@@ -280,6 +295,9 @@ struct Request {
     staging: Option<String>,
     #[serde(default)]
     version: Option<String>,
+    /// `whitelist.set` 的额外网段
+    #[serde(default)]
+    extra: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -304,6 +322,9 @@ struct Response {
     code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
+    /// 结构化数据（whitelist / port 这类查询）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
 }
 
 impl Response {
@@ -316,6 +337,7 @@ impl Response {
             kernel: None,
             code: None,
             message: None,
+            data: None,
         }
     }
     fn err(code: &str, message: impl Into<String>) -> Self {
@@ -327,6 +349,7 @@ impl Response {
             kernel: None,
             code: Some(code.to_string()),
             message: Some(message.into()),
+            data: None,
         }
     }
 }
@@ -345,6 +368,304 @@ struct Inner {
 pub struct State {
     paths: Paths,
     inner: Mutex<Inner>,
+}
+
+// ---------------------------------------------------------------------------
+// RPC 白名单：由已配置的虚拟网段推导
+// ---------------------------------------------------------------------------
+
+/// `10.254.1.22/27` → `10.254.1.0/27`（把主机位清零）。
+fn cidr_network(value: &str) -> Option<String> {
+    let (addr, len) = value.trim().split_once('/')?;
+    let len: u8 = len.trim().parse().ok()?;
+    if let Ok(v4) = addr.trim().parse::<std::net::Ipv4Addr>() {
+        if len > 32 {
+            return None;
+        }
+        let mask = if len == 0 {
+            0
+        } else {
+            u32::MAX << (32 - u32::from(len))
+        };
+        let net = std::net::Ipv4Addr::from(u32::from(v4) & mask);
+        return Some(format!("{net}/{len}"));
+    }
+    if let Ok(v6) = addr.trim().parse::<std::net::Ipv6Addr>() {
+        if len > 128 {
+            return None;
+        }
+        let mask = if len == 0 {
+            0
+        } else {
+            u128::MAX << (128 - u32::from(len))
+        };
+        let net = std::net::Ipv6Addr::from(u128::from(v6) & mask);
+        return Some(format!("{net}/{len}"));
+    }
+    None
+}
+
+/// 只允许私网 / 链路本地 / 回环。拒绝 `0.0.0.0/0` 与公网段 —— 白名单是唯一门禁，
+/// 放公网等于把无认证的内核 RPC 暴露到互联网。
+fn validate_cidr(cidr: &str) -> Result<String, String> {
+    let normalized = cidr_network(cidr).ok_or_else(|| format!("不是合法 CIDR: {cidr}"))?;
+    let (addr, len) = normalized.split_once('/').expect("cidr_network 保证有 /");
+    let len: u8 = len.parse().expect("cidr_network 保证 len 是数字");
+
+    let v4_ranges: [(std::net::Ipv4Addr, u8); 5] = [
+        ("10.0.0.0".parse().unwrap(), 8),
+        ("172.16.0.0".parse().unwrap(), 12),
+        ("192.168.0.0".parse().unwrap(), 16),
+        ("127.0.0.0".parse().unwrap(), 8),
+        ("100.64.0.0".parse().unwrap(), 10),
+    ];
+    if let Ok(v4) = addr.parse::<std::net::Ipv4Addr>() {
+        for (base, base_len) in v4_ranges {
+            if len >= base_len {
+                let mask = u32::MAX << (32 - u32::from(base_len));
+                if u32::from(v4) & mask == u32::from(base) & mask {
+                    return Ok(normalized);
+                }
+            }
+        }
+        // 169.254.0.0/16（链路本地）
+        if len >= 16
+            && u32::from(v4) & 0xffff_0000
+                == u32::from("169.254.0.0".parse::<std::net::Ipv4Addr>().unwrap())
+        {
+            return Ok(normalized);
+        }
+        return Err(format!("只允许私网/链路本地/回环网段（拒绝 {cidr}）"));
+    }
+    if let Ok(v6) = addr.parse::<std::net::Ipv6Addr>() {
+        let bits = u128::from(v6);
+        // ::1/128
+        if bits == 1 {
+            return Ok(normalized);
+        }
+        // fc00::/7、fe80::/10
+        for (base, base_len) in [("fc00::", 7u8), ("fe80::", 10)] {
+            if len >= base_len {
+                let mask = u128::MAX << (128 - u32::from(base_len));
+                let base_bits = u128::from(base.parse::<std::net::Ipv6Addr>().unwrap());
+                if bits & mask == base_bits & mask {
+                    return Ok(normalized);
+                }
+            }
+        }
+        return Err(format!("只允许私网/链路本地/回环网段（拒绝 {cidr}）"));
+    }
+    Err(format!("不是合法 CIDR: {cidr}"))
+}
+
+/// 扫 `<config-dir>/*.toml`，收集每个网络实例的虚拟网段。
+///
+/// 内核就是从该目录加载 `*.toml`（`exvlan/src/core.rs`），所以这里是权威来源。
+/// 返回 (网段列表, 提示信息)。
+fn configured_networks(config_dir: &Path) -> (Vec<String>, Vec<String>) {
+    let mut cidrs: Vec<String> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(config_dir) else {
+        return (cidrs, notes);
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            notes.push(format!("{name}: 无法读取，已跳过"));
+            continue;
+        };
+        let Ok(value) = text.parse::<toml::Value>() else {
+            notes.push(format!("{name}: TOML 解析失败，已跳过"));
+            continue;
+        };
+        let mut found = false;
+        for key in ["ipv4", "ipv6"] {
+            let Some(raw) = value.get(key).and_then(|v| v.as_str()) else {
+                continue;
+            };
+            match cidr_network(raw) {
+                Some(cidr) => {
+                    if !cidrs.contains(&cidr) {
+                        cidrs.push(cidr);
+                    }
+                    found = true;
+                }
+                None => notes.push(format!("{name}: {key}={raw} 无法解析")),
+            }
+        }
+        if !found {
+            // DHCP 或未配置静态地址：无法知道实际网段，回退到默认池。
+            if !cidrs.contains(&DHCP_FALLBACK_POOL.to_string()) {
+                cidrs.push(DHCP_FALLBACK_POOL.to_string());
+            }
+            notes.push(format!(
+                "{name}: 无静态地址（DHCP），使用默认池 {DHCP_FALLBACK_POOL}"
+            ));
+        }
+    }
+    (cidrs, notes)
+}
+
+// ---------------------------------------------------------------------------
+// 端口占用诊断（15999 被残留内核占住时，现场要能看出是谁）
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, serde::Serialize)]
+struct PortOwner {
+    pid: u32,
+    name: String,
+    /// 可执行文件完整路径（可能为空：拿不到权限时）。
+    path: String,
+}
+
+impl PortOwner {
+    /// 只清「我们自己的内核」：路径必须与 `<core>/exvlan(.exe)` 完全一致。
+    /// 只按进程名判断不安全（可能误杀同名程序）。
+    fn is_our_kernel(&self, kernel: &Path) -> bool {
+        if self.path.is_empty() {
+            return false;
+        }
+        let a = Path::new(&self.path);
+        let b = kernel;
+        // Windows 路径大小写不敏感
+        if cfg!(windows) {
+            a.to_string_lossy()
+                .eq_ignore_ascii_case(&b.to_string_lossy())
+        } else {
+            a == b
+        }
+    }
+}
+
+#[cfg(unix)]
+fn port_owner(port: u16) -> Option<PortOwner> {
+    let out = Command::new("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fpc"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut pid: Option<u32> = None;
+    let mut name = String::new();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix('p') {
+            pid = rest.trim().parse::<u32>().ok();
+        } else if let Some(rest) = line.strip_prefix('c') {
+            name = rest.trim().to_string();
+        }
+        if pid.is_some() && !name.is_empty() {
+            break;
+        }
+    }
+    let pid = pid?;
+    let path = Command::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .and_then(|line| line.split_whitespace().next().map(str::to_owned))
+        .unwrap_or_default();
+    Some(PortOwner { pid, name, path })
+}
+
+/// Windows：`OpenProcess` + `QueryFullProcessImageNameW` 取真实路径。
+#[cfg(target_os = "windows")]
+fn process_image_path(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    };
+
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return None;
+    }
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    let ok = unsafe { QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut len) };
+    unsafe { CloseHandle(handle) };
+    if ok == 0 {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&buf[..len as usize]))
+}
+
+#[cfg(target_os = "windows")]
+fn port_owner(port: u16) -> Option<PortOwner> {
+    let out = hidden("netstat").args(["-ano"]).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let needle = format!(":{port}");
+    let mut pid: Option<u32> = None;
+    for line in text.lines() {
+        if !line.contains("LISTENING") {
+            continue;
+        }
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if !fields.iter().any(|f| f.ends_with(&needle)) {
+            continue;
+        }
+        if let Some(last) = fields.last().and_then(|s| s.parse::<u32>().ok()) {
+            pid = Some(last);
+            break;
+        }
+    }
+    let pid = pid?;
+    let path = process_image_path(pid).unwrap_or_default();
+    let name = Path::new(&path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    Some(PortOwner { pid, name, path })
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn port_owner(_port: u16) -> Option<PortOwner> {
+    None
+}
+
+#[cfg(unix)]
+fn terminate_pid(pid: u32) -> anyhow::Result<()> {
+    let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    if rc != 0 {
+        bail!("kill({pid}) 失败: {}", std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn terminate_pid(pid: u32) -> anyhow::Result<()> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
+
+    let handle = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
+    if handle.is_null() {
+        bail!(
+            "OpenProcess({pid}) 失败: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let ok = unsafe { TerminateProcess(handle, 1) };
+    unsafe { CloseHandle(handle) };
+    if ok == 0 {
+        bail!(
+            "TerminateProcess({pid}) 失败: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn terminate_pid(_pid: u32) -> anyhow::Result<()> {
+    bail!("不支持终止进程")
 }
 
 impl State {
@@ -371,6 +692,62 @@ impl State {
         take_pid(&mut guard)
     }
 
+    /// 结构化白名单信息（GUI 的「设置 → 服务」展示用）。
+    fn whitelist_info(&self) -> serde_json::Value {
+        let (networks, mut notes) = configured_networks(&self.paths.config);
+        let extra = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config
+            .rpc_extra_whitelist
+            .clone();
+        let (effective, more_notes) = self.rpc_whitelist();
+        notes.extend(more_notes);
+        serde_json::json!({
+            "effective": effective,
+            "loopback": RPC_LOOPBACK,
+            "networks": networks,
+            "extra": extra,
+            "notes": notes,
+            "dhcp_fallback": DHCP_FALLBACK_POOL,
+            "max_extra": MAX_EXTRA_WHITELIST,
+        })
+    }
+
+    /// 计算生效的 RPC 白名单：回环 + 各虚拟网段 + 用户额外追加。
+    ///
+    /// 返回 `(逗号分隔参数, 提示/告警)`，提示会写进 service.log 与诊断包。
+    fn rpc_whitelist(&self) -> (String, Vec<String>) {
+        let (networks, mut notes) = configured_networks(&self.paths.config);
+
+        let extra = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config
+            .rpc_extra_whitelist
+            .clone();
+
+        let mut list: Vec<String> = RPC_LOOPBACK.iter().map(|s| s.to_string()).collect();
+        for cidr in networks {
+            if !list.contains(&cidr) {
+                list.push(cidr);
+            }
+        }
+        for raw in extra {
+            match validate_cidr(&raw) {
+                Ok(cidr) => {
+                    if !list.contains(&cidr) {
+                        list.push(cidr);
+                    }
+                }
+                Err(err) => notes.push(format!("额外白名单 {raw} 已忽略: {err}")),
+            }
+        }
+        (list.join(","), notes)
+    }
+
     fn kernel_args(&self) -> Vec<String> {
         vec![
             "--config-dir".into(),
@@ -378,7 +755,7 @@ impl State {
             "--rpc-portal".into(),
             RPC_PORTAL.into(),
             "--rpc-portal-whitelist".into(),
-            RPC_WHITELIST.into(),
+            self.rpc_whitelist().0,
             "--file-log-dir".into(),
             self.paths.logs.display().to_string(),
             "--file-log-level".into(),
@@ -414,6 +791,12 @@ impl State {
         }
         std::fs::create_dir_all(&self.paths.config).ok();
         std::fs::create_dir_all(&self.paths.logs).ok();
+
+        let (whitelist, notes) = self.rpc_whitelist();
+        self.log(format!("rpc whitelist = {whitelist}"));
+        for note in notes {
+            self.log(format!("rpc whitelist: {note}"));
+        }
 
         let mut cmd = Command::new(&self.paths.kernel);
         cmd.args(self.kernel_args())
@@ -641,6 +1024,78 @@ impl State {
                     Err(err) => Response::err("update_failed", err.to_string()),
                 },
                 None => Response::err("bad_request", "staging 缺失"),
+            },
+            "whitelist.get" => {
+                let mut r = Response::ok();
+                r.data = Some(self.whitelist_info());
+                r
+            }
+            "whitelist.set" => {
+                let raw = req.extra.unwrap_or_default();
+                if raw.len() > MAX_EXTRA_WHITELIST {
+                    return Response::err(
+                        "too_many",
+                        format!("额外网段最多 {MAX_EXTRA_WHITELIST} 条"),
+                    );
+                }
+                let mut cleaned = Vec::new();
+                for item in &raw {
+                    match validate_cidr(item) {
+                        Ok(cidr) => {
+                            if !cleaned.contains(&cidr) {
+                                cleaned.push(cidr);
+                            }
+                        }
+                        Err(err) => return Response::err("bad_cidr", err),
+                    }
+                }
+                {
+                    let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+                    guard.config.rpc_extra_whitelist = cleaned;
+                    let cfg = guard.config.clone();
+                    drop(guard);
+                    if let Err(err) = save_config(&self.paths, &cfg) {
+                        return Response::err("save_failed", err.to_string());
+                    }
+                }
+                self.log("rpc_extra_whitelist updated (restart required)");
+                let mut r = Response::ok();
+                r.data = Some(self.whitelist_info());
+                r
+            }
+            "port.owner" => {
+                let mut r = Response::ok();
+                r.data = Some(match port_owner(15999) {
+                    Some(owner) => serde_json::json!({
+                        "port": 15999,
+                        "pid": owner.pid,
+                        "name": owner.name,
+                        "path": owner.path,
+                        "is_our_kernel": owner.is_our_kernel(&self.paths.kernel),
+                    }),
+                    None => serde_json::json!({ "port": 15999, "free": true }),
+                });
+                r
+            }
+            "port.cleanup" => match port_owner(15999) {
+                None => Response::err("nothing", "15999 当前没有被占用"),
+                Some(owner) if !owner.is_our_kernel(&self.paths.kernel) => Response::err(
+                    "not_ours",
+                    format!(
+                        "占用者是 {}（pid={}, path={}），不是本产品的内核，拒绝终止",
+                        owner.name, owner.pid, owner.path
+                    ),
+                ),
+                Some(owner) => match terminate_pid(owner.pid) {
+                    Ok(()) => {
+                        self.log(format!(
+                            "port cleanup: killed stale kernel pid={}",
+                            owner.pid
+                        ));
+                        Response::ok()
+                    }
+                    Err(err) => Response::err("kill_failed", err.to_string()),
+                },
             },
             other => Response::err("bad_request", format!("未知操作: {other}")),
         }
@@ -960,7 +1415,7 @@ fn boot(state: &State) {
 
 #[cfg(unix)]
 fn socket_path() -> PathBuf {
-    PathBuf::from("/var/run/era.exvlan.studio/service.sock")
+    Path::new("/var/run").join(APP_ID).join("service.sock")
 }
 
 #[cfg(unix)]
@@ -1426,6 +1881,8 @@ fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
     let cfg = ServiceConfig {
         owner_uid: uid,
         mode: load_config(p).mode,
+        // 重装时保留用户手工追加的网段，不要静默清空。
+        rpc_extra_whitelist: load_config(p).rpc_extra_whitelist,
     };
     save_config(p, &cfg)?;
 
@@ -1476,6 +1933,8 @@ fn cleanup_legacy_macos() {
             let _ = std::fs::remove_file(format!("{dir}/{label}.plist"));
         }
     }
+    // 旧 helper 的运行时 socket（pre.12 遗留，权限还是 0666）
+    let _ = std::fs::remove_file(Path::new("/var/run").join(APP_ID).join("helper.sock"));
     // 旧 helper 二进制
     for stale in [
         "/Library/PrivilegedHelperTools/era.exvlan.studio.helper",
@@ -1512,6 +1971,7 @@ fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
     let cfg = ServiceConfig {
         owner_uid: 0,
         mode: load_config(p).mode,
+        rpc_extra_whitelist: load_config(p).rpc_extra_whitelist,
     };
     save_config(p, &cfg)?;
 
@@ -1812,4 +2272,55 @@ fn diagnose(p: &Paths) -> anyhow::Result<()> {
         eprintln!("\n(saved to {})", tmp.display());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod whitelist_tests {
+    use super::{cidr_network, validate_cidr};
+
+    #[test]
+    fn masks_host_bits() {
+        assert_eq!(
+            cidr_network("10.254.1.22/27").as_deref(),
+            Some("10.254.1.0/27")
+        );
+        assert_eq!(
+            cidr_network("192.168.5.7/24").as_deref(),
+            Some("192.168.5.0/24")
+        );
+        assert_eq!(cidr_network("10.0.0.1/8").as_deref(), Some("10.0.0.0/8"));
+        assert_eq!(cidr_network("fd00::5/64").as_deref(), Some("fd00::/64"));
+        assert_eq!(cidr_network("bogus/24"), None);
+        assert_eq!(cidr_network("10.1.1.1/33"), None);
+    }
+
+    #[test]
+    fn accepts_private_and_loopback() {
+        for cidr in [
+            "127.0.0.0/8",
+            "::1/128",
+            "10.254.1.0/27",
+            "172.20.0.0/16",
+            "192.168.1.0/24",
+            "100.64.0.0/16",
+            "169.254.0.0/16",
+            "fd00::/64",
+            "fe80::/10",
+        ] {
+            assert!(validate_cidr(cidr).is_ok(), "{cidr} 应被接受");
+        }
+    }
+
+    #[test]
+    fn rejects_public_and_default_routes() {
+        for cidr in [
+            "0.0.0.0/0",
+            "::/0",
+            "8.8.8.0/24",
+            "2001:4860::/32",
+            "1.1.1.1/32",
+        ] {
+            assert!(validate_cidr(cidr).is_err(), "{cidr} 必须被拒绝");
+        }
+    }
 }

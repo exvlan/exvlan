@@ -1822,6 +1822,13 @@ fn build_diagnostics_zip(
             DIAG_LOG_CAP,
             true,
         );
+        // daemon 的 panic / 未捕获错误走 stderr，单独落一个文件
+        add_file(
+            "service.stderr.log",
+            &crate::paths::service_log().with_file_name("service.stderr.log"),
+            DIAG_LOG_CAP,
+            true,
+        );
     }
 
     // 网络自检（由上传流程传入，含前端状态）
@@ -4409,6 +4416,32 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 }
             }
         }
+        Some("--exvlan-service-uninstall") => {
+            let bin = crate::service_client::installed_service_bin();
+            if !bin.is_file() {
+                report("service", &format!("服务未安装: {}", bin.display()));
+                ExitCode::FAILURE
+            } else {
+                match std::process::Command::new(&bin).arg("--uninstall").output() {
+                    Ok(out) if out.status.success() => ExitCode::SUCCESS,
+                    Ok(out) => {
+                        report(
+                            "service",
+                            &format!(
+                                "uninstall exit={} stderr={}",
+                                out.status,
+                                String::from_utf8_lossy(&out.stderr).trim()
+                            ),
+                        );
+                        ExitCode::FAILURE
+                    }
+                    Err(err) => {
+                        report("service", &format!("无法执行 --uninstall: {err}"));
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+        }
         Some("--exvlan-service-ctl") => {
             // 重启特权服务（提权）：交给服务二进制自己做，GUI 不碰 launchd/SC。
             let bin = crate::service_client::installed_service_bin();
@@ -4809,6 +4842,9 @@ fn ensure_service_and_kernel(app: &AppHandle) -> Result<String, String> {
     if !installed {
         logger::record("service.install", "首次安装特权服务（一次提权）");
         crate::service_client::install(app)?;
+        // 装成功了说明授权链路没问题，清掉历史上"用户点过取消"的标记，
+        // 否则它会在 prefs 里永久生效、让后续自动安装被静默跳过。
+        let _ = crate::prefs::set_ui_state(app.clone(), "elevate_denied".to_string(), None);
         acted = true;
     } else if need_service_version {
         // 免密升级：服务已经常驻，新二进制交给它自己替换。
@@ -4967,6 +5003,53 @@ async fn ensure_kernel_service(
     _opts: serde_json::Value,
 ) -> Result<String, String> {
     Ok("current".to_string())
+}
+
+/// 卸载特权服务（提权一次），随后把运行方式回落为「普通」。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn service_uninstall(runtime: String) -> Result<String, String> {
+    let bin = crate::service_client::installed_service_bin();
+    if !bin.is_file() {
+        return Err(format!("服务未安装: {}", bin.display()));
+    }
+    // 卸载走服务二进制自己（和安装对称），提权一次。
+    run_elevated(&["--exvlan-service-uninstall"])?;
+    logger::record("service.uninstall", "done");
+    // 卸载后内核没人托管：按用户选择回落普通模式（默认）或停止。
+    let next = if runtime == "off" { "off" } else { "normal" };
+    if next == "normal" {
+        crate::service_client::set_mode("normal").ok();
+    }
+    Ok(next.to_string())
+}
+
+/// 当前生效的 RPC 白名单（回环 + 各虚拟网段 + 额外追加）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn service_whitelist_info() -> Result<serde_json::Value, String> {
+    crate::service_client::whitelist_info()
+}
+
+/// 设置额外允许的网段（服务端做 CIDR 校验，拒绝公网段）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn service_extra_whitelist_set(extra: Vec<String>) -> Result<serde_json::Value, String> {
+    crate::service_client::set_extra_whitelist(&extra)
+}
+
+/// 谁占着 15999（诊断用；不是自家内核时只展示）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn port_owner_info() -> Result<serde_json::Value, String> {
+    crate::service_client::port_owner()
+}
+
+/// 结束占用 15999 的自家内核（服务端校验进程路径，非自家拒绝执行）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn port_cleanup() -> Result<(), String> {
+    crate::service_client::port_cleanup()
 }
 
 /// 服务自检（只读）：内核/服务状态、RPC 端口连通性、daemon 日志尾部。
@@ -5621,6 +5704,11 @@ pub fn run_gui() -> std::process::ExitCode {
             init_rpc_connection,
             runtime_apply,
             remote_ping,
+            service_uninstall,
+            service_whitelist_info,
+            service_extra_whitelist_set,
+            port_owner_info,
+            port_cleanup,
             is_client_running,
             init_web_client,
             is_web_client_connected,

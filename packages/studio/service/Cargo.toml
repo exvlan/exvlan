@@ -16,6 +16,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 minisign-verify = "0.3"
 base64.workspace = true
+# 读 `<config-dir>/*.toml` 推导 RPC 白名单（见 `rpc_whitelist`）
+toml.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

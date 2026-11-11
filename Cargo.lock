@@ -3164,6 +3164,7 @@ dependencies = [
  "minisign-verify",
  "serde",
  "serde_json",
+ "toml 1.1.8+spec-1.1.0",
  "windows-service",
  "windows-sys 0.59.0",
 ]

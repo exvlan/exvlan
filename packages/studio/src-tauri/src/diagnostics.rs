@@ -289,6 +289,18 @@ fn service_state_json() -> Value {
         value["codesign"] = json!(codesign_summary(&Some(bin)));
     }
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // 生效的白名单（回环 + 各虚拟网段）与 15999 占用者：
+        // 「远程管理连不上」和「内核起不来」这两类问题都靠这两项定位。
+        if let Ok(info) = crate::service_client::whitelist_info() {
+            value["whitelist"] = info;
+        }
+        if let Ok(owner) = crate::service_client::port_owner() {
+            value["port_15999"] = owner;
+        }
+    }
+
     value
 }
 

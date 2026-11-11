@@ -78,13 +78,15 @@ pub struct ServiceState {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use imp::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, set_mode, state, stop, stop_kernel, update,
+    is_installed, is_ready, kernel_status, port_cleanup, port_owner, set_extra_whitelist, set_mode,
+    state, stop, stop_kernel, update, whitelist_info,
 };
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub use stub::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, set_mode, state, stop, stop_kernel, update,
+    is_installed, is_ready, kernel_status, port_cleanup, port_owner, set_extra_whitelist, set_mode,
+    state, stop, stop_kernel, update, whitelist_info,
 };
 
 // ---------------------------------------------------------------------------
@@ -375,6 +377,29 @@ mod imp {
         *guard = None; // 断开连接：normal 模式下服务会停内核
     }
 
+    /// 生效的 RPC 白名单（回环 + 各虚拟网段 + 额外追加）。
+    pub fn whitelist_info() -> Result<serde_json::Value, String> {
+        let resp = request("whitelist.get", serde_json::json!({}))?;
+        Ok(resp.get("data").cloned().unwrap_or_default())
+    }
+
+    /// 设置额外网段；服务端会做 CIDR 校验并拒绝公网段。
+    pub fn set_extra_whitelist(extra: &[String]) -> Result<serde_json::Value, String> {
+        let resp = request("whitelist.set", serde_json::json!({ "extra": extra }))?;
+        Ok(resp.get("data").cloned().unwrap_or_default())
+    }
+
+    /// 谁占着 15999（诊断用）。
+    pub fn port_owner() -> Result<serde_json::Value, String> {
+        let resp = request("port.owner", serde_json::json!({}))?;
+        Ok(resp.get("data").cloned().unwrap_or_default())
+    }
+
+    /// 结束占用 15999 的**自家内核**（服务端会校验路径，非自家拒绝）。
+    pub fn port_cleanup() -> Result<(), String> {
+        request("port.cleanup", serde_json::json!({})).map(|_| ())
+    }
+
     /// 免密换内核：把随包内核 + 签名 + 版本放进 staging，再让服务 apply。
     pub fn apply_bundled(app: &tauri::AppHandle) -> Result<(), String> {
         let kernel = crate::kernel::bundled_kernel(app).ok_or("未找到随包内核")?;
@@ -473,5 +498,17 @@ mod stub {
     }
     pub fn apply_bundled(_app: &tauri::AppHandle) -> Result<(), String> {
         Err("Linux 没有特权服务（换内核走提权）".to_string())
+    }
+    pub fn whitelist_info() -> Result<serde_json::Value, String> {
+        Err("当前平台没有特权服务".to_string())
+    }
+    pub fn set_extra_whitelist(_extra: &[String]) -> Result<serde_json::Value, String> {
+        Err("当前平台没有特权服务".to_string())
+    }
+    pub fn port_owner() -> Result<serde_json::Value, String> {
+        Err("当前平台没有特权服务".to_string())
+    }
+    pub fn port_cleanup() -> Result<(), String> {
+        Err("当前平台没有特权服务".to_string())
     }
 }
