@@ -678,6 +678,13 @@ async function loadElevateDenied() {
   }
 }
 
+async function onServiceUninstalled() {
+  // 服务已卸载：内核没人托管，按决策自动回落普通模式（本机子进程）。
+  await switchRuntime("normal").catch(() => {});
+  await refreshServiceState();
+  await refreshTrayMenu().catch(() => {});
+}
+
 async function onServiceDialogChanged() {
   await refreshServiceState();
   await refreshTrayMenu().catch(() => {});
@@ -1316,7 +1323,11 @@ const configServerConnectionStatus = computed(() => {
       />
     </div>
 
-    <ServiceSettings v-model:visible="serviceDialogVisible" @changed="onServiceDialogChanged" />
+    <ServiceSettings
+      v-model:visible="serviceDialogVisible"
+      @changed="onServiceDialogChanged"
+      @uninstalled="onServiceUninstalled"
+    />
 
     <SettingsDialog
       v-model:visible="settingsVisible"

@@ -5015,13 +5015,11 @@ async fn service_uninstall(runtime: String) -> Result<String, String> {
     }
     // 卸载走服务二进制自己（和安装对称），提权一次。
     run_elevated(&["--exvlan-service-uninstall"])?;
+    // 卸载后服务已经不存在，不能再走 IPC；运行方式的回落由前端负责
+    // （`switchRuntime("normal")` 会重新 ensure + 连本机）。
+    crate::service_client::stop();
     logger::record("service.uninstall", "done");
-    // 卸载后内核没人托管：按用户选择回落普通模式（默认）或停止。
-    let next = if runtime == "off" { "off" } else { "normal" };
-    if next == "normal" {
-        crate::service_client::set_mode("normal").ok();
-    }
-    Ok(next.to_string())
+    Ok(if runtime == "off" { "off" } else { "normal" }.to_string())
 }
 
 /// 当前生效的 RPC 白名单（回环 + 各虚拟网段 + 额外追加）。

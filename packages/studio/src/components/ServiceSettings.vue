@@ -22,7 +22,11 @@ import {
 } from "~/composables/backend";
 
 const visible = defineModel<boolean>("visible", { default: false });
-const emit = defineEmits<{ (e: "changed"): void }>();
+const emit = defineEmits<{
+  (e: "changed"): void;
+  /** 卸载完成：外层需要把运行方式回落为普通模式 */
+  (e: "uninstalled"): void;
+}>();
 
 const { t } = useI18n();
 const toast = useToast();
@@ -142,7 +146,7 @@ async function onUninstall() {
       detail: t("service_settings.uninstall_done_detail", { mode: next }),
       life: 10000,
     });
-    emit("changed");
+    emit("uninstalled");
     visible.value = false;
   } catch (e: unknown) {
     toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 12000 });
