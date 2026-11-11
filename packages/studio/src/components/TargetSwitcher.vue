@@ -7,6 +7,7 @@ import { useI18n } from "vue-i18n";
 import { type as osType } from "@tauri-apps/plugin-os";
 import { useToast } from "openvue";
 import {
+  DEFAULT_RPC_PORT,
   LOCAL_TARGET,
   type RemoteTarget,
   type RuntimeKind,
@@ -43,13 +44,19 @@ const isMobile = computed(() => {
   return p === "android" || p === "ios";
 });
 
+/** `vServer · 10.254.1.1:15999`，没填名字时只显示地址。 */
+function remoteLabel(remote: RemoteTarget): string {
+  const addr = `${remote.host}:${remote.port || DEFAULT_RPC_PORT}`;
+  return remote.name ? `${remote.name} · ${addr}` : addr;
+}
+
 const targetText = computed(() => {
   if (props.targetId === LOCAL_TARGET) {
     return t("target.local");
   }
   const remote = remotes.value.find((r) => r.id === props.targetId);
   if (!remote) return t("target.missing");
-  return remote.name || `${remote.host}:${remote.port}`;
+  return remoteLabel(remote);
 });
 
 const runtimeText = computed(() => t(`runtime.${props.runtime}`));
@@ -99,7 +106,8 @@ const items = computed(() => {
         command: () => emit("switch-target", LOCAL_TARGET),
       },
       ...remotes.value.map((remote) => ({
-        label: remote.name || `${remote.host}:${remote.port}`,
+        // 名字与地址都给出来：只显示 name 时看不出连的是哪台机器
+        label: remoteLabel(remote),
         icon: props.targetId === remote.id ? "pi pi-check" : "pi pi-globe",
         command: () => emit("switch-target", remote.id),
       })),

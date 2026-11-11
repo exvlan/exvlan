@@ -2235,7 +2235,8 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
         let _ = hidden("sc").args(["start", SERVICE_LABEL]).output();
         return Err(anyhow::anyhow!("替换服务二进制失败: {err}"));
     }
-    let _ = write_version_file(p);
+    // 不在这里写 `service.version`：本进程是**旧**二进制，写进去的是旧版本；
+    // 新服务启动时 `boot()` 会写自己的版本。
 
     // 3) 拉起；失败回滚
     let start = hidden("sc").args(["start", SERVICE_LABEL]).output()?;
@@ -2263,7 +2264,7 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
     std::fs::copy(new_exe, &p.service_bin).context("替换服务二进制失败")?;
     let _ = std::fs::set_permissions(&p.service_bin, std::fs::Permissions::from_mode(0o755));
     chown_root(&p.service_bin);
-    let _ = write_version_file(p);
+    // 同上：版本文件由新服务启动时写入，避免这里写成旧版本。
 
     // kickstart -k：杀掉旧进程并按 plist 重新拉起（此时已是新二进制）。
     let out = Command::new("/bin/launchctl")
