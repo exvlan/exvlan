@@ -66,6 +66,12 @@ jobs:
       - name: Check path literals
         run: bash script/ci/check-paths.sh
 
+      # 打包守卫：平台覆盖文件不能丢掉基础配置的 bundle.resources
+      # （pre.13 事故：tauri.windows.conf.json 整体替换后没有 resources/service/*，
+      #   Windows 安装包里根本没有 exvlan-service.exe → 安装必失败）
+      - name: Check tauri bundle resources
+        run: python3 script/ci/check-tauri-resources.py
+
       # runner 预装内容 + 全 feature 构建很容易打满磁盘（曾多次 No space left on device）
       - name: Free disk space
         run: |

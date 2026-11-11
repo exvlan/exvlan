@@ -221,10 +221,28 @@ jobs:
           set -euo pipefail
           BIN=exvlan-service
           [[ "$GUI_TARGET" =~ windows ]] && BIN=exvlan-service.exe
+          # 1) staging 目录（构建机）
           test -f "packages/studio/src-tauri/resources/service/$BIN" \
             || { echo "::error::staging 目录缺少 $BIN"; exit 1; }
           test -f "packages/studio/src-tauri/resources/service/$BIN.sig" \
             || { echo "::error::缺少服务签名 $BIN.sig"; exit 1; }
+
+          # 2) 真实产物。staging 有 ≠ 打进包里 —— pre.13 的 Windows 事故就是
+          #    `tauri.windows.conf.json` 整体替换 resources 后漏了 service，
+          #    staging 检查却照样通过。
+          if [[ "$GUI_TARGET" =~ darwin ]]; then
+            hits=$(find "target/$GUI_TARGET/release/bundle/macos" -path '*Resources*' -name 'exvlan-service' 2>/dev/null | wc -l)
+            [ "$hits" -ge 1 ] || { echo "::error::.app 内没有 exvlan-service"; exit 1; }
+            echo "macOS bundle contains exvlan-service ($hits)"
+          elif [[ "$GUI_TARGET" =~ windows ]]; then
+            # NSIS 的 setup.exe 是自解压包，7z 可以列出内容；MSI 的 CAB 不行。
+            setup=$(find "target/$GUI_TARGET/release/bundle/nsis" -name '*-setup.exe' 2>/dev/null | head -1)
+            [ -n "$setup" ] || { echo "::error::未找到 NSIS setup.exe"; exit 1; }
+            7z l "$setup" > /tmp/nsis-list.txt || { echo "::error::7z 无法列出 $setup"; exit 1; }
+            grep -q 'exvlan-service.exe' /tmp/nsis-list.txt \
+              || { echo "::error::$setup 里没有 exvlan-service.exe（检查 tauri.windows.conf.json 的 resources）"; grep -i exvlan /tmp/nsis-list.txt || true; exit 1; }
+            echo "NSIS 安装包包含 exvlan-service.exe"
+          fi
 
       - name: Verify kernel bundled
         run: |

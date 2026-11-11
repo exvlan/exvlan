@@ -835,26 +835,41 @@ fn decode_signature_text(text: &str) -> String {
 fn main() -> anyhow::Result<()> {
     let p = paths();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let op = args.first().cloned().unwrap_or_default();
+    let result = run_cli(&p, &args);
+    // Windows 上是 GUI 子系统：stderr 没有去处，PowerShell 也不会等我们退出。
+    // 所以 `--install` 之类失败原本是**完全静默**的，现场只能靠猜。
+    // 这里把子命令结果写进 service.log（运维/诊断都看得到）。
+    if !op.is_empty() && op != "--daemon" && op != "--version" {
+        match &result {
+            Ok(()) => log_line(&p, &format!("cli {op} ok")),
+            Err(err) => log_line(&p, &format!("cli {op} failed: {err:#}")),
+        }
+    }
+    result
+}
+
+fn run_cli(p: &Paths, args: &[String]) -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
         Some("--version") => {
             println!("exvlan-service {BUILD_VERSION}");
             Ok(())
         }
-        Some("--daemon") => run_daemon(p),
+        Some("--daemon") => run_daemon(p.clone()),
         Some("--install") => {
             let uid = args.get(1).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
-            install(&p, uid)
+            install(p, uid)
         }
-        Some("--uninstall") => uninstall(&p),
+        Some("--uninstall") => uninstall(p),
         Some("--status") => {
-            println!("{}", serde_json::to_string_pretty(&load_config(&p))?);
+            println!("{}", serde_json::to_string_pretty(&load_config(p))?);
             Ok(())
         }
-        Some("--diagnose") => diagnose(&p),
+        Some("--diagnose") => diagnose(p),
         // 提权入口：重启服务本体（不改配置、不换二进制）。
         Some("--restart") => restart_service(),
         // 自更新落点：由运行中的服务 fork 出来，等它退出后替换二进制并拉起。
-        Some("--replace-updater") => replace_updater(&p, args.get(1).map(String::as_str)),
+        Some("--replace-updater") => replace_updater(p, args.get(1).map(String::as_str)),
         _ => {
             eprintln!(
                 "usage: exvlan-service --daemon | --install <uid> | --uninstall | --status | --diagnose | --restart"
