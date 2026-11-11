@@ -803,6 +803,8 @@ service_settings:
   extra: Extra allowed subnets
   extra_hint: "Only for WSL / LAN cases outside the mesh; private or link-local CIDRs only, max {max}."
   extra_saved: Extra subnets saved (effective after kernel restart)
+  mtu: Network MTU
+  mtu_hint: Defaults to 1300 (the tun ends up around 1280). Paths through mesh/relay are often limited to ~1330 bytes; with 1380 large TCP segments get dropped, which shows up as "connects but never replies".
   port: Port 15999
   port_free: Port is free
   port_foreign: The listener is not our kernel and will not be cleaned up automatically

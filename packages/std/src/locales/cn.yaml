@@ -802,6 +802,8 @@ service_settings:
   extra: 额外允许的网段
   extra_hint: "仅用于 WSL / 局域网等非 mesh 场景；只接受私网或链路本地网段，最多 {max} 条。"
   extra_saved: 额外网段已保存（重启内核后生效）
+  mtu: 网络 MTU
+  mtu_hint: 默认 1300（tun 实际约 1280）。经 mesh/relay 的路径 MTU 常在 1330 左右，用 1380 会让 TCP 大包被丢弃 —— 表现为「远程连得上但没响应」。
   port: 15999 端口
   port_free: 端口空闲
   port_foreign: 占用者不是本产品内核，不会自动清理

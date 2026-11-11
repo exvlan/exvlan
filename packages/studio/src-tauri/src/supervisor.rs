@@ -121,6 +121,10 @@ fn spawn(app: &tauri::AppHandle) -> anyhow::Result<NormalKernel> {
         .arg(&config_dir)
         .arg("--file-log-dir")
         .arg(&log_dir)
+        // 与特权服务保持一致：默认 1380 的 tun 在 mesh/relay 路径上会让
+        // TCP 分段超 MTU（连得上、收大包就卡）。1300 是安全值。
+        .arg("--mtu")
+        .arg("1300")
         .arg("--rpc-portal")
         .arg(&rpc_portal)
         .arg("--rpc-portal-whitelist")

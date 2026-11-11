@@ -68,6 +68,17 @@ const MAX_EXTRA_WHITELIST: usize = 8;
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 /// 本地 RPC 地址（内核固定监听这个端口）。
 const LOCAL_RPC: &str = "127.0.0.1:15999";
+
+/// tun 的 MTU。
+///
+/// 内核默认 1380 → tun 实际是 1360，TCP MSS 会跟着变成 1320，即 IP 层
+/// 1360 字节。而经 mesh/relay 的真实路径 MTU 常常只有 ~1330（实测：
+/// 1328 字节能过、1368 不能），于握手能成、一收大包就被丢 ——
+/// 表现为「TCP 连上了但请求全部超时」（issue #54/#55）。
+///
+/// 取 1300：减去链路开销后 tun ≈ 1280（IPv6 最小 MTU），穿任何路径都安全，
+/// 代价是吞吐降约 7%。内核已有 `--mtu` 参数，无需改内核。
+const TUN_MTU: u16 = 1300;
 /// 看门狗等待上限：超过这个时间内核还没起来，就认为 boot 卡住了。
 const BOOT_WATCHDOG: Duration = Duration::from_secs(20);
 
@@ -774,6 +785,7 @@ impl State {
             "extra": extra,
             "notes": notes,
             "dhcp_fallback": DHCP_FALLBACK_POOL,
+            "tun_mtu": TUN_MTU,
             "max_extra": MAX_EXTRA_WHITELIST,
         })
     }
@@ -785,6 +797,8 @@ impl State {
         vec![
             "--config-dir".into(),
             self.paths.config.display().to_string(),
+            "--mtu".into(),
+            TUN_MTU.to_string(),
             "--rpc-portal".into(),
             RPC_PORTAL.into(),
             "--rpc-portal-whitelist".into(),

@@ -322,6 +322,8 @@ export interface WhitelistInfo {
   extra: string[];
   notes: string[];
   dhcp_fallback: string;
+  /** tun 的 MTU（经 mesh 的 TCP 需要小于路径 MTU） */
+  tun_mtu?: number;
   max_extra: number;
 }
 
