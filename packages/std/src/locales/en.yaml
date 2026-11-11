@@ -781,10 +781,12 @@ target:
   add: Add remote
   name: Name (optional)
   name_placeholder: e.g. home server
-  address: Address (host:port)
-  invalid_address: Invalid address, e.g. 10.254.0.7:15999
+  address: Address (mesh IP or hostname)
+  invalid_address: Invalid address, e.g. 10.254.1.1
   test: Test connection
   test_all: Test all
+  port_hint: Port is fixed at {port} (remote access goes over the mesh only, no key, no HTTPS).
+  port_fixed: Remote targets always use port {port}; remove the other port and retry.
   switch_hint: switch from the status bar or tray
   hint: |-
     Remote targets are reached over the mesh network only (fixed port 15999,

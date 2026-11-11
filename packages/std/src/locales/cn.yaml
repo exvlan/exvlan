@@ -781,10 +781,12 @@ target:
   add: 添加远程
   name: 名称（可选）
   name_placeholder: 例如：家里小主机
-  address: 地址（主机:端口）
-  invalid_address: 地址格式不对，示例 10.254.0.7:15999
+  address: 地址（mesh IP 或主机名）
+  invalid_address: 地址格式不对，示例 10.254.1.1
   test: 测试连接
   test_all: 全部测速
+  port_hint: 端口固定为 {port}（远程只走 mesh，无密钥、无 HTTPS）。
+  port_fixed: 远程目标固定使用端口 {port}，请去掉其他端口后重试。
   switch_hint: 在状态栏或托盘切换
   hint: |-
     远程目标只通过 mesh 内网访问（固定 15999，无密钥、无 HTTPS）。

@@ -9,7 +9,7 @@ import {
   type RemoteTarget,
   loadRemotes,
   newRemote,
-  parseAddress,
+  parseRemoteHost,
   remoteUrl,
   saveRemotes,
 } from "~/composables/target";
@@ -52,7 +52,7 @@ function startAdd() {
 
 function startEdit(row: RemoteTarget) {
   editing.value = { ...row };
-  address.value = `${row.host}:${row.port || DEFAULT_RPC_PORT}`;
+  address.value = row.host;
 }
 
 function cancelEdit() {
@@ -62,12 +62,16 @@ function cancelEdit() {
 
 async function commitEdit() {
   if (!editing.value) return;
-  const parsed = parseAddress(address.value);
+  const parsed = parseRemoteHost(address.value);
   if (!parsed) {
     toast.add({ severity: "error", summary: t("target.invalid_address"), life: 6000 });
     return;
   }
-  const next = { ...editing.value, host: parsed.host, port: parsed.port };
+  if ("error" in parsed) {
+    toast.add({ severity: "error", summary: t("target.port_fixed"), life: 8000 });
+    return;
+  }
+  const next = { ...editing.value, host: parsed.host, port: DEFAULT_RPC_PORT };
   const index = rows.value.findIndex((r) => r.id === next.id);
   if (index >= 0) {
     rows.value[index] = next;
@@ -112,9 +116,9 @@ async function test(row: RemoteTarget) {
 
       <div v-for="row in rows" :key="row.id" class="flex items-center gap-2">
         <div class="flex-1">
-          <div class="font-medium">{{ row.name || `${row.host}:${row.port}` }}</div>
+          <div class="font-medium">{{ row.name || `${row.host}:${DEFAULT_RPC_PORT}` }}</div>
           <div class="text-xs text-surface-500">
-            {{ row.host }}:{{ row.port || DEFAULT_RPC_PORT }}
+            {{ row.host }}:{{ DEFAULT_RPC_PORT }}
             <span v-if="testResult[row.id]" class="ml-2">{{ testResult[row.id] }}</span>
           </div>
         </div>
@@ -149,11 +153,10 @@ async function test(row: RemoteTarget) {
         <label class="text-sm">{{ t("target.name") }}</label>
         <InputText v-model="editing.name" :placeholder="t('target.name_placeholder')" />
         <label class="text-sm">{{ t("target.address") }}</label>
-        <InputText
-          v-model="address"
-          :placeholder="`10.254.0.7:${DEFAULT_RPC_PORT}`"
-          @keyup.enter="commitEdit"
-        />
+        <InputText v-model="address" :placeholder="`10.254.1.1`" @keyup.enter="commitEdit" />
+        <div class="text-xs text-surface-500">
+          {{ t("target.port_hint", { port: DEFAULT_RPC_PORT }) }}
+        </div>
         <div class="flex justify-end gap-2">
           <Button size="small" text :label="t('web.common.cancel')" @click="cancelEdit" />
           <Button size="small" :label="t('web.common.save')" :loading="busy" @click="commitEdit" />

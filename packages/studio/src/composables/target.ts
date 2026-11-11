@@ -57,11 +57,20 @@ export function loadRemotes(): RemoteTarget[] {
   try {
     const list = JSON.parse(raw);
     if (!Array.isArray(list)) return [];
-    return list.filter((item): item is RemoteTarget => {
-      return (
-        item && typeof item.id === "string" && typeof item.host === "string" && item.host.length > 0
-      );
-    });
+    return (
+      list
+        .filter((item): item is RemoteTarget => {
+          return (
+            item &&
+            typeof item.id === "string" &&
+            typeof item.host === "string" &&
+            item.host.length > 0
+          );
+        })
+        // 自愈：远程目标固定 15999（设计上只走 mesh、无密钥无 HTTPS）。
+        // 历史数据里出现过 `1599` 这类手误，直接纠正而不是让用户去猜。
+        .map((item) => ({ ...item, port: DEFAULT_RPC_PORT }))
+    );
   } catch {
     return [];
   }
@@ -114,6 +123,30 @@ export function newRemote(host = "", port = DEFAULT_RPC_PORT): RemoteTarget {
     host,
     port,
   };
+}
+
+/**
+ * 解析「远程目标主机」。端口固定 15999 —— 允许粘贴 `host:15999`，
+ * 但其他端口明确拒绝（否则会存下 1599 这种手误，之后一直连不上）。
+ */
+export function parseRemoteHost(input: string): { host: string } | { error: "port" } | null {
+  let text = input.trim();
+  if (!text) return null;
+  text = text.replace(/^tcp:\/\//i, "").replace(/\/.*$/, "");
+  const v6 = text.match(/^\[([^\]]+)\](?::(\d+))?$/);
+  if (v6) {
+    if (v6[2] && Number(v6[2]) !== DEFAULT_RPC_PORT) return { error: "port" };
+    return { host: v6[1] };
+  }
+  const parts = text.split(":");
+  if (parts.length === 1) {
+    return { host: parts[0] };
+  }
+  const port = Number(parts[parts.length - 1]);
+  if (port !== DEFAULT_RPC_PORT) {
+    return { error: "port" };
+  }
+  return { host: parts.slice(0, -1).join(":") };
 }
 
 /** 解析 `host:port` / `tcp://host:port` / 纯 host。 */
