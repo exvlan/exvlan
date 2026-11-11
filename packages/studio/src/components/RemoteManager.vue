@@ -129,7 +129,7 @@ async function test(row: RemoteTarget) {
           size="small"
           text
           icon="pi pi-pencil"
-          :aria-label="t('settings.edit')"
+          :aria-label="t('web.common.edit')"
           @click="startEdit(row)"
         />
         <Button
@@ -137,7 +137,7 @@ async function test(row: RemoteTarget) {
           text
           severity="danger"
           icon="pi pi-trash"
-          :aria-label="t('settings.delete')"
+          :aria-label="t('web.common.delete')"
           @click="remove(row)"
         />
       </div>

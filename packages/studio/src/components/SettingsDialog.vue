@@ -33,15 +33,15 @@ async function onRetryHelper() {
     await serviceInstall();
     toast.add({
       severity: "success",
-      summary: t("mode.helper"),
-      detail: t("mode.helper_retry_ok"),
+      summary: t("mode.service"),
+      detail: t("mode.service_retry_ok"),
       life: 6000,
     });
   } catch (e: any) {
     toast.add({
       severity: "error",
-      summary: t("mode.helper"),
-      detail: `${t("mode.helper_retry_failed")}: ${String(e)}`,
+      summary: t("mode.service"),
+      detail: `${t("mode.service_retry_failed")}: ${String(e)}`,
       life: 15000,
     });
   } finally {
@@ -572,7 +572,7 @@ watch(
                 @click="reinstallService"
               />
               <Button
-                :label="t('mode.helper_retry')"
+                :label="t('mode.service_retry')"
                 size="small"
                 severity="secondary"
                 outlined

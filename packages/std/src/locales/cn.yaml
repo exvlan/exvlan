@@ -110,8 +110,14 @@ magisk_config_saved: 配置已验证并保存，Exvlan 已重新启动
 magisk_config_saved_restart_pending: 配置已验证并保存，Exvlan 守护进程仍在启动
 retain_network_instance: 保留网络实例
 collect_network_infos: 收集网络信息
+# 通用错误标题（About / KernelManager 的 toast 在用）
+error: 错误
+
 settings:
   title: 设置
+  privileged_service: 特权服务
+  privileged_service_ready: 已安装并运行中
+  privileged_service_missing: 未安装或未就绪
   general: 通用
   network: 网络
   logging: 日志
@@ -735,6 +741,7 @@ web:
   common:
     confirm: 确认
     cancel: 取消
+    close: 关闭
     save: 保存
     delete: 删除
     edit: 编辑
@@ -750,9 +757,6 @@ web:
     address: 地址
 
   settings:
-    privileged_service: 特权服务
-    privileged_service_ready: 已安装并运行中
-    privileged_service_missing: 未安装或未就绪
     title: 设置
     change_password: 修改密码
     old_password: 旧密码
@@ -820,11 +824,11 @@ mode:
   service: 服务模式
   remote: 远程模式
   normal_description: 直接运行EraXVlan，适合本地使用
-  helper: 特权服务
-  helper_missing: 特权服务未就绪：两种运行方式都需要它（TUN 与内核都由它托管）。
-  helper_retry: 重试安装
-  helper_retry_ok: 特权服务已就绪
-  helper_retry_failed: 重试安装失败
+  service: 特权服务
+  service_missing: 特权服务未就绪：两种运行方式都需要它（TUN 与内核都由它托管）。
+  service_retry: 重试安装
+  service_retry_ok: 特权服务已就绪
+  service_retry_failed: 重试安装失败
   normal_consent: |-
     普通模式下内核仍由特权服务（exvlan-service）托管，只是「关闭界面即停」。
     首次安装需要一次系统授权，之后切换/升级都不会再弹。

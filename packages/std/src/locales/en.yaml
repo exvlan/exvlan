@@ -110,8 +110,14 @@ magisk_config_saved: Configuration validated and saved; Exvlan restarted
 magisk_config_saved_restart_pending: Configuration validated and saved; the Exvlan supervisor is still starting
 retain_network_instance: Retain Network Instance
 collect_network_infos: Collect Network Infos
+# 通用错误标题（About / KernelManager 的 toast 在用）
+error: Error
+
 settings:
   title: Settings
+  privileged_service: Privileged service
+  privileged_service_ready: Installed and running
+  privileged_service_missing: Not installed or not ready
   general: General
   network: Network
   logging: Logging
@@ -735,6 +741,7 @@ web:
   common:
     confirm: Confirm
     cancel: Cancel
+    close: Close
     save: Save
     delete: Delete
     edit: Edit
@@ -750,9 +757,6 @@ web:
     address: Address
 
   settings:
-    privileged_service: Privileged service
-    privileged_service_ready: Installed and running
-    privileged_service_missing: Not installed or not ready
     title: Settings
     change_password: Change Password
     old_password: Old Password
@@ -821,11 +825,11 @@ mode:
   service: Service
   remote: Remote
   normal_description: Run Exvlan directly, suitable for local use.
-  helper: Privileged service
-  helper_missing: "The privileged service is not ready. Both run modes need it (it owns the kernel and the TUN device)."
-  helper_retry: Retry install
-  helper_retry_ok: Privileged service is ready
-  helper_retry_failed: Retry failed
+  service: Privileged service
+  service_missing: "The privileged service is not ready. Both run modes need it (it owns the kernel and the TUN device)."
+  service_retry: Retry install
+  service_retry_ok: Privileged service is ready
+  service_retry_failed: Retry failed
   normal_consent: |-
     In normal mode the kernel is still owned by the privileged service
     (exvlan-service); it just stops when you quit the app.

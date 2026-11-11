@@ -72,6 +72,12 @@ jobs:
       - name: Check tauri bundle resources
         run: python3 script/ci/check-tauri-resources.py
 
+      # i18n 守卫：字面量 `t("a.b")` 必须在 cn/en 语言包里存在。
+      # pre.14 事故：`settings.privileged_service` 被放进 `web.settings`
+      # （层级错一层），yaml 合法、tsc 通过，界面上直接把 key 渲染出来。
+      - name: Check i18n keys
+        run: python3 script/ci/check-i18n-keys.py
+
       # runner 预装内容 + 全 feature 构建很容易打满磁盘（曾多次 No space left on device）
       - name: Free disk space
         run: |

@@ -153,15 +153,15 @@ async function onRetryService(auto = false) {
     await serviceInstall();
     toast.add({
       severity: "success",
-      summary: t("mode.helper"),
-      detail: t("mode.helper_retry_ok"),
+      summary: t("mode.service"),
+      detail: t("mode.service_retry_ok"),
       life: 6000,
     });
   } catch (e: any) {
     void logDiagStep("service_retry_failed", String(e).slice(0, 300));
     toast.add({
       severity: auto ? "warn" : "error",
-      summary: t("mode.helper"),
+      summary: t("mode.service"),
       detail: `${t("mode.service_retry_failed")}: ${String(e)}`,
       life: 15000,
     });
@@ -1219,12 +1219,12 @@ const configServerConnectionStatus = computed(() => {
     >
       <i class="pi pi-shield" />
       <span class="flex-1 break-all">
-        {{ t("mode.helper_missing") }}
+        {{ t("mode.service_missing") }}
         <span v-if="serviceStatusText" class="opacity-70">({{ serviceStatusText }})</span>
       </span>
       <Button
         size="small"
-        :label="t('mode.helper_retry')"
+        :label="t('mode.service_retry')"
         icon="pi pi-refresh"
         :loading="retryingService"
         :disabled="retryingService"
