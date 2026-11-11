@@ -33,14 +33,14 @@ async function onRetryHelper() {
     await serviceInstall();
     toast.add({
       severity: "success",
-      summary: t("mode.service"),
+      summary: t("mode.privileged_service"),
       detail: t("mode.service_retry_ok"),
       life: 6000,
     });
   } catch (e: any) {
     toast.add({
       severity: "error",
-      summary: t("mode.service"),
+      summary: t("mode.privileged_service"),
       detail: `${t("mode.service_retry_failed")}: ${String(e)}`,
       life: 15000,
     });

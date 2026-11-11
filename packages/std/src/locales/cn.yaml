@@ -824,7 +824,7 @@ mode:
   service: 服务模式
   remote: 远程模式
   normal_description: 直接运行EraXVlan，适合本地使用
-  service: 特权服务
+  privileged_service: 特权服务
   service_missing: 特权服务未就绪：两种运行方式都需要它（TUN 与内核都由它托管）。
   service_retry: 重试安装
   service_retry_ok: 特权服务已就绪

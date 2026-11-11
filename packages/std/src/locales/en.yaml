@@ -825,7 +825,7 @@ mode:
   service: Service
   remote: Remote
   normal_description: Run Exvlan directly, suitable for local use.
-  service: Privileged service
+  privileged_service: Privileged service
   service_missing: "The privileged service is not ready. Both run modes need it (it owns the kernel and the TUN device)."
   service_retry: Retry install
   service_retry_ok: Privileged service is ready

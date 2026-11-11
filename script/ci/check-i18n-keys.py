@@ -21,6 +21,32 @@ from pathlib import Path
 
 import yaml
 
+
+class _StrictLoader(yaml.SafeLoader):
+    """同一层出现重复 key 直接报错。
+
+    PyYAML 默认静默取后者，而构建链里的 js-yaml 会直接失败 ——
+    pre.14/15 就这么让 CI 红了一次（`mode.service` 与 `mode.privileged_service`
+    撞名）。这里改成严格模式，本地就能拦住。
+    """
+
+
+def _no_duplicates(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"重复的 key: {key!r}", key_node.start_mark
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_StrictLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicates
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "packages" / "studio" / "src"
 LOCALES = {
@@ -48,7 +74,12 @@ def flatten(node, prefix: str = "") -> set[str]:
 def main() -> int:
     trees = {}
     for lang, path in LOCALES.items():
-        trees[lang] = flatten(yaml.safe_load(path.read_text(encoding="utf-8")))
+        try:
+            doc = yaml.load(path.read_text(encoding="utf-8"), Loader=_StrictLoader)
+        except yaml.constructor.ConstructorError as err:
+            print(f"::error::{path.name} 有重复 key：{err}")
+            return 1
+        trees[lang] = flatten(doc)
 
     used: dict[str, set[str]] = {}
     for path in SRC.rglob("*"):
