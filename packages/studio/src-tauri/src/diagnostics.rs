@@ -452,6 +452,7 @@ pub fn collect_system(app_config: &Path, app_log: &Path, core_dir: &Path) -> Col
         "quarantine": quarantine,
         "config_dir": {"path": app_config.display().to_string(), "writable": dir_writable(app_config)},
         "log_dir": {"path": app_log.display().to_string(), "writable": dir_writable(app_log)},
+        "webkit": webkit_storage_state(),
         "generated_at": crate::logger::timestamp(),
     });
     if !errors.is_empty() {
@@ -464,6 +465,52 @@ pub fn collect_system(app_config: &Path, app_log: &Path, core_dir: &Path) -> Col
         text: serde_json::to_string_pretty(&value)
             .unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}")),
         error: None,
+    }
+}
+
+
+/// macOS：`~/Library/WebKit` 的属主。
+///
+/// 历史版本以 root 跑过 WebView → 该目录变成 root 属主 → WKWebView 建不出
+/// LocalStorage 的 sqlite → 前端 `localStorage` 变成黑洞（保存了读不回来）。
+/// 这里把它做成诊断项，下次一眼就能看出。
+fn webkit_storage_state() -> Value {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        let path = home
+            .join("Library")
+            .join("WebKit")
+            .join(crate::paths::APP_ID);
+        match std::fs::metadata(&path) {
+            Ok(meta) => {
+                let uid = meta.uid();
+                let me = unsafe { libc::getuid() };
+                json!({
+                    "path": path.display().to_string(),
+                    "exists": true,
+                    "owner_uid": uid,
+                    "current_uid": me,
+                    "ok": uid == me,
+                    "hint": if uid == me { Value::Null } else {
+                        json!("属主不是当前用户：服务会在下次启动时自动 chown；若仍失败，请手动 `sudo chown -R $(id -u):$(id -g) ~/Library/WebKit`")
+                    },
+                })
+            }
+            Err(err) => json!({
+                "path": path.display().to_string(),
+                "exists": false,
+                "error": err.to_string(),
+            }),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        json!({"supported": false})
     }
 }
 

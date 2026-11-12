@@ -1,0 +1,13 @@
+[package]
+name = "exvlan-service-client"
+version = "26.410.20712"
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../exvlan/LICENSE"
+description = "EXVlan local control-plane client: service IPC + backend detection + shared paths (used by GUI / CLI / gateway)"
+
+[dependencies]
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
