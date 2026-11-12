@@ -1675,6 +1675,16 @@ fn boot(state: &State) {
     // 每次启动都写一遍版本文件：替换二进制成功后（新进程启动时）版本立刻反映，
     // 不必等下一次 install/update；也顺带修复「版本文件丢失」的情况。
     let _ = write_version_file(&state.paths);
+
+    #[cfg(target_os = "macos")]
+    {
+        // 历史脏数据：早期版本以 root 跑过 WebView，`~/Library/WebKit/era.exvlan.studio`
+        // 变成 root 属主 → WKWebView 建不出 LocalStorage 的 sqlite，
+        // 前端 localStorage 变成黑洞（远程目标列表/语言/上次网络全部失效）。
+        let owner = state.lock_inner().config.owner_uid;
+        fix_webkit_owner(state, owner);
+    }
+
     let mode = state.lock_inner().mode;
     match mode {
         Mode::Service => {
@@ -1686,6 +1696,110 @@ fn boot(state: &State) {
     }
     // 无论成功失败，boot 到这里就算走完：看门狗据此区分「卡住」与「失败」。
     BOOT_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// macOS：把 `~/Library/WebKit[/era.exvlan.studio]` 的属主修回用户。
+///
+/// 只在「当前属主是 root」时动手（幂等）；失败只记日志，不影响启动。
+#[cfg(target_os = "macos")]
+fn fix_webkit_owner(state: &State, owner_uid: u32) {
+    use std::os::unix::fs::MetadataExt as _;
+
+    if owner_uid == 0 {
+        return;
+    }
+    let Some(home) = home_dir_for_uid(owner_uid) else {
+        state.log(format!(
+            "webkit chown skipped: 无法解析 uid={owner_uid} 的家目录"
+        ));
+        return;
+    };
+    let base = home.join("Library").join("WebKit");
+    let app = base.join(APP_ID);
+    let mut fixed = 0usize;
+    for path in [&base, &app] {
+        let Ok(meta) = std::fs::metadata(path) else {
+            continue;
+        };
+        if meta.uid() != 0 {
+            continue;
+        }
+        match chown_recursive(path, owner_uid) {
+            Ok(n) => {
+                fixed += n;
+                state.log(format!(
+                    "webkit chown: {} → uid={owner_uid} ({n} entries)",
+                    path.display()
+                ));
+            }
+            Err(err) => state.log(format!("webkit chown failed: {}: {err}", path.display())),
+        }
+    }
+    if fixed > 0 {
+        state.log("webkit chown done（localStorage 应恢复可用）");
+    }
+}
+
+/// `getpwuid_r` → 家目录。
+#[cfg(target_os = "macos")]
+fn home_dir_for_uid(uid: u32) -> Option<std::path::PathBuf> {
+    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut buf = vec![0i8; 4096];
+    let mut result: *mut libc::passwd = std::ptr::null_mut();
+    let rc = unsafe {
+        libc::getpwuid_r(
+            uid as libc::uid_t,
+            &mut pwd,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut result,
+        )
+    };
+    if rc != 0 || result.is_null() || pwd.pw_dir.is_null() {
+        return None;
+    }
+    let dir = unsafe { std::ffi::CStr::from_ptr(pwd.pw_dir) };
+    Some(std::path::PathBuf::from(dir.to_string_lossy().into_owned()))
+}
+
+/// 递归 chown（不跟随符号链接），返回处理的条目数。
+#[cfg(target_os = "macos")]
+fn chown_recursive(root: &std::path::Path, uid: u32) -> std::io::Result<usize> {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    fn chown(path: &std::path::Path, uid: u32) -> std::io::Result<()> {
+        use std::os::unix::ffi::OsStrExt as _;
+        let c = std::ffi::CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| std::io::Error::other("path contains NUL"))?;
+        // gid 用 -1 表示不修改
+        let rc = unsafe { libc::lchown(c.as_ptr(), uid as libc::uid_t, -1i32 as libc::gid_t) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+
+    let _ = root.as_os_str().as_bytes();
+    let mut count = 0usize;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        chown(&path, uid)?;
+        count += 1;
+        let Ok(entries) = std::fs::read_dir(&path) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                stack.push(entry.path());
+            } else {
+                chown(&entry.path(), uid)?;
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
 }
 
 // ---------------------------------------------------------------------------

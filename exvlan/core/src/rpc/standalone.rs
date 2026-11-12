@@ -105,10 +105,13 @@ where
             let tunnel_info = match hook.on_new_client(tunnel_info).await {
                 Ok(info) => info,
                 Err(error) => {
-                    tracing::warn!(?error, "standalone hook.on_new_client failed");
+                    // 用 error 级：拒绝是「远端连不上」的常见原因，必须能在默认日志级别看到
+                    // （pre.16 用 warn，被 console 级别吞掉，排查时完全无迹可寻）。
+                    tracing::error!(?error, "standalone rpc client rejected");
                     continue;
                 }
             };
+            tracing::info!(info = ?tunnel_info, "standalone rpc client accepted");
 
             inflight_server.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             client_tasks.spawn(async move {
