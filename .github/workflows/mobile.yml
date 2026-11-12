@@ -252,6 +252,9 @@ jobs:
     needs: [pre_job, build-mobile]
     if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
+      # `cancelled` 也要算失败：子作业被取消（runner 回收 / 被并发取代）时
+      # 之前的实现会把它当 success，下游 `studio`/`mobile` 于是被静默跳过，
+      # 表现为「CI 绿了但没出 GUI 包」。整轮 run 被取消时本作业会 skip，不误报。
       - name: Mark result as failed
-        if: contains(needs.*.result, 'failure')
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
