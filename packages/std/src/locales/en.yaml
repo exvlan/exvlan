@@ -952,3 +952,6 @@ migrate:
   running: Migrating…
   exit: Quit
   done: Migration complete (backup kept)
+  no_tool_hint: This build does not bundle the migration tool. Run `exvlan-migrate --yes` in a terminal (or the standalone tool), then click Re-check.
+  recheck: Re-check
+  recheck_pending: Legacy data is still present. Make sure the migration tool finished successfully (see migrate.log).

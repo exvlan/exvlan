@@ -950,3 +950,6 @@ migrate:
   running: 迁移中…
   exit: 退出
   done: 迁移完成（已备份）
+  no_tool_hint: 本安装包未随带迁移工具。请在终端运行 `exvlan-migrate --yes`（或用安装包附带的独立工具），完成后点「重新检测」。
+  recheck: 重新检测
+  recheck_pending: 仍然检测到旧数据；请确认迁移工具已成功执行（可查看 migrate.log）。

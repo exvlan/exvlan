@@ -365,7 +365,36 @@ type MigrateStatus = {
 /** 迁移闸门：非空时全屏阻塞，直到迁移完成 */
 const migrateGate = ref<MigrateStatus | null>(null);
 const migrateRunning = ref(false);
+const migrateChecking = ref(false);
 let migrateResolve: (() => void) | null = null;
+
+/**
+ * 安装包里没有 `exvlan-migrate`（下一版起默认如此）：用户自己跑独立工具后，
+ * 这里重新检测一次；`pending=false` 就放行。
+ */
+async function onMigrateRecheck() {
+  migrateChecking.value = true;
+  try {
+    const ms = await invoke<MigrateStatus>("migrate_status");
+    if (!ms.pending) {
+      migrateGate.value = null;
+      migrateResolve?.();
+      migrateResolve = null;
+      return;
+    }
+    migrateGate.value = ms;
+    toast.add({
+      severity: "warn",
+      summary: t("migrate.title"),
+      detail: t("migrate.recheck_pending"),
+      life: 8000,
+    });
+  } catch (e: unknown) {
+    toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 10000 });
+  } finally {
+    migrateChecking.value = false;
+  }
+}
 
 async function onMigrateRun() {
   migrateRunning.value = true;
@@ -1424,6 +1453,14 @@ const configServerConnectionStatus = computed(() => {
         <p class="mb-3 text-sm text-surface-600 dark:text-surface-300">
           {{ t("migrate.hint") }}
         </p>
+        <!-- 下一版起安装包不再随带迁移工具：此时必须给出「自己跑工具 + 重试」
+             的路径，而不是让「开始迁移」按钮点出一个错误。 -->
+        <p
+          v-if="!migrateGate.tool"
+          class="mb-3 rounded bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+        >
+          {{ t("migrate.no_tool_hint") }}
+        </p>
         <ul
           class="mb-4 max-h-48 overflow-auto rounded bg-surface-100 p-3 text-xs font-mono dark:bg-surface-800"
         >
@@ -1438,9 +1475,16 @@ const configServerConnectionStatus = computed(() => {
             @click="exit(1)"
           />
           <Button
+            v-if="migrateGate.tool"
             :label="migrateRunning ? t('migrate.running') : t('migrate.run')"
             :loading="migrateRunning"
             @click="onMigrateRun"
+          />
+          <Button
+            v-else
+            :label="t('migrate.recheck')"
+            :loading="migrateChecking"
+            @click="onMigrateRecheck"
           />
         </div>
       </div>
