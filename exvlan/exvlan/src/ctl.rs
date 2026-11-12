@@ -92,6 +92,30 @@ enum ServiceCmd {
 }
 
 #[derive(Subcommand, Debug)]
+enum TokenCmd {
+    /// 签发 scoped token（明文只显示一次）
+    Create {
+        #[arg(long)]
+        name: String,
+        /// readonly | config | admin
+        #[arg(long, default_value = "readonly")]
+        role: String,
+        /// 追加/覆盖 scope（可重复；与 --role 叠加）
+        #[arg(long = "scope")]
+        scopes: Vec<String>,
+        /// 有效期，如 30d / 24h / 3600（缺省不过期，上限 90d）
+        #[arg(long)]
+        expires: Option<String>,
+    },
+    /// 列出 token（不含明文）
+    List,
+    /// 吊销
+    Revoke { id: String },
+    /// 校验一个 token（排障用）
+    Verify { token: String },
+}
+
+#[derive(Subcommand, Debug)]
 enum KernelCmd {
     Restart,
     Stop,
@@ -100,6 +124,11 @@ enum KernelCmd {
 
 #[derive(Subcommand, Debug)]
 enum AuthCmd {
+    /// scoped token 管理（远程访问用）
+    Token {
+        #[command(subcommand)]
+        cmd: TokenCmd,
+    },
     /// 显示本地 token 是否存在（不回显明文）
     Status,
     /// 首次生成本地 token（0600）
@@ -484,6 +513,7 @@ fn token_path() -> PathBuf {
 fn auth_cmd(cmd: AuthCmd) -> i32 {
     let path = token_path();
     match cmd {
+        AuthCmd::Token { cmd } => token_cmd(cmd),
         AuthCmd::Status => {
             let exists = path.is_file();
             print_json(&json!({
@@ -522,6 +552,123 @@ fn auth_cmd(cmd: AuthCmd) -> i32 {
                 2
             }
         },
+    }
+}
+
+fn token_cmd(cmd: TokenCmd) -> i32 {
+    use exvlan_service_client::tokens::{Store, parse_ttl, scopes_for_role};
+    let path = Store::path();
+    let mut store = Store::load(&path);
+    match cmd {
+        TokenCmd::Create {
+            name,
+            role,
+            scopes,
+            expires,
+        } => {
+            let mut final_scopes = match scopes_for_role(&role) {
+                Some(v) => v,
+                None => {
+                    eprintln!("未知 role: {role}（readonly|config|admin）");
+                    return 2;
+                }
+            };
+            for s in scopes {
+                if !exvlan_service_client::tokens::ALL_SCOPES.contains(&s.as_str()) {
+                    eprintln!("未知 scope: {s}");
+                    return 2;
+                }
+                if !final_scopes.contains(&s) {
+                    final_scopes.push(s);
+                }
+            }
+            let ttl = match expires.as_deref() {
+                None => None,
+                Some(text) => match parse_ttl(text) {
+                    Some(v) if v > 0 => {
+                        if v > 90 * 86_400 {
+                            eprintln!("有效期上限 90d");
+                            return 2;
+                        }
+                        Some(v)
+                    }
+                    _ => {
+                        eprintln!("无法解析有效期: {text}（示例 30d / 24h / 3600）");
+                        return 2;
+                    }
+                },
+            };
+            let (token, record) = store.create(&name, final_scopes, ttl);
+            if let Err(err) = store.save(&path) {
+                eprintln!("写入 {} 失败: {err}", path.display());
+                return 2;
+            }
+            print_json(&json!({
+                "id": record.id,
+                "name": record.name,
+                "scopes": record.scopes,
+                "expires_at": record.expires_at,
+                "token": token,
+                "note": "明文只显示这一次，请立即保存",
+            }));
+            0
+        }
+        TokenCmd::List => {
+            let items: Vec<_> = store
+                .tokens
+                .iter()
+                .map(|t| {
+                    json!({
+                        "id": t.id,
+                        "name": t.name,
+                        "scopes": t.scopes,
+                        "created_at": t.created_at,
+                        "expires_at": t.expires_at,
+                        "revoked": t.revoked,
+                        "last_used_at": t.last_used_at,
+                    })
+                })
+                .collect();
+            print_json(&json!({ "path": path.display().to_string(), "tokens": items }));
+            0
+        }
+        TokenCmd::Verify { token } => match store.verify(&token) {
+            Ok(claims) => {
+                print_json(&json!({
+                    "ok": true,
+                    "id": claims.id,
+                    "name": claims.name,
+                    "scopes": claims.scopes,
+                    "store": path.display().to_string(),
+                }));
+                0
+            }
+            Err(e) => {
+                print_json(&json!({
+                    "ok": false,
+                    "error": format!("{e:?}"),
+                    "store": path.display().to_string(),
+                }));
+                2
+            }
+        },
+        TokenCmd::Revoke { id } => {
+            if store.revoke(&id) {
+                match store.save(&path) {
+                    Ok(()) => {
+                        println!("已吊销 {id}");
+                        0
+                    }
+                    Err(err) => {
+                        eprintln!("写入失败: {err}");
+                        2
+                    }
+                }
+            } else {
+                eprintln!("找不到 token: {id}");
+                2
+            }
+        }
     }
 }
 

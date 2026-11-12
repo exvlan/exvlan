@@ -50,7 +50,10 @@ pub fn router(cfg: Config, token: String) -> Router {
         .route("/api/v1/service/policy", post(set_policy))
         .route("/api/v1/service/desired", post(set_desired))
         .route("/api/v1/service/kernel/restart", post(kernel_restart))
-        .route("/api/v1/instances", get(list_instances).post(create_instance))
+        .route(
+            "/api/v1/instances",
+            get(list_instances).post(create_instance),
+        )
         .route(
             "/api/v1/instances/{id}/config",
             get(get_instance_config).delete(delete_instance),
@@ -63,20 +66,66 @@ pub fn router(cfg: Config, token: String) -> Router {
 // 鉴权
 // ---------------------------------------------------------------------------
 
-fn authorized(state: &AppState, headers: &HeaderMap) -> bool {
-    let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
-        return false;
-    };
-    let Ok(text) = value.to_str() else {
-        return false;
-    };
-    let Some(token) = text.strip_prefix("Bearer ") else {
-        return false;
-    };
-    // 常量时间比较（长度不同直接 false）。
-    let a = token.trim().as_bytes();
-    let b = state.token.as_bytes();
+/// 取出 Bearer token。
+fn bearer(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(axum::http::header::AUTHORIZATION)?;
+    let text = value.to_str().ok()?;
+    let token = text.strip_prefix("Bearer ")?.trim();
+    (!token.is_empty()).then(|| token.to_string())
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// 要求指定 scope（`None` = 只要求「有效 token」）。
+///
+/// 本地 admin token（`<user>/gateway-token`）等同全部 scope；
+/// 其余 token 来自 `<user>/gateway-tokens.json`（sha256 存储、可过期/吊销）。
+#[allow(clippy::result_large_err)]
+fn require_scope(
+    state: &AppState,
+    headers: &HeaderMap,
+    scope: Option<&str>,
+) -> Result<exvlan_service_client::tokens::Claims, Response> {
+    use exvlan_service_client::tokens::{ALL_SCOPES, Store, VerifyError};
+    let token = bearer(headers).ok_or_else(unauthorized)?;
+    if constant_time_eq(token.as_bytes(), state.token.as_bytes()) {
+        return Ok(exvlan_service_client::tokens::Claims {
+            id: "local-admin".into(),
+            name: "local-admin".into(),
+            scopes: ALL_SCOPES.iter().map(|s| s.to_string()).collect(),
+        });
+    }
+    let mut store = Store::load(&Store::path());
+    tracing::debug!(
+        store = %Store::path().display(),
+        tokens = store.tokens.len(),
+        "verify scoped token"
+    );
+    let claims = store.verify(&token).map_err(|e| {
+        tracing::debug!(error = ?e, "token verify failed");
+        match e {
+            VerifyError::Expired => err(StatusCode::UNAUTHORIZED, "token_expired", "token 已过期"),
+            VerifyError::Revoked => {
+                err(StatusCode::UNAUTHORIZED, "token_revoked", "token 已被吊销")
+            }
+            VerifyError::Unknown => unauthorized(),
+        }
+    })?;
+    // 注意：**不在这里写回 store**。last_used 属于审计信息，但网关是并发读侧，
+    // 与 `auth token *`（写侧）竞争会导致「半截文件 / 覆盖吊销」这类问题；
+    // 单写者原则：store 只由 CLI 修改。
+    if let Some(need) = scope
+        && !claims.allows(need)
+    {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            format!("token 缺少 scope: {need}"),
+        ));
+    }
+    Ok(claims)
 }
 
 fn unauthorized() -> Response {
@@ -106,8 +155,8 @@ fn ipc(op: &str, extra: Value) -> Result<Value, Box<Response>> {
 // ---------------------------------------------------------------------------
 
 async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
+        return resp;
     }
     let backend = exvlan_service_client::detect();
     let p = exvlan_service_client::paths::paths();
@@ -159,15 +208,15 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
 }
 
 async fn doctor(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
+        return resp;
     }
     Json(exvlan_service_client::doctor::collect().to_json()).into_response()
 }
 
 async fn doctor_fix(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("service:control")) {
+        return resp;
     }
     let mut report = exvlan_service_client::doctor::collect();
     exvlan_service_client::doctor::fix(&mut report);
@@ -175,8 +224,8 @@ async fn doctor_fix(State(state): State<AppState>, headers: HeaderMap) -> Respon
 }
 
 async fn diag(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
+        return resp;
     }
     let report = exvlan_service_client::doctor::collect();
     let p = exvlan_service_client::paths::paths();
@@ -198,8 +247,8 @@ async fn diag(State(state): State<AppState>, headers: HeaderMap) -> Response {
 }
 
 async fn service(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("service:read")) {
+        return resp;
     }
     if !exvlan_service_client::detect().has_service() {
         return Json(json!({
@@ -216,8 +265,8 @@ async fn service(State(state): State<AppState>, headers: HeaderMap) -> Response 
 }
 
 async fn set_policy(State(state): State<AppState>, headers: HeaderMap, body: String) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("service:control")) {
+        return resp;
     }
     let policy = parse_field(&body, "policy").unwrap_or_default();
     if !matches!(policy.as_str(), "resident" | "session" | "stopped") {
@@ -234,8 +283,8 @@ async fn set_policy(State(state): State<AppState>, headers: HeaderMap, body: Str
 }
 
 async fn set_desired(State(state): State<AppState>, headers: HeaderMap, body: String) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("service:control")) {
+        return resp;
     }
     let desired = parse_field(&body, "desired").unwrap_or_default();
     let op = match desired.as_str() {
@@ -256,8 +305,8 @@ async fn set_desired(State(state): State<AppState>, headers: HeaderMap, body: St
 }
 
 async fn kernel_restart(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("service:control")) {
+        return resp;
     }
     match ipc("kernel.restart", json!({})) {
         Ok(v) => Json(v).into_response(),
@@ -311,9 +360,8 @@ async fn with_kernel<T, F>(f: F) -> Result<T, Box<Response>>
 where
     F: FnOnce(
         crate::kernel::Kernel,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = anyhow::Result<T>> + Send>,
-    >,
+    )
+        -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<T>> + Send>>,
 {
     let kernel = match tokio::time::timeout(
         std::time::Duration::from_secs(3),
@@ -354,8 +402,8 @@ where
 }
 
 async fn list_instances(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
+        return resp;
     }
     let result = with_kernel(|kernel| {
         Box::pin(async move {
@@ -380,8 +428,8 @@ async fn get_instance_config(
     headers: HeaderMap,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
+        return resp;
     }
     match with_kernel(|kernel| {
         let id = id.clone();
@@ -400,13 +448,19 @@ async fn create_instance(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:write")) {
+        return resp;
     }
     let config: exvlan_rpc::exvlan_proto::api::manage::NetworkConfig =
         match serde_json::from_str(&body) {
             Ok(c) => c,
-            Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", format!("配置解析失败: {e}")),
+            Err(e) => {
+                return err(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    format!("配置解析失败: {e}"),
+                );
+            }
         };
     match with_kernel(|kernel| {
         Box::pin(async move { kernel.run(config, true).await.map(|id| json!({"id": id})) })
@@ -423,8 +477,8 @@ async fn delete_instance(
     headers: HeaderMap,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:write")) {
+        return resp;
     }
     match with_kernel(|kernel| {
         let id = id.clone();
@@ -446,8 +500,8 @@ async fn events(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
+        return resp;
     }
     ws.on_upgrade(push_loop)
 }

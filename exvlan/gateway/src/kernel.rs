@@ -24,7 +24,9 @@ pub struct Kernel {
 impl Kernel {
     /// 连接内核 RPC portal（默认 `tcp://127.0.0.1:1995`）。
     pub async fn connect(url: &str) -> anyhow::Result<Self> {
-        let parsed = url.parse().with_context(|| format!("非法 RPC 地址: {url}"))?;
+        let parsed = url
+            .parse()
+            .with_context(|| format!("非法 RPC 地址: {url}"))?;
         let tunnel = exvlan_rpc::rpc::runtime_rpc_dialer(parsed)
             .connect()
             .await

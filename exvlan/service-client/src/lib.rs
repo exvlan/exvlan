@@ -16,6 +16,7 @@ pub mod backend;
 pub mod doctor;
 pub mod ipc;
 pub mod paths;
+pub mod tokens;
 
 pub use backend::{Backend, detect};
 pub use ipc::{Client, request};

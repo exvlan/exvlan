@@ -7,7 +7,10 @@ license-file = "../../exvlan/LICENSE"
 description = "EXVlan local control-plane client: service IPC + backend detection + shared paths (used by GUI / CLI / gateway)"
 
 [dependencies]
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+sha2.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

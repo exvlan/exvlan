@@ -3195,7 +3195,10 @@ name = "exvlan-service-client"
 version = "26.410.20712"
 dependencies = [
  "libc",
+ "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "uuid",
 ]
 
 [[package]]

@@ -59,6 +59,10 @@ async fn main() -> anyhow::Result<()> {
 
     let token = load_or_create_token(&cfg.token_file)?;
     tracing::info!(
+        "token store: {}",
+        exvlan_service_client::tokens::Store::path().display()
+    );
+    tracing::info!(
         "gateway listening on {}:{} (token file: {})",
         cfg.bind,
         cfg.port,
