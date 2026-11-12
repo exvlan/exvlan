@@ -320,7 +320,11 @@ jobs:
     name: Build Studio GUI
     # 只等桌面内核（GUI 矩阵只下载 core-macos-*/core-windows-*）
     needs: core_desktop
+    # `always()` 是必须的：`core_desktop` 被路径门控**跳过**时，GitHub 默认会把
+    # 依赖它的作业一并跳过 —— 那样「只改 GUI」的提交永远不会编译 GUI，
+    # 直到打 tag 才第一次发现编译错误。
     if: >-
+      always() &&
       github.event_name != 'schedule' && github.event_name != 'pull_request' &&
       github.ref_name != 'feature' &&
       (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped')
@@ -335,7 +339,9 @@ jobs:
     name: Build Studio Mobile
     # 移动端只用 mobile-kernel-* 产物，不需要等内核作业
     needs: core_desktop
+    # 同上：`always()` 让移动端在「内核路径门控跳过」的提交上照样编译。
     if: >-
+      always() &&
       github.event_name != 'schedule' && github.event_name != 'pull_request' &&
       github.ref_name != 'feature' &&
       (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped')
