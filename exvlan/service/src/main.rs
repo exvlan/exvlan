@@ -2369,7 +2369,9 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
             CreateNamedPipeW(
                 name.as_ptr(),
                 PIPE_ACCESS_DUPLEX,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                // `PIPE_REJECT_REMOTE_CLIENTS`：这个管道永远只服务本机 GUI，
+                // 显式拒绝 SMB 远端客户端（默认值在旧系统上是「允许」）。
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
                 64 * 1024,
