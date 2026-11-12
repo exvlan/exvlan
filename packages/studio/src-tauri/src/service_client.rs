@@ -276,7 +276,16 @@ mod imp {
         let src = bundled_service(app)
             .ok_or_else(|| format!("安装包内未找到服务二进制（resources/service/{bin}）"))?;
         let uid = current_uid().to_string();
-        crate::run_elevated(&["--install-exvlan-service", &src.display().to_string(), &uid])?;
+        // Windows：把**当前用户**的 SID 交给安装器，服务据此把命名管道 DACL
+        // 收窄到本人（服务以 LocalSystem 跑，事后反推不出是谁装的）。
+        // 取不到就传空串 → 服务退回 `IU`（不会锁门）。
+        let sid = exvlan_service_client::current_user_sid().unwrap_or_default();
+        crate::run_elevated(&[
+            "--install-exvlan-service",
+            &src.display().to_string(),
+            &uid,
+            &sid,
+        ])?;
         // 安装脚本内部已等 socket 就绪，这里再兜一次（避免 launchd 抖动）。
         for _ in 0..25 {
             if is_ready() {

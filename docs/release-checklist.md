@@ -25,6 +25,18 @@ cargo test  -p exvlan-studio --lib
 bash script/ci/check-paths.sh        # 绝对路径字面量只允许在 paths.rs
 ```
 
+## 1.5 安装后验收（pre.17 起）
+
+```bash
+# 装完包、启动过一次 App（完成迁移闸门）后执行
+sh script/lab/pre17-acceptance.sh          # 或 EXVLAN_CLI=/path/to/exvlan-cli
+```
+
+覆盖：`doctor` 的 `config.dir`、`config` 读写往返（用 `.disabled`，不动运行时）、
+路径穿越/坏 TOML 拒绝、本机 gateway `/api/v1/system` 与 `/api/v1/configs`、policy 词汇。
+界面相关（迁移页、网络保存后文件出现、`session` 策略下 CLI 不断网）仍需人工确认，
+脚本末尾会打印清单。
+
 ## 2. CI 流程
 
 ```bash

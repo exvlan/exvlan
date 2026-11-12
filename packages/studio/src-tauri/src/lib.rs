@@ -4428,15 +4428,18 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 .get(2)
                 .cloned()
                 .unwrap_or_else(|| crate::service_client::current_uid().to_string());
+            // Windows 安装者 SID（macOS/Linux 为空串，服务端忽略）。
+            let sid = args.get(3).cloned().unwrap_or_default();
             if src.is_empty() || !std::path::Path::new(&src).is_file() {
                 report("service", &format!("随包服务二进制不存在: {src:?}"));
                 ExitCode::FAILURE
             } else {
-                match std::process::Command::new(&src)
-                    .arg("--install")
-                    .arg(&uid)
-                    .output()
-                {
+                let mut cmd = std::process::Command::new(&src);
+                cmd.arg("--install").arg(&uid);
+                if !sid.is_empty() {
+                    cmd.arg(&sid);
+                }
+                match cmd.output() {
                     Ok(out) if out.status.success() => ExitCode::SUCCESS,
                     Ok(out) => {
                         report(
@@ -4622,6 +4625,9 @@ pub struct ProvisionPayload {
     /// 安装者 uid（服务只接受该用户的 IPC 请求）。
     #[serde(default)]
     pub owner_uid: u32,
+    /// Windows 安装者 SID（命名管道 DACL 收窄；空 = 未知，退回 IU）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_sid: Option<String>,
 }
 
 /// 停掉当前内核（由 `exvlan-service` 托管；Linux 下是 supervisor 子进程）。
@@ -4664,14 +4670,22 @@ fn stop_kernel_if_running() -> bool {
 
 /// 跑随包 `exvlan-service --install <uid>`（调用方必须是**已提权**的进程）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn install_privileged_service(src: &std::path::Path, uid: u32) -> anyhow::Result<()> {
+fn install_privileged_service(
+    src: &std::path::Path,
+    uid: u32,
+    sid: Option<&str>,
+) -> anyhow::Result<()> {
     use anyhow::Context as _;
     if !src.is_file() {
         anyhow::bail!("随包服务二进制不存在: {}", src.display());
     }
-    let out = std::process::Command::new(src)
-        .arg("--install")
-        .arg(uid.to_string())
+    let mut cmd = std::process::Command::new(src);
+    cmd.arg("--install").arg(uid.to_string());
+    // Windows：SID 决定命名管道 ACL；空 = 未知（服务端退回 IU）。
+    if let Some(sid) = sid.filter(|s| !s.is_empty()) {
+        cmd.arg(sid);
+    }
+    let out = cmd
         .output()
         .with_context(|| format!("无法执行 {}", src.display()))?;
     if !out.status.success() {
@@ -4718,7 +4732,11 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
         if let Some(src) = req.service_src.as_deref() {
             // 特权服务安装失败**不阻断启动**：记录到 error.log，由界面横幅
             // 提示 + 「重试安装」按钮处理。
-            match install_privileged_service(std::path::Path::new(src), req.owner_uid) {
+            match install_privileged_service(
+                std::path::Path::new(src),
+                req.owner_uid,
+                req.owner_sid.as_deref(),
+            ) {
                 Ok(()) => {
                     crate::logger::record("provision.service", "privileged service installed")
                 }
@@ -4954,6 +4972,7 @@ async fn linux_ensure(app: &AppHandle, opts: &service::ServiceOptions) -> Result
         service: need_service.then(|| opts.clone()),
         service_src: None,
         owner_uid: crate::service_client::current_uid(),
+        owner_sid: exvlan_service_client::current_user_sid(),
     };
     let json = serde_json::to_string(&payload).map_err(|e| logger::other("cmd:linux_ensure", e))?;
     logger::record(
@@ -5030,6 +5049,7 @@ fn ensure_service_and_kernel(app: &AppHandle) -> Result<String, String> {
                     service: None,
                     service_src: None,
                     owner_uid: crate::service_client::current_uid(),
+                    owner_sid: exvlan_service_client::current_user_sid(),
                 };
                 let json = serde_json::to_string(&payload)
                     .map_err(|e| logger::other("cmd:ensure_kernel_service", e))?;
@@ -5082,6 +5102,7 @@ async fn ensure_kernel_only(app: AppHandle) -> Result<String, String> {
         service: None,
         service_src: None,
         owner_uid: crate::service_client::current_uid(),
+        owner_sid: exvlan_service_client::current_user_sid(),
     };
     let json =
         serde_json::to_string(&payload).map_err(|e| logger::other("cmd:ensure_kernel_only", e))?;
