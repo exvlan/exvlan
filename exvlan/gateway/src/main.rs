@@ -10,6 +10,7 @@
 //! 远端访问需要显式开启 mesh 监听（opt-in），属后续版本。
 
 mod api;
+mod kernel;
 
 use std::net::SocketAddr;
 

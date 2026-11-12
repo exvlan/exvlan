@@ -115,9 +115,13 @@ def main() -> int:
         except (UnicodeDecodeError, OSError):
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            # 注释里写端口是合理的（文档/说明），只约束**代码**。
+            if stripped.startswith(("//", "#", "*", "/*")):
+                continue
             m = PATTERN.search(line)
             if m:
-                hits.append((rel, lineno, line.strip()[:120]))
+                hits.append((rel, lineno, stripped[:120]))
 
     if not hits:
         print(f"[ports] OK：{len(ALLOW_FILES)} 个白名单之外没有硬编码端口")

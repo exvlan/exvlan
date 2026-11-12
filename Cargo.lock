@@ -3083,6 +3083,7 @@ version = "26.410.20712"
 dependencies = [
  "anyhow",
  "axum",
+ "exvlan-rpc",
  "exvlan-service-client",
  "serde",
  "serde_json",
@@ -3090,6 +3091,7 @@ dependencies = [
  "tower-http 0.6.11",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

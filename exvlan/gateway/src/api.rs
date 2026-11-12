@@ -19,7 +19,7 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     extract::{
-        State,
+        Path as AxumPath, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode},
@@ -50,6 +50,11 @@ pub fn router(cfg: Config, token: String) -> Router {
         .route("/api/v1/service/policy", post(set_policy))
         .route("/api/v1/service/desired", post(set_desired))
         .route("/api/v1/service/kernel/restart", post(kernel_restart))
+        .route("/api/v1/instances", get(list_instances).post(create_instance))
+        .route(
+            "/api/v1/instances/{id}/config",
+            get(get_instance_config).delete(delete_instance),
+        )
         .route("/api/v1/events", get(events))
         .with_state(state)
 }
@@ -130,7 +135,7 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
         },
         "capabilities": {
             "service": backend.has_service(),
-            "instances": false,   // 内核 RPC 客户端接入后开启
+            "instances": kernel_reachable().await,
             "doctor": true,
             "events": true,
         },
@@ -143,6 +148,10 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
             "POST /api/v1/service/policy",
             "POST /api/v1/service/desired",
             "POST /api/v1/service/kernel/restart",
+            "GET  /api/v1/instances",
+            "POST /api/v1/instances",
+            "GET  /api/v1/instances/{id}/config",
+            "DELETE /api/v1/instances/{id}/config",
             "GET  /api/v1/events",
         ],
     }))
@@ -275,6 +284,157 @@ fn parse_field(body: &str, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// instances（内核 RPC）
+// ---------------------------------------------------------------------------
+
+fn kernel_url() -> String {
+    std::env::var("EXVLAN_RPC")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| format!("tcp://{}", exvlan_service_client::local_rpc_addr()))
+}
+
+async fn kernel_reachable() -> bool {
+    tokio::time::timeout(
+        std::time::Duration::from_millis(800),
+        crate::kernel::Kernel::connect(&kernel_url()),
+    )
+    .await
+    .map(|r| r.is_ok())
+    .unwrap_or(false)
+}
+
+async fn with_kernel<T, F>(f: F) -> Result<T, Box<Response>>
+where
+    F: FnOnce(
+        crate::kernel::Kernel,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = anyhow::Result<T>> + Send>,
+    >,
+{
+    let kernel = match tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        crate::kernel::Kernel::connect(&kernel_url()),
+    )
+    .await
+    {
+        Ok(Ok(k)) => k,
+        Ok(Err(e)) => {
+            return Err(Box::new(err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "kernel_unavailable",
+                format!("连不上内核 RPC（{}）：{e}", kernel_url()),
+            )));
+        }
+        Err(_) => {
+            return Err(Box::new(err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "kernel_unavailable",
+                format!("连接内核 RPC 超时（{}）", kernel_url()),
+            )));
+        }
+    };
+    f(kernel).await.map_err(|e| {
+        // anyhow 的 Display 只给最外层；这里带上下文，但截断掉 RUST_BACKTRACE 尾部。
+        let msg = format!("{e:#}");
+        let msg = msg
+            .split("\n\nStack backtrace")
+            .next()
+            .unwrap_or(&msg)
+            .to_string();
+        Box::new(err(
+            StatusCode::BAD_GATEWAY,
+            "kernel_rpc",
+            msg.chars().take(600).collect::<String>(),
+        ))
+    })
+}
+
+async fn list_instances(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authorized(&state, &headers) {
+        return unauthorized();
+    }
+    let result = with_kernel(|kernel| {
+        Box::pin(async move {
+            let ids = kernel.list_ids().await?;
+            let mut out = Vec::new();
+            for id in ids {
+                let config = kernel.get_config(&id).await?;
+                out.push(json!({"id": id, "config": config}));
+            }
+            Ok(out)
+        })
+    })
+    .await;
+    match result {
+        Ok(v) => Json(json!({ "instances": v })).into_response(),
+        Err(resp) => *resp,
+    }
+}
+
+async fn get_instance_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return unauthorized();
+    }
+    match with_kernel(|kernel| {
+        let id = id.clone();
+        Box::pin(async move { kernel.get_config(&id).await })
+    })
+    .await
+    {
+        Ok(Some(cfg)) => Json(json!({"id": id, "config": cfg})).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "not_found", "实例不存在或读不到配置"),
+        Err(resp) => *resp,
+    }
+}
+
+async fn create_instance(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return unauthorized();
+    }
+    let config: exvlan_rpc::exvlan_proto::api::manage::NetworkConfig =
+        match serde_json::from_str(&body) {
+            Ok(c) => c,
+            Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", format!("配置解析失败: {e}")),
+        };
+    match with_kernel(|kernel| {
+        Box::pin(async move { kernel.run(config, true).await.map(|id| json!({"id": id})) })
+    })
+    .await
+    {
+        Ok(v) => Json(v).into_response(),
+        Err(resp) => *resp,
+    }
+}
+
+async fn delete_instance(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return unauthorized();
+    }
+    match with_kernel(|kernel| {
+        let id = id.clone();
+        Box::pin(async move { kernel.delete(&id).await.map(|_| json!({"deleted": id})) })
+    })
+    .await
+    {
+        Ok(v) => Json(v).into_response(),
+        Err(resp) => *resp,
+    }
 }
 
 // ---------------------------------------------------------------------------
