@@ -333,6 +333,15 @@ struct Request {
     /// `whitelist.set` 的额外网段
     #[serde(default)]
     extra: Option<Vec<String>>,
+    /// `config.*` 的网络实例 id（也是配置文件名 `<id>.toml`）
+    #[serde(default)]
+    id: Option<String>,
+    /// `config.write` 的配置正文（内核 TOML）
+    #[serde(default)]
+    text: Option<String>,
+    /// `config.write` 是否启用（false → `<id>.toml.disabled`，内核不加载）
+    #[serde(default)]
+    enabled: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -497,6 +506,179 @@ fn validate_cidr(cidr: &str) -> Result<String, String> {
         return Err(format!("只允许私网/链路本地/回环网段（拒绝 {cidr}）"));
     }
     Err(format!("不是合法 CIDR: {cidr}"))
+}
+
+// ---------------------------------------------------------------------------
+// 网络配置读写（`config.*`）
+// ---------------------------------------------------------------------------
+//
+// 权威数据：内核从 `<config-dir>/*.toml` 加载网络实例。pre.17 起 GUI **不再**
+// 自己维护 `networks.toml`，而是经这里写文件（服务是唯一写者，目录属主是 root）。
+//
+// 禁用状态用后缀表达：`<id>.toml.disabled`（内核只扫 `*.toml`，自然不加载），
+// 这样「禁用」不会丢配置，也不需要第二份状态文件。
+
+/// 启用中的配置：`<id>.toml`。
+const CONFIG_ENABLED_SUFFIX: &str = ".toml";
+/// 已禁用的配置：`<id>.toml.disabled`。
+const CONFIG_DISABLED_SUFFIX: &str = ".toml.disabled";
+
+/// 实例 id → 文件名。**必须**挡住 `../`、绝对路径等输入：IPC 对面是 root。
+fn validate_network_id(id: &str) -> anyhow::Result<()> {
+    if id.is_empty() || id.len() > 64 {
+        bail!("实例 id 长度必须在 1..=64 之间");
+    }
+    if !id
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    {
+        bail!("实例 id 只允许 [A-Za-z0-9._-]");
+    }
+    if id.starts_with('.') || id.contains("..") {
+        bail!("实例 id 不能以 . 开头，也不能包含 ..");
+    }
+    Ok(())
+}
+
+fn config_file_path(config_dir: &Path, id: &str, enabled: bool) -> PathBuf {
+    let suffix = if enabled {
+        CONFIG_ENABLED_SUFFIX
+    } else {
+        CONFIG_DISABLED_SUFFIX
+    };
+    config_dir.join(format!("{id}{suffix}"))
+}
+
+#[derive(Debug, Serialize)]
+struct ConfigEntry {
+    id: String,
+    enabled: bool,
+    bytes: u64,
+    /// 最后修改时间（UNIX 秒）；拿不到时为 0。
+    modified: u64,
+}
+
+/// 列出配置目录里的网络（`*.toml` + `*.toml.disabled`）。
+fn list_network_configs(config_dir: &Path) -> Vec<ConfigEntry> {
+    let mut out: Vec<ConfigEntry> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(config_dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // 隐藏文件（含我们自己的 `.xxx.toml.tmp`）一律不看。
+        if name.starts_with('.') {
+            continue;
+        }
+        let (id, enabled) = if let Some(id) = name.strip_suffix(CONFIG_DISABLED_SUFFIX) {
+            (id.to_string(), false)
+        } else if let Some(id) = name.strip_suffix(CONFIG_ENABLED_SUFFIX) {
+            (id.to_string(), true)
+        } else {
+            continue;
+        };
+        if id.is_empty() {
+            continue;
+        }
+        let meta = entry.metadata().ok();
+        let bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified = meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        out.push(ConfigEntry {
+            id,
+            enabled,
+            bytes,
+            modified,
+        });
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
+}
+
+/// 最小校验：必须是 TOML 表，且带 `[network_identity] network_name`。
+///
+/// 不做完整字段校验 —— 那是内核 `TomlConfig` 的事；这里只拦住「写进去也起不来」
+/// 的明显错误，避免把坏文件留在目录里让内核下次启动直接报错。
+fn validate_network_toml(text: &str) -> anyhow::Result<()> {
+    let doc: toml::Value = toml::from_str(text).context("配置不是合法 TOML")?;
+    if !doc.is_table() {
+        bail!("配置必须是 TOML 表（应包含 [network_identity] 等小节）");
+    }
+    let name = doc
+        .get("network_identity")
+        .and_then(|v| v.get("network_name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if name.trim().is_empty() {
+        bail!("缺少 [network_identity] network_name（内核无法加载该实例）");
+    }
+    Ok(())
+}
+
+/// 原子写：临时文件 → 校验 → rename，再删掉另一种（启用/禁用）形态。
+fn write_network_config(
+    config_dir: &Path,
+    id: &str,
+    text: &str,
+    enabled: bool,
+) -> anyhow::Result<u64> {
+    validate_network_id(id)?;
+    validate_network_toml(text)?;
+    std::fs::create_dir_all(config_dir)
+        .with_context(|| format!("创建配置目录失败: {}", config_dir.display()))?;
+
+    // 临时文件用 `.` 前缀：内核与我们自己的 `list` 都不会把它当成实例。
+    let tmp = config_dir.join(format!(".{id}.toml.tmp"));
+    std::fs::write(&tmp, text).with_context(|| format!("写入 {} 失败", tmp.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644)).ok();
+    }
+    let dst = config_file_path(config_dir, id, enabled);
+    if let Err(err) = std::fs::rename(&tmp, &dst) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err).with_context(|| format!("替换 {} 失败", dst.display()));
+    }
+    // 同一个 id 只能有一种形态，否则会出现「启用 + 禁用」两份。
+    let _ = std::fs::remove_file(config_file_path(config_dir, id, !enabled));
+    Ok(text.len() as u64)
+}
+
+/// 读配置：返回 (正文, 是否启用)。
+fn read_network_config(config_dir: &Path, id: &str) -> anyhow::Result<(String, bool)> {
+    validate_network_id(id)?;
+    let enabled_path = config_file_path(config_dir, id, true);
+    if enabled_path.is_file() {
+        let text = std::fs::read_to_string(&enabled_path)
+            .with_context(|| format!("读取 {} 失败", enabled_path.display()))?;
+        return Ok((text, true));
+    }
+    let disabled_path = config_file_path(config_dir, id, false);
+    if disabled_path.is_file() {
+        let text = std::fs::read_to_string(&disabled_path)
+            .with_context(|| format!("读取 {} 失败", disabled_path.display()))?;
+        return Ok((text, false));
+    }
+    bail!("配置不存在: {id}");
+}
+
+/// 删除配置（两种形态都删），返回是否真的删掉了东西。
+fn delete_network_config(config_dir: &Path, id: &str) -> anyhow::Result<bool> {
+    validate_network_id(id)?;
+    let mut removed = false;
+    for enabled in [true, false] {
+        let path = config_file_path(config_dir, id, enabled);
+        if path.is_file() {
+            std::fs::remove_file(&path).with_context(|| format!("删除 {} 失败", path.display()))?;
+            removed = true;
+        }
+    }
+    Ok(removed)
 }
 
 /// 扫 `<config-dir>/*.toml`，收集每个网络实例的虚拟网段。
@@ -1287,6 +1469,63 @@ impl State {
                 r.data = Some(self.whitelist_info());
                 r
             }
+            "config.list" => {
+                let items = list_network_configs(&self.paths.config);
+                let mut r = Response::ok();
+                r.data = Some(serde_json::json!({
+                    "dir": self.paths.config.display().to_string(),
+                    "items": items,
+                }));
+                r
+            }
+            "config.read" => match req.id.as_deref() {
+                None => Response::err("bad_request", "id 缺失"),
+                Some(id) => match read_network_config(&self.paths.config, id) {
+                    Ok((text, enabled)) => {
+                        let mut r = Response::ok();
+                        r.data = Some(serde_json::json!({
+                            "id": id,
+                            "enabled": enabled,
+                            "text": text,
+                        }));
+                        r
+                    }
+                    Err(err) => Response::err("not_found", err.to_string()),
+                },
+            },
+            "config.write" => match (req.id.as_deref(), req.text.as_deref()) {
+                (Some(id), Some(text)) => {
+                    let enabled = req.enabled.unwrap_or(true);
+                    match write_network_config(&self.paths.config, id, text, enabled) {
+                        Ok(bytes) => {
+                            self.log(format!(
+                                "config.write id={id} enabled={enabled} bytes={bytes}"
+                            ));
+                            let mut r = Response::ok();
+                            r.data = Some(serde_json::json!({
+                                "id": id,
+                                "enabled": enabled,
+                                "bytes": bytes,
+                            }));
+                            r
+                        }
+                        Err(err) => Response::err("write_failed", err.to_string()),
+                    }
+                }
+                (None, _) => Response::err("bad_request", "id 缺失"),
+                (_, None) => Response::err("bad_request", "text 缺失"),
+            },
+            "config.delete" => match req.id.as_deref() {
+                None => Response::err("bad_request", "id 缺失"),
+                Some(id) => match delete_network_config(&self.paths.config, id) {
+                    Ok(true) => {
+                        self.log(format!("config.delete id={id}"));
+                        Response::ok()
+                    }
+                    Ok(false) => Response::err("not_found", format!("配置不存在: {id}")),
+                    Err(err) => Response::err("delete_failed", err.to_string()),
+                },
+            },
             "port.owner" => {
                 let mut r = Response::ok();
                 r.data = Some(match port_owner(RPC_PORT) {
@@ -1880,11 +2119,7 @@ fn serve_unix(state: Arc<State>) -> anyhow::Result<()> {
             continue;
         }
         let state = state.clone();
-        state.session_open();
-        std::thread::spawn(move || {
-            handle_unix_conn(&state, stream);
-            state.session_close();
-        });
+        std::thread::spawn(move || handle_unix_conn(&state, stream));
     }
     Ok(())
 }
@@ -1926,8 +2161,13 @@ fn peer_allowed(stream: &std::os::unix::net::UnixStream, state: &State) -> bool 
 }
 
 #[cfg(unix)]
-fn handle_unix_conn(state: &State, stream: std::os::unix::net::UnixStream) {
+fn handle_unix_conn(state: &Arc<State>, stream: std::os::unix::net::UnixStream) {
     use std::io::{BufRead, BufReader, Write};
+    // 只有**发过 hello** 的连接才算「一个会话」。
+    //
+    // 之前是「连上就算」：`exvlan-cli doctor` / 一次 `config list` 这种短连接在
+    // session 策略下会把会话数从 1 抖到 0，顺手把内核停掉（CLI 一查就断网）。
+    let mut is_session = false;
     let mut reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
         Err(_) => return,
@@ -1963,6 +2203,10 @@ fn handle_unix_conn(state: &State, stream: std::os::unix::net::UnixStream) {
             );
             continue;
         }
+        if req.op == "hello" && !is_session {
+            is_session = true;
+            state.session_open();
+        }
         let resp = state.handle(req);
         let _ = writeln!(
             writer,
@@ -1971,6 +2215,9 @@ fn handle_unix_conn(state: &State, stream: std::os::unix::net::UnixStream) {
         );
     }
     let _ = last;
+    if is_session {
+        state.session_close();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2137,7 +2384,6 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
         let connected = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) } != 0
             || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
         if connected {
-            state.session_open();
             let st = state.clone();
             let pipe = SendHandle(handle);
             std::thread::spawn(move || {
@@ -2145,7 +2391,6 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
                 // 从而绕过 SendHandle 的 Send 实现。
                 let handle = pipe.into_inner();
                 handle_pipe_conn(&st, handle);
-                st.session_close();
                 unsafe {
                     DisconnectNamedPipe(handle);
                     CloseHandle(handle);
@@ -2173,11 +2418,13 @@ impl SendHandle {
 }
 
 #[cfg(target_os = "windows")]
-fn handle_pipe_conn(state: &State, handle: windows_sys::Win32::Foundation::HANDLE) {
+fn handle_pipe_conn(state: &Arc<State>, handle: windows_sys::Win32::Foundation::HANDLE) {
     use windows_sys::Win32::Storage::FileSystem::*;
 
     let mut buf = [0u8; 4096];
     let mut pending = String::new();
+    // 与 unix 一致：只有发过 hello 的连接才算会话（短命令不会停内核）。
+    let mut is_session = false;
     loop {
         let mut read = 0u32;
         let ok = unsafe {
@@ -2203,10 +2450,17 @@ fn handle_pipe_conn(state: &State, handle: windows_sys::Win32::Foundation::HANDL
                     continue;
                 }
             };
+            if req.op == "hello" && !is_session {
+                is_session = true;
+                state.session_open();
+            }
             let resp = state.handle(req);
             write_pipe(handle, &resp);
         }
         let _ = read;
+    }
+    if is_session {
+        state.session_close();
     }
 }
 
@@ -2793,5 +3047,117 @@ mod whitelist_tests {
         let text = toml::to_string_pretty(&cfg).expect("dump");
         assert!(text.contains("policy = \"session\""), "{text}");
         assert!(!text.contains("mode ="), "{text}");
+    }
+
+    // ---- config.* 读写 ----
+
+    fn temp_config_dir(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "exvlan-service-test-{tag}-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    const VALID_CFG: &str = "hostname = \"n1\"\n[network_identity]\nnetwork_name = \"exvlan\"\nnetwork_secret = \"s\"\n";
+
+    #[test]
+    fn rejects_path_traversal_ids() {
+        for bad in [
+            "",
+            "..",
+            "../etc/passwd",
+            "a/b",
+            "/abs",
+            ".hidden",
+            "x..y",
+            "a b",
+            "网",
+            &"a".repeat(65),
+        ] {
+            assert!(
+                crate::validate_network_id(bad).is_err(),
+                "{bad:?} 必须被拒绝"
+            );
+        }
+        for good in [
+            "1467ec85-9cf8-47bc-8c06-8dc320e9b9c5",
+            "net_1",
+            "a.b",
+            "A-9",
+        ] {
+            assert!(crate::validate_network_id(good).is_ok(), "{good} 应被接受");
+        }
+    }
+
+    #[test]
+    fn config_write_read_delete_round_trip() {
+        let dir = temp_config_dir("roundtrip");
+        let id = "1467ec85-9cf8-47bc-8c06-8dc320e9b9c5";
+
+        let bytes = crate::write_network_config(&dir, id, VALID_CFG, true).expect("write");
+        assert_eq!(bytes, VALID_CFG.len() as u64);
+        let (text, enabled) = crate::read_network_config(&dir, id).expect("read");
+        assert_eq!(text, VALID_CFG);
+        assert!(enabled);
+
+        // 禁用：改成 `.toml.disabled`，且启用形态消失（不会有第二份状态）
+        crate::write_network_config(&dir, id, VALID_CFG, false).expect("disable");
+        assert!(!crate::config_file_path(&dir, id, true).exists());
+        assert!(crate::config_file_path(&dir, id, false).exists());
+        let (_, enabled) = crate::read_network_config(&dir, id).expect("read disabled");
+        assert!(!enabled);
+
+        let list = crate::list_network_configs(&dir);
+        assert_eq!(list.len(), 1, "{list:?}");
+        assert_eq!(list[0].id, id);
+
+        assert!(crate::delete_network_config(&dir, id).expect("delete"));
+        assert!(!crate::delete_network_config(&dir, id).expect("delete again"));
+        assert!(crate::list_network_configs(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_write_rejects_bad_toml_and_leaves_nothing_behind() {
+        let dir = temp_config_dir("badtoml");
+        let id = "net1";
+
+        assert!(crate::write_network_config(&dir, id, "not = [valid", true).is_err());
+        assert!(
+            crate::write_network_config(&dir, id, "hostname = \"n\"\n", true).is_err(),
+            "缺 network_identity 必须被拒绝"
+        );
+        assert!(crate::list_network_configs(&dir).is_empty());
+        assert!(!dir.join(format!("{id}.toml")).exists());
+        // 不留临时文件
+        let leftovers: Vec<String> = std::fs::read_dir(&dir)
+            .expect("read dir")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(leftovers.is_empty(), "临时文件没清干净: {leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_ignores_tmp_and_foreign_files() {
+        let dir = temp_config_dir("list");
+        std::fs::write(dir.join("a.toml"), VALID_CFG).expect("write a");
+        std::fs::write(dir.join("b.toml.disabled"), VALID_CFG).expect("write b");
+        std::fs::write(dir.join(".c.toml.tmp"), VALID_CFG).expect("write tmp");
+        std::fs::write(dir.join("networks.json"), "{}").expect("write json");
+        let list = crate::list_network_configs(&dir);
+        assert_eq!(list.len(), 2, "{list:?}");
+        assert_eq!(list[0].id, "a");
+        assert!(list[0].enabled);
+        assert_eq!(list[1].id, "b");
+        assert!(!list[1].enabled);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
