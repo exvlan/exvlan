@@ -341,3 +341,19 @@ CI 硬门禁：`service.yml` 的 Windows 作业真实 `--install` 一次，断�
   （`kernel:read/write`、`service:read/control/admin`、`gateway:admin`、`net:probe`）；
 - token **只能本地 IPC 签发**（远端不能自我续命），支持过期/吊销/`rotate --grace`，审计带 `token_id`；
 - 远端 `service:admin`（装服务/换内核/chown）由 admin token 全权（已接受风险，记录在案）。
+
+### 14.5 网络配置只有一份权威（pre.17 去存储化）
+
+| 项         | 决策                                                                                                            |
+| ---------- | --------------------------------------------------------------------------------------------------------------- |
+| 唯一权威   | 内核 `--config-dir` 下的 `<id>.toml`；**不再有** `networks.toml` / `localStorage.networkList` 这类第二份存储    |
+| 写入者     | `service` 后端：服务 IPC `config.write`（目录归 root，客户端无权直写）；`core` 后端：客户端直接原子写同一目录   |
+| 禁用语义   | `<id>.toml.disabled` —— 内核只扫 `*.toml`，所以「禁用」既不丢配置也不需要第二份状态文件                         |
+| 运行       | 运行实例走内核 RPC（不落盘）；持久化只发生在配置文件，二者解耦                                                  |
+| 迁移       | 旧 `networks.toml` 由 `exvlan-migrate` 一次性转成 `<id>.toml`（下一版不再随包）                                 |
+| Linux 特例 | Linux 没有特权服务进程（内核由 systemd 以 root 运行），安装时把配置目录 **chown 给属主**（0700，root 仍可读）   |
+| 守卫       | `exvlan-cli config list/get/set/rm/enable/disable`；`doctor` 增加 `config.dir`（不可写 = 保存会失败，直接报错） |
+
+会话计数同时修正：只有发过 `hello` 的连接才算会话。此前任何一次短连接
+（`exvlan-cli doctor` / `config list`）在 `policy=session` 下都会把会话数抖到 0，
+顺手停掉内核 —— 表现为「CLI 查一下，网络就断了」。
