@@ -790,8 +790,8 @@ target:
   remote_rejected: Connected to {addr} but it never replies. Usually the remote kernel RPC whitelist does not include this machine — make sure the remote runs pre.14 or newer (older builds only allow loopback).
   switch_hint: switch from the status bar or tray
   hint: |-
-    Remote targets are reached over the mesh network only (fixed port 15999,
-    no key, no HTTPS). Switching target does NOT stop the local kernel;
+    Remote targets are reached over the mesh network only (port is discovered
+    automatically, no key, no HTTPS). Switching target does NOT stop the local kernel;
     "remote + local normal mode" can coexist.
 
 service_settings:
@@ -805,7 +805,7 @@ service_settings:
   extra_saved: Extra subnets saved (effective after kernel restart)
   mtu: Network MTU
   mtu_hint: Defaults to 1300 (the tun ends up around 1280). Paths through mesh/relay are often limited to ~1330 bytes; with 1380 large TCP segments get dropped, which shows up as "connects but never replies".
-  port: Port 15999
+  port: RPC port
   port_free: Port is free
   port_foreign: The listener is not our kernel and will not be cleaned up automatically
   port_kill: Terminate stale kernel process

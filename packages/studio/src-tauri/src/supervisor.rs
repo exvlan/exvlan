@@ -113,8 +113,8 @@ fn spawn(app: &tauri::AppHandle) -> anyhow::Result<NormalKernel> {
         .with_context(|| format!("创建普通模式日志目录 {} 失败", log_dir.display()))?;
 
     // 与服务模式完全一致的参数集，只是目录（用户态）不同。
-    // 端口固定 15999：远程管理 / GUI / 服务都连这一个地址（两模式可互换）。
-    let rpc_portal = "127.0.0.1:15999".to_string();
+    // RPC 端口默认 1995（可在 service.toml 配置）：远程管理 / GUI / 服务都连这个地址。
+    let rpc_portal = "127.0.0.1:1995".to_string();
 
     let mut cmd = crate::kernel::kernel_command(&kernel);
     cmd.arg("--config-dir")

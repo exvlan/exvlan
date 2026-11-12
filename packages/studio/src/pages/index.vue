@@ -191,8 +191,8 @@ async function normalizeMode(mode: Mode): Promise<Mode> {
     config_dir: configDir,
     file_log_dir: logDir,
     file_log_level: "info",
-    // 端口固定：服务与普通模式都只用 15999，任何"保存过的自定义端口"都是
-    // pre.12 的残留，照它连会连到没人监听的地址。
+    // 端口：服务与普通模式都只用 1995（可在 service.toml 配置）；任何"保存过的
+    // 自定义端口"都是 pre.12 的残留，照它连会连到没人监听的地址。
     rpc_portal: LOCAL_RPC_PORTAL,
   } as Mode;
 }
@@ -271,7 +271,7 @@ async function onReinstallService() {
   try {
     await serviceReinstall({
       config_dir: "",
-      rpc_portal: (currentMode.value as any).rpc_portal || "127.0.0.1:15999",
+      rpc_portal: (currentMode.value as any).rpc_portal || "127.0.0.1:1995",
       file_log_level: (currentMode.value as any).file_log_level || "info",
       file_log_dir: "",
       config_server: (currentMode.value as any).config_server_url,
@@ -314,7 +314,7 @@ const runtimeKind = ref<RuntimeKind>(loadRuntime());
 const targetId = ref<string>(loadTargetId());
 
 /** 两种运行方式共用的固定本地端口（服务与 supervisor 都写死这个值）。 */
-const LOCAL_RPC_PORTAL = "127.0.0.1:15999";
+const LOCAL_RPC_PORTAL = "127.0.0.1:1995";
 
 const serviceDialogVisible = ref(false);
 /** 配置里的网段变了但内核还没重启 → 远程管理对新网段暂不生效。 */
@@ -769,7 +769,7 @@ async function ensureLocalKernel(mode: Mode) {
   const defaults = await serviceDefaultDirs();
   const merged = {
     config_dir: (mode as any).config_dir || saved.config_dir || defaults.config_dir,
-    rpc_portal: (mode as any).rpc_portal || saved.rpc_portal || "127.0.0.1:15999",
+    rpc_portal: (mode as any).rpc_portal || saved.rpc_portal || "127.0.0.1:1995",
     file_log_level: (mode as any).file_log_level || saved.file_log_level || "info",
     file_log_dir: (mode as any).file_log_dir || saved.file_log_dir || defaults.file_log_dir,
     config_server: (mode as { config_server_url?: string }).config_server_url,

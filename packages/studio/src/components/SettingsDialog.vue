@@ -170,7 +170,7 @@ async function reinstallService() {
     await clearElevateDenied();
     await serviceReinstall({
       config_dir: "",
-      rpc_portal: (props.mode as any).rpc_portal || "127.0.0.1:15999",
+      rpc_portal: (props.mode as any).rpc_portal || "127.0.0.1:1995",
       file_log_level: (props.mode as any).file_log_level || "info",
       file_log_dir: "",
       config_server: (props.mode as any).config_server_url,

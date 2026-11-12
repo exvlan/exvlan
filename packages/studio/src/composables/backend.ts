@@ -350,12 +350,12 @@ export interface PortOwnerInfo {
   is_our_kernel?: boolean;
 }
 
-/** 谁占着 15999（诊断用）。 */
+/** 谁占着 RPC 端口（诊断用）。 */
 export async function portOwnerInfo() {
   return await invoke<PortOwnerInfo>("port_owner_info");
 }
 
-/** 结束占用 15999 的自家内核（后端校验进程路径，非自家拒绝）。 */
+/** 结束占用 RPC 端口的自家内核（后端校验进程路径，非自家拒绝）。 */
 export async function portCleanup() {
   return await invoke<void>("port_cleanup");
 }

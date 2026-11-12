@@ -20,7 +20,7 @@ export interface RemoteTarget {
 }
 
 export const LOCAL_TARGET = "local";
-export const DEFAULT_RPC_PORT = 15999;
+export const DEFAULT_RPC_PORT = 1995;
 
 const KEY_RUNTIME = "runtime";
 const KEY_TARGET = "target";
@@ -67,8 +67,8 @@ export function loadRemotes(): RemoteTarget[] {
             item.host.length > 0
           );
         })
-        // 自愈：远程目标固定 15999（设计上只走 mesh、无密钥无 HTTPS）。
-        // 历史数据里出现过 `1599` 这类手误，直接纠正而不是让用户去猜。
+        // 端口由对端自动发现（默认 RPC 1995 / gateway 2016）。
+        // 归一化历史数据里的手误端口，避免用户去猜。
         .map((item) => ({ ...item, port: DEFAULT_RPC_PORT }))
     );
   } catch {
@@ -125,9 +125,12 @@ export function newRemote(host = "", port = DEFAULT_RPC_PORT): RemoteTarget {
   };
 }
 
+/** 允许在地址里出现的端口：当前默认值 + 历史默认值（便于粘贴旧地址）。 */
+const ACCEPTED_PORTS = new Set([DEFAULT_RPC_PORT, 15999]);
+
 /**
- * 解析「远程目标主机」。端口固定 15999 —— 允许粘贴 `host:15999`，
- * 但其他端口明确拒绝（否则会存下 1599 这种手误，之后一直连不上）。
+ * 解析「远程目标主机」。端口会由对端自动发现（默认 RPC 1995 / gateway 2016），
+ * 因此只做“去掉显式端口 + 拒绝明显手误”的处理。
  */
 export function parseRemoteHost(input: string): { host: string } | { error: "port" } | null {
   let text = input.trim();
@@ -135,7 +138,7 @@ export function parseRemoteHost(input: string): { host: string } | { error: "por
   text = text.replace(/^tcp:\/\//i, "").replace(/\/.*$/, "");
   const v6 = text.match(/^\[([^\]]+)\](?::(\d+))?$/);
   if (v6) {
-    if (v6[2] && Number(v6[2]) !== DEFAULT_RPC_PORT) return { error: "port" };
+    if (v6[2] && !ACCEPTED_PORTS.has(Number(v6[2]))) return { error: "port" };
     return { host: v6[1] };
   }
   const parts = text.split(":");
@@ -143,7 +146,7 @@ export function parseRemoteHost(input: string): { host: string } | { error: "por
     return { host: parts[0] };
   }
   const port = Number(parts[parts.length - 1]);
-  if (port !== DEFAULT_RPC_PORT) {
+  if (!ACCEPTED_PORTS.has(port)) {
     return { error: "port" };
   }
   return { host: parts.slice(0, -1).join(":") };
@@ -154,7 +157,7 @@ export function parseAddress(input: string): { host: string; port: number } | nu
   let text = input.trim();
   if (!text) return null;
   text = text.replace(/^tcp:\/\//i, "").replace(/\/.*$/, "");
-  // [::1]:15999
+  // [::1]:1995
   const v6 = text.match(/^\[([^\]]+)\](?::(\d+))?$/);
   if (v6) {
     return { host: v6[1], port: v6[2] ? Number(v6[2]) : DEFAULT_RPC_PORT };

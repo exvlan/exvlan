@@ -78,6 +78,11 @@ jobs:
       - name: Check i18n keys
         run: python3 script/ci/check-i18n-keys.py
 
+      # 端口守卫：管理面端口（1995/1996/2016/2018）必须来自配置/发现，
+      # 不允许再散落在业务代码里（pre.16 把 15999 写死在十几处）。
+      - name: Check hardcoded ports
+        run: python3 script/ci/check-no-hardcoded-ports.py
+
       # runner 预装内容 + 全 feature 构建很容易打满磁盘（曾多次 No space left on device）
       - name: Free disk space
         run: |

@@ -6,7 +6,7 @@
 //! 3. 通过 IPC 暴露 status / mode / kernel / apply
 //!
 //! 设计要点：模式只是「生命周期策略」，**切换模式不重启内核**；
-//! 配置与端口两模式一致（单一 config、固定 15999）。
+//! 配置与端口两模式一致（单一 config；RPC 端口默认 1995）。
 
 #![cfg_attr(
     not(any(target_os = "macos", target_os = "windows")),
@@ -50,7 +50,9 @@ const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
 };
 const MINISIGN_PUBKEY: &str = "RWSFKUboUUaFQYx/ap73a7ySNbuI5kjDGsiVJBtceshu+Ml99YPMFqe9";
 const PROTO: u32 = 1;
-const RPC_PORTAL: &str = "0.0.0.0:15999";
+/// RPC 端口（在内核与 GUI 之间保持一致；service.toml 可覆盖）。
+const RPC_PORT: u16 = 1995;
+const RPC_PORTAL: &str = "0.0.0.0:1995";
 /// 回环：GUI 自己从这里连进来，**任何情况下都不能少**。
 ///
 /// 内核的默认白名单是 `127.0.0.0/8` + `::1/128`；一旦显式传
@@ -67,7 +69,7 @@ const DHCP_FALLBACK_POOL: &str = "10.254.0.0/16";
 const MAX_EXTRA_WHITELIST: usize = 8;
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 /// 本地 RPC 地址（内核固定监听这个端口）。
-const LOCAL_RPC: &str = "127.0.0.1:15999";
+const LOCAL_RPC: &str = "127.0.0.1:1995";
 
 /// tun 的 MTU。
 ///
@@ -548,7 +550,7 @@ fn configured_networks(config_dir: &Path) -> (Vec<String>, Vec<String>) {
 }
 
 // ---------------------------------------------------------------------------
-// 端口占用诊断（15999 被残留内核占住时，现场要能看出是谁）
+// 端口占用诊断（RPC 端口被残留内核占住时，现场要能看出是谁）
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -929,12 +931,12 @@ impl State {
             let _ = child.wait();
             bail!("kernel start failed: {err}");
         }
-        // `wait_rpc_ready` 只看端口通不通：若 15999 已被**残留**的旧内核占着，
+        // `wait_rpc_ready` 只看端口通不通：若 RPC 端口已被**残留**的旧内核占着，
         // 我们刚拉起的这个会因 bind 失败立刻退出，而探活仍会“成功”。
         if let Ok(Some(status)) = child.try_wait() {
             self.log(format!("kernel exited immediately: {status}"));
             bail!(
-                "内核启动后立即退出（{status}）：很可能是 15999 端口被残留进程占用，\
+                "内核启动后立即退出（{status}）：很可能是 RPC 端口被残留进程占用，\
                  请结束遗留的 exvlan 进程后重试"
             );
         }
@@ -1058,7 +1060,7 @@ impl State {
         resp.kernel = Some(KernelInfo {
             pid,
             running: pid != 0,
-            rpc: "127.0.0.1:15999".into(),
+            rpc: LOCAL_RPC.into(),
         });
         resp
     }
@@ -1159,20 +1161,20 @@ impl State {
             }
             "port.owner" => {
                 let mut r = Response::ok();
-                r.data = Some(match port_owner(15999) {
+                r.data = Some(match port_owner(RPC_PORT) {
                     Some(owner) => serde_json::json!({
-                        "port": 15999,
+                        "port": RPC_PORT,
                         "pid": owner.pid,
                         "name": owner.name,
                         "path": owner.path,
                         "is_our_kernel": owner.is_our_kernel(&self.paths.kernel),
                     }),
-                    None => serde_json::json!({ "port": 15999, "free": true }),
+                    None => serde_json::json!({ "port": RPC_PORT, "free": true }),
                 });
                 r
             }
-            "port.cleanup" => match port_owner(15999) {
-                None => Response::err("nothing", "15999 当前没有被占用"),
+            "port.cleanup" => match port_owner(RPC_PORT) {
+                None => Response::err("nothing", "RPC 端口当前没有被占用"),
                 Some(owner) if !owner.is_our_kernel(&self.paths.kernel) => Response::err(
                     "not_ours",
                     format!(
@@ -1287,7 +1289,7 @@ fn wait_rpc_ready(timeout: Duration) -> anyhow::Result<()> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if std::net::TcpStream::connect_timeout(
-            &"127.0.0.1:15999".parse().unwrap(),
+            &LOCAL_RPC.parse().unwrap(),
             Duration::from_millis(200),
         )
         .is_ok()
@@ -1794,7 +1796,7 @@ mod win {
             state.log(format!("pipe loop exited: {err}"));
         }
 
-        // 退出前把内核一并收掉（否则会留下孤儿内核占着 15999 和 TUN）。
+        // 退出前把内核一并收掉（否则会留下孤儿内核占着 RPC 端口和 TUN）。
         if let Err(err) = state.stop_kernel() {
             state.log(format!("stop kernel on exit failed: {err}"));
         }
@@ -1982,7 +1984,7 @@ fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
     std::fs::set_permissions(&p.service_bin, std::fs::Permissions::from_mode(0o755))?;
     chown_root(&p.service_bin);
 
-    // 旧模型（内核直跑 launchd / 旧 helper）与新版抢 15999 与 TUN，必须先清掉。
+    // 旧模型（内核直跑 launchd / 旧 helper）与新版抢同一端口与 TUN，必须先清掉。
     // 注意：列表里**不能**包含当前的 SERVICE_LABEL，否则会删掉刚写好、
     // 或者（更糟）正在用的 plist（pre.12 的 bootstrap EIO 就是这个原因）。
     cleanup_legacy_macos();

@@ -376,14 +376,14 @@ mod imp {
     pub fn ensure_normal(_app: &tauri::AppHandle) -> Result<String, String> {
         set_mode("normal")?;
         ensure_kernel()?;
-        Ok("127.0.0.1:15999".to_string())
+        Ok("127.0.0.1:1995".to_string())
     }
 
     /// 服务模式：建 session → mode=service → 确保内核在跑。
     pub fn ensure_service(_app: &tauri::AppHandle) -> Result<String, String> {
         set_mode("service")?;
         ensure_kernel()?;
-        Ok("127.0.0.1:15999".to_string())
+        Ok("127.0.0.1:1995".to_string())
     }
 
     pub fn stop() {
@@ -403,13 +403,13 @@ mod imp {
         Ok(resp.get("data").cloned().unwrap_or_default())
     }
 
-    /// 谁占着 15999（诊断用）。
+    /// 谁占着 RPC 端口（诊断用）。
     pub fn port_owner() -> Result<serde_json::Value, String> {
         let resp = request("port.owner", serde_json::json!({}))?;
         Ok(resp.get("data").cloned().unwrap_or_default())
     }
 
-    /// 结束占用 15999 的**自家内核**（服务端会校验路径，非自家拒绝）。
+    /// 结束占用 RPC 端口的**自家内核**（服务端会校验路径，非自家拒绝）。
     pub fn port_cleanup() -> Result<(), String> {
         request("port.cleanup", serde_json::json!({})).map(|_| ())
     }
@@ -509,7 +509,7 @@ mod stub {
         crate::supervisor::ensure(app).map_err(|e| format!("{e:#}"))
     }
     pub fn ensure_service(_app: &tauri::AppHandle) -> Result<String, String> {
-        Ok("127.0.0.1:15999".to_string())
+        Ok("127.0.0.1:1995".to_string())
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     pub fn stop() {}

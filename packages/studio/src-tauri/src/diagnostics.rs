@@ -243,7 +243,7 @@ fn interfaces_text() -> (String, Option<String>) {
 }
 
 /// 特权服务（`exvlan-service`）的完整状态：落点/权限/disabled/签名，
-/// 用于定位「服务显示 Running 但 15999 没人监听」这类问题。
+/// 用于定位「服务显示 Running 但 RPC 端口没人监听」这类问题。
 fn service_state_json() -> Value {
     let st = crate::service_client::state();
     #[allow(unused_mut)]
@@ -291,13 +291,13 @@ fn service_state_json() -> Value {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        // 生效的白名单（回环 + 各虚拟网段）与 15999 占用者：
+        // 生效的白名单（回环 + 各虚拟网段）与 RPC 端口占用者：
         // 「远程管理连不上」和「内核起不来」这两类问题都靠这两项定位。
         if let Ok(info) = crate::service_client::whitelist_info() {
             value["whitelist"] = info;
         }
         if let Ok(owner) = crate::service_client::port_owner() {
-            value["port_15999"] = owner;
+            value["port_rpc"] = owner;
         }
     }
 
@@ -566,7 +566,7 @@ ip -6 route show 10.254.0.0/16 2>/dev/null
             "sh",
             &[
                 "-c",
-                "ss -lntup 2>/dev/null | grep -E ':(11010|11011|11012|15999|22020|11211)([^0-9]|$)' || netstat -an | grep -E '\\.(11010|11011|11012|15999|22020|11211)([^0-9]|$)'",
+                "ss -lntup 2>/dev/null | grep -E ':(11010|11011|11012|1995|1996|2016|2018|15999|16000|22020|11211)([^0-9]|$)' || netstat -an | grep -E '\\.(11010|11011|11012|1995|1996|2016|2018|15999|16000|22020|11211)([^0-9]|$)'",
             ],
             Duration::from_secs(5),
         );

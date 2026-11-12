@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn dialer_builds_for_tcp_url() {
-        let url: url::Url = "tcp://127.0.0.1:15999".parse().unwrap();
+        let url: url::Url = "tcp://127.0.0.1:1995".parse().unwrap();
         let dialer = runtime_rpc_dialer(url.clone());
         assert_eq!(dialer.remote_url(), url);
     }

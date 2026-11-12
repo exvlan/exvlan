@@ -182,7 +182,7 @@ pub mod kernel {
     use super::*;
 
     /// 桌面端默认连的本地内核守护进程端口（仅用于提示）。
-    pub const LOCAL_RPC_HINT: &str = "tcp://127.0.0.1:15999";
+    pub const LOCAL_RPC_HINT: &str = "tcp://127.0.0.1:1995";
 
     #[derive(Debug, Clone, Serialize)]
     pub struct UpdateInfo {

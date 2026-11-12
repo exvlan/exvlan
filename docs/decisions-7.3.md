@@ -300,3 +300,44 @@ CI 硬门禁：`service.yml` 的 Windows 作业真实 `--install` 一次，断�
 | DHCP 实例             | 读不到静态地址时回退 `10.254.0.0/16` 并在日志注明                                                                                |
 | 诊断域名              | `DIAG_UPLOAD_URL` / `DIAG_TOKEN_URL` → `https://diag.exvlan.era-x.cn`（灰云直连）；旧 Worker 保留待 pre.14 覆盖足够后再下线      |
 | `toml` 解析           | `str::parse::<toml::Value>()` 解析的是「值」不是文档 → 每个网络配置都被当成失败、白名单退化只剩回环；改用 `toml::from_str`       |
+
+## 14. pre.17 决策（控制面归位 / 端口重编号 / 无运行时迁移）
+
+### 14.1 组件与数据归属
+
+| 项       | 决策                                                                                                     |
+| -------- | -------------------------------------------------------------------------------------------------------- |
+| 部署形态 | 只有两种 backend：`core`（裸核，systemd/GUI 子进程监督）与 `service`（特权服务监督内核）                 |
+| 生命周期 | 由 `policy` 表达：`resident`（默认，常驻）/ `session`（随界面）/ `stopped`；「随界面」只有桌面客户端能设 |
+| 数据权威 | 内核持有网络配置（`config/*.toml`）；服务持有服务配置（`service.toml`）；**客户端只持有 UI/会话状态**    |
+| 路由     | 本地管理走环回直连（服务 IPC + 内核 RPC）；远端统一走对端 gateway（HTTP/WS + token）                     |
+| 编排     | 唯一编排者是 `exvlan-service`；GUI/CLI/gateway 只发指令，不再各自判断版本/ensure/端口                    |
+
+### 14.2 端口重编号（全部可配置，客户端从 `/api/v1/system.endpoints` 发现）
+
+| 端口              | 用途                                | 默认绑定                    |
+| ----------------- | ----------------------------------- | --------------------------- |
+| 1995              | 内核 RPC portal                     | 127.0.0.1                   |
+| 1996              | `exvlan-api` REST                   | 127.0.0.1                   |
+| 2016              | gateway HTTP/WS                     | 127.0.0.1（mesh 仅 opt-in） |
+| 2018              | `exvlan-api` config-server          | 0.0.0.0（客户端必需）       |
+| 11010/11011/11012 | peer 监听（tcp+udp / wg+ws / quic） | 0.0.0.0，支持 `:0` 自动分配 |
+
+历史端口 15999/16000/11211/22020 只保留在「默认值定义/兼容解析/诊断探测」处，由
+`script/ci/check-no-hardcoded-ports.py` 守卫。
+
+### 14.3 无运行时迁移/兼容
+
+- 运行时不实现任何数据迁移或旧格式兼容读取；
+- 一次性迁移由独立工具 `exvlan-migrate` 完成（本版随安装包分发，首次启动弹窗确认后执行；
+  下一版移除随包，仅保留独立工具）；
+- 迁移工具写 `migrate.log` / `migrate-report.json`，备份在用户目录，支持 `--rollback`；
+- 迁移失败停在专用错误页（回滚/重试），不写完成标记。
+
+### 14.4 安全模型
+
+- 本地：环回 + unix socket / 命名管道（OS 鉴权，不做自建鉴权）；
+- 远端：gateway Bearer token（`exv_<id>_<secret>`，服务端存 hash），scope 分权
+  （`kernel:read/write`、`service:read/control/admin`、`gateway:admin`、`net:probe`）；
+- token **只能本地 IPC 签发**（远端不能自我续命），支持过期/吊销/`rotate --grace`，审计带 `token_id`；
+- 远端 `service:admin`（装服务/换内核/chown）由 admin token 全权（已接受风险，记录在案）。

@@ -640,7 +640,7 @@ async fn resolve_rpc_bind_url(url: &url::Url) -> Result<std::net::SocketAddr, St
 
 /// 桌面端默认连接的本地内核守护进程（服务模式与 normal 模式共用）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const LOCAL_DAEMON_RPC_PORTAL: &str = "tcp://127.0.0.1:15999";
+const LOCAL_DAEMON_RPC_PORTAL: &str = "tcp://127.0.0.1:1995";
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
@@ -3774,7 +3774,7 @@ mod service {
         let legacy_backup = stop_legacy_service();
 
         // 守护进程启动第一步是初始化文件日志：目录不存在会直接退出（20710 实测
-        // 表现为「launchctl 显示 Running 但 15999 无人监听」）。这里以 root 预建。
+        // 表现为「launchctl 显示 Running 但 RPC 端口无人监听」）。这里以 root 预建。
         prepare_runtime_dirs(&opts);
 
         // 19707/20708 实测：服务已注册时 `service_manager.update()` 会先 bootout 再立刻
@@ -5060,14 +5060,14 @@ async fn service_extra_whitelist_set(extra: Vec<String>) -> Result<serde_json::V
     crate::service_client::set_extra_whitelist(&extra)
 }
 
-/// 谁占着 15999（诊断用；不是自家内核时只展示）。
+/// 谁占着 RPC 端口（诊断用；不是自家内核时只展示）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn port_owner_info() -> Result<serde_json::Value, String> {
     crate::service_client::port_owner()
 }
 
-/// 结束占用 15999 的自家内核（服务端校验进程路径，非自家拒绝执行）。
+/// 结束占用 RPC 端口的自家内核（服务端校验进程路径，非自家拒绝执行）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn port_cleanup() -> Result<(), String> {
@@ -5114,7 +5114,7 @@ async fn port_cleanup() -> Result<(), String> {
 #[tauri::command]
 fn service_diagnostics(rpc_portal: Option<String>) -> Result<String, String> {
     let dirs = service_default_dirs();
-    let portal = rpc_portal.unwrap_or_else(|| "127.0.0.1:15999".to_string());
+    let portal = rpc_portal.unwrap_or_else(|| "127.0.0.1:1995".to_string());
     let svc_state = crate::service_client::state();
     let status = format!(
         "installed={} ready={} mode={} kernel_pid={} {}",

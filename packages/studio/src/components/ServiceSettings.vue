@@ -121,7 +121,7 @@ async function onReinstall() {
   try {
     await serviceReinstall({
       config_dir: "",
-      rpc_portal: "127.0.0.1:15999",
+      rpc_portal: "127.0.0.1:1995",
       file_log_level: "info",
       file_log_dir: "",
       config_server: undefined,

@@ -44,7 +44,7 @@ const isMobile = computed(() => {
   return p === "android" || p === "ios";
 });
 
-/** `vServer · 10.254.1.1:15999`，没填名字时只显示地址。 */
+/** `vServer · 10.254.1.1`，没填名字时只显示地址。 */
 function remoteLabel(remote: RemoteTarget): string {
   const addr = `${remote.host}:${remote.port || DEFAULT_RPC_PORT}`;
   return remote.name ? `${remote.name} · ${addr}` : addr;
