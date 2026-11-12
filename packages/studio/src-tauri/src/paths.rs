@@ -74,7 +74,7 @@ pub fn service_plist(_label: &str) -> Option<PathBuf> {
 
 /// 特权服务（`exvlan-service`）的二进制落点。
 ///
-/// 与 `packages/studio/service` 里 `paths()` 的实现**必须一致**：GUI 用这个
+/// 与 `exvlan/service` 里 `paths()` 的实现**必须一致**：GUI 用这个
 /// 路径判断「是否已安装」并读取 `--version`。
 pub fn privileged_service_bin() -> PathBuf {
     #[cfg(target_os = "macos")]

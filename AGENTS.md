@@ -32,13 +32,13 @@ git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
 
 - **唯一入口**：`.github/workflows/pipeline.yml`。**所有** CI 都经其依赖链编排；其余工作流（`test/core/studio/mobile/docker/release/go/js/nix/ohos`）一律**只保留 `workflow_call`(+`workflow_dispatch`)**，不得自带 `on: push/pull_request/tags`。
 - **门控矩阵**：
-  | 事件 | tests | core | studio/mobile/docker | go/js/nix/ohos | audit | release |
-  |---|---|---|---|---|---|---|
-  | `feature` push | ✓ | ✓（仅 linux-x86_64，无 magisk） | ✗ | ✗ | 按依赖路径门控 | ✗ |
-  | PR(develop/main) | ✓ | ✓（全量） | ✗ | ✗ | ✓（全量） | ✗ |
-  | `develop`/`main` push | ✓ | ✓（全量+magisk） | ✓（必跑） | 按路径门控 | 按依赖路径门控 | ✗ |
-  | tag `v*` | ✓ | ✓（全量） | ✓ | **全量**（绕门控） | ✓（全量） | ✓ |
-  | `workflow_dispatch` | ✓ | ✓（全量） | ✓ | **全量**（绕门控） | ✓（全量） | ✗ |
+  | 事件                  | tests | core                            | studio/mobile/docker | go/js/nix/ohos     | audit          | release |
+  | --------------------- | ----- | ------------------------------- | -------------------- | ------------------ | -------------- | ------- |
+  | `feature` push        | ✓     | ✓（仅 linux-x86_64，无 magisk） | ✗                    | ✗                  | 按依赖路径门控 | ✗       |
+  | PR(develop/main)      | ✓     | ✓（全量）                       | ✗                    | ✗                  | ✓（全量）      | ✗       |
+  | `develop`/`main` push | ✓     | ✓（全量+magisk）                | ✓（必跑）            | 按路径门控         | 按依赖路径门控 | ✗       |
+  | tag `v*`              | ✓     | ✓（全量）                       | ✓                    | **全量**（绕门控） | ✓（全量）      | ✓       |
+  | `workflow_dispatch`   | ✓     | ✓（全量）                       | ✓                    | **全量**（绕门控） | ✓（全量）      | ✗       |
 - **依赖审计门禁**：`audit.yml` 跑 `cargo audit` + `pnpm audit --prod`（root 与 sdk）；允许清单 `.cargo/audit.toml`，元数据 `.cargo/audit-allowlist.toml`（`review_by` 到期即 CI 失败，由 `script/check_audit_allowlist.py` 校验）。清单外的新漏洞直接红灯。另有**每周一 03:00 UTC** 定时（`pipeline.yml` 的 `schedule`）：只跑 `audit` 与 `upstream_watch`（对比 EasyTier 最新 release 与本地 `v2.*` tag，有新版本自动开 issue），其余作业均排除。
 - **不因内容重复跳过构建**：`core/test/mobile` 的 `should_skip` 仅由 PR 路径门控决定（`fkirc/skip-duplicate-actions` 的输出不再影响构建；其 `cancel_others` 仍用于取消被取代的运行）。原因：下游 `docker`/`release` 依赖本轮 `core` 的产物，跳过会导致取不到。
 - **发版产物经 Actions artifact 传递**（`core-*`/`studio-*`/`mobile-*`/`magisk` 前缀上传；`release.yml` 用 `download-artifact` 的 `pattern` 精确拉取）。不用 `actions/cache`（10GB 配额 LRU 驱逐不可靠），也不用全量 `download-artifact`（buildx 产生的 `<owner>~<repo>~*.dockerbuild` 名字含 `~`，会导致解压失败）。
@@ -56,7 +56,7 @@ git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
 ## 版本对齐范围
 
 - 标准版本 `YY.QMM.Mmpp` 覆盖：根 `Cargo.toml`/各 crate、`packages/{studio,std,ui,generator}/package.json`、`tauri.conf.json`、magisk 清单、README 等。
-- **新增 crate 一并纳入**：`exvlan/rpc`（GUI 侧轻量依赖层）同时出现在 workspace `members`、`workspace.dependencies` 与自身 `package.version`，发版时三处都要改。
+- **新增 crate 一并纳入**：`exvlan/rpc`（GUI 侧轻量依赖层）、`exvlan/service`（特权服务）、`exvlan/service-client`（服务 IPC/提权/探测）、`exvlan/gateway`（控制面 HTTP/WS）、`exvlan/migrate`（一次性迁移工具）同时出现在 workspace `members`、`workspace.dependencies` 与自身 `package.version`，发版时三处都要改。
 - **`packages/sdk/**` 一并纳入**（sdk 为嵌套独立 workspace）：需同时改各子包 `version` 与内部 `workspace:<v>` specifier，并重生成 `packages/sdk/pnpm-lock.yaml`；否则 specifier 不匹配、`ERR_PNPM_OUTDATED_LOCKFILE`。
 
 ## 技能索引（`.agents/skills/`）

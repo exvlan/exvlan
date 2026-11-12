@@ -7,7 +7,7 @@ members = [
   "exvlan/rpc",
   "exvlan/api",
   "packages/studio/src-tauri",
-  "packages/studio/service",
+  "exvlan/service",
   "exvlan/contrib/ffi",
   "exvlan/contrib/uptime",
   "exvlan/contrib/android-jni",
