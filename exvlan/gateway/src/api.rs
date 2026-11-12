@@ -33,6 +33,12 @@ use serde_json::{Value, json};
 
 use crate::Config;
 
+/// 展示版本：CI 注入的构建串（`<标准版本>[-pre.N][+sha]`），本地构建回落 crate 版本。
+const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 #[derive(Clone)]
 struct AppState {
     token: Arc<String>,
@@ -176,7 +182,7 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
     };
     Json(json!({
         "api_version": 1,
-        "gateway": env!("CARGO_PKG_VERSION"),
+        "gateway": BUILD_VERSION,
         "backend": backend.as_str(),
         "supervisor": exvlan_service_client::backend::supervisor(),
         "policy": service.as_ref().and_then(|s| s.get("mode").cloned()),
@@ -245,7 +251,7 @@ async fn diag(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let p = exvlan_service_client::paths::paths();
     let user = exvlan_service_client::paths::user_paths();
     Json(json!({
-        "gateway": env!("CARGO_PKG_VERSION"),
+        "gateway": BUILD_VERSION,
         "backend": exvlan_service_client::detect().as_str(),
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,

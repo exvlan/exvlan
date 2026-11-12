@@ -315,13 +315,13 @@ CI 硬门禁：`service.yml` 的 Windows 作业真实 `--install` 一次，断�
 
 ### 14.2 端口重编号（全部可配置，客户端从 `/api/v1/system.endpoints` 发现）
 
-| 端口              | 用途                                | 默认绑定                    |
-| ----------------- | ----------------------------------- | --------------------------- |
-| 1995              | 内核 RPC portal                     | 127.0.0.1                   |
-| 1996              | `exvlan-api` REST                   | 127.0.0.1                   |
-| 2016              | gateway HTTP/WS                     | 127.0.0.1（mesh 仅 opt-in） |
-| 2018              | `exvlan-api` config-server          | 0.0.0.0（客户端必需）       |
-| 11010/11011/11012 | peer 监听（tcp+udp / wg+ws / quic） | 0.0.0.0，支持 `:0` 自动分配 |
+| 端口              | 用途                                | 默认绑定                                                                               |
+| ----------------- | ----------------------------------- | -------------------------------------------------------------------------------------- |
+| 1995              | 内核 RPC portal                     | 127.0.0.1（`service.toml` 的 `rpc_portal` 可改成 `0.0.0.0:1995`，供 GUI 直连远端内核） |
+| 1996              | `exvlan-api` REST                   | 127.0.0.1                                                                              |
+| 2016              | gateway HTTP/WS                     | 127.0.0.1（mesh 仅 opt-in）                                                            |
+| 2018              | `exvlan-api` config-server          | 0.0.0.0（客户端必需）                                                                  |
+| 11010/11011/11012 | peer 监听（tcp+udp / wg+ws / quic） | 0.0.0.0，支持 `:0` 自动分配                                                            |
 
 历史端口 15999/16000/11211/22020 只保留在「默认值定义/兼容解析/诊断探测」处，由
 `script/ci/check-no-hardcoded-ports.py` 守卫。
@@ -367,3 +367,19 @@ CI 硬门禁：`service.yml` 的 Windows 作业真实 `--install` 一次，断�
 | macOS   | unix socket `0600` + 属主 uid（`peercred` 校验）                                                                                                                                                                 | 已按属主收紧                                                                                  | —                                                       |
 | Windows | 命名管道 DACL：`SY`/`BA` 全权 + **安装者 SID** 读写（`exvlan_service_client::current_user_sid()` → `--install <uid> <sid>` → `service.toml owner_sid`，服务启动据此构造 ACL）；已加 `PIPE_REJECT_REMOTE_CLIENTS` | 已收窄：只有装服务的那个用户能连。SID 取不到/为空（旧安装）时**回退 `IU`** 并写日志，绝不锁门 | 升级安装会刷新 SID；`--diagnose` 显示 `owner_sid(boot)` |
 | Linux   | 无特权服务（core backend），systemd 以 root 跑内核                                                                                                                                                               | 配置目录 chown 给属主（0700），root 内核只读                                                  | 如需常驻服务再补 systemd 版 `exvlan-service`            |
+
+### 14.7 pre.18 热修（真机验收抓出的问题）
+
+pre.17 在 macOS 真机（10.254.1.6，pre.16 → pre.17 实测）验收时暴露 6 个问题，全部修在 pre.18：
+
+| #   | 问题                                                                                                                                            | 修法                                                                                                                                    |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| F1  | `exvlan-migrate` 只找**用户目录**的 `service.json`，macOS/Windows 的在**系统目录** → 迁移后 `owner_uid/policy/rpc_extra_whitelist` 被重置为默认 | `pick_service_json()` 两处都找（用户优先）；`service.toml` 已存在时**不覆盖**（只告警），并补单测                                       |
+| F2  | 迁移备份目录 / `migrate.done` 属主是 **root**（GUI 提权运行），用户读不了自己的备份                                                             | 新增 `--owner-uid <uid>`：备份与 marker `chown` 给该用户（含主组）；GUI 自动传入                                                        |
+| F3  | 内核 RPC 实际绑 `0.0.0.0:1995`，与文档「127.0.0.1」不符                                                                                         | 默认改回 `127.0.0.1:1995`；`service.toml.rpc_portal` 可显式覆盖（GUI 直连远端内核的老用法），端口解析随之生效                           |
+| F4  | 内核版本文件不一致：服务写 `core/version`，service-client 读 `core/exvlan.version` → `doctor` 永远 `kernel=-`                                   | `Paths::kernel_version_file()` 改为 `<core>/version`，与写入方对齐                                                                      |
+| F5  | 全新安装时 `doctor` 对不存在的 WebKit 目录报 `!`                                                                                                | 目录不存在降级为 `info`（属正常），只有属主不对才报 error                                                                               |
+| F6  | 工具打进安装包但**从不安装**到系统路径，agent/用户只能用 app 包内路径                                                                           | `--install --tools-dir <dir>`：服务把 `exvlan-cli`/`exvlan-gateway` 拷到 `paths.{cli,gateway}_bin`（0755）；Linux 由提权 provision 落盘 |
+| F7  | `gateway` 的 `/system` 与 `migrate.done` 版本串缺 `-pre.N`                                                                                      | 统一用 `EXVLAN_BUILD_VERSION`（CI 注入），本地构建回落 crate 版本                                                                       |
+
+验收脚本同步加了第 6 项：检查内核 `--rpc-portal` 是否只绑回环（`script/lab/pre17-acceptance.sh`）。

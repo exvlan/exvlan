@@ -19,3 +19,6 @@ exvlan-service-client = { path = "../service-client" }
 # 用内核自己的 `NetworkConfig::gen_config()` 做映射，避免手写字段表出错
 exvlan-proto = { path = "../proto" }
 exvlan-core = { path = "../core", features = ["config-write"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

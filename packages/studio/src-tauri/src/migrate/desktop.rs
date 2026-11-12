@@ -77,7 +77,14 @@ pub async fn migrate_run(app: tauri::AppHandle) -> Result<serde_json::Value, Str
     })?;
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         let mut cmd = std::process::Command::new(&bin);
-        cmd.args(["--yes", "--json"]);
+        // 提权运行 → 备份/marker 会变成 root 所有，用户读不了自己的备份；
+        // 把当前桌面用户 uid 传进去，由工具 chown 回来。
+        cmd.args([
+            "--yes",
+            "--json",
+            "--owner-uid",
+            &crate::service_client::current_uid().to_string(),
+        ]);
         let out = crate::elevate::Command::new(cmd)
             .output()
             .map_err(|e| format!("调用迁移工具失败: {e}"))?;

@@ -353,10 +353,18 @@ fn webkit_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
             evidence: json!({"path": path.display().to_string(), "owner": md.uid()}),
             fixable: false,
         }),
+        // 目录还没建：全新安装的正常状态（WKWebView 首次写入时才创建），不该报警。
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => out.push(Finding {
+            id: "app.webkit_owner",
+            level: "info",
+            summary: "WebKit 目录尚未创建（首次写入 localStorage 后出现，属正常）".into(),
+            evidence: json!({"path": path.display().to_string()}),
+            fixable: false,
+        }),
         Err(err) => out.push(Finding {
             id: "app.webkit_owner",
             level: "warn",
-            summary: format!("{} 不存在: {err}", path.display()),
+            summary: format!("{} 读不到: {err}", path.display()),
             evidence: json!({"path": path.display().to_string()}),
             fixable: false,
         }),

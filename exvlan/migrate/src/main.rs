@@ -17,7 +17,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, bail};
 use serde_json::{Value, json};
 
-const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// 展示版本：优先用 CI 注入的构建串（`<标准版本>[-pre.N][+sha]`），
+/// 本地直接 cargo build 时回落到 crate 版本。
+const TOOL_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -25,6 +30,9 @@ fn main() {
     let mut rollback: Option<PathBuf> = None;
     let mut log_path: Option<PathBuf> = None;
     let mut json_out = false;
+    // 备份与 `migrate.done` 的属主。GUI 提权运行本工具时传当前桌面用户 uid，
+    // 否则备份会是 root 所有（用户读不了自己的备份）。
+    let mut owner_uid: Option<u32> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -38,6 +46,10 @@ fn main() {
             "--log" => {
                 i += 1;
                 log_path = args.get(i).map(PathBuf::from);
+            }
+            "--owner-uid" => {
+                i += 1;
+                owner_uid = args.get(i).and_then(|v| v.parse::<u32>().ok());
             }
             "--help" | "-h" => {
                 print_help();
@@ -58,7 +70,7 @@ fn main() {
 
     let result = match rollback {
         Some(dir) => rollback_from(&dir, &user, &mut log),
-        None => migrate(dry_run, &user, &mut log, json_out),
+        None => migrate(dry_run, &user, &mut log, json_out, owner_uid),
     };
     if let Err(err) = result {
         log.error(&format!("{err:#}"));
@@ -74,7 +86,7 @@ fn print_help() {
 一次性迁移（pre.16 → pre.17）。默认只预览。
 
 用法:
-  exvlan-migrate [--dry-run] [--json] [--log <path>]   预览
+  exvlan-migrate [--dry-run] [--json] [--log <path>] [--owner-uid <uid>]   预览
   exvlan-migrate --yes                                 执行
   exvlan-migrate --rollback <backup-dir>               回滚
 
@@ -132,6 +144,19 @@ fn now_ts() -> String {
     format!("unix:{secs}")
 }
 
+/// 选出旧 `service.json`：用户目录优先，其次**系统目录**（macOS/Windows 的服务配置）。
+///
+/// 只有系统目录这一处是 pre.17 首个版本漏掉的 —— 结果是升级后服务配置
+/// （owner_uid / policy / rpc_extra_whitelist）被重置成默认值。
+fn pick_service_json(user_data: &Path, service_config: &Path) -> Option<PathBuf> {
+    [
+        user_data.join("service.json"),
+        service_config.with_file_name("service.json"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
+}
+
 #[derive(Debug, Default)]
 struct Legacy {
     networks_toml: Option<PathBuf>,
@@ -150,10 +175,11 @@ fn detect(
     if n.is_file() {
         l.networks_toml = Some(n);
     }
-    let s = user.data.join("service.json");
-    if s.is_file() {
-        l.service_json = Some(s);
-    }
+    // 旧 `service.json` 可能在两处：
+    // - 用户目录（历史 / Linux 裸核）；
+    // - **系统目录**（macOS/Windows 的服务配置，root 持有）—— pre.17 之前就漏了
+    //   这一处，导致迁移后 owner_uid/policy/rpc_extra_whitelist 全被重置成默认。
+    l.service_json = pick_service_json(&user.data, &p.service_config);
     let d = user.data.join("config.d");
     if d.is_dir() {
         l.config_d = Some(d);
@@ -178,6 +204,7 @@ fn migrate(
     user: &exvlan_service_client::paths::UserPaths,
     log: &mut Logger,
     json_out: bool,
+    owner_uid: Option<u32>,
 ) -> anyhow::Result<()> {
     let p = exvlan_service_client::paths::paths();
     let legacy = detect(user, &p);
@@ -234,6 +261,9 @@ fn migrate(
     {
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o700)).ok();
+        if let Some(uid) = owner_uid {
+            chown_tree(&backup, uid);
+        }
     }
     let mut backed: Vec<String> = Vec::new();
     for src in items.iter().map(PathBuf::from) {
@@ -273,13 +303,23 @@ fn migrate(
     }
 
     // 3) 转换 service.json → service.toml
+    //
+    // 目标已存在时**不覆盖**：可能已经迁移过/手工修过（覆盖会把用户的 policy /
+    // 白名单再抹一次，正是 pre.17 首个版本踩过的坑）。
     let mut service_ok = true;
     if let Some(src) = &legacy.service_json {
-        match convert_service(src, &p.service_config, log) {
-            Ok(()) => log.info("convert service.json → service.toml"),
-            Err(err) => {
-                service_ok = false;
-                log.error(&format!("转换 service.json 失败: {err:#}"));
+        if p.service_config.is_file() {
+            log.warn(&format!(
+                "{} 已存在，跳过转换（保留现值）",
+                p.service_config.display()
+            ));
+        } else {
+            match convert_service(src, &p.service_config, log) {
+                Ok(()) => log.info("convert service.json → service.toml"),
+                Err(err) => {
+                    service_ok = false;
+                    log.error(&format!("转换 service.json 失败: {err:#}"));
+                }
             }
         }
     }
@@ -326,8 +366,9 @@ fn migrate(
         serde_json::to_string_pretty(&report)?,
     )
     .ok();
+    let marker = user.data.join("migrate.done");
     std::fs::write(
-        user.data.join("migrate.done"),
+        &marker,
         serde_json::to_string_pretty(&json!({
             "version": TOOL_VERSION,
             "ts": exvlan_service_client::tokens::now_secs(),
@@ -335,6 +376,12 @@ fn migrate(
         }))?,
     )
     .context("写 migrate.done 失败")?;
+    #[cfg(unix)]
+    if let Some(uid) = owner_uid {
+        // 备份目录在转换期间又新增了 report/migrate.log，这里统一再 chown 一次。
+        chown_tree(&backup, uid);
+        chown_path(&marker, uid);
+    }
 
     log.info(&format!(
         "phase=done converted={converted} removed={} backup={}",
@@ -482,6 +529,44 @@ fn rollback_from(
     Ok(())
 }
 
+/// 把路径（及其子项）的属主改成 `uid`，组沿用该用户的主组。
+///
+/// 只有 root 能成功；失败不阻断迁移（只是备份属主不对，属于体验问题）。
+#[cfg(unix)]
+fn chown_tree(path: &Path, uid: u32) {
+    chown_path(path, uid);
+    if path.is_dir()
+        && let Ok(entries) = std::fs::read_dir(path)
+    {
+        for entry in entries.flatten() {
+            chown_tree(&entry.path(), uid);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn chown_path(path: &Path, uid: u32) {
+    use std::os::unix::ffi::OsStrExt as _;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return;
+    };
+    // 拿不到主组就传 -1（= 不改 gid）。
+    let gid: libc::gid_t = unsafe {
+        let pw = libc::getpwuid(uid);
+        if pw.is_null() {
+            libc::gid_t::MAX
+        } else {
+            (*pw).pw_gid as libc::gid_t
+        }
+    };
+    unsafe {
+        libc::chown(c.as_ptr(), uid, gid);
+    }
+}
+
+#[cfg(not(unix))]
+fn chown_tree(_path: &Path, _uid: u32) {}
+
 fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
@@ -533,4 +618,66 @@ fn uuid_hex() -> String {
     }
     out.truncate(32);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "exvlan-migrate-test-{tag}-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    #[test]
+    fn finds_service_json_in_user_dir() {
+        let user = temp("user");
+        let sys = temp("sys");
+        std::fs::write(user.join("service.json"), "{}").unwrap();
+        let picked = pick_service_json(&user, &sys.join("service.toml"));
+        assert_eq!(picked, Some(user.join("service.json")));
+        let _ = std::fs::remove_dir_all(&user);
+        let _ = std::fs::remove_dir_all(&sys);
+    }
+
+    #[test]
+    fn finds_service_json_in_system_dir() {
+        // pre.17 首个版本漏掉的就是这一处（macOS/Windows 的服务配置在系统目录）。
+        let user = temp("user2");
+        let sys = temp("sys2");
+        std::fs::write(sys.join("service.json"), "{\"mode\":\"Normal\"}").unwrap();
+        let picked = pick_service_json(&user, &sys.join("service.toml"));
+        assert_eq!(picked, Some(sys.join("service.json")));
+        let _ = std::fs::remove_dir_all(&user);
+        let _ = std::fs::remove_dir_all(&sys);
+    }
+
+    #[test]
+    fn prefers_user_dir_when_both_exist() {
+        let user = temp("user3");
+        let sys = temp("sys3");
+        std::fs::write(user.join("service.json"), "{}").unwrap();
+        std::fs::write(sys.join("service.json"), "{}").unwrap();
+        let picked = pick_service_json(&user, &sys.join("service.toml"));
+        assert_eq!(picked, Some(user.join("service.json")));
+        let _ = std::fs::remove_dir_all(&user);
+        let _ = std::fs::remove_dir_all(&sys);
+    }
+
+    #[test]
+    fn none_when_no_legacy_service_json() {
+        let user = temp("user4");
+        let sys = temp("sys4");
+        assert_eq!(pick_service_json(&user, &sys.join("service.toml")), None);
+        let _ = std::fs::remove_dir_all(&user);
+        let _ = std::fs::remove_dir_all(&sys);
+    }
 }

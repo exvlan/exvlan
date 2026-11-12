@@ -52,7 +52,9 @@ const MINISIGN_PUBKEY: &str = "RWSFKUboUUaFQYx/ap73a7ySNbuI5kjDGsiVJBtceshu+Ml99
 const PROTO: u32 = 1;
 /// RPC 端口（在内核与 GUI 之间保持一致；service.toml 可覆盖）。
 const RPC_PORT: u16 = 1995;
-const RPC_PORTAL: &str = "0.0.0.0:1995";
+/// 默认只绑回环：远端管理走 gateway（`docs/decisions-7.3.md` §14.2）。
+/// 需要 GUI 直连远端内核的老用法，在 `service.toml` 里写 `rpc_portal = "0.0.0.0:1995"`。
+const RPC_PORTAL_DEFAULT: &str = "127.0.0.1:1995";
 /// 回环：GUI 自己从这里连进来，**任何情况下都不能少**。
 ///
 /// 内核的默认白名单是 `127.0.0.0/8` + `::1/128`；一旦显式传
@@ -106,6 +108,9 @@ pub struct Paths {
     pub service_bin: PathBuf,
     pub service_config: PathBuf,
     pub service_log: PathBuf,
+    /// 随安装包分发的控制面工具（`--install --tools-dir` 拷贝到这里）。
+    pub cli_bin: PathBuf,
+    pub gateway_bin: PathBuf,
 }
 
 /// Windows：拉起控制台程序（`sc` / `schtasks`）时不要弹 cmd 窗口。
@@ -170,6 +175,8 @@ fn paths() -> Paths {
         let data = PathBuf::from("/Library/Application Support/era.exvlan.studio");
         let logs = PathBuf::from("/Library/Logs/era.exvlan.studio");
         let core = data.join("core");
+        let core_cli = core.join("exvlan-cli");
+        let core_gw = core.join("exvlan-gateway");
         Paths {
             config: data.join("config"),
             kernel: core.join("exvlan"),
@@ -179,12 +186,16 @@ fn paths() -> Paths {
             service_config: data.join("service.toml"),
             service_log: logs.join("service.log"),
             logs,
+            cli_bin: core_cli,
+            gateway_bin: core_gw,
         }
     }
     #[cfg(target_os = "windows")]
     {
         let data = PathBuf::from(r"C:\ProgramData\era.exvlan.studio");
         let core = data.join("core");
+        let core_cli = core.join("exvlan-cli.exe");
+        let core_gw = core.join("exvlan-gateway.exe");
         Paths {
             config: data.join("config"),
             kernel: core.join("exvlan.exe"),
@@ -194,12 +205,16 @@ fn paths() -> Paths {
             service_bin: data.join("bin").join("exvlan-service.exe"),
             service_config: data.join("service.toml"),
             service_log: data.join("logs").join("service.log"),
+            cli_bin: core_cli,
+            gateway_bin: core_gw,
         }
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let data = PathBuf::from("/var/lib/era.exvlan.studio");
         let core = data.join("core");
+        let core_cli = core.join("exvlan-cli");
+        let core_gw = core.join("exvlan-gateway");
         Paths {
             config: data.join("config"),
             kernel: core.join("exvlan"),
@@ -209,6 +224,8 @@ fn paths() -> Paths {
             service_bin: PathBuf::from("/usr/local/bin/exvlan-service"),
             service_config: data.join("service.toml"),
             service_log: PathBuf::from("/var/log/era.exvlan.studio/service.log"),
+            cli_bin: core_cli,
+            gateway_bin: core_gw,
         }
     }
 }
@@ -248,6 +265,14 @@ pub struct ServiceConfig {
     /// 与 pre.17 之前的行为一致，**不会**把用户锁在门外。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub owner_sid: String,
+    /// 内核 RPC portal 的绑定地址。
+    ///
+    /// 默认 **`127.0.0.1:1995`**（远端统一走 gateway）。
+    ///
+    /// 旧行为是 `0.0.0.0:1995` + 白名单兜底；确实需要「GUI 直连远端内核」，
+    /// 可显式写成 `rpc_portal = "0.0.0.0:1995"`（等于把 RPC 暴露给白名单网段）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpc_portal: Option<String>,
 }
 
 impl Default for ServiceConfig {
@@ -257,6 +282,7 @@ impl Default for ServiceConfig {
             policy: Mode::Service,
             rpc_extra_whitelist: Vec::new(),
             owner_sid: String::new(),
+            rpc_portal: None,
         }
     }
 }
@@ -1038,6 +1064,7 @@ impl State {
     ///
     /// 返回 `(逗号分隔参数, 提示/告警)`，提示会写进 service.log 与诊断包。
     fn kernel_args(&self, whitelist: &str) -> Vec<String> {
+        let portal = self.rpc_portal();
         vec![
             // 由服务托管的"守护进程"：实例数归零（配置重建 / 删除最后一个网络）
             // 时**必须继续存活**，否则内核会静默退出、RPC 端口消失。
@@ -1045,7 +1072,7 @@ impl State {
             "--config-dir".into(),
             self.paths.config.display().to_string(),
             "--rpc-portal".into(),
-            RPC_PORTAL.into(),
+            portal,
             "--rpc-portal-whitelist".into(),
             whitelist.to_string(),
             "--file-log-dir".into(),
@@ -1184,7 +1211,7 @@ impl State {
             );
         }
         // 端口通 ≠ 是我们的内核在应答：残留的旧内核同样能让探活“成功”。
-        match port_owner(RPC_PORT) {
+        match port_owner(self.rpc_port()) {
             Some(owner) if owner.pid == pid => {}
             Some(owner) => {
                 self.log(format!(
@@ -1194,8 +1221,9 @@ impl State {
                 let _ = child.kill();
                 let _ = child.wait();
                 bail!(
-                    "RPC 端口 {RPC_PORT} 由其他进程应答（{} pid={} path={}），\
+                    "RPC 端口 {} 由其他进程应答（{} pid={} path={}），\
                      新内核未能真正启动",
+                    self.rpc_port(),
                     owner.name,
                     owner.pid,
                     owner.path
@@ -1214,12 +1242,13 @@ impl State {
     /// 若 RPC 端口被**我们自己的**内核产物（含 `.prev` 残留）占着，杀掉它；
     /// 被外来进程占着则明确报错（不误杀）。
     fn cleanup_stale_kernel(&self) -> anyhow::Result<()> {
-        let Some(owner) = port_owner(RPC_PORT) else {
+        let Some(owner) = port_owner(self.rpc_port()) else {
             return Ok(());
         };
         if !owner.is_stale_kernel_of(&self.paths.kernel) {
             bail!(
-                "RPC 端口 {RPC_PORT} 被其他进程占用：{}（pid={}, path={}）",
+                "RPC 端口 {} 被其他进程占用：{}（pid={}, path={}）",
+                self.rpc_port(),
                 owner.name,
                 owner.pid,
                 owner.path
@@ -1231,7 +1260,7 @@ impl State {
         ));
         terminate_pid(owner.pid)?;
         for _ in 0..50 {
-            if port_owner(RPC_PORT).is_none() {
+            if port_owner(self.rpc_port()).is_none() {
                 return Ok(());
             }
             std::thread::sleep(Duration::from_millis(100));
@@ -1367,6 +1396,25 @@ impl State {
             return Err(anyhow::anyhow!("kernel_rollback: {err}"));
         }
         Ok(())
+    }
+
+    /// 生效的 RPC portal 绑定地址（`service.toml` 的 `rpc_portal` 优先）。
+    fn rpc_portal(&self) -> String {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config
+            .rpc_portal
+            .clone()
+            .unwrap_or_else(|| RPC_PORTAL_DEFAULT.to_string())
+    }
+
+    /// 生效的 RPC 端口（用于端口占用/清理；`rpc_portal` 可改端口）。
+    fn rpc_port(&self) -> u16 {
+        self.rpc_portal()
+            .rsplit_once(':')
+            .and_then(|(_, port)| port.parse::<u16>().ok())
+            .unwrap_or(RPC_PORT)
     }
 
     fn status(&self) -> Response {
@@ -1543,19 +1591,19 @@ impl State {
             },
             "port.owner" => {
                 let mut r = Response::ok();
-                r.data = Some(match port_owner(RPC_PORT) {
+                r.data = Some(match port_owner(self.rpc_port()) {
                     Some(owner) => serde_json::json!({
-                        "port": RPC_PORT,
+                        "port": self.rpc_port(),
                         "pid": owner.pid,
                         "name": owner.name,
                         "path": owner.path,
                         "is_our_kernel": owner.is_our_kernel(&self.paths.kernel),
                     }),
-                    None => serde_json::json!({ "port": RPC_PORT, "free": true }),
+                    None => serde_json::json!({ "port": self.rpc_port(), "free": true }),
                 });
                 r
             }
-            "port.cleanup" => match port_owner(RPC_PORT) {
+            "port.cleanup" => match port_owner(self.rpc_port()) {
                 None => Response::err("nothing", "RPC 端口当前没有被占用"),
                 Some(owner) if !owner.is_stale_kernel_of(&self.paths.kernel) => Response::err(
                     "not_ours",
@@ -1824,7 +1872,16 @@ fn run_cli(p: &Paths, args: &[String]) -> anyhow::Result<()> {
             let uid = args.get(1).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
             // 第 3 个参数是 Windows 安装者 SID（macOS/Linux 忽略）。
             let sid = args.get(2).map(String::as_str).unwrap_or("");
-            install(p, uid, sid)
+            install(p, uid, sid)?;
+            // 控制面工具（cli/gateway）随安装包分发，但只有服务有权限把它们
+            // 放到系统路径（GUI 跑在用户态）。缺工具不阻断安装：日志里说明。
+            if let Some(dir) = flag_value(args, "--tools-dir") {
+                match install_tools(p, Path::new(&dir)) {
+                    Ok(()) => log_line(p, &format!("tools installed from {dir}")),
+                    Err(err) => log_line(p, &format!("tools install skipped: {err:#}")),
+                }
+            }
+            Ok(())
         }
         Some("--uninstall") => uninstall(p),
         Some("--status") => {
@@ -2539,6 +2596,49 @@ fn write_pipe(handle: windows_sys::Win32::Foundation::HANDLE, resp: &Response) {
 // 安装 / 卸载
 // ---------------------------------------------------------------------------
 
+/// 取 `--flag <value>` 的值（也支持 `--flag=value`）。
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    if let Some(pos) = args.iter().position(|a| a == flag) {
+        return args.get(pos + 1).cloned();
+    }
+    args.iter()
+        .find_map(|a| a.strip_prefix(&format!("{flag}=")).map(str::to_string))
+}
+
+/// 把随包的 `exvlan-cli` / `exvlan-gateway` 安装到系统路径。
+///
+/// 目的：agent / 用户不依赖 app 包路径就能用控制面（`exvlan-cli doctor` 等）。
+/// 由服务（root）执行，因为目标目录在系统路径下。
+#[allow(dead_code)]
+fn install_tools(p: &Paths, dir: &Path) -> anyhow::Result<()> {
+    let exe = if cfg!(windows) { ".exe" } else { "" };
+    let mut copied = Vec::new();
+    for (name, dst) in [
+        ("exvlan-cli", &p.cli_bin),
+        ("exvlan-gateway", &p.gateway_bin),
+    ] {
+        let src = dir.join(format!("{name}{exe}"));
+        if !src.is_file() {
+            continue;
+        }
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        std::fs::copy(&src, dst)
+            .with_context(|| format!("拷贝 {} → {} 失败", src.display(), dst.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = std::fs::set_permissions(dst, std::fs::Permissions::from_mode(0o755));
+        }
+        copied.push(dst.display().to_string());
+    }
+    if copied.is_empty() {
+        bail!("{} 里没有 exvlan-cli / exvlan-gateway", dir.display());
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
@@ -2599,6 +2699,8 @@ fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
         } else {
             sid.to_string()
         },
+        // 重装保留用户显式配置的绑定地址（默认回环）。
+        rpc_portal: load_config(p).rpc_portal,
     };
     save_config(p, &cfg)?;
 
@@ -2695,6 +2797,8 @@ fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
         } else {
             sid.to_string()
         },
+        // 重装保留用户显式配置的绑定地址（默认回环）。
+        rpc_portal: load_config(p).rpc_portal,
     };
     save_config(p, &cfg)?;
 

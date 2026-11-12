@@ -53,6 +53,19 @@ pub fn bundled_service(app: &tauri::AppHandle) -> Option<PathBuf> {
     .find(|candidate| candidate.is_file())
 }
 
+/// 随包的控制面工具目录（`resources/tools/`：cli / gateway / migrate）。
+pub fn bundled_tools_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    use tauri::Manager as _;
+    let dir = app.path().resource_dir().ok()?;
+    [
+        dir.join("tools"),
+        dir.join("resources").join("tools"),
+        dir.clone(),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_dir())
+}
+
 /// 已安装的服务二进制落点（必须与 `exvlan-service` 内部的 `paths()` 一致）。
 pub fn installed_service_bin() -> PathBuf {
     crate::paths::privileged_service_bin()
@@ -280,11 +293,15 @@ mod imp {
         // 收窄到本人（服务以 LocalSystem 跑，事后反推不出是谁装的）。
         // 取不到就传空串 → 服务退回 `IU`（不会锁门）。
         let sid = exvlan_service_client::current_user_sid().unwrap_or_default();
+        let tools = bundled_tools_dir(app)
+            .map(|d| d.display().to_string())
+            .unwrap_or_default();
         crate::run_elevated(&[
             "--install-exvlan-service",
             &src.display().to_string(),
             &uid,
             &sid,
+            &tools,
         ])?;
         // 安装脚本内部已等 socket 就绪，这里再兜一次（避免 launchd 抖动）。
         for _ in 0..25 {

@@ -32,8 +32,16 @@ pub struct Paths {
 }
 
 impl Paths {
+    /// 内核版本文件。
+    ///
+    /// `exvlan-service` 落盘时就写在 `<core dir>/version`（与 GUI 的
+    /// `kernel::installed_version()` 同一约定）；这里以前拼的是
+    /// `<kernel>.version`，两边不一致 → `doctor` 永远显示 `kernel=-`。
     pub fn kernel_version_file(&self) -> PathBuf {
-        with_suffix(&self.kernel_bin, ".version")
+        self.kernel_bin
+            .parent()
+            .map(|dir| dir.join("version"))
+            .unwrap_or_else(|| with_suffix(&self.kernel_bin, ".version"))
     }
     pub fn service_version_file(&self) -> PathBuf {
         with_suffix(&self.service_bin, ".version")

@@ -4430,6 +4430,8 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 .unwrap_or_else(|| crate::service_client::current_uid().to_string());
             // Windows 安装者 SID（macOS/Linux 为空串，服务端忽略）。
             let sid = args.get(3).cloned().unwrap_or_default();
+            // 随包工具目录（cli/gateway）；空串表示不装（旧调用方）。
+            let tools_dir = args.get(4).cloned().unwrap_or_default();
             if src.is_empty() || !std::path::Path::new(&src).is_file() {
                 report("service", &format!("随包服务二进制不存在: {src:?}"));
                 ExitCode::FAILURE
@@ -4438,6 +4440,9 @@ pub fn run_elevated_cli(args: &[String]) -> Option<std::process::ExitCode> {
                 cmd.arg("--install").arg(&uid);
                 if !sid.is_empty() {
                     cmd.arg(&sid);
+                }
+                if !tools_dir.is_empty() {
+                    cmd.arg("--tools-dir").arg(&tools_dir);
                 }
                 match cmd.output() {
                     Ok(out) if out.status.success() => ExitCode::SUCCESS,
@@ -4628,6 +4633,9 @@ pub struct ProvisionPayload {
     /// Windows 安装者 SID（命名管道 DACL 收窄；空 = 未知，退回 IU）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_sid: Option<String>,
+    /// 随包工具目录（Linux 上由提权子进程拷到 `/opt/…/core/`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools_dir: Option<String>,
 }
 
 /// 停掉当前内核（由 `exvlan-service` 托管；Linux 下是 supervisor 子进程）。
@@ -4674,6 +4682,7 @@ fn install_privileged_service(
     src: &std::path::Path,
     uid: u32,
     sid: Option<&str>,
+    tools_dir: Option<&str>,
 ) -> anyhow::Result<()> {
     use anyhow::Context as _;
     if !src.is_file() {
@@ -4684,6 +4693,9 @@ fn install_privileged_service(
     // Windows：SID 决定命名管道 ACL；空 = 未知（服务端退回 IU）。
     if let Some(sid) = sid.filter(|s| !s.is_empty()) {
         cmd.arg(sid);
+    }
+    if let Some(dir) = tools_dir.filter(|d| !d.is_empty()) {
+        cmd.arg("--tools-dir").arg(dir);
     }
     let out = cmd
         .output()
@@ -4729,6 +4741,17 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
                 format!("config dir handed over to uid={}", req.owner_uid),
             );
         }
+        // Linux 没有特权服务进程：工具由这个提权子进程直接落盘。
+        #[cfg(target_os = "linux")]
+        if let Some(dir) = req.tools_dir.as_deref() {
+            match install_tools_linux(std::path::Path::new(dir)) {
+                Ok(copied) => crate::logger::record(
+                    "provision.tools",
+                    format!("installed {copied} tool(s) from {dir}"),
+                ),
+                Err(err) => crate::logger::record("provision.tools", format!("skipped: {err:#}")),
+            }
+        }
         if let Some(src) = req.service_src.as_deref() {
             // 特权服务安装失败**不阻断启动**：记录到 error.log，由界面横幅
             // 提示 + 「重试安装」按钮处理。
@@ -4736,6 +4759,7 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
                 std::path::Path::new(src),
                 req.owner_uid,
                 req.owner_sid.as_deref(),
+                req.tools_dir.as_deref(),
             ) {
                 Ok(()) => {
                     crate::logger::record("provision.service", "privileged service installed")
@@ -4757,6 +4781,34 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
     }
 
     result
+}
+
+/// Linux：把随包工具拷到 `/opt/era.exvlan.studio/core/`（与 CLI 的查找路径一致）。
+#[cfg(target_os = "linux")]
+fn install_tools_linux(dir: &std::path::Path) -> anyhow::Result<usize> {
+    use anyhow::Context as _;
+    let p = exvlan_service_client::paths::paths();
+    let mut copied = 0usize;
+    for (name, dst) in [
+        ("exvlan-cli", &p.cli_bin),
+        ("exvlan-gateway", &p.gateway_bin),
+    ] {
+        let src = dir.join(name);
+        if !src.is_file() {
+            continue;
+        }
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        std::fs::copy(&src, dst)
+            .with_context(|| format!("拷贝 {} → {} 失败", src.display(), dst.display()))?;
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = std::fs::set_permissions(dst, std::fs::Permissions::from_mode(0o755));
+        }
+        copied += 1;
+    }
+    Ok(copied)
 }
 
 /// 修复用户目录属主（目录被 root 守护进程写过时会变成 root，用户态无法再写）。
@@ -4973,6 +5025,7 @@ async fn linux_ensure(app: &AppHandle, opts: &service::ServiceOptions) -> Result
         service_src: None,
         owner_uid: crate::service_client::current_uid(),
         owner_sid: exvlan_service_client::current_user_sid(),
+        tools_dir: crate::service_client::bundled_tools_dir(app).map(|d| d.display().to_string()),
     };
     let json = serde_json::to_string(&payload).map_err(|e| logger::other("cmd:linux_ensure", e))?;
     logger::record(
@@ -5050,6 +5103,8 @@ fn ensure_service_and_kernel(app: &AppHandle) -> Result<String, String> {
                     service_src: None,
                     owner_uid: crate::service_client::current_uid(),
                     owner_sid: exvlan_service_client::current_user_sid(),
+                    tools_dir: crate::service_client::bundled_tools_dir(app)
+                        .map(|d| d.display().to_string()),
                 };
                 let json = serde_json::to_string(&payload)
                     .map_err(|e| logger::other("cmd:ensure_kernel_service", e))?;
@@ -5103,6 +5158,7 @@ async fn ensure_kernel_only(app: AppHandle) -> Result<String, String> {
         service_src: None,
         owner_uid: crate::service_client::current_uid(),
         owner_sid: exvlan_service_client::current_user_sid(),
+        tools_dir: crate::service_client::bundled_tools_dir(&app).map(|d| d.display().to_string()),
     };
     let json =
         serde_json::to_string(&payload).map_err(|e| logger::other("cmd:ensure_kernel_only", e))?;

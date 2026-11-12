@@ -20,5 +20,8 @@
       "version": "12.16.1",
       "onFail": "download"
     }
+  },
+  "volta": {
+    "node": "26.13.1"
   }
 }

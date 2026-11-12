@@ -156,6 +156,18 @@ if [ -n "$ST" ]; then
   esac
 fi
 
+# ---------------------------------------------------------------- 6. RPC 绑定
+step 6 "RPC portal 绑定（默认应只有回环）"
+PORTAL=$(ps -axo command 2>/dev/null | grep -E "core/exvlan .*--rpc-portal" | grep -v grep | head -1 | sed -n 's/.*--rpc-portal \([^ ]*\).*/\1/p')
+if [ -n "${PORTAL:-}" ]; then
+  case "$PORTAL" in
+    127.0.0.1:* | "[::1]":*) ok "rpc-portal $PORTAL（仅回环）" ;;
+    *) note "rpc-portal $PORTAL 对外监听（如需 GUI 直连远端内核才这样配；见 service.toml rpc_portal）" ;;
+  esac
+else
+  note "没找到内核 RPC 参数（内核未运行？）"
+fi
+
 # ---------------------------------------------------------------- 收尾
 printf '\n手工确认（界面相关，无法自动判定）：\n'
 cat <<'EOF'
