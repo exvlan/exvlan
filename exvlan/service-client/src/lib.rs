@@ -4,6 +4,7 @@
 //!
 //! - [`ipc`]：特权服务 IPC（unix socket / Windows 命名管道），`{proto:1,op}` 行式 JSON；
 //! - [`backend`]：探测当前是 `core`（裸核，无服务）还是 `service`（有特权服务）；
+//! - [`config`]：网络配置（内核 `config-dir/*.toml`）唯一写者入口；
 //! - [`paths`]：三平台统一的目录/二进制/凭据位置。
 //!
 //! 使用方：GUI（`packages/studio/src-tauri`）、`exvlan-cli`、`exvlan-gateway`。
@@ -13,6 +14,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod backend;
+pub mod config;
 pub mod doctor;
 pub mod ipc;
 pub mod paths;

@@ -107,6 +107,7 @@ pub fn collect() -> Report {
 
     version_checks(&mut out, &p);
     port_checks(&mut out);
+    config_checks(&mut out);
     storage_checks(&mut out, &user);
     #[cfg(target_os = "macos")]
     webkit_check(&mut out, &user);
@@ -199,6 +200,63 @@ fn service_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
             }),
         }
     }
+}
+
+/// 配置目录是 pre.17 的唯一权威：不可读写 = 「保存了但没生效」。
+fn config_checks(out: &mut Vec<Finding>) {
+    let p = paths::paths();
+    if backend::detect().has_service() {
+        // 有服务：目录归 root，客户端只关心「经 IPC 能不能读写」。
+        // 注意这里直接打 IPC，不走 `config::list()`（那条路在服务不可达时会
+        // 悄悄退回本地文件，正好把「服务坏了」这个事实藏起来）。
+        return match ipc::request("config.list", json!({})) {
+            Ok(resp) => out.push(Finding {
+                id: "config.dir",
+                level: "ok",
+                summary: format!(
+                    "配置目录经服务可读写（{} 个网络）",
+                    resp.get("data")
+                        .and_then(|d| d.get("items"))
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0)
+                ),
+                evidence: json!({
+                    "dir": p.config.display().to_string(),
+                    "networks": resp.get("data").and_then(|d| d.get("items")).cloned().unwrap_or_else(|| json!([])),
+                }),
+                fixable: false,
+            }),
+            Err(err) => out.push(Finding {
+                id: "config.dir",
+                level: "error",
+                summary: format!("服务读不到配置目录: {err}"),
+                evidence: json!({"error": err}),
+                fixable: false,
+            }),
+        };
+    }
+
+    // core（无特权服务）：GUI / CLI 直接写这个目录。
+    let writable = dir_writable(&p.config);
+    out.push(Finding {
+        id: "config.dir",
+        level: if writable { "ok" } else { "error" },
+        summary: if writable {
+            format!("配置目录可写: {}", p.config.display())
+        } else {
+            format!(
+                "配置目录不可写（保存网络会失败）: {} —— 需要 root 把属主改成当前用户（chown -R $(id -u) '{}'）",
+                p.config.display(),
+                p.config.display()
+            )
+        },
+        evidence: json!({
+            "dir": p.config.display().to_string(),
+            "writable": writable,
+        }),
+        fixable: false,
+    });
 }
 
 fn version_checks(out: &mut Vec<Finding>, p: &paths::Paths) {

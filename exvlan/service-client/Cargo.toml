@@ -9,6 +9,7 @@ description = "EXVlan local control-plane client: service IPC + backend detectio
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+toml.workspace = true
 sha2.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
