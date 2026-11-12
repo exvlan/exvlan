@@ -54,3 +54,33 @@ reason = "hickory-proto 0.25.2 zone file lexer 对 >=4096 字符 token panic；�
 id = "RUSTSEC-2026-0491"
 review_by = "2027-01-31"
 reason = "hickory-proto 0.25.2 头部 record count 造成内存放大；诊断的 TXT/SRV 查询有 2s 预算与线程超时，影响有限。"
+
+# --- hickory 0.25.2 的 DNSSEC 批次（2026-09-03 披露；resolver 侧说 0.26.2 修复）---
+# 共同前提：这 5 条都要求**开启 DNSSEC 校验**（`ResolverOpts::validate = true`）才可触发。
+# 本仓从不开启：`exvlan/exvlan/src/common/dns.rs` 用 `ResolverOpts::default()`，
+# 全仓 grep 无 `validate` 设置；`dns_server` 只做本地应答，不做校验。
+# 因此当前不可达；升级仍需等 hickory-client 稳定 0.26（四件套协同）。
+[[allow]]
+id = "RUSTSEC-2026-0504"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 DNSSEC NSEC3 比较方向反了（仅 validate=true 时可达）；本仓不启用 DNSSEC。待 hickory-client 稳定 0.26 后四件套一起升。"
+
+[[allow]]
+id = "RUSTSEC-2026-0505"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 DNSSEC 未校验 NSEC3 owner name 属区（仅 validate=true）；本仓不启用 DNSSEC。"
+
+[[allow]]
+id = "RUSTSEC-2026-0511"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 对「已证明的空非终结符」接受 NXDOMAIN（仅 validate=true）；本仓不启用 DNSSEC。"
+
+[[allow]]
+id = "RUSTSEC-2026-0512"
+review_by = "2027-01-31"
+reason = "hickory-proto 0.25.2 DNSSEC 把无关的已签名 RRset 当作答案（仅 validate=true）；本仓不启用 DNSSEC。"
+
+[[allow]]
+id = "RUSTSEC-2026-0514"
+review_by = "2027-01-31"
+reason = "hickory-resolver 0.25.2 `lookup/lookup_ip` 会返回未通过 DNSSEC 校验的记录（仅 validate=true）；本仓不启用 DNSSEC。修复需 resolver>=0.26.2，但被 hickory-client 无稳定 0.26 阻塞。"

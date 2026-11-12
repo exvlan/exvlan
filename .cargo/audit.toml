@@ -16,6 +16,15 @@ ignore = [
   "RUSTSEC-2026-0489",
   "RUSTSEC-2026-0490",
   "RUSTSEC-2026-0491",
+  # hickory-proto/resolver 0.25.2 —— 2026-09-03 DNSSEC 批次（4 条 proto + 1 条 resolver）。
+  # 触发条件全是「开启 DNSSEC 校验时信任了错误的签名链」，而我们从不开
+  # `ResolverOpts::validate`（默认 false，仓内无任何地方开启）；
+  # 升级同样被 hickory-client 0.26 缺位阻塞（只有 0.26.0-alpha.1）。
+  "RUSTSEC-2026-0504",
+  "RUSTSEC-2026-0505",
+  "RUSTSEC-2026-0511",
+  "RUSTSEC-2026-0512",
+  "RUSTSEC-2026-0514",
   # crypto-bigint 0.5.5 —— 经 openidconnect 4.0.1 → p256 0.13 → ecdsa 0.16 → elliptic-curve 0.13 引入；
   # 上游 openidconnect 尚无 0.7 链路（最新仍 4.0.1），仅影响 API 的 OIDC 签名验证路径。见 issue #7。
   "RUSTSEC-2026-0387",
