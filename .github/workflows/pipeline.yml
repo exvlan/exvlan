@@ -337,8 +337,10 @@ jobs:
 
   mobile:
     name: Build Studio Mobile
-    # 移动端只用 mobile-kernel-* 产物，不需要等内核作业
-    needs: core_desktop
+    # 移动端只用 mobile-kernel-* 产物，不需要等内核作业。
+    # 但**必须**等 `mobile_kernel` 产出：加 `always()` 后本作业会在 pipeline 一开始
+    # 就启动，与 mobile-kernel 并行 → 下载 artifact 时它还不在（实测直接失败）。
+    needs: [core_desktop, mobile_kernel]
     # 同上：`always()` 让移动端在「内核路径门控跳过」的提交上照样编译。
     if: >-
       always() &&
