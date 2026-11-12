@@ -18,7 +18,7 @@ pub mod paths;
 
 pub use backend::{Backend, detect};
 pub use ipc::{Client, request};
-pub use paths::{APP_ID, Paths, PRIVILEGED_SERVICE_LABEL, paths};
+pub use paths::{APP_ID, PRIVILEGED_SERVICE_LABEL, Paths, paths};
 
 /// 内核 RPC portal 默认端口（`service.toml [kernel] rpc_port` 可覆盖）。
 pub const DEFAULT_RPC_PORT: u16 = 1995;

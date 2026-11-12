@@ -468,7 +468,6 @@ pub fn collect_system(app_config: &Path, app_log: &Path, core_dir: &Path) -> Col
     }
 }
 
-
 /// macOS：`~/Library/WebKit` 的属主。
 ///
 /// 历史版本以 root 跑过 WebView → 该目录变成 root 属主 → WKWebView 建不出

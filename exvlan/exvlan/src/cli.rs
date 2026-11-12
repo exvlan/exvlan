@@ -3353,9 +3353,17 @@ fn optional_column_targets(
         .collect()
 }
 
+#[path = "ctl.rs"]
+mod ctl;
+
 #[tokio::main]
 #[tracing::instrument]
 async fn main() -> Result<(), Error> {
+    // 产品控制面命令（service / doctor / diag / auth）在 `ctl.rs`：
+    // 不改上游的 clap 枚举，避免每次上游同步都要解冲突。
+    if let Some(code) = ctl::maybe_run() {
+        std::process::exit(code);
+    }
     let locale = sys_locale::get_locale().unwrap_or_else(|| String::from("en-US"));
     rust_i18n::set_locale(&locale);
     let cli = Cli::parse();

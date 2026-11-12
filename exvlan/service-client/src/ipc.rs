@@ -51,8 +51,7 @@ impl Client {
         #[cfg(unix)]
         let (writer, reader) = {
             (
-                Box::new(stream.try_clone().map_err(|e| e.to_string())?)
-                    as Box<dyn Write + Send>,
+                Box::new(stream.try_clone().map_err(|e| e.to_string())?) as Box<dyn Write + Send>,
                 BufReader::new(Box::new(stream) as Box<dyn std::io::Read + Send>),
             )
         };
@@ -64,8 +63,7 @@ impl Client {
                 .open(&addr)
                 .map_err(|e| format!("连接服务管道失败: {e}"))?;
             (
-                Box::new(file.try_clone().map_err(|e| e.to_string())?)
-                    as Box<dyn Write + Send>,
+                Box::new(file.try_clone().map_err(|e| e.to_string())?) as Box<dyn Write + Send>,
                 BufReader::new(Box::new(file) as Box<dyn std::io::Read + Send>),
             )
         };

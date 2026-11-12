@@ -35,6 +35,7 @@ name = "packet_bytes_extraction"
 harness = false
 
 [dependencies]
+exvlan-service-client = { path = "../service-client" }
 exvlan-core.workspace = true
 exvlan-proto = { workspace = true, features = ["api", "core"] }
 exvlan-rpc.workspace = true
