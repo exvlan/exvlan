@@ -41,6 +41,19 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// 直接调用 gateway（新端点无需等 CLI 发版）
+    Api {
+        /// HTTP 方法（GET/POST/PUT/PATCH/DELETE）
+        method: String,
+        /// 路径，如 /api/v1/doctor
+        path: String,
+        /// 请求体：`@file` / `-`（stdin）/ 字面量 JSON
+        #[arg(long)]
+        data: Option<String>,
+        /// 非安全方法必须显式确认
+        #[arg(long)]
+        yes: bool,
+    },
     /// 本地 gateway token（仅本机使用）
     Auth {
         #[command(subcommand)]
@@ -98,7 +111,10 @@ enum AuthCmd {
 /// 入口分发：命中我们的子命令则执行并返回退出码。
 pub fn maybe_run() -> Option<i32> {
     let first = std::env::args().nth(1)?;
-    if !matches!(first.as_str(), "service" | "doctor" | "diag" | "auth") {
+    if !matches!(
+        first.as_str(),
+        "service" | "doctor" | "diag" | "auth" | "api"
+    ) {
         return None;
     }
     // doctor/diag 的 `--json` 由我们处理；其余参数交给 clap 校验。
@@ -113,6 +129,12 @@ pub fn maybe_run() -> Option<i32> {
         Cmd::Service { cmd } => service_cmd(cmd),
         Cmd::Doctor { json, fix } => doctor(json, fix),
         Cmd::Diag { json } => diag(json),
+        Cmd::Api {
+            method,
+            path,
+            data,
+            yes,
+        } => api(&method, &path, data.as_deref(), yes),
         Cmd::Auth { cmd } => auth_cmd(cmd),
     })
 }
@@ -319,6 +341,134 @@ fn diag(_json_out: bool) -> i32 {
         "findings": report.findings.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
     }));
     0
+}
+
+// ---------------------------------------------------------------------------
+// api：直接把请求打到 gateway（HTTP/1.1，无第三方依赖）
+// ---------------------------------------------------------------------------
+
+fn gateway_base() -> String {
+    std::env::var("EXVLAN_API")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| format!("http://{}", exvlan_service_client::local_gateway_addr()))
+}
+
+fn gateway_token() -> Option<String> {
+    if let Ok(t) = std::env::var("EXVLAN_TOKEN")
+        && !t.trim().is_empty()
+    {
+        return Some(t.trim().to_string());
+    }
+    let path = exvlan_service_client::paths::user_paths()
+        .data
+        .join("gateway-token");
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn api(method: &str, path: &str, data: Option<&str>, yes: bool) -> i32 {
+    let method = method.to_ascii_uppercase();
+    let safe = matches!(method.as_str(), "GET" | "HEAD");
+    let body = match data {
+        None => None,
+        Some("-") => {
+            use std::io::Read as _;
+            let mut buf = String::new();
+            if std::io::stdin().read_to_string(&mut buf).is_err() {
+                eprintln!("读取 stdin 失败");
+                return 2;
+            }
+            Some(buf)
+        }
+        Some(v) if v.starts_with('@') => match std::fs::read_to_string(&v[1..]) {
+            Ok(text) => Some(text),
+            Err(err) => {
+                eprintln!("读取 {} 失败: {err}", &v[1..]);
+                return 2;
+            }
+        },
+        Some(v) => Some(v.to_string()),
+    };
+    if !safe && !yes {
+        eprintln!("{method} {path} 会修改状态；确认请加 --yes（当前为预览）");
+        if let Some(b) = &body {
+            eprintln!("body: {b}");
+        }
+        return 2;
+    }
+    match http_request(&method, path, body.as_deref()) {
+        Ok((status, text)) => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                print_json(&v);
+            } else {
+                println!("{text}");
+            }
+            if (200..300).contains(&status) { 0 } else { 2 }
+        }
+        Err(err) => {
+            eprintln!("请求失败: {err}");
+            3
+        }
+    }
+}
+
+fn http_request(method: &str, path: &str, body: Option<&str>) -> Result<(u16, String), String> {
+    let base = gateway_base();
+    let rest = base
+        .strip_prefix("http://")
+        .ok_or_else(|| format!("仅支持 http://（当前 {base}）"))?;
+    let (authority, prefix) = match rest.split_once('/') {
+        Some((a, p)) => (a, format!("/{p}")),
+        None => (rest, String::new()),
+    };
+    let full_path = if prefix.is_empty() {
+        path.to_string()
+    } else {
+        format!("{}{}", prefix.trim_end_matches('/'), path)
+    };
+    let token = gateway_token().ok_or_else(|| {
+        "没有 gateway token：先运行 `exvlan-cli auth login` 或启动 gateway 生成".to_string()
+    })?;
+
+    let mut stream = std::net::TcpStream::connect(authority)
+        .map_err(|e| format!("连接 {authority} 失败: {e}"))?;
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
+
+    use std::io::{Read as _, Write as _};
+    let mut req = format!(
+        "{method} {full_path} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n"
+    );
+    if let Some(b) = body {
+        req.push_str("Content-Type: application/json\r\n");
+        req.push_str(&format!("Content-Length: {}\r\n", b.len()));
+    }
+    req.push_str("\r\n");
+    if let Some(b) = body {
+        req.push_str(b);
+    }
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| format!("发送请求失败: {e}"))?;
+
+    let mut raw = Vec::new();
+    stream
+        .read_to_end(&mut raw)
+        .map_err(|e| format!("读取响应失败: {e}"))?;
+    let text = String::from_utf8_lossy(&raw);
+    let status = text
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .ok_or_else(|| "无法解析响应状态".to_string())?;
+    let body = text
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b.to_string())
+        .unwrap_or_default();
+    Ok((status, body))
 }
 
 // ---------------------------------------------------------------------------

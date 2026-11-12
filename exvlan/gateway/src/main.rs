@@ -47,9 +47,12 @@ async fn main() -> anyhow::Result<()> {
 
     let cfg = Config {
         bind: env_or("EXVLAN_GATEWAY_BIND", "127.0.0.1"),
-        port: env_or("EXVLAN_GATEWAY_PORT", "2016")
-            .parse()
-            .context("EXVLAN_GATEWAY_PORT 必须是端口号")?,
+        port: env_or(
+            "EXVLAN_GATEWAY_PORT",
+            &exvlan_service_client::DEFAULT_GATEWAY_PORT.to_string(),
+        )
+        .parse()
+        .context("EXVLAN_GATEWAY_PORT 必须是端口号")?,
         token_file,
     };
 
