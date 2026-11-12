@@ -17,23 +17,16 @@ use crate::{ipc, paths};
 const ENABLED_SUFFIX: &str = ".toml";
 const DISABLED_SUFFIX: &str = ".toml.disabled";
 
-/// 一条网络配置。
-#[derive(Debug, Clone, Deserialize)]
-pub struct Entry {
-    pub id: String,
-    pub enabled: bool,
-    pub bytes: u64,
-    pub modified: u64,
-}
-
 /// 一条配置的完整内容（列表/读取都用它）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Saved {
     pub id: String,
     pub enabled: bool,
     pub text: String,
+    #[serde(default)]
     /// 文件字节数（等于 `text.len()`；给列表展示用）。
     pub bytes: u64,
+    #[serde(default)]
     /// 最后修改时间（UNIX 秒；拿不到时为 0）。
     pub modified: u64,
 }
@@ -83,26 +76,14 @@ pub fn dir() -> Result<String, String> {
 pub fn list() -> Result<Vec<Saved>, String> {
     if service_ready() {
         let resp = ipc::request("config.list", json!({}))?;
-        let items: Vec<Entry> = serde_json::from_value(
+        // 服务一次把正文也带回来（客户端不再逐条 read）。
+        return serde_json::from_value(
             resp.get("data")
                 .and_then(|d| d.get("items"))
                 .cloned()
                 .unwrap_or_else(|| json!([])),
         )
-        .map_err(|e| format!("解析 config.list 失败: {e}"))?;
-        let mut out = Vec::with_capacity(items.len());
-        for item in items {
-            match read(&item.id) {
-                Ok(mut saved) => {
-                    saved.bytes = item.bytes;
-                    saved.modified = item.modified;
-                    out.push(saved);
-                }
-                // 列表与读取之间可能被删掉（用户/内核）：跳过，不中断整表。
-                Err(_) => continue,
-            }
-        }
-        return Ok(out);
+        .map_err(|e| format!("解析 config.list 失败: {e}"));
     }
     list_local(&config_dir())
 }

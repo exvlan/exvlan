@@ -183,28 +183,36 @@ async fn run_network_instance(
         .gen_config()
         .map_err(|e| logger::other("cmd:run_network_instance", e))?;
     // 落盘与运行解耦：
-    // - 落盘（`save=true`）= 写内核配置目录（`<config-dir>/<id>.toml`），
-    //   这是**唯一**的持久化位置（不再有 networks.toml 那份第二权威）；
-    // - 运行 = 走 RPC 让内核立刻生效，持久化交给配置文件。
+    // - 运行 = 走 RPC 让内核立刻生效（**不**让内核侧落盘，否则会写第二份存储）；
+    // - 落盘（`save=true`）= 写内核配置目录 `<config-dir>/<id>.toml`，这是唯一
+    //   的持久化位置（不再有 networks.toml 那份第二权威）。
     //
-    // 顺序上先落盘：即使这次运行失败，用户重启后仍然能加载到这份配置。
+    // 顺序：先运行、后落盘。落盘失败时网络已经通了，此时**必须**把「没保存」
+    // 这件事说清楚（返回错误由界面展示），而不是假装成功。
     let id = toml_config.get_id();
-    if save {
-        config_store::write(&id.to_string(), &toml_config.dump(), true)?;
-    }
+    let toml_text = save.then(|| toml_config.dump());
     let _mutation = client_manager.config_mutation.lock().await;
     client_manager
         .pre_run_network_instance_hook(&app, &toml_config, manager::PersistedConfigSource::User)
         .await?;
     client_manager
-        // 桌面端的内核配置来自配置文件，运行实例时**不再**让内核侧落盘
-        // （否则会写第二份存储，与配置目录漂移）。
         .handle_run_network_instance(app.clone(), cfg, false)
         .await
         .map_err(|e| logger::other("cmd:run_network_instance", e))?;
     client_manager
         .post_run_network_instance_hook(&app, &id)
         .await?;
+    drop(_mutation);
+
+    if let Some(text) = toml_text {
+        config_store::write(&id.to_string(), &text, true).map_err(|err| {
+            let msg = format!("已连接，但配置没能保存（{err}）；下次启动不会自动加载这个网络");
+            logger::other("cmd:run_network_instance", msg.clone());
+            msg
+        })?;
+        // 内存缓存同步一下：列表/名字查询立刻能看到刚保存的配置。
+        client_manager.storage.refresh_saved(&id.to_string());
+    }
     Ok(())
 }
 
@@ -3148,6 +3156,31 @@ mod manager {
         // 注意：**不再**通过 `save_configs` / `save_enabled_networks` 事件把
         // 内存缓存回写给前端（那会让前端再写一遍文件，等于把权威又搬回 WebView）。
         // 桌面端的持久化只发生在两处：`run_network_instance` 落盘、配置目录读写。
+
+        /// 从配置目录把某一条读回内存缓存（写入后调用，保证列表立刻一致）。
+        pub(super) fn refresh_saved(&self, id: &str) {
+            let Ok(saved) = crate::config_store::read(id) else {
+                return;
+            };
+            let Ok(uuid) = Uuid::parse_str(id) else {
+                return;
+            };
+            let Ok(loader) = TomlConfigLoader::new_from_str(&saved.text) else {
+                return;
+            };
+            let Ok(config) = NetworkConfig::new_from_config(&loader) else {
+                return;
+            };
+            self.network_configs.insert(
+                uuid,
+                GUIConfig::new(id.to_string(), config, manager::PersistedConfigSource::User),
+            );
+            if saved.enabled {
+                self.enabled_networks.insert(uuid);
+            } else {
+                self.enabled_networks.remove(&uuid);
+            }
+        }
 
         /// 把配置目录里尚未进入内存缓存的网络补进来（只补、不覆盖）。
         ///

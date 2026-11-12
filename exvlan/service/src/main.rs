@@ -556,6 +556,9 @@ struct ConfigEntry {
     bytes: u64,
     /// 最后修改时间（UNIX 秒）；拿不到时为 0。
     modified: u64,
+    /// 配置正文。列表一次带回来，客户端不必再逐条 `config.read`
+    /// （UI 每次轮询都要列表，N+1 次 IPC 会明显变慢）。
+    text: String,
 }
 
 /// 列出配置目录里的网络（`*.toml` + `*.toml.disabled`）。
@@ -588,11 +591,16 @@ fn list_network_configs(config_dir: &Path) -> Vec<ConfigEntry> {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        // 读不到正文（权限/竞态）就不列这一条：客户端拿到的条目一定能用。
+        let Ok(text) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
         out.push(ConfigEntry {
             id,
             enabled,
             bytes,
             modified,
+            text,
         });
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
