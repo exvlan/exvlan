@@ -7,7 +7,8 @@
       "./Packet.dll",
       "./*.sys",
       "resources/kernel/*",
-      "resources/service/*"
+      "resources/service/*",
+      "resources/tools/*"
     ],
     "windows": {
       "webviewInstallMode": {

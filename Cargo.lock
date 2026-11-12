@@ -3222,6 +3222,7 @@ dependencies = [
  "async-trait",
  "dashmap",
  "exvlan-rpc",
+ "exvlan-service-client",
  "hickory-resolver",
  "if-addrs",
  "jni 0.22.4",

@@ -355,6 +355,39 @@ async function onApplyWhitelist() {
     whitelistApplying.value = false;
   }
 }
+type MigrateStatus = {
+  pending: boolean;
+  items: string[];
+  tool: string | null;
+  done: boolean;
+};
+
+/** 迁移闸门：非空时全屏阻塞，直到迁移完成 */
+const migrateGate = ref<MigrateStatus | null>(null);
+const migrateRunning = ref(false);
+let migrateResolve: (() => void) | null = null;
+
+async function onMigrateRun() {
+  migrateRunning.value = true;
+  try {
+    await invoke<Record<string, unknown>>("migrate_run");
+    toast.add({
+      severity: "success",
+      summary: t("migrate.title"),
+      detail: t("migrate.done"),
+      life: 4000,
+    });
+    migrateGate.value = null;
+    migrateResolve?.();
+    migrateResolve = null;
+  } catch (e: unknown) {
+    toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 15000 });
+    void reportFrontendError("fe:migrate", String(e));
+  } finally {
+    migrateRunning.value = false;
+  }
+}
+
 const isModeSaving = ref(false);
 const manualDisconnect = ref(false);
 
@@ -834,6 +867,16 @@ function onAppUpdateLater() {
 
 onMounted(async () => {
   const cleanupFns: Array<() => void> = [];
+
+  // 一次性迁移闸门（pre.17）：检测到旧数据就阻塞启动，等用户确认后跑随包工具。
+  // 运行时不做任何迁移/兼容，迁移完成后才继续后面的初始化。
+  const ms = await invoke<MigrateStatus>("migrate_status").catch(() => null);
+  if (ms?.pending) {
+    migrateGate.value = ms;
+    await new Promise<void>((resolve) => {
+      migrateResolve = resolve;
+    });
+  }
 
   // 提权被拒绝过就不再自动弹 UAC（见 ensureKernelServiceGuarded）
   await loadElevateDenied();
@@ -1370,6 +1413,38 @@ const configServerConnectionStatus = computed(() => {
       @set-log-level="onSetLogLevel"
       @changed-language="refreshTrayMenu"
     />
+
+    <!-- 一次性迁移（pre.17）：阻塞启动，完成后自动继续 -->
+    <div
+      v-if="migrateGate"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+    >
+      <div class="w-full max-w-xl rounded-lg bg-surface-0 p-6 shadow-xl dark:bg-surface-900">
+        <div class="mb-3 text-lg font-semibold">{{ t("migrate.title") }}</div>
+        <p class="mb-3 text-sm text-surface-600 dark:text-surface-300">
+          {{ t("migrate.hint") }}
+        </p>
+        <ul
+          class="mb-4 max-h-48 overflow-auto rounded bg-surface-100 p-3 text-xs font-mono dark:bg-surface-800"
+        >
+          <li v-for="item in migrateGate.items" :key="item" class="break-all">{{ item }}</li>
+        </ul>
+        <div class="flex items-center justify-end gap-2">
+          <Button
+            :label="t('migrate.exit')"
+            severity="secondary"
+            text
+            :disabled="migrateRunning"
+            @click="exit(1)"
+          />
+          <Button
+            :label="migrateRunning ? t('migrate.running') : t('migrate.run')"
+            :loading="migrateRunning"
+            @click="onMigrateRun"
+          />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 

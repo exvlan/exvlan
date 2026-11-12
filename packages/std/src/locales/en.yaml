@@ -944,3 +944,11 @@ upgrade:
   app_up_to_date: App is up to date
   download_and_install: Download & install
   downloaded: Downloaded
+
+migrate:
+  title: One-time migration required
+  hint: Legacy data found. Migration converts networks into the kernel config, removes obsolete files and keeps a backup (rollback possible). This is the last version that migrates automatically.
+  run: Start migration
+  running: Migrating…
+  exit: Quit
+  done: Migration complete (backup kept)

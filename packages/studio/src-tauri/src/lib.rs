@@ -7,6 +7,7 @@ mod elevate;
 mod ffi;
 mod kernel;
 mod logger;
+mod migrate;
 mod networks;
 mod paths;
 mod prefs;
@@ -5807,6 +5808,8 @@ pub fn run_gui() -> std::process::ExitCode {
             get_service_status,
             service_diagnostics,
             service_restart,
+            migrate::migrate_status,
+            migrate::migrate_run,
             service_kernel_restart,
             service_reinstall,
             init_rpc_connection,

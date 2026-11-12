@@ -178,16 +178,26 @@ jobs:
 
       # 特权服务（macOS + Windows）：唯一的常驻特权进程。
       # 首次安装授权一次；之后的升级通过 IPC 自更新（`service.update`），零弹窗。
-      - name: Build privileged service
+      # 同时构建控制面工具（gateway / cli / migrate），它们都是本机控制面的一部分：
+      # - gateway：127.0.0.1 的 HTTP/WS，CLI / agent / 远端客户端用
+      # - cli：产品子命令（service/doctor/diag/auth/api）+ 上游内核 CLI
+      # - migrate：pre.17 的一次性迁移（下个版本从安装包移除）
+      - name: Build privileged service and control-plane tools
         run: |
           set -euo pipefail
-          cargo build --release -p exvlan-service --target "$GUI_TARGET"
-          BIN=exvlan-service
-          [[ "$GUI_TARGET" =~ windows ]] && BIN=exvlan-service.exe
-          mkdir -p packages/studio/src-tauri/resources/service
-          cp "target/$GUI_TARGET/release/$BIN" packages/studio/src-tauri/resources/service/
-          chmod +x "packages/studio/src-tauri/resources/service/$BIN" || true
-          ls -l packages/studio/src-tauri/resources/service/
+          cargo build --release -p exvlan-service -p exvlan-gateway -p exvlan-migrate \
+            --target "$GUI_TARGET"
+          cargo build --release -p exvlan --bin exvlan-cli --features management,cli \
+            --target "$GUI_TARGET"
+          EXE=""
+          [[ "$GUI_TARGET" =~ windows ]] && EXE=".exe"
+          mkdir -p packages/studio/src-tauri/resources/service packages/studio/src-tauri/resources/tools
+          cp "target/$GUI_TARGET/release/exvlan-service$EXE" packages/studio/src-tauri/resources/service/
+          for b in exvlan-gateway exvlan-cli exvlan-migrate; do
+            cp "target/$GUI_TARGET/release/$b$EXE" packages/studio/src-tauri/resources/tools/
+          done
+          chmod +x packages/studio/src-tauri/resources/service/* packages/studio/src-tauri/resources/tools/* || true
+          ls -l packages/studio/src-tauri/resources/service/ packages/studio/src-tauri/resources/tools/
 
       # 内核 + 服务本体签名：服务只安装 minisign 校验通过的包
       # （复用 updater 私钥，无需新 secret）。

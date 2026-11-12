@@ -942,3 +942,11 @@ upgrade:
   app_up_to_date: 应用已是最新
   download_and_install: 下载并安装
   downloaded: 已下载
+
+migrate:
+  title: 需要一次性迁移
+  hint: 检测到旧版本数据。迁移会把网络配置转换到内核、清理旧文件并保留备份（失败可回滚）。这是本版本最后一次做迁移。
+  run: 开始迁移
+  running: 迁移中…
+  exit: 退出
+  done: 迁移完成（已备份）
