@@ -424,7 +424,10 @@ async fn list_configs(
     if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
         return resp;
     }
-    let full = matches!(params.get("full").map(String::as_str), Some("1") | Some("true"));
+    let full = matches!(
+        params.get("full").map(String::as_str),
+        Some("1") | Some("true")
+    );
     match exvlan_service_client::config::list() {
         Ok(items) => {
             let list: Vec<Value> = items
@@ -526,7 +529,11 @@ async fn delete_config(
     }
     match exvlan_service_client::config::delete(&id) {
         Ok(true) => Json(json!({ "id": id, "removed": true })).into_response(),
-        Ok(false) => err(StatusCode::NOT_FOUND, "not_found", format!("配置不存在: {id}")),
+        Ok(false) => err(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            format!("配置不存在: {id}"),
+        ),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "config_delete", e),
     }
 }

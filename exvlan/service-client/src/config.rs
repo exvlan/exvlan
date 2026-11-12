@@ -272,3 +272,80 @@ pub fn set_enabled(id: &str, enabled: bool) -> Result<(), String> {
     }
     write(id, &saved.text, enabled)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CFG: &str = "hostname = \"n\"\n[network_identity]\nnetwork_name = \"exvlan\"\n";
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "exvlan-cfg-test-{tag}-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    #[test]
+    fn rejects_traversal_and_hidden_ids() {
+        for bad in ["..", "../x", "a/b", ".hid", "x..y", "", &"a".repeat(65)] {
+            assert!(validate_id(bad).is_err(), "{bad:?} 必须被拒绝");
+        }
+        assert!(validate_id("1467ec85-9cf8-47bc-8c06-8dc320e9b9c5").is_ok());
+    }
+
+    #[test]
+    fn local_round_trip_and_disable() {
+        let dir = temp_dir("roundtrip");
+        write_local(&dir, "net1", CFG, true).expect("write");
+        let saved = read_local(&dir, "net1").expect("read");
+        assert!(saved.enabled);
+        assert_eq!(saved.text, CFG);
+
+        write_local(&dir, "net1", CFG, false).expect("disable");
+        assert!(!dir.join("net1.toml").exists());
+        let saved = read_local(&dir, "net1").expect("read disabled");
+        assert!(!saved.enabled);
+
+        let list = list_local(&dir).expect("list");
+        assert_eq!(list.len(), 1);
+        assert!(!list[0].enabled);
+
+        assert!(delete_local(&dir, "net1").expect("delete"));
+        assert!(!delete_local(&dir, "net1").expect("delete again"));
+        assert!(list_local(&dir).expect("list empty").is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn local_write_rejects_invalid_toml() {
+        let dir = temp_dir("badtoml");
+        assert!(write_local(&dir, "a", "not = [valid", true).is_err());
+        assert!(write_local(&dir, "a", "hostname = \"x\"\n", true).is_err());
+        assert!(list_local(&dir).expect("list").is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_enabled_keeps_text() {
+        let dir = temp_dir("toggle");
+        write_local(&dir, "net", CFG, true).expect("write");
+        // set_enabled 走的是公开入口（需要服务不可用），这里直接验证本地等价路径。
+        write_local(
+            &dir,
+            "net",
+            &read_local(&dir, "net").expect("read").text,
+            false,
+        )
+        .expect("disable");
+        assert_eq!(read_local(&dir, "net").expect("read").text, CFG);
+        assert!(!read_local(&dir, "net").expect("read").enabled);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
