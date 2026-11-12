@@ -136,24 +136,14 @@ export async function getConfig(instanceId: string) {
   return NetworkTypes.normalizeNetworkConfig(config);
 }
 
-/** 读取网络列表（`networks.toml` 的 JSON 表示）。 */
+/** 读取网络列表（内核配置目录的 JSON 视图：`<config-dir>/<id>.toml`）。 */
 export async function getNetworks(): Promise<string> {
   return await invoke<string>("get_networks");
 }
 
-/** 写入网络列表（入参是 JSON 字符串）。 */
+/** 写入网络列表（入参是 JSON 字符串）：逐条落盘到内核配置目录。 */
 export async function setNetworks(networks: string) {
   return await invoke("set_networks", { networks });
-}
-
-/** 把旧 localStorage 的 networkList 迁移到 networks.toml（只迁移一次）。 */
-export async function migrateNetworks(networks: string) {
-  return await invoke<boolean>("migrate_networks", { networks });
-}
-
-/** 正式版（清理模式）才让前端删除 localStorage 快照。 */
-export async function legacyCleanupEnabled(): Promise<boolean> {
-  return await invoke<boolean>("legacy_cleanup_enabled");
 }
 
 /** 偏好/网络文件路径（诊断面板显示用）。 */
@@ -164,11 +154,18 @@ export async function networksPath() {
   return await invoke<string>("networks_path_cmd");
 }
 
+/**
+ * 把「已保存的网络」灌进内核客户端管理器（启动时调用）。
+ *
+ * 数据来源只有一个：内核配置目录。不再回退 localStorage —— pre.16 的
+ * `localStorage.networkList` 是第二份权威，回退它会凭空冒出幽灵网络。
+ */
 export async function sendConfigs(enabledNetworks: string[]) {
   const fromBackend = await getNetworks().catch(() => "");
-  const raw =
-    fromBackend && fromBackend !== "[]" ? fromBackend : localStorage.getItem("networkList");
-  const networkList = parseStoredConfigs(raw);
+  const networkList = parseStoredConfigs(fromBackend);
+  if (networkList.length === 0) {
+    return;
+  }
   return await invoke("load_configs", {
     configs: networkList.map(({ config, source }) => ({
       config: NetworkTypes.toBackendNetworkConfig(config),

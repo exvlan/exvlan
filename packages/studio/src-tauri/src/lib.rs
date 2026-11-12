@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod config_store;
 mod diagnostics;
 mod elevate;
 #[cfg(target_os = "android")]
@@ -181,16 +182,28 @@ async fn run_network_instance(
     let toml_config = cfg
         .gen_config()
         .map_err(|e| logger::other("cmd:run_network_instance", e))?;
+    // 落盘与运行解耦：
+    // - 落盘（`save=true`）= 写内核配置目录（`<config-dir>/<id>.toml`），
+    //   这是**唯一**的持久化位置（不再有 networks.toml 那份第二权威）；
+    // - 运行 = 走 RPC 让内核立刻生效，持久化交给配置文件。
+    //
+    // 顺序上先落盘：即使这次运行失败，用户重启后仍然能加载到这份配置。
+    let id = toml_config.get_id();
+    if save {
+        config_store::write(&id.to_string(), &toml_config.dump(), true)?;
+    }
     let _mutation = client_manager.config_mutation.lock().await;
     client_manager
         .pre_run_network_instance_hook(&app, &toml_config, manager::PersistedConfigSource::User)
         .await?;
     client_manager
-        .handle_run_network_instance(app.clone(), cfg, save)
+        // 桌面端的内核配置来自配置文件，运行实例时**不再**让内核侧落盘
+        // （否则会写第二份存储，与配置目录漂移）。
+        .handle_run_network_instance(app.clone(), cfg, false)
         .await
         .map_err(|e| logger::other("cmd:run_network_instance", e))?;
     client_manager
-        .post_run_network_instance_hook(&app, &toml_config.get_id())
+        .post_run_network_instance_hook(&app, &id)
         .await?;
     Ok(())
 }
@@ -3106,13 +3119,6 @@ mod manager {
                 source,
             }
         }
-
-        fn into_stored(self) -> StoredGuiConfig {
-            StoredGuiConfig {
-                config: self.config,
-                source: self.source,
-            }
-        }
     }
 
     impl PersistentConfig<anyhow::Error> for GUIConfig {
@@ -3139,29 +3145,48 @@ mod manager {
             }
         }
 
-        fn save_configs(&self, app: &AppHandle) -> anyhow::Result<()> {
-            let configs = self
-                .network_configs
-                .iter()
-                .map(|entry| entry.value().clone().into_stored())
-                .collect::<Vec<_>>();
-            app.emit("save_configs", configs)?;
-            Ok(())
-        }
+        // 注意：**不再**通过 `save_configs` / `save_enabled_networks` 事件把
+        // 内存缓存回写给前端（那会让前端再写一遍文件，等于把权威又搬回 WebView）。
+        // 桌面端的持久化只发生在两处：`run_network_instance` 落盘、配置目录读写。
 
-        fn save_enabled_networks(&self, app: &AppHandle) -> anyhow::Result<()> {
-            let payload: Vec<String> = self
-                .enabled_networks
-                .iter()
-                .map(|entry| entry.key().to_string())
-                .collect();
-            app.emit("save_enabled_networks", payload)?;
-            Ok(())
+        /// 把配置目录里尚未进入内存缓存的网络补进来（只补、不覆盖）。
+        ///
+        /// 内存缓存只承载「本次会话里内核已知的实例」，而配置目录才是持久化的
+        /// 权威；列表/诊断都需要看到「已保存但当前没运行」的网络。
+        fn merge_saved_configs(&self) {
+            let Ok(saved) = crate::config_store::list() else {
+                return;
+            };
+            for entry in saved {
+                let Ok(uuid) = Uuid::parse_str(&entry.id) else {
+                    continue;
+                };
+                if self.network_configs.contains_key(&uuid) {
+                    continue;
+                }
+                let Ok(loader) = TomlConfigLoader::new_from_str(&entry.text) else {
+                    continue;
+                };
+                let Ok(config) = NetworkConfig::new_from_config(&loader) else {
+                    continue;
+                };
+                self.network_configs.insert(
+                    uuid,
+                    GUIConfig::new(
+                        entry.id.clone(),
+                        config,
+                        manager::PersistedConfigSource::User,
+                    ),
+                );
+                if entry.enabled {
+                    self.enabled_networks.insert(uuid);
+                }
+            }
         }
 
         fn save_config(
             &self,
-            app: &AppHandle,
+            _app: &AppHandle,
             inst_id: Uuid,
             cfg: NetworkConfig,
             source: PersistedConfigSource,
@@ -3173,55 +3198,67 @@ mod manager {
                 .unwrap_or(source);
             let config = GUIConfig::new(inst_id.to_string(), cfg, source);
             self.network_configs.insert(inst_id, config);
-            self.save_configs(app)
+            Ok(())
         }
     }
     #[async_trait]
     impl Storage<AppHandle, GUIConfig, anyhow::Error> for GUIStorage {
         async fn insert_or_update_user_network_config(
             &self,
-            app: AppHandle,
+            _app: AppHandle,
             network_inst_id: Uuid,
             network_config: NetworkConfig,
             source: ConfigSource,
         ) -> Result<(), anyhow::Error> {
             self.save_config(
-                &app,
+                &_app,
                 network_inst_id,
                 network_config,
                 PersistedConfigSource::from_runtime_source(source),
             )?;
             self.enabled_networks.insert(network_inst_id);
-            self.save_enabled_networks(&app)?;
             Ok(())
         }
 
         async fn delete_network_configs(
             &self,
-            app: AppHandle,
+            _app: AppHandle,
             network_inst_ids: &[Uuid],
         ) -> Result<(), anyhow::Error> {
             for network_inst_id in network_inst_ids {
+                // 配置目录才是权威：先删文件，再收拾内存缓存。
+                if let Err(err) = crate::config_store::delete(&network_inst_id.to_string()) {
+                    crate::logger::record(
+                        "networks.delete",
+                        format!("删除 {network_inst_id} 配置失败: {err}"),
+                    );
+                }
                 self.network_configs.remove(network_inst_id);
                 self.enabled_networks.remove(network_inst_id);
             }
-            self.save_configs(&app)?;
-            self.save_enabled_networks(&app)?;
             Ok(())
         }
 
         async fn update_network_config_state(
             &self,
-            app: AppHandle,
+            _app: AppHandle,
             network_inst_id: Uuid,
             disabled: bool,
         ) -> Result<(), anyhow::Error> {
+            // 持久化：`<id>.toml` ↔ `<id>.toml.disabled`（内核只加载前者）。
+            if let Err(err) =
+                crate::config_store::set_enabled(&network_inst_id.to_string(), !disabled)
+            {
+                crate::logger::record(
+                    "networks.state",
+                    format!("切换 {network_inst_id} 启用状态失败: {err}"),
+                );
+            }
             if disabled {
                 self.enabled_networks.remove(&network_inst_id);
             } else {
                 self.enabled_networks.insert(network_inst_id);
             }
-            self.save_enabled_networks(&app)?;
             Ok(())
         }
 
@@ -3230,6 +3267,7 @@ mod manager {
             _: AppHandle,
             props: ListNetworkProps,
         ) -> Result<Vec<GUIConfig>, anyhow::Error> {
+            self.merge_saved_configs();
             let mut ret = Vec::new();
             for entry in self.network_configs.iter() {
                 let id: Uuid = entry.key().to_owned();
@@ -3257,11 +3295,24 @@ mod manager {
             _: AppHandle,
             network_inst_id: &str,
         ) -> Result<Option<GUIConfig>, anyhow::Error> {
-            let uuid = Uuid::parse_str(network_inst_id)?;
-            Ok(self
-                .network_configs
-                .get(&uuid)
-                .map(|entry| entry.value().clone()))
+            if let Ok(uuid) = Uuid::parse_str(network_inst_id)
+                && let Some(entry) = self.network_configs.get(&uuid)
+            {
+                return Ok(Some(entry.value().clone()));
+            }
+            // 内存里没有（例如刚重启、实例还没跑起来）：从配置目录读，
+            // 这样「已保存但没运行」的网络也能显示名字/配置。
+            let saved = match crate::config_store::read(network_inst_id) {
+                Ok(saved) => saved,
+                Err(_) => return Ok(None),
+            };
+            let loader = TomlConfigLoader::new_from_str(&saved.text)?;
+            let config = NetworkConfig::new_from_config(&loader)?;
+            Ok(Some(GUIConfig::new(
+                network_inst_id.to_string(),
+                config,
+                manager::PersistedConfigSource::User,
+            )))
         }
     }
 
@@ -4263,12 +4314,6 @@ fn service_default_dirs_cmd() -> ServiceDefaultDirs {
     service_default_dirs()
 }
 
-/// 前端据此删除 localStorage 里的旧快照（`networkList`）。
-#[tauri::command]
-fn legacy_cleanup_enabled() -> bool {
-    ENABLE_LEGACY_CLEANUP
-}
-
 /// 提权子命令入口（由 `main.rs` 在解析到内部参数时调用）。
 ///
 /// 这些命令只会在通过 `elevate::Command` 以 root 拉起时执行；普通用户直接运行
@@ -4627,8 +4672,15 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
         }
         #[cfg(target_os = "linux")]
         if let Some(opts) = req.service.clone() {
-            service::install(opts)?;
+            service::install(opts.clone())?;
             crate::logger::record("provision.service", "systemd unit installed");
+            // Linux 没有特权服务进程：内核由 systemd 以 root 跑，但**配置文件
+            // 必须由用户态写**（pre.17 起配置目录是唯一权威）。把目录交给属主。
+            crate::paths::hand_over_to_owner(std::path::Path::new(&opts.config_dir), req.owner_uid);
+            crate::logger::record(
+                "provision.service",
+                format!("config dir handed over to uid={}", req.owner_uid),
+            );
         }
         if let Some(src) = req.service_src.as_deref() {
             // 特权服务安装失败**不阻断启动**：记录到 error.log，由界面横幅
@@ -5831,7 +5883,6 @@ pub fn run_gui() -> std::process::ExitCode {
             report_boot_state,
             diagnostics_info,
             service_default_dirs_cmd,
-            legacy_cleanup_enabled,
             error_log_path,
             read_error_log,
             share_error_log,
@@ -5843,7 +5894,6 @@ pub fn run_gui() -> std::process::ExitCode {
             prefs::prefs_path_cmd,
             networks::get_networks,
             networks::set_networks,
-            networks::migrate_networks,
             networks::networks_path_cmd,
         ])
         .on_window_event(|_win, event| match event {

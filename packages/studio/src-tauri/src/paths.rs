@@ -112,7 +112,7 @@ pub fn launch_daemons_dir() -> PathBuf {
     PathBuf::from("/Library/LaunchDaemons")
 }
 
-/// 用户侧配置目录（prefs.toml / networks.toml / machine_id）。
+/// 用户侧配置目录（prefs.toml / machine_id / 迁移标记）。
 pub fn user_config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager as _;
     app.path()
@@ -204,6 +204,32 @@ pub fn restrict_file(path: &std::path::Path) {
 }
 
 /// 设置目录权限（Unix）。`mode` 用八进制字面量，如 `0o700`。
+/// Linux：把 root 创建的目录交给桌面用户。
+///
+/// Linux 没有特权服务进程（内核由 systemd 以 root 运行），但配置文件必须由
+/// 用户态的 GUI / CLI 写。目录改成属主所有（权限不变，仍是 0700）：
+/// root 内核照样能读，用户终于能写。
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn hand_over_to_owner(path: &std::path::Path, uid: u32) {
+    use std::os::unix::ffi::OsStrExt as _;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return;
+    };
+    // gid = 0（保持 root 组），只换属主；失败由调用方记录。
+    unsafe {
+        libc::chown(c.as_ptr(), uid, 0);
+    }
+    if let Ok(meta) = std::fs::metadata(path) {
+        use std::os::unix::fs::MetadataExt as _;
+        if meta.uid() != uid {
+            crate::logger::record(
+                "paths.owner",
+                format!("{} 属主仍是 {}（期望 {uid}）", path.display(), meta.uid()),
+            );
+        }
+    }
+}
+
 pub fn ensure_dir_mode(path: &std::path::Path, mode: u32) {
     #[cfg(unix)]
     {
