@@ -150,7 +150,9 @@ fn service_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
         evidence: st.clone(),
         fixable: false,
     });
-    if mode != "off" && pid == 0 {
+    // `policy` 的规范词汇是 resident/session/stopped；旧服务会回 off/normal/service。
+    let stopped = matches!(mode, "stopped" | "off");
+    if !stopped && pid == 0 {
         out.push(Finding {
             id: "kernel.running",
             level: "error",
