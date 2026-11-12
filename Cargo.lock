@@ -3211,6 +3211,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "toml 1.1.8+spec-1.1.0",
  "uuid",
 ]
 
