@@ -83,6 +83,18 @@ jobs:
       - name: Check hardcoded ports
         run: python3 script/ci/check-no-hardcoded-ports.py
 
+      # 单一写者：关键状态字段的写入点只允许减少（pre.13–16 一半的 bug 是「多份权威」）
+      - name: Check single writer
+        run: python3 script/ci/check-single-writer.py
+
+      # 静默失败：空的 catch / `if let Err(_)` 必须记录或显式标注忽略
+      - name: Check silent errors
+        run: python3 script/ci/check-silent-error.py
+
+      # 契约一致：gateway 的每条路由都必须登记在 /system.manifest
+      - name: Check api parity
+        run: python3 script/ci/check-api-parity.py
+
       # runner 预装内容 + 全 feature 构建很容易打满磁盘（曾多次 No space left on device）
       - name: Free disk space
         run: |
