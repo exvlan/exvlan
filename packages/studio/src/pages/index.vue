@@ -48,7 +48,7 @@ import ServiceSettings from "~/components/ServiceSettings.vue";
 import SettingsDialog from "~/components/SettingsDialog.vue";
 import {
   runtimeApply,
-  serviceRestart,
+  serviceKernelRestart,
   serviceWhitelistInfo,
   appUpdateApply,
   appUpdateInfo,
@@ -334,7 +334,14 @@ async function refreshWhitelistState() {
 async function onApplyWhitelist() {
   whitelistApplying.value = true;
   try {
-    await serviceRestart();
+    // 必须是「原子重启内核」，不能只重启服务本体：
+    // 后者在 normal 策略下会把内核停掉却不拉起来（改配置就断网）。
+    await serviceKernelRestart();
+    // 内核进程换了，旧的 RPC 连接已失效 → 重新建连（不要留一个“假在线”的客户端）。
+    await initWithMode(currentMode.value).catch((e: unknown) => {
+      startupError.value = String(e);
+      void reportFrontendError("fe:kernel-restart", String(e));
+    });
     await refreshWhitelistState();
     toast.add({
       severity: "success",

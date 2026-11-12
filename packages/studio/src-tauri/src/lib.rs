@@ -18,6 +18,7 @@ mod service_client;
 mod supervisor;
 // upgrade 全平台编译：kernel 子模块在移动端返回“不支持”，app 子模块移动端走 APK 流程。
 mod upgrade;
+mod watchdog;
 
 use anyhow::Context;
 use exvlan_rpc::exvlan_proto::api::config::{ConfigPatchAction, VpnPortalClientPatch};
@@ -642,6 +643,15 @@ async fn resolve_rpc_bind_url(url: &url::Url) -> Result<std::net::SocketAddr, St
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const LOCAL_DAEMON_RPC_PORTAL: &str = "tcp://127.0.0.1:1995";
 
+/// 判断目标是否是「本机内核」：回环地址（含显式 `tcp://127.0.0.1:…` 与 `[::1]`）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn is_local_portal(url: &str) -> bool {
+    let text = url.trim().trim_start_matches("tcp://");
+    let host = text.rsplit_once(':').map(|(h, _)| h).unwrap_or(text);
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "0.0.0.0")
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn init_rpc_connection(
@@ -649,27 +659,34 @@ async fn init_rpc_connection(
     is_normal_mode: bool,
     url: Option<String>,
 ) -> Result<(), String> {
-    // normal：拉起**用户态**内核子进程（随 GUI 退出）；service/remote：连已有地址。
+    // 本机 = 拉起/确保内核（normal：用户态子进程随 GUI 退出；service：服务托管）；
+    // 远端 = 直接用给定地址（不经本机内核）。
+    //
+    // 历史 bug：界面总是显式传 `tcp://127.0.0.1:<port>`，`match explicit` 的第一条
+    // 分支直接命中，后面两个 `ensure_*` 成了**死代码** —— 内核没人拉、服务的
+    // mode 也永远同步不到（issue #58/#60）。
     let explicit = url.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let client_url = match explicit {
-        Some(url) => url,
-        None if is_normal_mode => {
-            let app2 = app.clone();
-            let portal =
-                tokio::task::spawn_blocking(move || crate::service_client::ensure_normal(&app2))
-                    .await
-                    .map_err(|e| format!("普通模式启动任务失败: {e}"))?
-                    .map_err(|e| format!("启动普通模式内核失败: {e}"))?;
-            format!("tcp://{portal}")
-        }
-        None => {
-            let app2 = app.clone();
+    let local = explicit.as_deref().map(is_local_portal).unwrap_or(true);
+    let client_url = if local {
+        let app2 = app.clone();
+        let portal = if is_normal_mode {
+            tokio::task::spawn_blocking(move || crate::service_client::ensure_normal(&app2))
+                .await
+                .map_err(|e| format!("普通模式启动任务失败: {e}"))?
+                .map_err(|e| format!("启动普通模式内核失败: {e}"))?
+        } else {
             tokio::task::spawn_blocking(move || crate::service_client::ensure_service(&app2))
                 .await
                 .map_err(|e| format!("服务模式启动任务失败: {e}"))?
-                .map_err(|e| format!("启动服务模式内核失败: {e}"))?;
-            LOCAL_DAEMON_RPC_PORTAL.to_string()
+                .map_err(|e| format!("启动服务模式内核失败: {e}"))?
+        };
+        if portal.starts_with("tcp://") {
+            portal
+        } else {
+            format!("tcp://{portal}")
         }
+    } else {
+        explicit.unwrap_or_else(|| LOCAL_DAEMON_RPC_PORTAL.to_string())
     };
 
     // 注意：连接期间**不能**持有 CLIENT_MANAGER 写锁。
@@ -690,8 +707,24 @@ async fn init_rpc_connection(
             .await
             .map_err(|_| "Failed to acquire write lock for client manager")?;
     *client_manager_guard = Some(client_manager);
+    drop(client_manager_guard);
+
+    // `GUIClientManager::new()` 只是构造成功，**不代表** RPC 握手完成
+    // （历史误导：日志先打 "desktop rpc connected"，实际根本连不通）。
+    // 这里做一次真实调用，成功后才算真的连上了。
+    if let Err(err) = list_network_instance_ids(app.clone()).await {
+        logger::record(
+            "mode",
+            format!("desktop rpc constructed but first call failed: {client_url}: {err}"),
+        );
+        return Err(format!("RPC 已连接但首个请求失败: {err}"));
+    }
     logger::record("mode", format!("desktop rpc connected: {client_url}"));
     logger::event("mode", format!("desktop rpc connected: {client_url}"));
+
+    if local {
+        crate::watchdog::arm(app, is_normal_mode);
+    }
 
     Ok(())
 }
@@ -5205,6 +5238,23 @@ fn service_restart() -> Result<(), String> {
     Ok(())
 }
 
+/// 原子重启本机内核（应用配置 / 白名单后使用）。
+///
+/// 与 `service_restart` 的区别：后者只重启**服务本体**（daemon），
+/// 在 normal 策略下会把内核停掉却不拉起来 —— 那是「改配置就断网」的根因。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn service_kernel_restart() -> Result<serde_json::Value, String> {
+    let result = tokio::task::spawn_blocking(crate::service_client::restart_kernel)
+        .await
+        .map_err(|e| format!("重启内核任务失败: {e}"))?;
+    match &result {
+        Ok(_) => logger::record("service.kernel_restart", "done"),
+        Err(err) => logger::record("service.kernel_restart", format!("failed: {err}")),
+    }
+    result
+}
+
 /// 强制重装特权服务（提权一次）：等价于「重新跑一遍 --install」，
 /// 会 bootout 旧实例、重写 plist/SCM 注册、再等 IPC 就绪。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -5757,6 +5807,7 @@ pub fn run_gui() -> std::process::ExitCode {
             get_service_status,
             service_diagnostics,
             service_restart,
+            service_kernel_restart,
             service_reinstall,
             init_rpc_connection,
             runtime_apply,

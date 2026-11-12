@@ -238,15 +238,6 @@ async function onCleanupPort() {
         </div>
       </div>
 
-      <!-- 网络 MTU -->
-      <div class="flex flex-col gap-1">
-        <div class="font-medium">
-          {{ t("service_settings.mtu") }}
-          <span class="ml-1 font-mono text-sm text-surface-500">{{ info?.tun_mtu ?? "-" }}</span>
-        </div>
-        <div class="text-xs text-surface-500">{{ t("service_settings.mtu_hint") }}</div>
-      </div>
-
       <!-- 端口占用 -->
       <div class="flex flex-col gap-2">
         <div class="font-medium">{{ t("service_settings.port") }}</div>

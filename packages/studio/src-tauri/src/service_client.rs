@@ -78,15 +78,15 @@ pub struct ServiceState {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use imp::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, port_cleanup, port_owner, set_extra_whitelist, set_mode,
-    state, stop, stop_kernel, update, whitelist_info,
+    is_installed, is_ready, kernel_status, port_cleanup, port_owner, restart_kernel,
+    set_extra_whitelist, set_mode, state, stop, stop_kernel, update, whitelist_info,
 };
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub use stub::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, port_cleanup, port_owner, set_extra_whitelist, set_mode,
-    state, stop, stop_kernel, update, whitelist_info,
+    is_installed, is_ready, kernel_status, port_cleanup, port_owner, restart_kernel,
+    set_extra_whitelist, set_mode, state, stop, stop_kernel, update, whitelist_info,
 };
 
 // ---------------------------------------------------------------------------
@@ -362,6 +362,11 @@ mod imp {
         request("kernel.stop", serde_json::json!({})).map(|_| ())
     }
 
+    /// 原子重启内核（停 → 清残留 → 起），期间服务端会挂起 normal 的停机逻辑。
+    pub fn restart_kernel() -> Result<serde_json::Value, String> {
+        request("kernel.restart", serde_json::json!({}))
+    }
+
     pub fn kernel_status() -> Result<(u32, bool), String> {
         let resp = request("status", serde_json::json!({}))?;
         let pid = resp
@@ -495,6 +500,9 @@ mod stub {
     }
     pub fn stop_kernel() -> Result<(), String> {
         Ok(())
+    }
+    pub fn restart_kernel() -> Result<serde_json::Value, String> {
+        Err("当前平台没有特权服务（core 模式由 systemd/GUI supervisor 管理内核）".to_string())
     }
     pub fn kernel_status() -> Result<(u32, bool), String> {
         Ok((0, false))

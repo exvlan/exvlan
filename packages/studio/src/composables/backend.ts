@@ -323,7 +323,6 @@ export interface WhitelistInfo {
   notes: string[];
   dhcp_fallback: string;
   /** tun 的 MTU（经 mesh 的 TCP 需要小于路径 MTU） */
-  tun_mtu?: number;
   max_extra: number;
 }
 
@@ -406,6 +405,11 @@ export async function serviceDiagnostics(rpcPortal?: string) {
 /** 重启服务（提权）。 */
 export async function serviceRestart() {
   return await invoke("service_restart");
+}
+
+/** 原子重启本机内核（停 → 清残留 → 起）。改配置/白名单后用这个，而不是重启服务本体。 */
+export async function serviceKernelRestart() {
+  return await invoke<Record<string, unknown>>("service_kernel_restart");
 }
 
 /** 强制重装服务（提权，含目录预建与真连自检）。 */

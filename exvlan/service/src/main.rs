@@ -80,7 +80,6 @@ const LOCAL_RPC: &str = "127.0.0.1:1995";
 ///
 /// 取 1300：减去链路开销后 tun ≈ 1280（IPv6 最小 MTU），穿任何路径都安全，
 /// 代价是吞吐降约 7%。内核已有 `--mtu` 参数，无需改内核。
-const TUN_MTU: u16 = 1300;
 /// 看门狗等待上限：超过这个时间内核还没起来，就认为 boot 卡住了。
 const BOOT_WATCHDOG: Duration = Duration::from_secs(20);
 
@@ -395,6 +394,8 @@ struct Inner {
     mode: Mode,
     config: ServiceConfig,
     sessions: usize,
+    /// 正在执行「原子重启内核」：期间不要因会话归零而停内核。
+    restarting: bool,
 }
 
 pub struct State {
@@ -562,6 +563,42 @@ struct PortOwner {
 }
 
 impl PortOwner {
+    /// 内核目录下、名字属于 `{exvlan[.exe], exvlan[.exe].prev}` 的进程。
+    ///
+    /// 换内核时旧二进制会被改名成 `.prev`，但**进程仍在跑**并占着 RPC 端口；
+    /// 只按「路径完全等于当前内核」判断会把它当外人，永远清不掉。
+    fn is_stale_kernel_of(&self, kernel: &Path) -> bool {
+        if self.path.is_empty() {
+            return false;
+        }
+        let p = Path::new(&self.path);
+        let (Some(dir), Some(base)) =
+            (kernel.parent(), kernel.file_name().and_then(|s| s.to_str()))
+        else {
+            return false;
+        };
+        let same_dir = if cfg!(windows) {
+            p.parent()
+                .map(|d| {
+                    d.to_string_lossy()
+                        .eq_ignore_ascii_case(&dir.to_string_lossy())
+                })
+                .unwrap_or(false)
+        } else {
+            p.parent() == Some(dir)
+        };
+        if !same_dir {
+            return false;
+        }
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let (name, base) = if cfg!(windows) {
+            (name.to_ascii_lowercase(), base.to_ascii_lowercase())
+        } else {
+            (name.to_string(), base.to_string())
+        };
+        name == base || name == format!("{base}.prev")
+    }
+
     /// 只清「我们自己的内核」：路径必须与 `<core>/exvlan(.exe)` 完全一致。
     /// 只按进程名判断不安全（可能误杀同名程序）。
     fn is_our_kernel(&self, kernel: &Path) -> bool {
@@ -740,6 +777,7 @@ impl State {
                 mode,
                 config,
                 sessions: 0,
+                restarting: false,
             }),
         }
     }
@@ -787,7 +825,6 @@ impl State {
             "extra": extra,
             "notes": notes,
             "dhcp_fallback": DHCP_FALLBACK_POOL,
-            "tun_mtu": TUN_MTU,
             "max_extra": MAX_EXTRA_WHITELIST,
         })
     }
@@ -797,10 +834,11 @@ impl State {
     /// 返回 `(逗号分隔参数, 提示/告警)`，提示会写进 service.log 与诊断包。
     fn kernel_args(&self, whitelist: &str) -> Vec<String> {
         vec![
+            // 由服务托管的"守护进程"：实例数归零（配置重建 / 删除最后一个网络）
+            // 时**必须继续存活**，否则内核会静默退出、RPC 端口消失。
+            "--daemon".into(),
             "--config-dir".into(),
             self.paths.config.display().to_string(),
-            "--mtu".into(),
-            TUN_MTU.to_string(),
             "--rpc-portal".into(),
             RPC_PORTAL.into(),
             "--rpc-portal-whitelist".into(),
@@ -940,7 +978,76 @@ impl State {
                  请结束遗留的 exvlan 进程后重试"
             );
         }
+        // 端口通 ≠ 是我们的内核在应答：残留的旧内核同样能让探活“成功”。
+        match port_owner(RPC_PORT) {
+            Some(owner) if owner.pid == pid => {}
+            Some(owner) => {
+                self.log(format!(
+                    "rpc responder mismatch: want pid={pid}, got pid={} path={}",
+                    owner.pid, owner.path
+                ));
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!(
+                    "RPC 端口 {RPC_PORT} 由其他进程应答（{} pid={} path={}），\
+                     新内核未能真正启动",
+                    owner.name,
+                    owner.pid,
+                    owner.path
+                );
+            }
+            None => {
+                self.log("rpc responder missing after ready");
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("探活成功但 RPC 端口无人监听");
+            }
+        }
         Ok((child, whitelist))
+    }
+
+    /// 若 RPC 端口被**我们自己的**内核产物（含 `.prev` 残留）占着，杀掉它；
+    /// 被外来进程占着则明确报错（不误杀）。
+    fn cleanup_stale_kernel(&self) -> anyhow::Result<()> {
+        let Some(owner) = port_owner(RPC_PORT) else {
+            return Ok(());
+        };
+        if !owner.is_stale_kernel_of(&self.paths.kernel) {
+            bail!(
+                "RPC 端口 {RPC_PORT} 被其他进程占用：{}（pid={}, path={}）",
+                owner.name,
+                owner.pid,
+                owner.path
+            );
+        }
+        self.log(format!(
+            "cleanup stale kernel pid={} path={}",
+            owner.pid, owner.path
+        ));
+        terminate_pid(owner.pid)?;
+        for _ in 0..50 {
+            if port_owner(RPC_PORT).is_none() {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        bail!("清理残留内核后 RPC 端口仍被占用")
+    }
+
+    /// 原子重启内核：停 → 清残留 → 起。期间挂起「normal 模式会话归零停机」。
+    fn restart_kernel(&self) -> anyhow::Result<KernelInfo> {
+        self.lock_inner().restarting = true;
+        let outcome = (|| {
+            self.stop_kernel()?;
+            self.cleanup_stale_kernel()?;
+            self.ensure_kernel()
+        })();
+        self.lock_inner().restarting = false;
+        self.log(match &outcome {
+            Ok(info) => format!("kernel.restart ok pid={}", info.pid),
+            Err(err) => format!("kernel.restart failed: {err}"),
+        });
+        outcome
     }
 
     fn stop_kernel(&self) -> anyhow::Result<()> {
@@ -1015,6 +1122,15 @@ impl State {
         if let Some(dir) = self.paths.kernel.parent() {
             std::fs::create_dir_all(dir).ok();
         }
+
+        // 先停掉正在跑的内核（不能只依赖 Child 句柄：服务自更新后句柄会丢，
+        // 旧进程会被改名成 `.prev` 却继续占着 RPC 端口）。
+        let was_running = self.kernel_pid() != 0;
+        if was_running {
+            self.stop_kernel()?;
+        }
+        self.cleanup_stale_kernel()?;
+
         // 保留上一版，失败可回滚。
         if self.paths.kernel.is_file() {
             let _ = std::fs::remove_file(&self.paths.kernel_prev);
@@ -1036,18 +1152,14 @@ impl State {
         }
         self.log(format!("kernel installed {version}"));
 
-        let was_running = self.kernel_pid() != 0;
-        if was_running {
-            self.stop_kernel()?;
-            if let Err(err) = self.ensure_kernel() {
-                self.log(format!("new kernel failed ({err}), rolling back"));
-                let _ = std::fs::remove_file(&self.paths.kernel);
-                if self.paths.kernel_prev.is_file() {
-                    std::fs::rename(&self.paths.kernel_prev, &self.paths.kernel).ok();
-                }
-                self.ensure_kernel().ok();
-                return Err(anyhow::anyhow!("kernel_rollback: {err}"));
+        if was_running && let Err(err) = self.ensure_kernel() {
+            self.log(format!("new kernel failed ({err}), rolling back"));
+            let _ = std::fs::remove_file(&self.paths.kernel);
+            if self.paths.kernel_prev.is_file() {
+                std::fs::rename(&self.paths.kernel_prev, &self.paths.kernel).ok();
             }
+            self.ensure_kernel().ok();
+            return Err(anyhow::anyhow!("kernel_rollback: {err}"));
         }
         Ok(())
     }
@@ -1098,6 +1210,14 @@ impl State {
             "kernel.stop" => match self.stop_kernel() {
                 Ok(()) => self.status(),
                 Err(err) => Response::err("internal", err.to_string()),
+            },
+            "kernel.restart" => match self.restart_kernel() {
+                Ok(info) => {
+                    let mut r = self.status();
+                    r.kernel = Some(info);
+                    r
+                }
+                Err(err) => Response::err("kernel_restart_failed", err.to_string()),
             },
             "apply" => match req.staging.as_deref() {
                 Some(dir) => match self.apply(Path::new(dir)) {
@@ -1175,7 +1295,7 @@ impl State {
             }
             "port.cleanup" => match port_owner(RPC_PORT) {
                 None => Response::err("nothing", "RPC 端口当前没有被占用"),
-                Some(owner) if !owner.is_our_kernel(&self.paths.kernel) => Response::err(
+                Some(owner) if !owner.is_stale_kernel_of(&self.paths.kernel) => Response::err(
                     "not_ours",
                     format!(
                         "占用者是 {}（pid={}, path={}），不是本产品的内核，拒绝终止",
@@ -1252,18 +1372,38 @@ impl State {
     }
 
     // ---- session（normal 模式的存活锚点） ----
-    fn session_open(&self) {
-        self.inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .sessions += 1;
+    //
+    // 「关」的一半原本就有（最后一个会话断开 → 停内核），「开」的一半缺失：
+    // 客户端连上来时没人拉内核，于是关掉界面再打开就永远连不上（issue #58/#60）。
+    fn session_open(self: &Arc<Self>) {
+        let should_start = {
+            let mut guard = self.lock_inner();
+            guard.sessions += 1;
+            guard.sessions == 1
+                && guard.mode != Mode::Off
+                && !guard.restarting
+                && guard.child.is_none()
+        };
+        if !should_start {
+            return;
+        }
+        let me = self.clone();
+        std::thread::spawn(move || {
+            // 锁外执行（ensure_kernel 会等 RPC 就绪），且**不阻塞**会话握手。
+            if let Err(err) = me.ensure_kernel() {
+                me.log(format!("session_open: ensure_kernel failed: {err}"));
+            }
+        });
     }
 
-    fn session_close(&self) {
+    fn session_close(self: &Arc<Self>) {
         let stop = {
-            let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = self.lock_inner();
             guard.sessions = guard.sessions.saturating_sub(1);
-            guard.sessions == 0 && guard.mode == Mode::Normal && guard.child.is_some()
+            guard.sessions == 0
+                && guard.mode == Mode::Normal
+                && !guard.restarting
+                && guard.child.is_some()
         };
         if stop {
             self.log("last session closed in normal mode → stop kernel");
