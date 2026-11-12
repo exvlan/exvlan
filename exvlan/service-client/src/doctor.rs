@@ -1,0 +1,403 @@
+//! 一键体检（doctor）：backend / 服务 / 内核 / 端口 / 存储 / 迁移。
+//!
+//! 只依赖本 crate 的 IPC 与路径，**不依赖内核 RPC** —— 所以内核没跑、服务没装
+//! 也能给出结论，这正是排障最需要的场景。
+//!
+//! 同一份 findings 会被 CLI（`exvlan-cli doctor`）与 gateway
+//! （`GET /api/v1/doctor`）复用，避免两套判断再次漂移。
+
+use serde_json::{Value, json};
+
+use crate::{backend, ipc, paths};
+
+#[derive(Debug, Clone)]
+pub struct Finding {
+    pub id: &'static str,
+    pub level: &'static str,
+    pub summary: String,
+    pub evidence: Value,
+    pub fixable: bool,
+}
+
+impl Finding {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "level": self.level,
+            "summary": self.summary,
+            "evidence": self.evidence,
+        })
+    }
+}
+
+/// 汇总结果：`ok` 表示没有 error 级 findings。
+#[derive(Debug, Clone)]
+pub struct Report {
+    pub findings: Vec<Finding>,
+}
+
+impl Report {
+    pub fn ok(&self) -> bool {
+        !self.findings.iter().any(|f| f.level == "error")
+    }
+    pub fn has_warn(&self) -> bool {
+        self.findings.iter().any(|f| f.level == "warn")
+    }
+    /// 退出码：0 绿 / 1 warn / 2 error。
+    pub fn exit_code(&self) -> i32 {
+        if !self.ok() {
+            2
+        } else if self.has_warn() {
+            1
+        } else {
+            0
+        }
+    }
+    pub fn to_json(&self) -> Value {
+        json!({
+            "ok": self.ok(),
+            "findings": self.findings.iter().map(Finding::to_json).collect::<Vec<_>>(),
+        })
+    }
+    pub fn to_text(&self) -> String {
+        let mut out = String::new();
+        for f in &self.findings {
+            let mark = match f.level {
+                "ok" => "✓",
+                "warn" => "!",
+                "error" => "✗",
+                _ => "·",
+            };
+            out.push_str(&format!("{mark} [{}] {}\n", f.id, f.summary));
+        }
+        out
+    }
+}
+
+/// 采集所有检查项。
+pub fn collect() -> Report {
+    let mut out = Vec::new();
+    let p = paths::paths();
+    let user = paths::user_paths();
+    let backend = backend::detect();
+
+    out.push(Finding {
+        id: "backend",
+        level: "info",
+        summary: format!(
+            "backend={} supervisor={}",
+            backend.as_str(),
+            backend::supervisor()
+        ),
+        evidence: json!({"backend": backend.as_str(), "supervisor": backend::supervisor()}),
+        fixable: false,
+    });
+
+    if backend.has_service() {
+        service_checks(&mut out, &p);
+    } else {
+        out.push(Finding {
+            id: "service.installed",
+            level: "info",
+            summary: "core backend：没有特权服务（内核由 systemd / GUI supervisor 托管）".into(),
+            evidence: json!({"backend": "core"}),
+            fixable: false,
+        });
+    }
+
+    version_checks(&mut out, &p);
+    port_checks(&mut out);
+    storage_checks(&mut out, &user);
+    #[cfg(target_os = "macos")]
+    webkit_check(&mut out, &user);
+    migrate_check(&mut out, &user);
+
+    Report { findings: out }
+}
+
+fn service_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
+    match ipc::request("ping", json!({})) {
+        Ok(_) => out.push(Finding {
+            id: "service.ipc",
+            level: "ok",
+            summary: "服务 IPC 可达".into(),
+            evidence: json!({"service_bin": p.service_bin.display().to_string()}),
+            fixable: false,
+        }),
+        Err(err) => out.push(Finding {
+            id: "service.ipc",
+            level: "error",
+            summary: format!("服务 IPC 不可达: {err}"),
+            evidence: json!({"error": err}),
+            fixable: false,
+        }),
+    }
+
+    let Ok(st) = ipc::request("status", json!({})) else {
+        return;
+    };
+    let mode = st.get("mode").and_then(Value::as_str).unwrap_or("-");
+    let pid = st
+        .get("kernel")
+        .and_then(|k| k.get("pid"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    out.push(Finding {
+        id: "service.policy",
+        level: "info",
+        summary: format!("policy={mode}"),
+        evidence: st.clone(),
+        fixable: false,
+    });
+    if mode != "off" && pid == 0 {
+        out.push(Finding {
+            id: "kernel.running",
+            level: "error",
+            summary: format!("policy={mode} 但内核没在跑"),
+            evidence: json!({"mode": mode, "pid": pid}),
+            fixable: true,
+        });
+    } else {
+        out.push(Finding {
+            id: "kernel.running",
+            level: "ok",
+            summary: format!("内核 pid={pid}"),
+            evidence: json!({"pid": pid}),
+            fixable: false,
+        });
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let addr = paths::service_ipc_addr();
+        match std::fs::metadata(&addr) {
+            Ok(md) => {
+                let mode = md.mode() & 0o777;
+                let me = current_uid();
+                let ok = md.uid() == me && mode == 0o600;
+                out.push(Finding {
+                    id: "service.socket_perms",
+                    level: if ok { "ok" } else { "warn" },
+                    summary: format!(
+                        "{} owner={} mode={:o}{}",
+                        addr.display(),
+                        md.uid(),
+                        mode,
+                        if ok { "" } else { "（应为当前用户 + 0600）" }
+                    ),
+                    evidence: json!({"uid": md.uid(), "mode": format!("{mode:o}"), "current_uid": me}),
+                    fixable: false,
+                });
+            }
+            Err(err) => out.push(Finding {
+                id: "service.socket_perms",
+                level: "warn",
+                summary: format!("socket 不存在: {err}"),
+                evidence: json!({"path": addr.display().to_string()}),
+                fixable: false,
+            }),
+        }
+    }
+}
+
+fn version_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
+    let kernel_v = read_trim(&p.kernel_version_file());
+    let service_v = read_trim(&p.service_version_file());
+    let cli_v = env!("CARGO_PKG_VERSION").to_string();
+    if let (Some(k), Some(s)) = (&kernel_v, &service_v)
+        && k != s
+    {
+        out.push(Finding {
+            id: "version.mismatch",
+            level: "warn",
+            summary: format!("内核 {k} ≠ 服务 {s}（重装服务可对齐）"),
+            evidence: json!({"kernel": k, "service": s}),
+            fixable: false,
+        });
+    }
+    out.push(Finding {
+        id: "version.info",
+        level: "info",
+        summary: format!(
+            "cli={cli_v} kernel={} service={}",
+            kernel_v.as_deref().unwrap_or("-"),
+            service_v.as_deref().unwrap_or("-")
+        ),
+        evidence: json!({"cli": cli_v, "kernel": kernel_v, "service": service_v}),
+        fixable: false,
+    });
+}
+
+fn port_checks(out: &mut Vec<Finding>) {
+    let rpc = crate::local_rpc_addr();
+    let gw = crate::local_gateway_addr();
+    let rpc_open = tcp_open(&rpc);
+    let gw_open = tcp_open(&gw);
+    out.push(Finding {
+        id: "net.ports",
+        level: if rpc_open { "ok" } else { "warn" },
+        summary: format!(
+            "rpc {rpc} {} / gateway {gw} {}",
+            if rpc_open { "listening" } else { "closed" },
+            if gw_open { "listening" } else { "closed" }
+        ),
+        evidence: json!({"rpc": rpc, "rpc_open": rpc_open, "gateway": gw, "gateway_open": gw_open}),
+        fixable: false,
+    });
+}
+
+fn storage_checks(out: &mut Vec<Finding>, user: &paths::UserPaths) {
+    let ok = dir_writable(&user.data);
+    out.push(Finding {
+        id: "app.prefs_dir",
+        level: if ok { "ok" } else { "error" },
+        summary: format!(
+            "prefs 目录 {} {}",
+            user.data.display(),
+            if ok { "可写" } else { "不可写" }
+        ),
+        evidence: json!({"path": user.data.display().to_string()}),
+        fixable: false,
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn webkit_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let path = user
+        .data
+        .parent()
+        .unwrap_or(std::path::Path::new("/"))
+        .join("WebKit")
+        .join(crate::APP_ID);
+    let me = current_uid();
+    match std::fs::metadata(&path) {
+        Ok(md) if md.uid() != me => out.push(Finding {
+            id: "app.webkit_owner",
+            level: "error",
+            summary: format!(
+                "{} 属主是 {}（应为 {me}）→ localStorage 会失效（远程目标/语言/上次网络全静默失败）；\
+                 服务下次启动会自动 chown",
+                path.display(),
+                md.uid()
+            ),
+            evidence: json!({"path": path.display().to_string(), "owner": md.uid(), "expected": me}),
+            fixable: false,
+        }),
+        Ok(md) => out.push(Finding {
+            id: "app.webkit_owner",
+            level: "ok",
+            summary: format!("{} 属主正确（{me}）", path.display()),
+            evidence: json!({"path": path.display().to_string(), "owner": md.uid()}),
+            fixable: false,
+        }),
+        Err(err) => out.push(Finding {
+            id: "app.webkit_owner",
+            level: "warn",
+            summary: format!("{} 不存在: {err}", path.display()),
+            evidence: json!({"path": path.display().to_string()}),
+            fixable: false,
+        }),
+    }
+}
+
+fn migrate_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
+    let marker = user.data.join("migrate.done");
+    let legacy = [
+        user.data.join("networks.toml"),
+        user.data.join("service.json"),
+        user.data.join("config.d"),
+        user.data.join("ui-state.json"),
+    ];
+    let present: Vec<String> = legacy
+        .iter()
+        .filter(|p| p.exists())
+        .map(|p| p.display().to_string())
+        .collect();
+    if present.is_empty() {
+        out.push(Finding {
+            id: "migrate.legacy",
+            level: "ok",
+            summary: "没有旧版本遗留数据".into(),
+            evidence: json!({"marker": marker.display().to_string()}),
+            fixable: false,
+        });
+    } else {
+        out.push(Finding {
+            id: "migrate.legacy",
+            level: "error",
+            summary: format!(
+                "检测到旧版本数据（{} 项）→ 请先运行 exvlan-migrate",
+                present.len()
+            ),
+            evidence: json!({"paths": present, "marker": marker.display().to_string()}),
+            fixable: false,
+        });
+    }
+}
+
+/// 执行安全修复（目前只有「内核没跑 → 原子重启」）。
+pub fn fix(report: &mut Report) {
+    for f in report.findings.iter_mut() {
+        if f.id == "kernel.running" && f.level == "error" && f.fixable {
+            match ipc::request("kernel.restart", json!({})) {
+                Ok(_) => {
+                    f.level = "ok";
+                    f.summary = "内核已重启".into();
+                }
+                Err(err) => f.summary = format!("重启内核失败: {err}"),
+            }
+        }
+    }
+}
+
+fn read_trim(path: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn tcp_open(addr: &str) -> bool {
+    let Ok(sock) = addr.parse::<std::net::SocketAddr>() else {
+        return false;
+    };
+    std::net::TcpStream::connect_timeout(&sock, std::time::Duration::from_millis(300)).is_ok()
+}
+
+fn dir_writable(path: &std::path::Path) -> bool {
+    let dir = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+    };
+    if dir.as_os_str().is_empty() {
+        return false;
+    }
+    let probe = dir.join(".exvlan-doctor-probe");
+    match std::fs::write(&probe, b"1") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+pub fn current_uid() -> u32 {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+            .unwrap_or(0)
+    }
+    #[cfg(windows)]
+    0
+}

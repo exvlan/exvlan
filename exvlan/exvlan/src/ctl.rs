@@ -280,353 +280,27 @@ fn euid() -> u32 {
 }
 
 // ---------------------------------------------------------------------------
-// doctor / diag
+// doctor / diag（实现见 exvlan_service_client::doctor，CLI 与 gateway 共用）
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
-struct Finding {
-    id: &'static str,
-    level: &'static str,
-    summary: String,
-    evidence: serde_json::Value,
-    fixable: bool,
-}
-
-fn collect_findings() -> Vec<Finding> {
-    let mut out = Vec::new();
-    let p = paths::paths();
-    let user = exvlan_service_client::paths::user_paths();
-    let backend = detect();
-
-    out.push(Finding {
-        id: "backend",
-        level: "info",
-        summary: format!(
-            "backend={} supervisor={}",
-            backend.as_str(),
-            exvlan_service_client::backend::supervisor()
-        ),
-        evidence: json!({"backend": backend.as_str()}),
-        fixable: false,
-    });
-
-    // 服务
-    if backend.has_service() {
-        match ipc("ping", json!({})) {
-            Ok(_) => out.push(Finding {
-                id: "service.ipc",
-                level: "ok",
-                summary: "服务 IPC 可达".into(),
-                evidence: json!({"socket": p.service_bin.display().to_string()}),
-                fixable: false,
-            }),
-            Err(err) => out.push(Finding {
-                id: "service.ipc",
-                level: "error",
-                summary: format!("服务 IPC 不可达: {err}"),
-                evidence: json!({"error": err}),
-                fixable: false,
-            }),
-        }
-        if let Ok(st) = ipc("status", json!({})) {
-            let mode = st.get("mode").and_then(|v| v.as_str()).unwrap_or("-");
-            let pid = st
-                .get("kernel")
-                .and_then(|k| k.get("pid"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            out.push(Finding {
-                id: "service.policy",
-                level: "info",
-                summary: format!("policy={mode}"),
-                evidence: st.clone(),
-                fixable: false,
-            });
-            let want_running = mode != "off";
-            if want_running && pid == 0 {
-                out.push(Finding {
-                    id: "kernel.running",
-                    level: "error",
-                    summary: format!("policy={mode} 但内核没在跑"),
-                    evidence: json!({"mode": mode, "pid": pid}),
-                    fixable: true,
-                });
-            } else {
-                out.push(Finding {
-                    id: "kernel.running",
-                    level: "ok",
-                    summary: format!("内核 pid={pid}"),
-                    evidence: json!({"pid": pid}),
-                    fixable: false,
-                });
-            }
-        }
-        // socket 权限（unix）
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt as _;
-            let addr = exvlan_service_client::paths::service_ipc_addr();
-            match std::fs::metadata(&addr) {
-                Ok(md) => {
-                    let mode = md.mode() & 0o777;
-                    let ok = md.uid() == current_uid() && mode == 0o600;
-                    out.push(Finding {
-                        id: "service.socket_perms",
-                        level: if ok { "ok" } else { "warn" },
-                        summary: format!(
-                            "{} owner={} mode={:o}{}",
-                            addr.display(),
-                            md.uid(),
-                            mode,
-                            if ok {
-                                ""
-                            } else {
-                                "（应为当前用户 + 0600）"
-                            }
-                        ),
-                        evidence: json!({"uid": md.uid(), "mode": format!("{mode:o}")}),
-                        fixable: false,
-                    });
-                }
-                Err(err) => out.push(Finding {
-                    id: "service.socket_perms",
-                    level: "warn",
-                    summary: format!("socket 不存在: {err}"),
-                    evidence: json!({"path": addr.display().to_string()}),
-                    fixable: false,
-                }),
-            }
-        }
-    } else {
-        out.push(Finding {
-            id: "service.installed",
-            level: "info",
-            summary: "core backend：没有特权服务（内核由 systemd / GUI supervisor 托管）".into(),
-            evidence: json!({"backend": "core"}),
-            fixable: false,
-        });
-    }
-
-    // 版本一致性
-    let kernel_v = read_trim(&p.kernel_version_file());
-    let service_v = read_trim(&p.service_version_file());
-    let cli_v = env!("CARGO_PKG_VERSION").to_string();
-    if let (Some(k), Some(s)) = (&kernel_v, &service_v)
-        && k != s
-    {
-        out.push(Finding {
-            id: "version.mismatch",
-            level: "warn",
-            summary: format!("内核 {k} ≠ 服务 {s}（重装服务可对齐）"),
-            evidence: json!({"kernel": k, "service": s}),
-            fixable: false,
-        });
-    }
-    out.push(Finding {
-        id: "version.info",
-        level: "info",
-        summary: format!(
-            "cli={cli_v} kernel={} service={}",
-            kernel_v.as_deref().unwrap_or("-"),
-            service_v.as_deref().unwrap_or("-")
-        ),
-        evidence: json!({"cli": cli_v, "kernel": kernel_v, "service": service_v}),
-        fixable: false,
-    });
-
-    // 端口
-    let rpc = exvlan_service_client::local_rpc_addr();
-    let gw = exvlan_service_client::local_gateway_addr();
-    out.push(Finding {
-        id: "net.ports",
-        level: if tcp_open(&rpc) { "ok" } else { "warn" },
-        summary: format!(
-            "rpc {rpc} {} / gateway {gw} {}",
-            if tcp_open(&rpc) { "listening" } else { "closed" },
-            if tcp_open(&gw) { "listening" } else { "closed" }
-        ),
-        evidence: json!({"rpc": rpc, "rpc_open": tcp_open(&rpc), "gateway": gw, "gateway_open": tcp_open(&gw)}),
-        fixable: false,
-    });
-
-    // 用户侧存储
-    out.push(Finding {
-        id: "app.prefs_dir",
-        level: if dir_writable(&user.data) {
-            "ok"
-        } else {
-            "error"
-        },
-        summary: format!(
-            "prefs 目录 {} {}",
-            user.data.display(),
-            if dir_writable(&user.data) {
-                "可写"
-            } else {
-                "不可写"
-            }
-        ),
-        evidence: json!({"path": user.data.display().to_string()}),
-        fixable: false,
-    });
-
-    // macOS：WebKit 目录属主
-    #[cfg(target_os = "macos")]
-    {
-        use std::os::unix::fs::MetadataExt as _;
-        let path = user
-            .data
-            .parent()
-            .unwrap_or(std::path::Path::new("/"))
-            .join("WebKit")
-            .join(exvlan_service_client::APP_ID);
-        let me = current_uid();
-        match std::fs::metadata(&path) {
-            Ok(md) if md.uid() != me => out.push(Finding {
-                id: "app.webkit_owner",
-                level: "error",
-                summary: format!(
-                    "{} 属主是 {}（应为 {me}）→ localStorage 会失效（远程目标/语言/上次网络全静默失败）",
-                    path.display(),
-                    md.uid()
-                ),
-                evidence: json!({"path": path.display().to_string(), "owner": md.uid(), "expected": me}),
-                fixable: false,
-            }),
-            Ok(md) => out.push(Finding {
-                id: "app.webkit_owner",
-                level: "ok",
-                summary: format!("{} 属主正确（{me}）", path.display()),
-                evidence: json!({"path": path.display().to_string(), "owner": md.uid()}),
-                fixable: false,
-            }),
-            Err(err) => out.push(Finding {
-                id: "app.webkit_owner",
-                level: "warn",
-                summary: format!("{} 不存在: {err}", path.display()),
-                evidence: json!({"path": path.display().to_string()}),
-                fixable: false,
-            }),
-        }
-    }
-
-    // 迁移状态
-    let marker = user.data.join("migrate.done");
-    let legacy = [
-        user.data.join("networks.toml"),
-        user.data.join("service.json"),
-        user.data.join("config.d"),
-        user.data.join("ui-state.json"),
-    ];
-    let present: Vec<String> = legacy
-        .iter()
-        .filter(|p| p.exists())
-        .map(|p| p.display().to_string())
-        .collect();
-    if !present.is_empty() {
-        out.push(Finding {
-            id: "migrate.legacy",
-            level: "error",
-            summary: format!(
-                "检测到旧版本数据（{} 项）→ 请先运行 exvlan-migrate",
-                present.len()
-            ),
-            evidence: json!({"paths": present, "marker": marker.display().to_string()}),
-            fixable: false,
-        });
-    } else {
-        out.push(Finding {
-            id: "migrate.legacy",
-            level: "ok",
-            summary: "没有旧版本遗留数据".into(),
-            evidence: json!({"marker": marker.display().to_string()}),
-            fixable: false,
-        });
-    }
-
-    out
-}
-
-fn tcp_open(addr: &str) -> bool {
-    let Ok(sock) = addr.parse::<std::net::SocketAddr>() else {
-        return false;
-    };
-    std::net::TcpStream::connect_timeout(&sock, std::time::Duration::from_millis(300)).is_ok()
-}
-
-fn dir_writable(path: &std::path::Path) -> bool {
-    let dir = if path.is_dir() {
-        path.to_path_buf()
-    } else {
-        path.parent().map(PathBuf::from).unwrap_or_default()
-    };
-    if dir.as_os_str().is_empty() {
-        return false;
-    }
-    let probe = dir.join(".exvlan-doctor-probe");
-    match std::fs::write(&probe, b"1") {
-        Ok(()) => {
-            let _ = std::fs::remove_file(&probe);
-            true
-        }
-        Err(_) => false,
-    }
-}
-
 fn doctor(json_out: bool, fix: bool) -> i32 {
-    let mut findings = collect_findings();
+    let mut report = exvlan_service_client::doctor::collect();
     if fix {
-        for f in findings.iter_mut() {
-            if f.id == "kernel.running" && f.level == "error" && f.fixable {
-                match ipc("kernel.restart", json!({})) {
-                    Ok(_) => {
-                        f.level = "ok";
-                        f.summary = "内核已重启".into();
-                    }
-                    Err(err) => {
-                        f.summary = format!("重启内核失败: {err}");
-                    }
-                }
-            }
-        }
+        exvlan_service_client::doctor::fix(&mut report);
     }
-    let has_error = findings.iter().any(|f| f.level == "error");
-    let has_warn = findings.iter().any(|f| f.level == "warn");
-
     if json_out {
-        print_json(&json!({
-            "ok": !has_error,
-            "findings": findings.iter().map(|f| json!({
-                "id": f.id,
-                "level": f.level,
-                "summary": f.summary,
-                "evidence": f.evidence,
-            })).collect::<Vec<_>>(),
-        }));
+        print_json(&report.to_json());
     } else {
-        for f in &findings {
-            let mark = match f.level {
-                "ok" => "✓",
-                "warn" => "!",
-                "error" => "✗",
-                _ => "·",
-            };
-            println!("{mark} [{}] {}", f.id, f.summary);
-        }
+        print!("{}", report.to_text());
     }
-    if has_error {
-        2
-    } else if has_warn {
-        1
-    } else {
-        0
-    }
+    report.exit_code()
 }
 
 fn diag(_json_out: bool) -> i32 {
     let p = paths::paths();
     let user = exvlan_service_client::paths::user_paths();
-    let payload = json!({
+    let report = exvlan_service_client::doctor::collect();
+    print_json(&json!({
         "version": env!("CARGO_PKG_VERSION"),
         "backend": detect().as_str(),
         "supervisor": exvlan_service_client::backend::supervisor(),
@@ -642,20 +316,9 @@ fn diag(_json_out: bool) -> i32 {
             "kernel": read_trim(&p.kernel_version_file()),
             "service": read_trim(&p.service_version_file()),
         },
-        "findings": collect_findings().iter().map(|f| json!({
-            "id": f.id, "level": f.level, "summary": f.summary, "evidence": f.evidence,
-        })).collect::<Vec<_>>(),
-    });
-    // diag 目前只有 JSON 形态（供 agent / 诊断包直接消费）。
-    print_json(&payload);
+        "findings": report.findings.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
+    }));
     0
-}
-
-fn print_json(v: &serde_json::Value) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -736,4 +399,11 @@ fn write_private(path: &std::path::Path, text: &str) -> std::io::Result<()> {
 #[allow(dead_code)]
 fn backend_str(b: &Backend) -> &'static str {
     b.as_str()
+}
+
+fn print_json(v: &serde_json::Value) {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
+    );
 }

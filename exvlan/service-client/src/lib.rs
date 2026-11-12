@@ -13,6 +13,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod backend;
+pub mod doctor;
 pub mod ipc;
 pub mod paths;
 
