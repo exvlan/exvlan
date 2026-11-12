@@ -10,16 +10,19 @@
 //! - `POST /service/desired`     running|stopped
 //! - `POST /service/kernel/restart`  原子重启内核
 //! - `GET  /events`              WebSocket：周期性推送服务/体检摘要
+//! - `/configs`                  已保存的网络配置（内核 `<config-dir>/<id>.toml`，唯一权威）
+//! - `/instances`                内核里**正在跑**的实例（RPC）
 //!
-//! 尚未提供 `/instances`（需要内核 RPC 客户端）；`/system.capabilities.instances`
-//! 会如实返回 `false`，客户端据此隐藏相关操作。
+//! 「已保存」与「正在跑」是两件事：前者是配置目录里的文件，后者是内核里的实例。
+//! 远端客户端要「保存并生效」就是先 `PUT /configs/{id}` 再 `POST /instances`。
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
     Json, Router,
     extract::{
-        Path as AxumPath, State,
+        Path as AxumPath, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode},
@@ -57,6 +60,11 @@ pub fn router(cfg: Config, token: String) -> Router {
         .route(
             "/api/v1/instances/{id}/config",
             get(get_instance_config).delete(delete_instance),
+        )
+        .route("/api/v1/configs", get(list_configs))
+        .route(
+            "/api/v1/configs/{id}",
+            get(get_config).put(put_config).delete(delete_config),
         )
         .route("/api/v1/events", get(events))
         .with_state(state)
@@ -185,6 +193,8 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
         "capabilities": {
             "service": backend.has_service(),
             "instances": kernel_reachable().await,
+            // 配置目录读写不依赖内核 RPC（读文件 / 服务 IPC 即可）。
+            "configs": true,
             "doctor": true,
             "events": true,
         },
@@ -201,6 +211,10 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
             "POST /api/v1/instances",
             "GET  /api/v1/instances/{id}/config",
             "DELETE /api/v1/instances/{id}/config",
+            "GET  /api/v1/configs",
+            "GET  /api/v1/configs/{id}",
+            "PUT  /api/v1/configs/{id}",
+            "DELETE /api/v1/configs/{id}",
             "GET  /api/v1/events",
         ],
     }))
@@ -399,6 +413,122 @@ where
             msg.chars().take(600).collect::<String>(),
         ))
     })
+}
+
+/// 已保存的网络配置（配置目录视图）。正文用 `?full=1` 才回，列表默认只给元信息。
+async fn list_configs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
+        return resp;
+    }
+    let full = matches!(params.get("full").map(String::as_str), Some("1") | Some("true"));
+    match exvlan_service_client::config::list() {
+        Ok(items) => {
+            let list: Vec<Value> = items
+                .iter()
+                .map(|item| {
+                    if full {
+                        json!({
+                            "id": item.id,
+                            "enabled": item.enabled,
+                            "bytes": item.bytes,
+                            "modified": item.modified,
+                            "text": item.text,
+                        })
+                    } else {
+                        json!({
+                            "id": item.id,
+                            "enabled": item.enabled,
+                            "bytes": item.bytes,
+                            "modified": item.modified,
+                        })
+                    }
+                })
+                .collect();
+            Json(json!({ "configs": list })).into_response()
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "config_list", e),
+    }
+}
+
+async fn get_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
+        return resp;
+    }
+    match exvlan_service_client::config::read(&id) {
+        Ok(saved) => Json(json!({
+            "id": saved.id,
+            "enabled": saved.enabled,
+            "text": saved.text,
+        }))
+        .into_response(),
+        Err(e) if e.contains("不存在") => err(StatusCode::NOT_FOUND, "not_found", e),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "config_read", e),
+    }
+}
+
+async fn put_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(id): AxumPath<String>,
+    body: String,
+) -> Response {
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:write")) {
+        return resp;
+    }
+    // 支持两种写法：裸 TOML 正文，或 `{"text": "...", "enabled": true}`。
+    let parsed: Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(_) => Value::String(body),
+    };
+    let (text, enabled) = match parsed {
+        Value::String(text) => (text, true),
+        Value::Object(map) => {
+            let text = map
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let enabled = map.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            (text, enabled)
+        }
+        _ => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                "请求体应为 TOML 文本或 {text, enabled}",
+            );
+        }
+    };
+    if text.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "text 为空");
+    }
+    match exvlan_service_client::config::write(&id, &text, enabled) {
+        Ok(()) => Json(json!({ "id": id, "enabled": enabled, "ok": true })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, "config_write", e),
+    }
+}
+
+async fn delete_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:write")) {
+        return resp;
+    }
+    match exvlan_service_client::config::delete(&id) {
+        Ok(true) => Json(json!({ "id": id, "removed": true })).into_response(),
+        Ok(false) => err(StatusCode::NOT_FOUND, "not_found", format!("配置不存在: {id}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "config_delete", e),
+    }
 }
 
 async fn list_instances(State(state): State<AppState>, headers: HeaderMap) -> Response {
