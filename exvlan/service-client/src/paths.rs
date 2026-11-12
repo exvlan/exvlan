@@ -145,6 +145,8 @@ pub fn user_paths() -> UserPaths {
     }
 }
 
+/// `$HOME`（macOS/Linux 的用户目录；Windows 用 `%APPDATA%`，不需要它）。
+#[cfg(not(target_os = "windows"))]
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .filter(|v| !v.is_empty())

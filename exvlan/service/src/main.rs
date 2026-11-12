@@ -242,6 +242,12 @@ pub struct ServiceConfig {
     /// 默认空：实际白名单由 `<config-dir>/*.toml` 里的虚拟网段自动推导。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rpc_extra_whitelist: Vec<String>,
+    /// Windows：安装者（GUI 用户）的 SID，用于把命名管道 DACL 收窄到本人。
+    ///
+    /// 空 = 未知（旧安装 / macOS / Linux）→ 管道退回 `IU`（交互式用户），
+    /// 与 pre.17 之前的行为一致，**不会**把用户锁在门外。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub owner_sid: String,
 }
 
 impl Default for ServiceConfig {
@@ -250,6 +256,7 @@ impl Default for ServiceConfig {
             owner_uid: 0,
             policy: Mode::Service,
             rpc_extra_whitelist: Vec::new(),
+            owner_sid: String::new(),
         }
     }
 }
@@ -1815,7 +1822,9 @@ fn run_cli(p: &Paths, args: &[String]) -> anyhow::Result<()> {
         Some("--daemon") => run_daemon(p.clone()),
         Some("--install") => {
             let uid = args.get(1).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
-            install(p, uid)
+            // 第 3 个参数是 Windows 安装者 SID（macOS/Linux 忽略）。
+            let sid = args.get(2).map(String::as_str).unwrap_or("");
+            install(p, uid, sid)
         }
         Some("--uninstall") => uninstall(p),
         Some("--status") => {
@@ -2325,29 +2334,64 @@ mod win {
 /// 命名管道的安全描述符：`D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)`。
 ///
 /// 失败时返回 `None`，退回系统默认 ACL（并记日志），保证服务仍能用。
+/// 组装命名管道的 SDDL。
+///
+/// - `SY` = LocalSystem 全权、`BA` = Administrators 全权；
+/// - 最后一项是「客户端」：有安装者 SID 就用它（**只有本人**），否则退回
+///   `IU`（交互式登录用户）—— 与 pre.17 之前一致，宁可宽一点也不锁门。
+///
+/// 只接受形如 `S-1-5-21-...` 的 SID：这段字符串会被拼进 SDDL，随手塞
+/// `WD)(A;;GA;;;WD` 这类内容就能把权限放开，所以必须先过白名单。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn pipe_sddl(owner_sid: &str) -> String {
+    let sane = owner_sid.starts_with("S-1-")
+        && owner_sid.len() <= 184
+        && owner_sid
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b == b'-' || b == b'S');
+    if sane {
+        format!("D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;{owner_sid})")
+    } else {
+        "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)".to_string()
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn pipe_security_attributes() -> Option<windows_sys::Win32::Security::SECURITY_ATTRIBUTES> {
     use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
     use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 
     const SDDL_REVISION_1: u32 = 1;
-    let sddl: Vec<u16> = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)\0"
-        .encode_utf16()
-        .collect();
-    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
-    let ok = unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            sddl.as_ptr(),
-            SDDL_REVISION_1,
-            &mut sd,
-            std::ptr::null_mut(),
-        )
+
+    let owner_sid = load_config(&paths()).owner_sid;
+    let sddl_text = pipe_sddl(&owner_sid);
+    let make = |text: &str| -> PSECURITY_DESCRIPTOR {
+        let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        let ok = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                wide.as_ptr(),
+                SDDL_REVISION_1,
+                &mut sd,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 { std::ptr::null_mut() } else { sd }
     };
-    if ok == 0 {
+
+    let mut sd = make(&sddl_text);
+    if sd.is_null() {
+        // SID 写法有问题（或解析失败）：退回 IU，绝不留一个默认 ACL 的管道。
+        log_line(
+            &paths(),
+            &format!("pipe SDDL 构造失败（owner_sid={owner_sid:?}），退回 IU"),
+        );
+        sd = make("D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)");
+    }
+    if sd.is_null() {
         log_line(&paths(), "pipe SDDL 构造失败，退回默认 ACL");
         return None;
     }
-    // 故意不 LocalFree：整个进程生命周期复用同一份描述符。
     Some(SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: sd,
@@ -2496,7 +2540,7 @@ fn write_pipe(handle: windows_sys::Win32::Foundation::HANDLE, resp: &Response) {
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "macos")]
-fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
+fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
 
     let src = std::env::current_exe()?;
@@ -2549,6 +2593,12 @@ fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
         policy: load_config(p).policy,
         // 重装时保留用户手工追加的网段，不要静默清空。
         rpc_extra_whitelist: load_config(p).rpc_extra_whitelist,
+        // macOS 不用 SID（socket 0600 + peercred），传了也保留原值。
+        owner_sid: if sid.is_empty() {
+            load_config(p).owner_sid
+        } else {
+            sid.to_string()
+        },
     };
     save_config(p, &cfg)?;
 
@@ -2611,7 +2661,7 @@ fn cleanup_legacy_macos() {
 }
 
 #[cfg(target_os = "windows")]
-fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
+fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
     use windows_service::service::{
         ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType, ServiceType,
     };
@@ -2634,10 +2684,17 @@ fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
 
     // 3) 持久化配置（此前 Windows 分支漏了 save_config → owner_uid/mode 缺失，
     //    `--diagnose` 只能显示默认值）。
+    // 管道 DACL 要收窄到「安装者本人」，所以必须在安装时把 SID 记下来：
+    // 服务以 LocalSystem 运行，事后无法推断是哪个用户点的安装。
     let cfg = ServiceConfig {
         owner_uid: 0,
         policy: load_config(p).policy,
         rpc_extra_whitelist: load_config(p).rpc_extra_whitelist,
+        owner_sid: if sid.is_empty() {
+            load_config(p).owner_sid
+        } else {
+            sid.to_string()
+        },
     };
     save_config(p, &cfg)?;
 
@@ -2831,7 +2888,7 @@ fn replace_updater(_p: &Paths, _new_exe: Option<&str>) -> anyhow::Result<()> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn install(_p: &Paths, _uid: u32) -> anyhow::Result<()> {
+fn install(_p: &Paths, _uid: u32, _sid: &str) -> anyhow::Result<()> {
     bail!("exvlan-service 只在 macOS/Windows 上安装")
 }
 
@@ -2876,6 +2933,15 @@ fn diagnose(p: &Paths) -> anyhow::Result<()> {
         )),
     }
     out.push_str(&format!("policy(boot): {:?}\n", load_config(p).policy));
+    let boot_sid = load_config(p).owner_sid;
+    out.push_str(&format!(
+        "owner_sid(boot): {}\n",
+        if boot_sid.is_empty() {
+            "(unknown → pipe ACL 退回 IU)"
+        } else {
+            boot_sid.as_str()
+        }
+    ));
     #[allow(unused_mut)]
     let mut probes: Vec<(&str, &Path)> = vec![
         ("service.bin", &p.service_bin),
@@ -3038,6 +3104,31 @@ mod whitelist_tests {
     }
 
     use super::{Mode, ServiceConfig};
+
+    #[test]
+    fn pipe_sddl_narrows_to_owner_sid_only_when_valid() {
+        let sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+        let sddl = crate::pipe_sddl(sid);
+        assert!(sddl.contains(&format!(";;;{sid})")), "{sddl}");
+        assert!(sddl.contains(";;;SY)") && sddl.contains(";;;BA)"), "{sddl}");
+        // 空/未知 → 退回 IU（不能因此把用户锁在门外）
+        assert!(crate::pipe_sddl("").contains(";;;IU)"));
+        // 想借 SID 字段塞 ACE 的值一律不认
+        for evil in [
+            "S-1-5-21-1-2-3-1001)(A;;GA;;;WD",
+            "WD)(A;;GA;;;WD",
+            "S-1-5-18",
+        ] {
+            let out = crate::pipe_sddl(evil);
+            if evil == "S-1-5-18" {
+                // 合法 SID（SYSTEM）：允许，但不会引入新 ACE
+                assert!(out.contains(";;;S-1-5-18)"), "{out}");
+            } else {
+                assert!(out.contains(";;;IU)"), "{evil} 必须被拒绝: {out}");
+                assert!(!out.contains(";;;WD"), "{out}");
+            }
+        }
+    }
 
     #[test]
     fn service_config_toml_accepts_new_and_legacy_names() {

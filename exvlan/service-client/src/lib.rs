@@ -16,11 +16,13 @@
 pub mod backend;
 pub mod config;
 pub mod doctor;
+pub mod identity;
 pub mod ipc;
 pub mod paths;
 pub mod tokens;
 
 pub use backend::{Backend, detect};
+pub use identity::{current_uid, current_user_sid};
 pub use ipc::{Client, request};
 pub use paths::{APP_ID, PRIVILEGED_SERVICE_LABEL, Paths, paths};
 
