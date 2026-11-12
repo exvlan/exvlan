@@ -1,4 +1,4 @@
-//! 产品控制面命令（`exvlan-cli service|doctor|diag|auth`）。
+//! 产品控制面命令（`exvlan-cli service|config|doctor|diag|auth|api`）。
 //!
 //! 这些命令属于 EXVlan 的产品层（服务 + 后端探测 + 体检），**不是**上游内核
 //! CLI 的一部分。为了不改动上游 `cli.rs` 的 clap 枚举（上游同步会冲突），这里
@@ -26,6 +26,11 @@ enum Cmd {
     Service {
         #[command(subcommand)]
         cmd: ServiceCmd,
+    },
+    /// 网络配置（内核 `<config-dir>/<id>.toml`，唯一权威）
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCmd,
     },
     /// 一键体检：backend / 服务 / 内核 / 端口 / 存储
     Doctor {
@@ -92,6 +97,33 @@ enum ServiceCmd {
 }
 
 #[derive(Subcommand, Debug)]
+enum ConfigCmd {
+    /// 列出已保存的网络（含启用状态）
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// 读取一条配置（TOML）
+    Get { id: String },
+    /// 写入/覆盖一条配置（内容来自文件或 stdin）
+    Set {
+        id: String,
+        /// 配置文件路径；`-` 表示 stdin
+        #[arg(long)]
+        file: String,
+        /// 写入后不启用（内核不加载）
+        #[arg(long)]
+        disabled: bool,
+    },
+    /// 删除一条配置
+    Rm { id: String },
+    /// 启用（内核下次启动会加载）
+    Enable { id: String },
+    /// 禁用（保留配置，内核不加载）
+    Disable { id: String },
+}
+
+#[derive(Subcommand, Debug)]
 enum TokenCmd {
     /// 签发 scoped token（明文只显示一次）
     Create {
@@ -142,7 +174,7 @@ pub fn maybe_run() -> Option<i32> {
     let first = std::env::args().nth(1)?;
     if !matches!(
         first.as_str(),
-        "service" | "doctor" | "diag" | "auth" | "api"
+        "service" | "config" | "doctor" | "diag" | "auth" | "api"
     ) {
         return None;
     }
@@ -156,6 +188,7 @@ pub fn maybe_run() -> Option<i32> {
     };
     Some(match parsed.cmd {
         Cmd::Service { cmd } => service_cmd(cmd),
+        Cmd::Config { cmd } => config_cmd(cmd),
         Cmd::Doctor { json, fix } => doctor(json, fix),
         Cmd::Diag { json } => diag(json),
         Cmd::Api {
@@ -166,6 +199,90 @@ pub fn maybe_run() -> Option<i32> {
         } => api(&method, &path, data.as_deref(), yes),
         Cmd::Auth { cmd } => auth_cmd(cmd),
     })
+}
+
+// ---------------------------------------------------------------------------
+// config（网络配置：内核配置目录是唯一权威）
+// ---------------------------------------------------------------------------
+
+fn config_cmd(cmd: ConfigCmd) -> i32 {
+    use exvlan_service_client::config as cfg;
+    let result = match cmd {
+        ConfigCmd::List { json: as_json } => cfg::list().map(|items| {
+            if as_json {
+                print_json(&json!(
+                    items
+                        .iter()
+                        .map(|e| json!({
+                            "id": e.id,
+                            "enabled": e.enabled,
+                            "bytes": e.bytes,
+                            "modified": e.modified,
+                        }))
+                        .collect::<Vec<_>>()
+                ));
+            } else {
+                for item in &items {
+                    println!(
+                        "{}  {:<9} {:>6}B  {}",
+                        item.id,
+                        if item.enabled { "enabled" } else { "disabled" },
+                        item.bytes,
+                        fmt_ts(item.modified)
+                    );
+                }
+                if items.is_empty() {
+                    println!("（没有已保存的网络配置）");
+                }
+            }
+        }),
+        ConfigCmd::Get { id } => cfg::read(&id).map(|saved| {
+            if !saved.enabled {
+                eprintln!("# {id} 当前为 disabled（内核不加载）");
+            }
+            print!("{}", saved.text);
+        }),
+        ConfigCmd::Set { id, file, disabled } => {
+            read_input(&file).and_then(|text| cfg::write(&id, &text, !disabled))
+        }
+        ConfigCmd::Rm { id } => cfg::delete(&id).map(|removed| {
+            if removed {
+                println!("已删除 {id}");
+            } else {
+                println!("{id} 不存在（无需删除）");
+            }
+        }),
+        ConfigCmd::Enable { id } => cfg::set_enabled(&id, true),
+        ConfigCmd::Disable { id } => cfg::set_enabled(&id, false),
+    };
+    match result {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("错误: {err}");
+            2
+        }
+    }
+}
+
+/// `--file <path>` / `--file -`（stdin）。
+fn read_input(file: &str) -> Result<String, String> {
+    if file == "-" {
+        use std::io::Read as _;
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| format!("读取 stdin 失败: {e}"))?;
+        return Ok(buf);
+    }
+    std::fs::read_to_string(file).map_err(|e| format!("读取 {file} 失败: {e}"))
+}
+
+fn fmt_ts(secs: u64) -> String {
+    if secs == 0 {
+        return "-".to_string();
+    }
+    // 不引入时间库：直接给 UNIX 秒，够 agent 用。
+    format!("unix:{secs}")
 }
 
 // ---------------------------------------------------------------------------
