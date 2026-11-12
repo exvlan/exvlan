@@ -104,7 +104,7 @@ pub struct Paths {
     pub kernel: PathBuf,
     pub kernel_prev: PathBuf,
     pub service_bin: PathBuf,
-    pub service_json: PathBuf,
+    pub service_config: PathBuf,
     pub service_log: PathBuf,
 }
 
@@ -176,7 +176,7 @@ fn paths() -> Paths {
             kernel_prev: core.join("exvlan.prev"),
             core,
             service_bin: PathBuf::from("/Library/PrivilegedHelperTools/era.exvlan.studio.service"),
-            service_json: data.join("service.json"),
+            service_config: data.join("service.toml"),
             service_log: logs.join("service.log"),
             logs,
         }
@@ -192,7 +192,7 @@ fn paths() -> Paths {
             core,
             logs: data.join("logs"),
             service_bin: data.join("bin").join("exvlan-service.exe"),
-            service_json: data.join("service.json"),
+            service_config: data.join("service.toml"),
             service_log: data.join("logs").join("service.log"),
         }
     }
@@ -207,7 +207,7 @@ fn paths() -> Paths {
             core,
             logs: PathBuf::from("/var/log/era.exvlan.studio"),
             service_bin: PathBuf::from("/usr/local/bin/exvlan-service"),
-            service_json: data.join("service.json"),
+            service_config: data.join("service.toml"),
             service_log: PathBuf::from("/var/log/era.exvlan.studio/service.log"),
         }
     }
@@ -218,11 +218,16 @@ fn paths() -> Paths {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum Mode {
+    /// 常驻（旧名 `service`）
+    #[serde(rename = "resident", alias = "service", alias = "Service")]
     #[default]
     Service,
+    /// 随客户端（旧名 `normal`）
+    #[serde(rename = "session", alias = "normal", alias = "Normal")]
     Normal,
+    /// 停止（旧名 `off`）
+    #[serde(rename = "stopped", alias = "off", alias = "Off")]
     Off,
 }
 
@@ -230,8 +235,9 @@ pub enum Mode {
 pub struct ServiceConfig {
     #[serde(default)]
     pub owner_uid: u32,
-    #[serde(default)]
-    pub mode: Mode,
+    /// 生命周期策略。pre.17 起字段名为 `policy`；`mode` 作为旧名兼容读取。
+    #[serde(default, alias = "mode")]
+    pub policy: Mode,
     /// 用户额外允许访问 RPC 的网段（逃生口，例如 WSL 的 172.x）。
     /// 默认空：实际白名单由 `<config-dir>/*.toml` 里的虚拟网段自动推导。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -242,29 +248,31 @@ impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             owner_uid: 0,
-            mode: Mode::Service,
+            policy: Mode::Service,
             rpc_extra_whitelist: Vec::new(),
         }
     }
 }
 
 fn load_config(p: &Paths) -> ServiceConfig {
-    std::fs::read_to_string(&p.service_json)
+    // pre.17 起统一用 TOML（与 prefs.toml / config 目录一致）；
+    // 旧 `service.json` 由 `exvlan-migrate` 一次性转换，运行时不做兼容读取。
+    std::fs::read_to_string(&p.service_config)
         .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
+        .and_then(|t| toml::from_str(&t).ok())
         .unwrap_or_default()
 }
 
 fn save_config(p: &Paths, cfg: &ServiceConfig) -> anyhow::Result<()> {
-    if let Some(dir) = p.service_json.parent() {
+    if let Some(dir) = p.service_config.parent() {
         std::fs::create_dir_all(dir).ok();
     }
-    let text = serde_json::to_string_pretty(cfg)?;
-    std::fs::write(&p.service_json, text)?;
+    let text = toml::to_string_pretty(cfg)?;
+    std::fs::write(&p.service_config, text)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        let _ = std::fs::set_permissions(&p.service_json, std::fs::Permissions::from_mode(0o600));
+        let _ = std::fs::set_permissions(&p.service_config, std::fs::Permissions::from_mode(0o600));
     }
     Ok(())
 }
@@ -767,7 +775,7 @@ fn compute_whitelist(config_dir: &Path, extra: &[String]) -> (String, Vec<String
 impl State {
     fn new(paths: Paths) -> Self {
         let config = load_config(&paths);
-        let mode = config.mode;
+        let mode = config.policy;
         Self {
             paths,
             inner: Mutex::new(Inner {
@@ -1089,7 +1097,7 @@ impl State {
                 return Ok(());
             }
             guard.mode = mode;
-            guard.config.mode = mode;
+            guard.config.policy = mode;
             let cfg = guard.config.clone();
             // 持久化在锁外做，避免阻塞其它请求。
             drop(guard);
@@ -2274,7 +2282,7 @@ fn install(p: &Paths, uid: u32) -> anyhow::Result<()> {
 
     let cfg = ServiceConfig {
         owner_uid: uid,
-        mode: load_config(p).mode,
+        policy: load_config(p).policy,
         // 重装时保留用户手工追加的网段，不要静默清空。
         rpc_extra_whitelist: load_config(p).rpc_extra_whitelist,
     };
@@ -2364,7 +2372,7 @@ fn install(p: &Paths, _uid: u32) -> anyhow::Result<()> {
     //    `--diagnose` 只能显示默认值）。
     let cfg = ServiceConfig {
         owner_uid: 0,
-        mode: load_config(p).mode,
+        policy: load_config(p).policy,
         rpc_extra_whitelist: load_config(p).rpc_extra_whitelist,
     };
     save_config(p, &cfg)?;
@@ -2596,20 +2604,20 @@ fn diagnose(p: &Paths) -> anyhow::Result<()> {
     out.push_str(&format!("service: {BUILD_VERSION}\n"));
     // `service.json` 是 0600 root：普通用户跑 `--diagnose` 读不到它。
     // 明确报出来，而不是用 `unwrap_or_default()` 打印一份假的 {owner_uid:0}。
-    match std::fs::read_to_string(&p.service_json) {
+    match std::fs::read_to_string(&p.service_config) {
         Ok(text) => out.push_str(&format!("config: {}\n", text.trim())),
         Err(err) => out.push_str(&format!(
             "config: <unreadable: {err}> path={}\n",
-            p.service_json.display()
+            p.service_config.display()
         )),
     }
-    out.push_str(&format!("mode(boot): {:?}\n", load_config(p).mode));
+    out.push_str(&format!("policy(boot): {:?}\n", load_config(p).policy));
     #[allow(unused_mut)]
     let mut probes: Vec<(&str, &Path)> = vec![
         ("service.bin", &p.service_bin),
         ("kernel", &p.kernel),
         ("kernel.prev", &p.kernel_prev),
-        ("service.json", &p.service_json),
+        ("service.toml", &p.service_config),
     ];
     #[cfg(unix)]
     {
@@ -2763,5 +2771,27 @@ mod whitelist_tests {
         ] {
             assert!(validate_cidr(cidr).is_err(), "{cidr} 必须被拒绝");
         }
+    }
+
+    use super::{Mode, ServiceConfig};
+
+    #[test]
+    fn service_config_toml_accepts_new_and_legacy_names() {
+        let cfg: ServiceConfig = toml::from_str(
+            "owner_uid = 501\npolicy = \"session\"\nrpc_extra_whitelist = [\"10.254.66.0/24\"]\n",
+        )
+        .expect("parse new");
+        assert_eq!(cfg.policy, Mode::Normal);
+        assert_eq!(cfg.owner_uid, 501);
+
+        // 旧 service.json 的取值（Service/Normal/Off）与旧字段名 `mode` 仍可读
+        let legacy: ServiceConfig =
+            toml::from_str("owner_uid = 7\nmode = \"Normal\"\n").expect("parse legacy");
+        assert_eq!(legacy.policy, Mode::Normal);
+
+        // 写回用规范词汇（resident/session/stopped）
+        let text = toml::to_string_pretty(&cfg).expect("dump");
+        assert!(text.contains("policy = \"session\""), "{text}");
+        assert!(!text.contains("mode ="), "{text}");
     }
 }

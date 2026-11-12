@@ -10,6 +10,7 @@ members = [
   "exvlan/service",
   "exvlan/service-client",
   "exvlan/gateway",
+  "exvlan/migrate",
   "exvlan/contrib/ffi",
   "exvlan/contrib/uptime",
   "exvlan/contrib/android-jni",

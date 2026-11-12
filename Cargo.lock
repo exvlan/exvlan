@@ -3107,6 +3107,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "exvlan-migrate"
+version = "26.410.20712"
+dependencies = [
+ "anyhow",
+ "exvlan-core",
+ "exvlan-proto",
+ "exvlan-service-client",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
 name = "exvlan-mini"
 version = "26.410.20712"
 dependencies = [

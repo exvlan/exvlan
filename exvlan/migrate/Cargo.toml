@@ -1,0 +1,21 @@
+[package]
+name = "exvlan-migrate"
+version = "26.410.20712"
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../exvlan/LICENSE"
+description = "EXVlan one-shot migration: pre.17 installs must run this once (inside the installer, removed in the next release)"
+
+[[bin]]
+name = "exvlan-migrate"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+exvlan-service-client = { path = "../service-client" }
+# 用内核自己的 `NetworkConfig::gen_config()` 做映射，避免手写字段表出错
+exvlan-proto = { path = "../proto" }
+exvlan-core = { path = "../core", features = ["config-write"] }
