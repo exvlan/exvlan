@@ -5379,6 +5379,12 @@ fn service_restart() -> Result<(), String> {
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
+async fn service_kernel_restart() -> Result<serde_json::Value, String> {
+    Err("该功能仅桌面端支持".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
 fn service_reinstall(_opts: serde_json::Value) -> Result<(), String> {
     Err("该功能仅桌面端支持".to_string())
 }
