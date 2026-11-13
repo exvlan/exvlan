@@ -527,3 +527,35 @@ port = 2016
   `kernel:write`。`GET /instances/{id}` 会带 `writable` 字段，UI 据此决定是否显示编辑/删除入口；
   越权时对端返回 403「token 缺少 scope」，客户端原样提示「用可改配置/全权角色重新配对」。
 - 经 gateway 暂不支持：VPN 门户客户端增删（明确提示到对端本机操作），避免半吊子实现。
+
+### 14.11 pre.20：交付内容与真机/实测抓到的坑
+
+**本版包含**
+
+| 编号 | 内容                                                                                                                          |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------- |
+| P2   | 端口冲突结构化错误（`port_in_use` + occupant/kind/hint）+ GUI 卡片 + `doctor net.port_conflict`                               |
+| R1   | gateway RESTful 契约硬切：`GET/PATCH/DELETE /instances/{id}`、`POST /validate`；旧 `/instances/{id}/config` 返回 404          |
+| R2   | 对端出码 + 对端签发 token；GUI 新增「经 gateway」目标（配对 / 只读查看 / 诊断）；`auth pair` CLI                              |
+| R3   | 经 gateway 写操作（启停/删除/下发/校验）；`rpc_mesh_whitelist` 默认关 + 迁移写 true；gateway 由服务托管（退避重启、状态上报） |
+
+**实测抓到的两个坑（都已修）**
+
+1. **「停用」会把配置删掉（P0 数据丢失）**
+   `PATCH {disabled:true}` 原本先 `delete_network_instance` 再改名。实例从配置目录加载时，
+   内核的 delete 会顺手删掉 `<id>.toml` → 随后改名失败，配置目录被清空。
+   现在：**先**改名成 `.toml.disabled`，**再**用 `retain_network_instance` 停实例（不碰配置目录）；
+   启用时先恢复文件名再 `run`。删除（`DELETE`）显式连配置文件一起删，避免「停用中删了又冒出来」。
+
+2. **升级不刷新随包工具**
+   `--replace-updater` 只换服务本体，`core/exvlan-gateway` 还是旧版 —— 新端点等于装了没生效。
+   现在 GUI 把 cli/gateway 放进 `<staging>/tools/`，服务转存后由 updater 覆盖（`install_tools`
+   改为「写 `.new` 再 rename」，运行中的 gateway 也能安全替换）。
+   同时 token store 固定到 `<data>/gateway-tokens.json`（服务以 root 跑，`$HOME=/var/root` 会让
+   配对 token 散落在无关目录）。
+
+**已知限制（pre.21 再看）**
+
+- 经 gateway 不支持 VPN 门户客户端增删（明确提示到对端本机操作）。
+- 裸核（core）模式没有服务托管 gateway：需要远端接入时另装系统服务（systemd/launchd/SCM）。
+- 移动端经 gateway 可用，但 `parse_config`（TOML→结构）依赖桌面端的本地转换命令，移动端会给出明确错误。

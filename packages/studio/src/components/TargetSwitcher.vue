@@ -142,16 +142,21 @@ const items = computed(() => {
           managerVisible.value = true;
         },
       },
-      { separator: true },
-      {
-        label: t("target.generate_code"),
-        icon: "pi pi-key",
-        command: () => {
-          pairCode.value = "";
-          pairError.value = "";
-          pairDialogVisible.value = true;
-        },
-      },
+      // 生成配对码是「被管端」的动作：移动端没有 gateway，不提供入口。
+      ...(isMobile.value
+        ? []
+        : [
+            { separator: true },
+            {
+              label: t("target.generate_code"),
+              icon: "pi pi-key",
+              command: () => {
+                pairCode.value = "";
+                pairError.value = "";
+                pairDialogVisible.value = true;
+              },
+            },
+          ]),
     ],
   });
   return list;
