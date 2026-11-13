@@ -569,15 +569,21 @@ port = 2016
 
 **范围**
 
-| 项       | 内容                                                                                                      |
-| -------- | --------------------------------------------------------------------------------------------------------- |
-| 运行形态 | 前台 `--daemon`（容器/嵌入式）+ systemd unit（桌面/服务器），二者共用同一二进制                           |
-| 安装     | `--install` / `--uninstall` / `--status` / `--restart` / `--diagnose` 与 mac/win 同一套代码               |
-| IPC      | unix socket `/var/run/era.exvlan.studio/service.sock`，属主 = 安装者 uid，0600                            |
-| 托管     | 内核、gateway、tools 全部由服务托管（与 §14.10 的 `[gateway]` 配置一致）                                  |
-| 清理     | 删除 `studio/src-tauri/src/supervisor.rs`，以及 `control` / `studio::service_client` 的 Linux `stub` 分支 |
-| 打包     | Linux GUI 包带 `exvlan-service` + unit 模板；首次安装一次授权                                             |
-| 语义变化 | Linux 从「setcap + PDEATHSIG」变为「有服务（root）」，与 macOS/Windows 一致                               |
+| 项       | 内容                                                                                                                          |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 运行形态 | 前台 `--daemon`（容器/嵌入式）+ systemd unit（桌面/服务器），二者共用同一二进制                                               |
+| 安装     | `--install` / `--uninstall` / `--status` / `--restart` / `--diagnose` 与 mac/win 同一套代码                                   |
+| IPC      | unix socket `/var/run/era.exvlan.studio/service.sock`，属主 = 安装者 uid，0600                                                |
+| 托管     | 内核、gateway、tools 全部由服务托管（与 §14.10 的 `[gateway]` 配置一致）                                                      |
+| 清理     | 删除 `studio/src-tauri/src/supervisor.rs`，以及 `control` / `studio::service_client` 的 Linux `stub` 分支                     |
+| 打包     | Linux GUI 包带 `exvlan-service` + unit 模板；首次安装一次授权                                                                 |
+| 语义变化 | Linux 从「setcap + PDEATHSIG」变为「有服务（root）」，与 macOS/Windows 一致                                                   |
+| 服务名   | `era.exvlan.studio.service`（与 `APP_ID` / 目录名 / 其它平台 label 一致）                                                     |
+| 卸载     | `--uninstall` 只删二进制 + unit（stop/disable），**保留** `/var/lib` 配置与 `/var/log` 日志；彻底清理另用 `--purge`           |
+| 重启     | `systemctl restart`（尊重 unit 的硬化/依赖），失败提示 `journalctl -u`                                                        |
+| 提权     | GUI 先 `pkexec`，失败回落 `sudo`/root                                                                                         |
+| 硬化     | `NoNewPrivileges` / `ProtectHome` / `ProtectSystem=full` / `PrivateTmp`，保留 `CAP_NET_ADMIN`/`CAP_NET_RAW` 与 `/dev/net/tun` |
+| 安装后   | `daemon-reload` → `enable --now` → 等 `sd_notify READY=1`（超时回滚并打日志）                                                 |
 
 **发布口径**：dev.1 不再按「做完一项就发一个预览」的节奏。dev.1 的门槛是下面全部完成：
 
