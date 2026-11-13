@@ -953,3 +953,19 @@ migrate:
   no_tool_hint: 本安装包未随带迁移工具。请在终端运行 `exvlan-migrate --yes`（或用安装包附带的独立工具），完成后点「重新检测」。
   recheck: 重新检测
   recheck_pending: 仍然检测到旧数据；请确认迁移工具已成功执行（可查看 migrate.log）。
+
+port_conflict:
+  title: RPC 端口 {port} 被占用
+  hint_forwarded: |
+    占用者是端口转发器（{name}），常见于 VS Code Remote 的自动转发。
+    处理方式（任选其一）：
+      1) VS Code → Ports 面板停止转发 {port}；或在 settings.json 加
+         "remote.portsAttributes": {{ "{port}": {{ "onAutoForward": "ignore" }} }}
+      2) 本机改用别的端口：在 service.toml 里写 rpc_portal = "127.0.0.1:1996" 并重启服务
+  hint_exvlan: |
+    占用者是另一个 Exvlan 内核（{name}，pid={pid}）——可能是残留进程或另一份安装/WSL 实例。
+    结束它后点「重试」；或改 service.toml 的 rpc_portal 换端口。
+  hint_foreign: |
+    占用者是其它程序（{name}）。结束它，或改 service.toml 的 rpc_portal 换端口。
+  copy_cmd: 复制处理指引
+  copied: 已复制

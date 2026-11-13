@@ -955,3 +955,19 @@ migrate:
   no_tool_hint: This build does not bundle the migration tool. Run `exvlan-migrate --yes` in a terminal (or the standalone tool), then click Re-check.
   recheck: Re-check
   recheck_pending: Legacy data is still present. Make sure the migration tool finished successfully (see migrate.log).
+
+port_conflict:
+  title: RPC port {port} is in use
+  hint_forwarded: |
+    The port is held by a forwarder ({name}) — typically VS Code Remote auto-forwarding.
+    Fix it either way:
+      1) VS Code -> Ports panel: stop forwarding {port}; or add to settings.json
+         "remote.portsAttributes": {{ "{port}": {{ "onAutoForward": "ignore" }} }}
+      2) Use another port: set rpc_portal = "127.0.0.1:1996" in service.toml and restart the service
+  hint_exvlan: |
+    Held by another Exvlan kernel ({name}, pid={pid}) — a leftover process or another install/WSL instance.
+    Stop it and hit Retry; or change rpc_portal in service.toml.
+  hint_foreign: |
+    Held by another program ({name}). Stop it, or change rpc_portal in service.toml.
+  copy_cmd: Copy instructions
+  copied: Copied

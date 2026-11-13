@@ -107,6 +107,7 @@ pub fn collect() -> Report {
 
     version_checks(&mut out, &p);
     port_checks(&mut out);
+    port_conflict_check(&mut out);
     config_checks(&mut out);
     storage_checks(&mut out, &user);
     #[cfg(target_os = "macos")]
@@ -273,6 +274,55 @@ fn config_checks(out: &mut Vec<Finding>) {
 fn is_pipe_busy(err: &str) -> bool {
     // 系统消息会随语言本地化，认 os error 码最稳。
     err.contains("os error 231") || err.to_ascii_lowercase().contains("pipe instance")
+}
+
+/// RPC 端口是否被**外来**进程占着（pre.19 起服务会返回结构化 `port_in_use`，
+/// 这里做「事前体检」：内核没跑时也能看出来端口被谁占了）。
+fn port_conflict_check(out: &mut Vec<Finding>) {
+    if !backend::detect().has_service() {
+        return;
+    }
+    let Ok(resp) = ipc::request("port.owner", json!({})) else {
+        return;
+    };
+    let Some(data) = resp.get("data") else {
+        return;
+    };
+    if data.get("free").and_then(Value::as_bool).unwrap_or(false) {
+        return;
+    }
+    let ours = data
+        .get("is_our_kernel")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let port = data.get("port").and_then(Value::as_u64).unwrap_or(0);
+    if ours {
+        out.push(Finding {
+            id: "net.port_conflict",
+            level: "ok",
+            summary: format!("RPC 端口 {port} 由本机内核占用（正常）"),
+            evidence: data.clone(),
+            fixable: false,
+        });
+        return;
+    }
+    let name = data
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let pid = data.get("pid").and_then(Value::as_u64).unwrap_or(0);
+    out.push(Finding {
+        id: "net.port_conflict",
+        level: "error",
+        summary: format!(
+            "RPC 端口 {port} 被 {name}（pid={pid}）占用，内核起不来；\
+             若这是编辑器/SSH 的端口转发，请在它的 Ports 面板停掉该端口，\
+             或把 service.toml 的 rpc_portal 改成 \"127.0.0.1:{}\"",
+            crate::DEFAULT_RPC_PORT.saturating_add(1)
+        ),
+        evidence: data.clone(),
+        fixable: false,
+    });
 }
 
 fn version_checks(out: &mut Vec<Finding>, p: &paths::Paths) {

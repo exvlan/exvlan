@@ -416,3 +416,37 @@ pre.17 在 macOS 真机（10.254.1.6，pre.16 → pre.17 实测）验收时暴�
   `get_networks`/`set_networks` 变成配置目录视图；FFI 只负责按 TOML 起实例。
 - 旧 `networks.toml` 做**一次性转换**（`networks-migrated` 标记；任一条失败则保留源文件、
   不写标记、下次重试），下一版删除这段（`networks/legacy.rs`）。
+
+### 14.9 端口冲突卡片 + NSIS 静默安装的实测结论
+
+**端口冲突（pre.20）**
+
+- 服务把「端口被占」返回成结构化错误 `code=port_in_use` +
+  `data={port, occupant{pid,name,path}, kind, hint}`，`kind ∈ exvlan|forwarded|foreign`
+  （判定：进程路径命中我们的内核 → exvlan；`Code.exe`/`wslrelay`/`openssh` → forwarded；其余 foreign）。
+- GUI 把它渲染成卡片（谁占的 + 按 kind 给的操作指引 + 复制命令 + 诊断 + 重试），
+  不再只甩一句红字。
+- `doctor` 新增 `net.port_conflict`（走 IPC `port.owner`，内核没跑时也能看出端口被谁占）。
+
+**NSIS `/S` 静默安装（实测，Windows 26xxx）**
+
+| 场景                           | 结果                                                        |
+| ------------------------------ | ----------------------------------------------------------- |
+| `setup.exe /S /D=<空目录>`     | ✅ 正常安装                                                 |
+| 同一目录**再装同版本**         | ⚠️ 退出码 0 但**什么都不做**（文件时间戳不变）              |
+| 在已装同版本的默认目录装同版本 | ⚠️ 同上（这就是「静默升级看起来成功、实际没换文件」的原因） |
+
+原因：预览版共用 `26.410.20712` 作为 bundle version，NSIS 认为「已是这个版本」→ 跳过；
+而 MSI 侧用 `wix.version`（第 4 段 = 1000 + 预览序号，由 `script/ci/msi-version.py` 生成）
+→ **MSI 的同版本重装是有效的**。
+
+自动化/agent 升级因此统一走：
+
+```powershell
+# 推荐：MSI 静默重装（版本号已按预览序号递增）
+msiexec /i EXVlan.Studio_<ver>_x64_en-US.msi /qn REINSTALL=ALL REINSTALLMODE=vomus
+# 或：先卸载再装 NSIS
+& "$env:PROGRAMFILES\EXVlan Studio\uninstall.exe" /S ; setup.exe /S
+```
+
+用户手动双击安装不受影响（有 UI，可确认重装）。

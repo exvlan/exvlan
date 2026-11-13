@@ -440,6 +440,33 @@ impl Response {
             data: None,
         }
     }
+    /// 把 `port_in_use|{json}` 形式的错误拆成结构化响应（GUI 据此渲染卡片）。
+    fn conflict(payload: serde_json::Value) -> Self {
+        let port = payload.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
+        let name = payload
+            .get("occupant")
+            .and_then(|o| o.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let pid = payload
+            .get("occupant")
+            .and_then(|o| o.get("pid"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let kind = payload
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("foreign");
+        let message = format!("RPC 端口 {port} 被 {name}（pid={pid}, kind={kind}）占用");
+        Self::err_with_data("port_in_use", message, payload)
+    }
+
+    fn err_with_data(code: &str, message: impl Into<String>, data: serde_json::Value) -> Self {
+        let mut r = Self::err(code, message);
+        r.data = Some(data);
+        r
+    }
+
     fn err(code: &str, message: impl Into<String>) -> Self {
         Self {
             ok: false,
@@ -804,6 +831,17 @@ fn configured_networks(config_dir: &Path) -> (Vec<String>, Vec<String>) {
     (cidrs, notes)
 }
 
+/// 统一把 `port_in_use|{json}` 的错误拆成结构化响应；其它错误保持原 code。
+fn conflict_or(err: anyhow::Error, fallback_code: &str) -> Response {
+    let msg = err.to_string();
+    if let Some(rest) = msg.strip_prefix("port_in_use|")
+        && let Ok(payload) = serde_json::from_str::<serde_json::Value>(rest)
+    {
+        return Response::conflict(payload);
+    }
+    Response::err(fallback_code, msg)
+}
+
 // ---------------------------------------------------------------------------
 // 端口占用诊断（RPC 端口被残留内核占住时，现场要能看出是谁）
 // ---------------------------------------------------------------------------
@@ -814,6 +852,68 @@ struct PortOwner {
     name: String,
     /// 可执行文件完整路径（可能为空：拿不到权限时）。
     path: String,
+}
+
+/// 端口占用者的性质（决定 GUI 给什么指引）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PortKind {
+    /// 我们自己的内核（残留进程 / 另一份安装 / WSL 里的实例）
+    Exvlan,
+    /// 端口转发器（VS Code Remote / WSL relay / SSH 隧道）
+    Forwarded,
+    /// 其它程序
+    Foreign,
+}
+
+impl PortKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            PortKind::Exvlan => "exvlan",
+            PortKind::Forwarded => "forwarded",
+            PortKind::Foreign => "foreign",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            PortKind::Exvlan => {
+                "占用者是另一个 Exvlan 内核（残留进程 / 另一份安装 / WSL 里的实例）。                 结束它，或在 service.toml 里改 rpc_portal"
+            }
+            PortKind::Forwarded => {
+                "疑似编辑器/SSH 的端口转发（如 VS Code Remote 的 remote.autoForwardPorts）。                 在 VS Code 的 Ports 面板停止转发 1995，或加 \"remote.portsAttributes\" 忽略该端口"
+            }
+            PortKind::Foreign => {
+                "该端口被其它程序占用。可结束该程序，或在 service.toml 里把 rpc_portal 改成 127.0.0.1:1996"
+            }
+        }
+    }
+}
+
+/// 判定端口占用者性质：先看是不是我们自己的内核产物，再看是不是已知的转发器。
+fn classify_port_owner(owner: &PortOwner, kernel: &Path) -> PortKind {
+    if owner.is_stale_kernel_of(kernel) {
+        return PortKind::Exvlan;
+    }
+    let name = owner.name.to_ascii_lowercase();
+    let path = owner.path.to_ascii_lowercase();
+    let forwarded = [
+        "code.exe",
+        "code",
+        "wslrelay.exe",
+        "ssh.exe",
+        "ssh",
+        "vscode-server",
+    ]
+    .iter()
+    .any(|n| name == *n);
+    let forwarded = forwarded
+        || ["\\.vscode\\", "microsoft vs code", "wslrelay", "openssh"]
+            .iter()
+            .any(|frag| path.contains(frag));
+    if forwarded {
+        PortKind::Forwarded
+    } else {
+        PortKind::Foreign
+    }
 }
 
 impl PortOwner {
@@ -1243,14 +1343,7 @@ impl State {
                 ));
                 let _ = child.kill();
                 let _ = child.wait();
-                bail!(
-                    "RPC 端口 {} 由其他进程应答（{} pid={} path={}），\
-                     新内核未能真正启动",
-                    self.rpc_port(),
-                    owner.name,
-                    owner.pid,
-                    owner.path
-                );
+                return Err(self.port_conflict_error(owner));
             }
             None => {
                 self.log("rpc responder missing after ready");
@@ -1269,13 +1362,14 @@ impl State {
             return Ok(());
         };
         if !owner.is_stale_kernel_of(&self.paths.kernel) {
-            bail!(
-                "RPC 端口 {} 被其他进程占用：{}（pid={}, path={}）",
+            self.log(format!(
+                "rpc port {} occupied by foreign process: {} pid={} path={}",
                 self.rpc_port(),
                 owner.name,
                 owner.pid,
                 owner.path
-            );
+            ));
+            return Err(self.port_conflict_error(owner));
         }
         self.log(format!(
             "cleanup stale kernel pid={} path={}",
@@ -1425,6 +1519,22 @@ impl State {
         Ok(())
     }
 
+    /// 端口冲突 → 结构化错误（`port_in_use|{json}`），由 `handle()` 拆成 Response。
+    fn port_conflict_error(&self, owner: PortOwner) -> anyhow::Error {
+        let kind = classify_port_owner(&owner, &self.paths.kernel);
+        let payload = serde_json::json!({
+            "port": self.rpc_port(),
+            "occupant": {
+                "pid": owner.pid,
+                "name": owner.name,
+                "path": owner.path,
+            },
+            "kind": kind.as_str(),
+            "hint": kind.hint(),
+        });
+        anyhow::anyhow!("port_in_use|{payload}")
+    }
+
     /// 生效的 RPC portal 绑定地址（`service.toml` 的 `rpc_portal` 优先）。
     fn rpc_portal(&self) -> String {
         self.inner
@@ -1485,7 +1595,7 @@ impl State {
                     r.kernel = Some(info);
                     r
                 }
-                Err(err) => Response::err("kernel_start_failed", err.to_string()),
+                Err(err) => conflict_or(err, "kernel_start_failed"),
             },
             "kernel.stop" => match self.stop_kernel() {
                 Ok(()) => self.status(),
@@ -1497,19 +1607,20 @@ impl State {
                     r.kernel = Some(info);
                     r
                 }
-                Err(err) => Response::err("kernel_restart_failed", err.to_string()),
+                Err(err) => conflict_or(err, "kernel_restart_failed"),
             },
             "apply" => match req.staging.as_deref() {
                 Some(dir) => match self.apply(Path::new(dir)) {
                     Ok(()) => self.status(),
                     Err(err) => {
                         let msg = err.to_string();
-                        let code = if msg.contains("kernel_rollback") {
-                            "kernel_rollback"
+                        if msg.starts_with("port_in_use|") {
+                            conflict_or(err, "apply_failed")
+                        } else if msg.contains("kernel_rollback") {
+                            Response::err("kernel_rollback", msg)
                         } else {
-                            "apply_failed"
-                        };
-                        Response::err(code, msg)
+                            Response::err("apply_failed", msg)
+                        }
                     }
                 },
                 None => Response::err("bad_request", "staging 缺失"),
@@ -3446,5 +3557,37 @@ mod whitelist_tests {
         assert_eq!(list[1].id, "b");
         assert!(!list[1].enabled);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn classifies_port_owner_kinds() {
+        let kernel = Path::new("/Library/Application Support/era.exvlan.studio/core/exvlan");
+        let owner = |name: &str, path: &str| crate::PortOwner {
+            pid: 42,
+            name: name.into(),
+            path: path.into(),
+        };
+
+        // 我们自己的内核（含 .prev 残留）
+        assert_eq!(
+            crate::classify_port_owner(&owner("exvlan", kernel.to_str().unwrap()), kernel),
+            crate::PortKind::Exvlan
+        );
+        // VS Code 的端口转发（本次 pre.18 真实事故）
+        assert_eq!(
+            crate::classify_port_owner(
+                &owner("Code.exe", r"C:\Program Files\Microsoft VS Code\Code.exe"),
+                kernel
+            ),
+            crate::PortKind::Forwarded
+        );
+        // 其它程序
+        assert_eq!(
+            crate::classify_port_owner(&owner("nginx", "/usr/sbin/nginx"), kernel),
+            crate::PortKind::Foreign
+        );
+        // kind 的展示串稳定（GUI/日志都依赖）
+        assert_eq!(crate::PortKind::Forwarded.as_str(), "forwarded");
+        assert!(!crate::PortKind::Forwarded.hint().is_empty());
     }
 }

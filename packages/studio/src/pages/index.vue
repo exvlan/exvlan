@@ -176,6 +176,42 @@ const aboutVisible = ref(false);
 /** 启动/连接失败时保留的错误（顶部横幅展示，不再静默降级模式）。 */
 const startupError = ref("");
 
+/**
+ * 端口冲突（`port_in_use`）：服务返回的结构化错误被人性化成
+ * `RPC 端口 1995 被 Code.exe（pid=1234, kind=forwarded）占用`。
+ * 这里解析出来渲染专用卡片（比一句红字有用得多）。
+ */
+const portConflict = ref<{ port: string; name: string; pid: string; kind: string } | null>(null);
+
+function noteStartupError(e: unknown) {
+  const text = String(e);
+  startupError.value = text;
+  const m = /RPC 端口 (\d+) 被 (.+?)（pid=(\d+), kind=(\w+)）占用/.exec(text);
+  portConflict.value = m
+    ? { port: m[1] ?? "", name: m[2] ?? "", pid: m[3] ?? "", kind: m[4] ?? "foreign" }
+    : null;
+}
+
+/** 给用户的可复制命令（按平台）。 */
+const conflictHint = computed(() => {
+  const c = portConflict.value;
+  if (!c) return "";
+  if (c.kind === "forwarded")
+    return t("port_conflict.hint_forwarded", { port: c.port, name: c.name });
+  if (c.kind === "exvlan")
+    return t("port_conflict.hint_exvlan", { port: c.port, name: c.name, pid: c.pid });
+  return t("port_conflict.hint_foreign", { port: c.port, name: c.name });
+});
+
+async function copyConflictHint() {
+  try {
+    await navigator.clipboard.writeText(conflictHint.value);
+    toast.add({ severity: "success", summary: t("port_conflict.copied"), life: 2000 });
+  } catch (e: unknown) {
+    toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 8000 });
+  }
+}
+
 /** 补齐 service 模式缺失的默认值（历史版本可能只存了 mode 字段）。 */
 async function normalizeMode(mode: Mode): Promise<Mode> {
   if (mode.mode !== "service") {
@@ -294,8 +330,8 @@ async function retryStartup() {
   startupError.value = "";
   try {
     await ensureLocalKernel(currentMode.value);
-  } catch (e: any) {
-    startupError.value = String(e);
+  } catch (e: unknown) {
+    noteStartupError(e);
     toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 10000 });
     return;
   }
@@ -339,7 +375,7 @@ async function onApplyWhitelist() {
     await serviceKernelRestart();
     // 内核进程换了，旧的 RPC 连接已失效 → 重新建连（不要留一个“假在线”的客户端）。
     await initWithMode(currentMode.value).catch((e: unknown) => {
-      startupError.value = String(e);
+      noteStartupError(e);
       void reportFrontendError("fe:kernel-restart", String(e));
     });
     await refreshWhitelistState();
@@ -1293,6 +1329,43 @@ const configServerConnectionStatus = computed(() => {
         icon="pi pi-share-alt"
         @click="onShareErrorLog"
       />
+    </div>
+
+    <!-- 端口冲突（port_in_use）：给出「谁占的 + 怎么办」，而不是一句报错 -->
+    <div
+      v-if="portConflict"
+      class="mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+    >
+      <div class="flex items-center gap-2 font-medium">
+        <i class="pi pi-exclamation-circle" />
+        <span>{{ t("port_conflict.title", { port: portConflict.port }) }}</span>
+        <span class="text-xs opacity-70">
+          {{ portConflict.name }} · pid={{ portConflict.pid }} · {{ portConflict.kind }}
+        </span>
+      </div>
+      <p class="mt-1 whitespace-pre-line text-xs leading-5">{{ conflictHint }}</p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <Button
+          size="small"
+          :label="t('port_conflict.copy_cmd')"
+          icon="pi pi-copy"
+          @click="copyConflictHint"
+        />
+        <Button
+          size="small"
+          text
+          :label="t('settings.service_check')"
+          icon="pi pi-wrench"
+          @click="openServiceCheck"
+        />
+        <Button
+          size="small"
+          text
+          :label="t('client.retry_startup')"
+          icon="pi pi-replay"
+          @click="retryStartup"
+        />
+      </div>
     </div>
 
     <!-- 网段改了但内核还没重启：远程管理对新网段暂不生效 -->
