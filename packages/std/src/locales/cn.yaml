@@ -523,7 +523,7 @@ web:
     central_networks: 所属网络
 
   device_management:
-    readonly_target: 这是「经 gateway」的只读目标：可以查看与诊断，修改请到对端本机操作。
+    readonly_target: 当前 token 只读：可以查看与诊断；要修改请在对端用「可改配置/全权」角色重新生成配对码。
     confirm_delete_network: 确定删除网络 {name}？删除后该网络会从配置目录里移除。
     edit_network: 编辑网络
     export_config: 导出配置

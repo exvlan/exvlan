@@ -129,11 +129,33 @@ fn truncate(text: &str, max: usize) -> String {
 
 /// 带 Bearer 的 GET；错误信息直接给用户看（含状态码与对端消息）。
 async fn get_json(host: &str, port: u16, token: &str, path: &str) -> Result<Value, String> {
+    request_json("GET", host, port, token, path, None).await
+}
+
+/// 通用请求（写操作用 POST/PATCH/DELETE）。
+///
+/// 403 会明确提示「token 缺少 scope」——只读配对（role=readonly）本来就该被拒绝，
+/// 用户需要在对端用 `--role config`（或 `admin`）重新出码配对。
+async fn request_json(
+    method: &str,
+    host: &str,
+    port: u16,
+    token: &str,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Value, String> {
     let url = format!("{}{path}", base_url(host, port));
-    let resp = reqwest::Client::new()
-        .get(&url)
+    let mut req = reqwest::Client::new()
+        .request(
+            reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| format!("非法方法: {e}"))?,
+            &url,
+        )
         .bearer_auth(token)
-        .timeout(TIMEOUT)
+        .timeout(TIMEOUT);
+    if let Some(body) = body {
+        req = req.json(&body);
+    }
+    let resp = req
         .send()
         .await
         .map_err(|e| format!("连接 {url} 失败: {e}（对端 gateway 开着吗？地址对吗？）"))?;
@@ -342,7 +364,90 @@ pub async fn gateway_instance(
 ) -> Result<Value, String> {
     let entry = find(&app, &target_id)?;
     let path = format!("/api/v1/instances/{instance_id}");
-    get_json(&entry.host, entry.port, &entry.token, &path).await
+    let mut value = get_json(&entry.host, entry.port, &entry.token, &path).await?;
+    // 本机 token 有没有写权限，决定 UI 要不要显示编辑/删除入口。
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert(
+            "writable".to_string(),
+            json!(entry.scopes.iter().any(|s| s == "kernel:write")),
+        );
+    }
+    Ok(value)
+}
+
+// ---------------------------------------------------------------------------
+// 写操作（需要 token 带 kernel:write）
+// ---------------------------------------------------------------------------
+
+/// 下发/更新实例配置（`POST /instances`，对端内核会持久化到配置目录）。
+#[tauri::command]
+pub async fn gateway_run_instance(
+    app: AppHandle,
+    target_id: String,
+    config: Value,
+) -> Result<Value, String> {
+    let entry = find(&app, &target_id)?;
+    request_json(
+        "POST",
+        &entry.host,
+        entry.port,
+        &entry.token,
+        "/api/v1/instances",
+        Some(config),
+    )
+    .await
+}
+
+/// 启停实例（`PATCH /instances/{id} {disabled}`）。
+#[tauri::command]
+pub async fn gateway_update_state(
+    app: AppHandle,
+    target_id: String,
+    instance_id: String,
+    disabled: bool,
+) -> Result<Value, String> {
+    let entry = find(&app, &target_id)?;
+    let path = format!("/api/v1/instances/{instance_id}");
+    request_json(
+        "PATCH",
+        &entry.host,
+        entry.port,
+        &entry.token,
+        &path,
+        Some(json!({ "disabled": disabled })),
+    )
+    .await
+}
+
+/// 删除实例（`DELETE /instances/{id}`）。
+#[tauri::command]
+pub async fn gateway_delete_instance(
+    app: AppHandle,
+    target_id: String,
+    instance_id: String,
+) -> Result<Value, String> {
+    let entry = find(&app, &target_id)?;
+    let path = format!("/api/v1/instances/{instance_id}");
+    request_json("DELETE", &entry.host, entry.port, &entry.token, &path, None).await
+}
+
+/// 校验配置（`POST /validate` → 返回 TOML 文本）。
+#[tauri::command]
+pub async fn gateway_validate(
+    app: AppHandle,
+    target_id: String,
+    config: Value,
+) -> Result<Value, String> {
+    let entry = find(&app, &target_id)?;
+    request_json(
+        "POST",
+        &entry.host,
+        entry.port,
+        &entry.token,
+        "/api/v1/validate",
+        Some(config),
+    )
+    .await
 }
 
 /// 本机生成配对码（**被管端**的动作）。

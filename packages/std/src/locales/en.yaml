@@ -523,7 +523,7 @@ web:
     central_networks: Joined Networks
 
   device_management:
-    readonly_target: This is a read-only target reached through the peer gateway. You can view and diagnose; make changes on that machine.
+    readonly_target: "This token is read-only: viewing and diagnostics work; to make changes, pair again on the peer with the config/admin role."
     confirm_delete_network: Delete network {name}? It will be removed from the config directory.
     edit_network: Edit Network
     export_config: Export Config

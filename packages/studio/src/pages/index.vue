@@ -22,7 +22,12 @@ import { executeVpnTileAction } from "~/composables/mobile_vpn_tile";
 import { dedupeNetworkInstances } from "~/composables/instance_dedupe";
 import { GUIRemoteClient } from "~/modules/api";
 import { GatewayRemoteClient } from "~/modules/gateway_api";
-import { gatewaySystem, logDiagStep, uploadDiagnostics } from "~/composables/backend";
+import {
+  gatewayRemotes,
+  gatewaySystem,
+  logDiagStep,
+  uploadDiagnostics,
+} from "~/composables/backend";
 import { buildFrontendState } from "~/composables/diagnostics";
 
 import { useToast, useConfirm } from "openvue";
@@ -577,6 +582,7 @@ async function initWithMode(rawMode: Mode) {
   // 目标：本机 = 连本机内核；远程 = 连 mesh 里的另一台。
   // 远程时**本机内核照运行方式继续跑**（互不影响），但不再向远程推本地配置。
   const remote = findRemote(targetId.value);
+  gatewayWritable.value = false;
   if (!remote && runtimeKind.value === "off") {
     // 运行方式=停止：本机没有 RPC 可连，界面保持「未运行」并提供重试入口。
     startupError.value = t("runtime.off_hint");
@@ -590,6 +596,11 @@ async function initWithMode(rawMode: Mode) {
     void ensureRuntimeQuiet();
     try {
       await gatewaySystem(remote.id);
+      // 权限来自 token 的 scopes：只读 token 就把新增/编辑入口一并藏掉。
+      const paired = await gatewayRemotes();
+      gatewayWritable.value = !!paired
+        .find((item) => item.id === remote.id)
+        ?.scopes?.includes("kernel:write");
     } catch (e) {
       startupError.value = t("target.gateway_unreachable", {
         addr: remoteAddress(remote),
@@ -1083,6 +1094,8 @@ const remoteClient = computed(() =>
     ? new GatewayRemoteClient(currentRemote.value.id)
     : new GUIRemoteClient(),
 );
+/** 对端 token 是否带写权限（配对时选了 config/admin 才有）。 */
+const gatewayWritable = ref(false);
 const instanceId = ref<string | undefined>(undefined);
 const clientRunning = ref(false);
 
@@ -1473,7 +1486,7 @@ const configServerConnectionStatus = computed(() => {
       v-if="clientRunning"
       class="flex-1 overflow-y-auto"
       :api="remoteClient"
-      :readonly="isGatewayTarget"
+      :readonly="isGatewayTarget && !gatewayWritable"
       :pause-auto-refresh="isModeSaving"
       v-model:instance-id="instanceId"
     />
