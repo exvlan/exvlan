@@ -521,4 +521,9 @@ port = 2016
 
 - GUI 远端目标**新增一类「经 gateway」**（与现有直连 1995 并存，用户显式选择），不做静默降级 ——
   直连/经 gateway 的权限与可见面不同，静默切换会让「我到底连到了哪」变模糊。
-- R2 只读：列表 / 详情（config+info+meta）/ 诊断。写操作留到 R3。
+- R2 只读：列表 / 详情（config+info+meta）/ 诊断。
+- R3 写操作：启停（`PATCH /instances/{id}`）、删除（`DELETE`）、下发/校验（`POST /instances`、`POST /validate`）。
+  权限**由 token 的 scope 决定**：配对 role=readonly 只能读；`config`/`admin` 才有
+  `kernel:write`。`GET /instances/{id}` 会带 `writable` 字段，UI 据此决定是否显示编辑/删除入口；
+  越权时对端返回 403「token 缺少 scope」，客户端原样提示「用可改配置/全权角色重新配对」。
+- 经 gateway 暂不支持：VPN 门户客户端增删（明确提示到对端本机操作），避免半吊子实现。

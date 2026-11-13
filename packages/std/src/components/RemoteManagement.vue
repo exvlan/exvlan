@@ -199,7 +199,7 @@ const stopNetwork = async () => {
 const confirm = useConfirm();
 const confirmDeleteNetwork = () => {
   confirm.require({
-    // 统一由宿主 App 的 `<ConfirmDialog>` 渲染（本组件不再自带 ConfirmPopup，
+    // 统一由宿主 App 的 `<ConfirmPopup>` 渲染（本组件不再自带 ConfirmPopup，
     // 否则同一个 require 会同时弹出「内联 + 模态」两个确认框）。
     message: t("web.device_management.confirm_delete_network", {
       name: currentNetworkMeta.value?.network_name || instanceId.value || "",
