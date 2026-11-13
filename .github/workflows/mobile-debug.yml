@@ -1,0 +1,158 @@
+name: Mobile Debug APK
+
+# 只为「真机验证」产出一个 **arm64 debug APK**（可 `adb shell run-as` 直读
+# `files/config/*.toml`，拿到文件级证据）。**不进 pipeline**、不影响发版。
+#
+# 特点：
+# - 只构建 aarch64 一个 ABI（比发版的 4 ABI 快很多）
+# - debug 构型（`android:debuggable=true`）
+# - 用**正式 release keystore 重新签名** → 可以 `adb install -r` 覆盖正式包，
+#   既保留设备上的旧数据（验证一次性迁移），又能 run-as 读文件
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "要构建的 ref（默认当前分支）"
+        required: false
+
+concurrency:
+  group: mobile-debug-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    env:
+      NAME: exvlan
+      TARGET: aarch64-linux-android
+      ARCH: aarch64
+      ANDROID_ABI: arm64-v8a
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set current ref as env variable
+        run: echo "GIT_DESC=$(git log -1 --format=%cd.%h --date=format:%Y-%m-%d_%H:%M:%S)" >> $GITHUB_ENV
+
+      - name: Compute build version
+        run: bash script/ci/build-version.sh
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: "oracle"
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+        with:
+          cmdline-tools-version: 14742923
+          packages: "build-tools;34.0.0 ndk;26.0.10792818 platform-tools platforms;android-34 "
+
+      - name: Setup Android Environment
+        run: |
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/ndk/26.0.10792818/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+          echo "NDK_HOME=$ANDROID_HOME/ndk/26.0.10792818/" >> $GITHUB_ENV
+
+      - name: Prepare build environment
+        uses: ./.github/actions/prepare-build
+        with:
+          target: aarch64-linux-android
+          gui: false
+          pnpm: true
+          pnpm-build-filter: ""
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert no exvlan-core in android dependency tree
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p exvlan-studio --target "$TARGET" 2>/dev/null || true)
+          if echo "$tree" | grep -q 'exvlan-core'; then
+            echo "::error::移动端依赖树仍包含 exvlan-core（P7 回归）"
+            exit 1
+          fi
+
+      # 内核 FFI 库：按**产物名**反查最近一个未过期的（比「最近一次成功运行」可靠）
+      - name: Resolve kernel lib run
+        id: krun
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id=$(gh api "repos/${{ github.repository }}/actions/artifacts?name=mobile-kernel-${ANDROID_ABI}&per_page=20" \
+            --jq '[.artifacts[] | select(.expired == false)] | .[0].workflow_run.id // empty')
+          if [[ -z "$run_id" ]]; then
+            echo "::error::找不到 mobile-kernel-${ANDROID_ABI} 产物（先跑一次 pipeline 的 Mobile Kernel Libs）"
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "reuse kernel lib from run $run_id"
+
+      - name: Fetch prebuilt kernel lib
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mobile-kernel-${{ env.ANDROID_ABI }}
+          path: ./kernel-lib
+          run-id: ${{ steps.krun.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Stage kernel lib into jniLibs
+        run: |
+          set -euo pipefail
+          test -f ./kernel-lib/libexvlan_ffi.so || { echo "::error::缺少 libexvlan_ffi.so"; exit 1; }
+          mkdir -p "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/${ANDROID_ABI}"
+          cp ./kernel-lib/libexvlan_ffi.so "packages/studio/src-tauri/gen/android/app/src/main/jniLibs/${ANDROID_ABI}/"
+
+      - name: Prepare release keystore (for re-signing the debug build)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_ALIAS_SECRET: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_PASSWORD_SECRET: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64" || { echo "::error::缺少 ANDROID_KEYSTORE_BASE64"; exit 1; }
+          keystore="$RUNNER_TEMP/exvlan-upload.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$keystore"
+          echo "KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+          echo "KEYSTORE_ALIAS=$KEYSTORE_ALIAS_SECRET" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD_SECRET" >> "$GITHUB_ENV"
+
+      - name: Build debug APK (arm64 only)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          cd packages/studio
+          pnpm tauri android build --apk --debug --target "$ARCH"
+
+      # debug 包默认用 runner 的随机 debug keystore 签名 → 无法覆盖正式包。
+      # 用正式 keystore 重新签名：既保留 debuggable（run-as 可读文件），又能 install -r。
+      - name: Re-sign debug APK with release keystore
+        run: |
+          set -euo pipefail
+          src=$(ls packages/studio/src-tauri/gen/android/app/build/outputs/apk/*/debug/*.apk | head -1)
+          echo "debug apk: $src"
+          btdir=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          out="$RUNNER_TEMP/app-arm64-debug.apk"
+          "$btdir/zipalign" -f -p 4 "$src" "$RUNNER_TEMP/aligned.apk"
+          "$btdir/apksigner" sign \
+            --ks "$KEYSTORE_PATH" --ks-key-alias "$KEYSTORE_ALIAS" \
+            --ks-pass "env:KEYSTORE_PASSWORD" --key-pass "env:KEYSTORE_PASSWORD" \
+            --out "$out" "$RUNNER_TEMP/aligned.apk"
+          "$btdir/apksigner" verify --print-certs "$out" | head -5
+          cp "$out" ./app-arm64-debug.apk
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: app-arm64-debug
+          path: ./app-arm64-debug.apk
+          if-no-files-found: error
+          retention-days: 14
