@@ -88,6 +88,8 @@ async function maybeAutoUploadDiag(detail: string) {
     if (localStorage.getItem("diag_upload_consent") !== "1") {
       const accepted = await new Promise<boolean>((resolve) => {
         confirm.require({
+          // ConfirmPopup 需要锚点；启动时的同意框没有点击事件，锚到页面根节点。
+          target: (document.querySelector("#root") as HTMLElement | null) ?? document.body,
           header: t("settings.upload_diag"),
           message: t("settings.upload_consent"),
           accept: () => resolve(true),
@@ -1165,7 +1167,7 @@ async function openConfigServerDialog() {
   editingMode.value = JSON.parse(JSON.stringify(loadMode()));
   configServerDialogVisible.value = true;
 }
-async function onConfigServerSave() {
+async function onConfigServerSave(event?: MouseEvent) {
   if (JSON.stringify(currentMode.value) === JSON.stringify(editingMode.value)) {
     configServerDialogVisible.value = false;
     return;
@@ -1173,6 +1175,11 @@ async function onConfigServerSave() {
   if (editingMode.value.mode === "service") {
     await new Promise<void>((resolve, reject) => {
       confirm.require({
+        // 锚到触发按钮（按钮旁弹出），没有事件时退回页面根节点。
+        target:
+          (event?.currentTarget as HTMLElement | null) ??
+          (document.querySelector("#root") as HTMLElement | null) ??
+          document.body,
         message: t("config-server.update_service_confirm"),
         icon: "pi pi-exclamation-triangle",
         rejectProps: {
@@ -1281,7 +1288,7 @@ const configServerConnectionStatus = computed(() => {
         <Button
           :label="t('web.common.save')"
           icon="pi pi-save"
-          @click="onConfigServerSave"
+          @click="onConfigServerSave($event)"
           autofocus
           :loading="isModeSaving"
         />
