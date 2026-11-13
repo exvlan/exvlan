@@ -14,6 +14,7 @@ use std::io::{BufRead as _, BufReader, Write};
 use serde_json::{Value, json};
 
 use crate::paths;
+use crate::protocol::{Request, Response, WireRequest};
 
 /// 一条持久会话。
 ///
@@ -73,6 +74,20 @@ impl Client {
         }
         self.send(body)?;
         self.read_reply()
+    }
+
+    /// 发送**类型化**请求（协议 v2）并解析成类型化响应。
+    ///
+    /// 与 [`Client::request`] 并存的原因：服务端接线前仍是 v1（平铺）。等
+    /// 服务切到 v2 后，`request` 会删除、所有调用点改用 `call`。
+    pub fn call(&mut self, req: &Request) -> Result<Response, String> {
+        let wire = serde_json::to_value(WireRequest::new(req.clone()))
+            .map_err(|e| format!("序列化请求失败: {e}"))?;
+        self.send(wire)?;
+        let value = self.read_reply()?;
+        serde_json::from_value(value).map_err(|e| {
+            format!("响应不是协议 v2（服务端可能还是旧版，请一起升级）: {e}")
+        })
     }
 
     fn send(&mut self, body: Value) -> Result<(), String> {
@@ -147,4 +162,13 @@ fn open_pipe_with_retry(addr: &std::path::Path) -> Result<std::fs::File, String>
 pub fn request(op: &str, extra: Value) -> Result<Value, String> {
     let mut client = Client::connect()?;
     client.request(op, extra)
+}
+
+/// 一次性类型化调用（协议 v2）：连上 → 发 → 断开。
+///
+/// 注意：服务把「连接」当会话（`session` 策略下用它判断内核该不该停），
+/// 所以这条短连接的生命周期就是本次调用。
+pub fn call(req: &Request) -> Result<Response, String> {
+    let mut client = Client::connect()?;
+    client.call(req)
 }
