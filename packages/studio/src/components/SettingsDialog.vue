@@ -7,6 +7,7 @@ import { useToast } from "openvue";
 import type { Mode } from "~/composables/mode";
 import About from "~/components/About.vue";
 import KernelManager from "~/components/KernelManager.vue";
+import UpdateSettings from "~/components/UpdateSettings.vue";
 import {
   elevateSelftest,
   logDiagStep,
@@ -68,6 +69,8 @@ const props = defineProps<{
   configServerStatus: string;
   logLevel: string;
   initialSection?: Section;
+  /** 当前目标是否「经 gateway」的远端（应用更新只在本机做） */
+  remoteTarget?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -88,7 +91,7 @@ const platform = type();
 const isMobile = platform === "android" || platform === "ios";
 const isDesktop = !isMobile;
 
-type Section = "general" | "network" | "logging" | "about";
+type Section = "general" | "network" | "update" | "logging" | "about";
 const section = ref<Section>(props.initialSection ?? "general");
 
 watch(
@@ -103,6 +106,7 @@ watch(
 const sections = computed(() => [
   { key: "general" as const, label: t("settings.general"), icon: "pi pi-cog" },
   { key: "network" as const, label: t("settings.network"), icon: "pi pi-globe" },
+  { key: "update" as const, label: t("settings.update"), icon: "pi pi-download" },
   { key: "logging" as const, label: t("settings.logging"), icon: "pi pi-file" },
   { key: "about" as const, label: t("settings.about"), icon: "pi pi-info-circle" },
 ]);
@@ -600,6 +604,10 @@ watch(
         </div>
 
         <!-- 日志 -->
+        <div v-else-if="section === 'update'" class="flex flex-col">
+          <UpdateSettings :remote="props.remoteTarget" />
+        </div>
+
         <div v-else-if="section === 'logging'" class="flex flex-col">
           <div class="settings-row">
             <div class="flex-1">

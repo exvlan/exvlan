@@ -149,6 +149,275 @@ async fn fetch_manifest(base: &str, default_base: &str) -> anyhow::Result<Manife
     Ok(manifest)
 }
 
+// ---------------------------------------------------------------------------
+// 更新通道（stable < rc < beta < dev < nightly）
+// ---------------------------------------------------------------------------
+//
+// 两张**不同**的排序表，别混：
+// - `visibility_rank`：选中某档能看哪些版本（向下包含：nightly 连 stable 也看）
+// - `compare_stage`：同一个 base 下谁更新（stable > rc > beta > dev > nightly）
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Channel {
+    Stable,
+    Rc,
+    Beta,
+    Dev,
+    Nightly,
+}
+
+impl Channel {
+    pub const ALL: [Channel; 5] = [
+        Channel::Stable,
+        Channel::Rc,
+        Channel::Beta,
+        Channel::Dev,
+        Channel::Nightly,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Channel::Stable => "stable",
+            Channel::Rc => "rc",
+            Channel::Beta => "beta",
+            Channel::Dev => "dev",
+            Channel::Nightly => "nightly",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "stable" => Some(Channel::Stable),
+            "rc" | "pre" => Some(Channel::Rc),
+            "beta" => Some(Channel::Beta),
+            "dev" => Some(Channel::Dev),
+            "nightly" => Some(Channel::Nightly),
+            _ => None,
+        }
+    }
+
+    /// 该档位能看到的版本（含更低风险档位）。
+    pub fn visibility_rank(self) -> u8 {
+        match self {
+            Channel::Stable => 0,
+            Channel::Rc => 1,
+            Channel::Beta => 2,
+            Channel::Dev => 3,
+            Channel::Nightly => 4,
+        }
+    }
+
+    /// 同一个 base 下的先后：正式版是 rc 的后一步，所以 stable 最大。
+    pub fn compare_stage(self) -> u8 {
+        match self {
+            Channel::Stable => 5,
+            Channel::Rc => 4,
+            Channel::Beta => 3,
+            Channel::Dev => 2,
+            Channel::Nightly => 1,
+        }
+    }
+
+    /// 安装的是哪条线（首次启动没有偏好时用版本串推断）。
+    /// 历史 `-pre.N` 归到 dev（pre 线就是开发线）。
+    pub fn infer_from_version(version: &str) -> Self {
+        let lower = version.to_ascii_lowercase();
+        if lower.contains("-nightly.") {
+            Channel::Nightly
+        } else if lower.contains("-dev.") || lower.contains("-pre.") {
+            Channel::Dev
+        } else if lower.contains("-beta.") {
+            Channel::Beta
+        } else if lower.contains("-rc.") {
+            Channel::Rc
+        } else {
+            Channel::Stable
+        }
+    }
+
+    /// 需要请求的通道目录（从低风险到高风险，顺序稳定便于测试）。
+    pub fn visible(self) -> Vec<Channel> {
+        Channel::ALL
+            .into_iter()
+            .filter(|c| c.visibility_rank() <= self.visibility_rank())
+            .collect()
+    }
+}
+
+/// 结构化版本：`(base, stage, seq)`。
+///
+/// 改这个是因为旧的 `version_key` 把 `-pre.20` 当成第 4 段数字 —— 同 base 下
+/// `26.410.20712`（正式版）会被判成比 `26.410.20712-pre.20` 更旧。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Version {
+    pub base: Vec<u64>,
+    pub stage: u8,
+    /// legacy `-pre.*` 用 0（比 nightly 还低，只影响历史版本排序）
+    pub seq: u64,
+}
+
+impl Version {
+    pub fn parse(raw: &str) -> Self {
+        let text = raw.trim().trim_start_matches('v');
+        let text = text.split('+').next().unwrap_or(text);
+        let (base_part, suffix) = match text.split_once('-') {
+            Some((b, s)) => (b, Some(s)),
+            None => (text, None),
+        };
+        let base: Vec<u64> = base_part
+            .split('.')
+            .filter_map(|p| p.parse::<u64>().ok())
+            .collect();
+        let (stage, seq) = match suffix {
+            None => (Channel::Stable.compare_stage(), 0),
+            Some(suffix) => {
+                let (name, seq) = suffix
+                    .split_once('.')
+                    .map(|(n, v)| (n, v.parse::<u64>().unwrap_or(0)))
+                    .unwrap_or((suffix, 0));
+                let stage = match name.to_ascii_lowercase().as_str() {
+                    "pre" => 0,
+                    "nightly" => Channel::Nightly.compare_stage(),
+                    "dev" => Channel::Dev.compare_stage(),
+                    "beta" => Channel::Beta.compare_stage(),
+                    "rc" => Channel::Rc.compare_stage(),
+                    _ => 0,
+                };
+                (stage, seq)
+            }
+        };
+        Self { base, stage, seq }
+    }
+}
+
+impl Ord for Version {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.base
+            .cmp(&other.base)
+            .then(self.stage.cmp(&other.stage))
+            .then(self.seq.cmp(&other.seq))
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// 通道目录下的清单地址：`<base><channel>/manifest.json`。
+pub fn channel_manifest_url(base: &str, default_base: &str, channel: Channel) -> String {
+    format!(
+        "{}{}/manifest.json",
+        normalize_base(base, default_base),
+        channel.as_str()
+    )
+}
+
+/// 通道目录下的官方 updater 清单：`<base><channel>/latest.json`。
+pub fn channel_latest_url(base: &str, default_base: &str, channel: Channel) -> String {
+    format!(
+        "{}{}/latest.json",
+        normalize_base(base, default_base),
+        channel.as_str()
+    )
+}
+
+/// 拉某个通道目录的清单。
+pub async fn fetch_channel_manifest(
+    base: &str,
+    default_base: &str,
+    channel: Channel,
+) -> anyhow::Result<Manifest> {
+    let url = channel_manifest_url(base, default_base, channel);
+    let resp = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()?
+        .get(&url)
+        .send()
+        .await
+        .with_context(|| format!("请求 {url} 失败"))?;
+    if !resp.status().is_success() {
+        bail!("{url} 返回 {}", resp.status());
+    }
+    let manifest: Manifest = resp
+        .json()
+        .await
+        .with_context(|| format!("解析 {url} 失败"))?;
+    if manifest.schema > MANIFEST_SCHEMA {
+        bail!(
+            "manifest schema 为 {}，当前客户端仅支持 {}",
+            manifest.schema,
+            MANIFEST_SCHEMA
+        );
+    }
+    Ok(manifest)
+}
+
+/// 合并「当前通道及以下」各通道清单里的版本。
+///
+/// 单个通道 404/网络错误只跳过（新通道刚上线时目录可能还不存在）；
+/// 全部失败才算错误，避免断网时静默当作「无更新」。
+pub async fn collect_channel_versions(
+    base: &str,
+    default_base: &str,
+    channel: Channel,
+) -> anyhow::Result<Vec<(Channel, VersionEntry)>> {
+    let mut out: Vec<(Channel, VersionEntry)> = Vec::new();
+    let mut last_err: Option<anyhow::Error> = None;
+    for ch in channel.visible() {
+        match fetch_channel_manifest(base, default_base, ch).await {
+            Ok(manifest) => {
+                for entry in manifest.versions {
+                    out.push((ch, entry));
+                }
+            }
+            Err(err) => last_err = Some(err),
+        }
+    }
+    if out.is_empty()
+        && let Some(err) = last_err
+    {
+        return Err(err.context("所有通道清单都拉不到"));
+    }
+    out.sort_by(|a, b| Version::parse(&a.1.version).cmp(&Version::parse(&b.1.version)));
+    out.reverse();
+    Ok(out)
+}
+
+/// 清单里的一个候选版本（给 UI 的「选择版本」下拉）。
+#[derive(Debug, Clone, Serialize)]
+pub struct VersionChoice {
+    pub version: String,
+    /// 它来自哪条通道（合并后才知道）
+    pub channel: String,
+    /// 当前客户端能不能装；false 时 `reason` 说明原因
+    pub compatible: bool,
+    pub reason: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// 当前客户端支持的 RPC 契约版本（内核 manifest 里的 `rpc_schema` 超过它就装不了）。
+pub const SUPPORTED_RPC_SCHEMA: u32 = 1;
+
+/// 在「当前通道及以下」里找指定版本，返回 (来源通道, 条目)。
+pub async fn find_version(
+    base: &str,
+    default_base: &str,
+    channel: Channel,
+    version: &str,
+) -> anyhow::Result<(Channel, VersionEntry)> {
+    for ch in channel.visible() {
+        if let Ok(manifest) = fetch_channel_manifest(base, default_base, ch).await
+            && let Some(entry) = pick(&manifest, version)
+        {
+            return Ok((ch, entry.clone()));
+        }
+    }
+    bail!("{version} 不在 {} 及以下任何通道的清单里", channel.as_str())
+}
+
 /// 下载并校验 sha256，返回字节。
 async fn download_verified(base: &str, asset: &Asset) -> anyhow::Result<Vec<u8>> {
     let url = format!("{base}{}", asset.file);
@@ -192,43 +461,79 @@ pub mod kernel {
         pub available: bool,
         pub versions: Vec<String>,
         pub source: String,
+        /// 当前通道（决定看到哪些版本）
+        pub channel: String,
+        /// 各候选版本 + 兼容性（UI 里置灰不兼容项并给原因）
+        pub choices: Vec<VersionChoice>,
     }
 
     /// 检查内核更新（移动端不支持：内核随包分发）。
-    pub async fn check_update(base: &str, studio_version: &str) -> anyhow::Result<UpdateInfo> {
+    ///
+    /// 合并「当前通道及以下」的清单，按 `(base, stage, seq)` 取最大的**兼容**版本。
+    pub async fn check_update(
+        base: &str,
+        studio_version: &str,
+        channel: Channel,
+    ) -> anyhow::Result<UpdateInfo> {
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
-            let _ = (base, studio_version);
+            let _ = (base, studio_version, channel);
             bail!("移动端内核随应用发布，不支持在线升级");
         }
 
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let base = normalize_base(base, KERNEL_BASE_URL);
-            let manifest = fetch_manifest(&base, KERNEL_BASE_URL).await?;
             let platform = platform_key();
             let current = crate::kernel::installed_version();
+            let merged = collect_channel_versions(&base, KERNEL_BASE_URL, channel).await?;
 
-            let mut versions: Vec<String> = manifest
-                .versions
+            let mut choices: Vec<VersionChoice> = Vec::new();
+            let mut seen: Vec<String> = Vec::new();
+            for (ch, entry) in merged {
+                if seen.contains(&entry.version) {
+                    continue;
+                }
+                if !entry.assets.contains_key(&platform) {
+                    continue;
+                }
+                let reason = if entry.rpc_schema > SUPPORTED_RPC_SCHEMA {
+                    Some(format!(
+                        "该内核的 RPC 契约版本为 {}，当前客户端只支持 {}（请先升级客户端）",
+                        entry.rpc_schema, SUPPORTED_RPC_SCHEMA
+                    ))
+                } else if !version_ge(studio_version, &entry.min_studio_version) {
+                    Some(format!(
+                        "需要客户端 ≥ {}（当前 {}）",
+                        entry.min_studio_version, studio_version
+                    ))
+                } else {
+                    None
+                };
+                seen.push(entry.version.clone());
+                choices.push(VersionChoice {
+                    version: entry.version,
+                    channel: ch.as_str().to_string(),
+                    compatible: reason.is_none(),
+                    reason,
+                    notes: (!entry.notes.is_empty()).then_some(entry.notes),
+                });
+            }
+
+            let latest = choices
                 .iter()
-                .filter(|v| v.assets.contains_key(&platform))
-                .filter(|v| version_ge(studio_version, &v.min_studio_version))
-                .map(|v| v.version.clone())
-                .collect();
-            versions.sort_by_key(|v| version_key(v));
-            versions.reverse();
-
-            let latest = versions
-                .first()
-                .cloned()
-                .or_else(|| (!manifest.latest.is_empty()).then(|| manifest.latest.clone()));
-
+                .find(|c| c.compatible)
+                .map(|c| c.version.clone());
             let available = match (&current, &latest) {
                 (None, Some(_)) => true,
-                (Some(c), Some(l)) => version_key(l) > version_key(c),
+                (Some(c), Some(l)) => Version::parse(l) > Version::parse(c),
                 _ => false,
             };
+            let versions: Vec<String> = choices
+                .iter()
+                .filter(|c| c.compatible)
+                .map(|c| c.version.clone())
+                .collect();
 
             Ok(UpdateInfo {
                 platform,
@@ -237,6 +542,8 @@ pub mod kernel {
                 available,
                 versions,
                 source: base,
+                channel: channel.as_str().to_string(),
+                choices,
             })
         }
     }
@@ -246,25 +553,26 @@ pub mod kernel {
         base: &str,
         version: &str,
         studio_version: &str,
+        channel: Channel,
     ) -> anyhow::Result<()> {
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
-            let _ = (base, version, studio_version);
+            let _ = (base, version, studio_version, channel);
             bail!("移动端内核随应用发布，不支持在线升级");
         }
 
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let base = normalize_base(base, KERNEL_BASE_URL);
-            let manifest = fetch_manifest(&base, KERNEL_BASE_URL).await?;
             let platform = platform_key();
 
-            let entry = pick(&manifest, version)
-                .with_context(|| format!("manifest 中没有版本 {version}"))?;
-            if entry.rpc_schema > 1 {
+            let (source_channel, entry) =
+                find_version(&base, KERNEL_BASE_URL, channel, version).await?;
+            if entry.rpc_schema > SUPPORTED_RPC_SCHEMA {
                 bail!(
-                    "内核 {version} 的 RPC 契约版本为 {}，当前 GUI 不支持（请先升级客户端）",
-                    entry.rpc_schema
+                    "内核 {version} 的 RPC 契约版本为 {}，当前 GUI 只支持 {}（请先升级客户端）",
+                    entry.rpc_schema,
+                    SUPPORTED_RPC_SCHEMA
                 );
             }
             if !version_ge(studio_version, &entry.min_studio_version) {
@@ -276,9 +584,12 @@ pub mod kernel {
             let asset = entry
                 .assets
                 .get(&platform)
-                .with_context(|| format!("内核 {version} 未提供 {platform} 平台的包"))?;
+                .with_context(|| format!("内核 {version} 未提供 {platform} 平台的包"))?
+                .clone();
 
-            let bytes = download_verified(&base, asset).await?;
+            // 资产在通道目录下：`<base><channel>/<file>`
+            let asset_base = format!("{}{}/", base, source_channel.as_str());
+            let bytes = download_verified(&asset_base, &asset).await?;
 
             let tmp = tempfile::tempdir().context("创建临时目录失败")?;
             let archive = tmp.path().join("kernel.zip");
@@ -385,47 +696,57 @@ pub mod app {
         pub available: bool,
         pub versions: Vec<String>,
         pub source: String,
+        pub channel: String,
+        /// 各候选版本（UI 的「选择版本」下拉用）
+        pub choices: Vec<VersionChoice>,
     }
 
     fn current_version() -> String {
         env!("CARGO_PKG_VERSION").to_string()
     }
 
-    /// 检查应用更新。
-    pub async fn check_update(base: &str) -> anyhow::Result<AppUpdateInfo> {
+    /// 检查应用更新（合并「当前通道及以下」的清单）。
+    pub async fn check_update(base: &str, channel: Channel) -> anyhow::Result<AppUpdateInfo> {
         let base = normalize_base(base, APP_BASE_URL);
-        let manifest = fetch_manifest(&base, APP_BASE_URL).await?;
         let platform = platform_key();
         let current = current_version();
+        let merged = collect_channel_versions(&base, APP_BASE_URL, channel).await?;
 
-        let mut versions: Vec<String> = manifest
-            .versions
-            .iter()
-            .filter(|v| v.assets.contains_key(&platform))
-            .map(|v| v.version.clone())
-            .collect();
-        versions.sort_by_key(|v| version_key(v));
-        versions.reverse();
+        let mut choices: Vec<VersionChoice> = Vec::new();
+        for (ch, entry) in merged {
+            if !entry.assets.contains_key(&platform) {
+                continue;
+            }
+            if choices.iter().any(|c| c.version == entry.version) {
+                continue;
+            }
+            choices.push(VersionChoice {
+                version: entry.version,
+                channel: ch.as_str().to_string(),
+                compatible: true,
+                reason: None,
+                notes: (!entry.notes.is_empty()).then_some(entry.notes),
+            });
+        }
 
-        let entry = versions
-            .first()
-            .and_then(|v| pick(&manifest, v).cloned())
-            .or_else(|| pick(&manifest, &manifest.latest).cloned());
-
-        let latest = entry.as_ref().map(|e| e.version.clone());
+        let latest = choices.first().map(|c| c.version.clone());
         let available = latest
             .as_ref()
-            .map(|l| version_key(l) > version_key(&current))
+            .map(|l| Version::parse(l) > Version::parse(&current))
             .unwrap_or(false);
+        let notes = choices.first().and_then(|c| c.notes.clone());
+        let versions = choices.iter().map(|c| c.version.clone()).collect();
 
         Ok(AppUpdateInfo {
             platform,
             current,
             latest,
-            notes: entry.map(|e| e.notes).filter(|n| !n.is_empty()),
+            notes,
             available,
             versions,
             source: base,
+            channel: channel.as_str().to_string(),
+            choices,
         })
     }
 
@@ -436,19 +757,21 @@ pub mod app {
     pub async fn download_installer(
         base: &str,
         version: &str,
+        channel: Channel,
         dest_dir: Option<&std::path::Path>,
     ) -> anyhow::Result<PathBuf> {
         let base = normalize_base(base, APP_BASE_URL);
-        let manifest = fetch_manifest(&base, APP_BASE_URL).await?;
         let platform = platform_key();
-        let entry =
-            pick(&manifest, version).with_context(|| format!("manifest 中没有版本 {version}"))?;
+        let (source_channel, entry) = find_version(&base, APP_BASE_URL, channel, version).await?;
         let asset = entry
             .assets
             .get(&platform)
-            .with_context(|| format!("应用 {version} 未提供 {platform} 平台的安装包"))?;
+            .with_context(|| format!("应用 {version} 未提供 {platform} 平台的安装包"))?
+            .clone();
 
-        let bytes = download_verified(&base, asset).await?;
+        // 资产在通道目录下：`<base><channel>/<file>`
+        let asset_base = format!("{}{}/", base, source_channel.as_str());
+        let bytes = download_verified(&asset_base, &asset).await?;
         let dir = match dest_dir {
             Some(dir) => dir.to_path_buf(),
             None => std::env::temp_dir().join("exvlan-update"),
@@ -460,14 +783,47 @@ pub mod app {
     }
 
     /// 官方 updater 检查（桌面）：成功返回 Some，未配置/网络失败返回 None（由上层回退自建）。
+    ///
+    /// 端点按**通道**给：先算出「当前通道及以下」里最新的那一档，再把 updater 的
+    /// endpoint 指向它 —— [`tauri_plugin_updater`] 自己只认单条线，无法做向下包含。
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    pub async fn check_update_official(app: &tauri::AppHandle) -> Option<AppUpdateInfo> {
+    pub async fn check_update_official(
+        app: &tauri::AppHandle,
+        base: &str,
+        channel: Channel,
+    ) -> Option<AppUpdateInfo> {
         use tauri_plugin_updater::UpdaterExt;
 
-        let updater = match app.updater() {
+        let base = normalize_base(base, APP_BASE_URL);
+        let winner = match collect_channel_versions(&base, APP_BASE_URL, channel).await {
+            Ok(list) => list
+                .into_iter()
+                .find(|(_, e)| e.assets.contains_key(&platform_key()))
+                .map(|(ch, _)| ch),
+            Err(err) => {
+                eprintln!("[upgrade] 通道清单不可用: {err:#}");
+                None
+            }
+        }?;
+
+        let endpoint = channel_latest_url(&base, APP_BASE_URL, winner);
+        let url = match tauri::Url::parse(&endpoint) {
             Ok(u) => u,
             Err(err) => {
-                eprintln!("[upgrade] 官方 updater 不可用: {err}");
+                eprintln!("[upgrade] 非法 updater 端点 {endpoint}: {err}");
+                return None;
+            }
+        };
+        let updater = match app.updater_builder().endpoints(vec![url]) {
+            Ok(builder) => match builder.build() {
+                Ok(u) => u,
+                Err(err) => {
+                    eprintln!("[upgrade] 官方 updater 不可用: {err}");
+                    return None;
+                }
+            },
+            Err(err) => {
+                eprintln!("[upgrade] 官方 updater 端点失败: {err}");
                 return None;
             }
         };
@@ -490,7 +846,9 @@ pub mod app {
             notes: notes.filter(|n| !n.is_empty()),
             available,
             versions: Vec::new(),
-            source: "official".to_string(),
+            source: format!("official:{}", winner.as_str()),
+            channel: channel.as_str().to_string(),
+            choices: Vec::new(),
         })
     }
 
@@ -558,6 +916,81 @@ mod tests {
                 || key.starts_with("linux-")
                 || key.starts_with("android-")
         );
+    }
+
+    #[test]
+    fn version_orders_by_base_then_stage_then_seq() {
+        // 同 base：正式版 > rc > beta > dev > nightly
+        let v = Version::parse;
+        assert!(v("26.410.20712") > v("26.410.20712-rc.1"));
+        assert!(v("26.410.20712-rc.1") > v("26.410.20712-beta.1"));
+        assert!(v("26.410.20712-beta.1") > v("26.410.20712-dev.1"));
+        assert!(v("26.410.20712-dev.1") > v("26.410.20712-nightly.1115"));
+        // 同 base + 同 stage：按 seq
+        assert!(v("26.410.20712-dev.2") > v("26.410.20712-dev.1"));
+        // 跨 base：base 优先（新 base 的 nightly > 旧 base 的正式版）
+        assert!(v("26.410.20713-nightly.1115") > v("26.410.20712"));
+    }
+
+    #[test]
+    fn legacy_pre_stage_sits_below_nightly() {
+        let v = Version::parse;
+        assert!(v("26.410.20712-pre.20") < v("26.410.20712-nightly.1115"));
+        // 所以 pre.20 用户能收到同 base 的 dev.1（stage 更高）
+        assert!(v("26.410.20712-dev.1") > v("26.410.20712-pre.20"));
+    }
+
+    #[test]
+    fn visibility_is_inclusive_downwards() {
+        assert_eq!(Channel::Stable.visible(), vec![Channel::Stable]);
+        assert_eq!(
+            Channel::Dev.visible(),
+            vec![Channel::Stable, Channel::Rc, Channel::Beta, Channel::Dev]
+        );
+        assert_eq!(Channel::Nightly.visible().len(), 5);
+    }
+
+    #[test]
+    fn channel_inferred_from_installed_version() {
+        assert_eq!(
+            Channel::infer_from_version("26.410.20712-pre.20"),
+            Channel::Dev
+        );
+        assert_eq!(
+            Channel::infer_from_version("26.410.20713-dev.1"),
+            Channel::Dev
+        );
+        assert_eq!(
+            Channel::infer_from_version("26.410.20713-nightly.1115"),
+            Channel::Nightly
+        );
+        assert_eq!(Channel::infer_from_version("26.410.20713-rc.1"), Channel::Rc);
+        assert_eq!(Channel::infer_from_version("26.410.20713"), Channel::Stable);
+    }
+
+    #[test]
+    fn channel_urls_keep_base_and_channel_segment() {
+        let base = "https://dl.example/upgrade/";
+        assert_eq!(
+            channel_manifest_url(base, APP_BASE_URL, Channel::Dev),
+            "https://dl.example/upgrade/dev/manifest.json"
+        );
+        assert_eq!(
+            channel_latest_url(base, APP_BASE_URL, Channel::Nightly),
+            "https://dl.example/upgrade/nightly/latest.json"
+        );
+        // 没写结尾斜杠也要归一
+        assert_eq!(
+            channel_manifest_url("https://dl.example/core", KERNEL_BASE_URL, Channel::Rc),
+            "https://dl.example/core/rc/manifest.json"
+        );
+    }
+
+    #[test]
+    fn channel_parse_accepts_aliases() {
+        assert_eq!(Channel::parse("PRE"), Some(Channel::Rc));
+        assert_eq!(Channel::parse("dev"), Some(Channel::Dev));
+        assert_eq!(Channel::parse("bogus"), None);
     }
 
     #[test]

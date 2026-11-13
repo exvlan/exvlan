@@ -197,6 +197,15 @@ export async function setServiceStatus(enable: boolean) {
   return await invoke("set_service_status", { enable });
 }
 
+/** 清单里的一个候选版本（不兼容时带原因，UI 置灰）。 */
+export interface VersionChoice {
+  version: string;
+  channel: string;
+  compatible: boolean;
+  reason?: string;
+  notes?: string;
+}
+
 export interface KernelUpdateInfo {
   platform: string;
   current?: string;
@@ -204,14 +213,16 @@ export interface KernelUpdateInfo {
   available: boolean;
   versions: string[];
   source: string;
+  channel: string;
+  choices: VersionChoice[];
 }
 
-export async function kernelUpdateInfo(source?: string) {
-  return await invoke<KernelUpdateInfo>("kernel_update_info", { source });
+export async function kernelUpdateInfo(source?: string, channel?: string) {
+  return await invoke<KernelUpdateInfo>("kernel_update_info", { source, channel });
 }
 
-export async function kernelInstallVersion(version: string, source?: string) {
-  return await invoke("kernel_install_version", { version, source });
+export async function kernelInstallVersion(version: string, source?: string, channel?: string) {
+  return await invoke("kernel_install_version", { version, source, channel });
 }
 
 export interface AppUpdateInfo {
@@ -222,14 +233,16 @@ export interface AppUpdateInfo {
   available: boolean;
   versions: string[];
   source: string;
+  channel: string;
+  choices: VersionChoice[];
 }
 
-export async function appUpdateInfo(source?: string) {
-  return await invoke<AppUpdateInfo>("app_update_info", { source });
+export async function appUpdateInfo(source?: string, channel?: string) {
+  return await invoke<AppUpdateInfo>("app_update_info", { source, channel });
 }
 
-export async function appDownloadUpdate(version: string, source?: string) {
-  return await invoke<string>("app_download_update", { version, source });
+export async function appDownloadUpdate(version: string, source?: string, channel?: string) {
+  return await invoke<string>("app_download_update", { version, source, channel });
 }
 
 export async function appInstallUpdate(path: string) {
@@ -237,8 +250,44 @@ export async function appInstallUpdate(path: string) {
 }
 
 /** 安装应用更新：桌面优先官方 updater（成功后自动重启），失败回退「下载 + 打开安装包」。 */
-export async function appUpdateApply(version: string, source?: string) {
-  return await invoke("app_update_apply", { version, source });
+export async function appUpdateApply(version: string, source?: string, channel?: string) {
+  return await invoke("app_update_apply", { version, source, channel });
+}
+
+// ---------------------------------------------------------------------------
+// 更新通道
+// ---------------------------------------------------------------------------
+
+export type UpdateChannel = "stable" | "rc" | "beta" | "dev" | "nightly";
+
+export interface UpdatePrefs {
+  channel: UpdateChannel;
+  auto_check: boolean;
+  auto_install_kernel: boolean;
+  /** 该通道下已跳过的版本 */
+  skipped?: string | null;
+  /** 环境变量覆盖（实验室用；非空时 UI 要提示） */
+  env_override?: string | null;
+}
+
+export async function getUpdatePrefs() {
+  return await invoke<UpdatePrefs>("get_update_prefs");
+}
+
+export async function setUpdateChannel(channel: UpdateChannel) {
+  return await invoke<UpdateChannel>("set_update_channel", { channel });
+}
+
+export async function setUpdateFlag(key: "auto_check" | "auto_install_kernel", value: boolean) {
+  return await invoke("set_update_flag", { key, value });
+}
+
+export async function skipUpdateVersion(version: string) {
+  return await invoke("skip_update_version", { version });
+}
+
+export async function unskipUpdateVersion() {
+  return await invoke("unskip_update_version");
 }
 
 export async function getServiceStatus() {

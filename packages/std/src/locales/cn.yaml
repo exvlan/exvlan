@@ -114,6 +114,7 @@ collect_network_infos: 收集网络信息
 error: 错误
 
 settings:
+  update: 更新
   title: 设置
   privileged_service: 特权服务
   privileged_service_ready: 已安装并运行中
@@ -997,3 +998,38 @@ port_conflict:
     占用者是其它程序（{name}）。结束它，或改 service.toml 的 rpc_portal 换端口。
   copy_cmd: 复制处理指引
   copied: 已复制
+
+update:
+  title: 更新
+  channel: 更新通道
+  channel_hint: 选中某档即可看到该档及更稳档位的版本。
+  channel_stable: 正式版
+  channel_stable_desc: 只收正式发布版本，最稳。
+  channel_rc: 预览版
+  channel_rc_desc: 正式版之前的候选版本，只修问题不加功能。
+  channel_beta: 测试版
+  channel_beta_desc: 功能基本齐了，等验证。
+  channel_dev: 开发版
+  channel_dev_desc: 开发主线（历史 pre.* 已并入此档），功能最新但可能不稳定。
+  channel_nightly: 夜间版
+  channel_nightly_desc: 每天从开发主线自动构建，最新也最容易出问题。
+  app: 应用
+  kernel: 内核
+  available: 有更新
+  up_to_date: 已是最新版本
+  up_to_date_short: 最新
+  choose_version: 选择版本
+  install: 安装
+  install_started: 已开始安装
+  skip: 跳过此版本
+  skipped: 已跳过
+  skipped_hint: "已跳过 {version}"
+  unskip: 取消跳过
+  auto_check: 启动后自动检查更新
+  auto_install_kernel: 自动安装内核更新
+  auto_install_kernel_hint: 默认关闭。开启后后台自动换内核（失败会自动回滚），适合无人值守节点。
+  check: 检查更新
+  teaser: 想尝鲜？可把通道切到预览版 / 测试版 / 开发版 / 夜间版。
+  remote_notice: 当前连着远端目标：应用更新需在那台机器上操作。
+  remote_kernel_hint: 远端目标的内核升级需要网关支持（即将提供），现在请在对端本机操作。
+  env_override: 环境变量 EXVLAN_UPDATE_CHANNEL={value} 正在覆盖这里的设置。

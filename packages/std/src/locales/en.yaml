@@ -114,6 +114,7 @@ collect_network_infos: Collect Network Infos
 error: Error
 
 settings:
+  update: Update
   title: Settings
   privileged_service: Privileged service
   privileged_service_ready: Installed and running
@@ -999,3 +1000,38 @@ port_conflict:
     Held by another program ({name}). Stop it, or change rpc_portal in service.toml.
   copy_cmd: Copy instructions
   copied: Copied
+
+update:
+  title: Update
+  channel: Update channel
+  channel_hint: Selecting a channel shows versions from that channel and all more stable ones.
+  channel_stable: Stable
+  channel_stable_desc: Only released versions — the safest choice.
+  channel_rc: Preview
+  channel_rc_desc: Release candidate before stable; fixes only.
+  channel_beta: Beta
+  channel_beta_desc: Feature complete, awaiting validation.
+  channel_dev: Dev
+  channel_dev_desc: Development line (previous pre.* builds belong here) — newest, may break.
+  channel_nightly: Nightly
+  channel_nightly_desc: Automatic daily build from the development branch.
+  app: App
+  kernel: Kernel
+  available: Update available
+  up_to_date: You are on the latest version
+  up_to_date_short: Latest
+  choose_version: Choose version
+  install: Install
+  install_started: Installation started
+  skip: Skip this version
+  skipped: Skipped
+  skipped_hint: "Skipped {version}"
+  unskip: Unskip
+  auto_check: Check for updates after launch
+  auto_install_kernel: Install kernel updates automatically
+  auto_install_kernel_hint: Off by default. When on, the kernel is replaced in the background (auto rollback on failure) — for unattended nodes.
+  check: Check for updates
+  teaser: Want early builds? Switch the channel to Preview / Beta / Dev / Nightly.
+  remote_notice: Connected to a remote target — app updates must be run on that machine.
+  remote_kernel_hint: Remote kernel upgrades need gateway support (coming soon); for now upgrade on that machine.
+  env_override: Environment variable EXVLAN_UPDATE_CHANNEL={value} overrides this setting.

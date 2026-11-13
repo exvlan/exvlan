@@ -5473,12 +5473,76 @@ fn service_reinstall(_opts: serde_json::Value) -> Result<(), String> {
     Err("该功能仅桌面端支持".to_string())
 }
 
+/// 解析更新通道：显式参数 > 环境变量 > prefs > 按构建版本串推断。
+fn resolve_update_channel(app: &AppHandle, explicit: Option<&str>) -> upgrade::Channel {
+    if let Some(ch) = explicit.and_then(upgrade::Channel::parse) {
+        return ch;
+    }
+    if let Some(ch) = std::env::var("EXVLAN_UPDATE_CHANNEL")
+        .ok()
+        .and_then(|v| upgrade::Channel::parse(&v))
+    {
+        return ch;
+    }
+    if let Some(ch) = prefs::update_channel(app).and_then(|v| upgrade::Channel::parse(&v)) {
+        return ch;
+    }
+    upgrade::Channel::infer_from_version(BUILD_VERSION)
+}
+
+#[tauri::command]
+fn get_update_channel(app: AppHandle) -> String {
+    resolve_update_channel(&app, None).as_str().to_string()
+}
+
+#[tauri::command]
+fn set_update_channel(app: AppHandle, channel: String) -> Result<String, String> {
+    prefs::set_update_channel(&app, &channel)?;
+    logger::event("update.channel", format!("set to {channel}"));
+    Ok(resolve_update_channel(&app, None).as_str().to_string())
+}
+
+/// 更新偏好（通道 / 自动检查 / 自动装内核 / 已跳过版本）。
+#[tauri::command]
+fn get_update_prefs(app: AppHandle) -> serde_json::Value {
+    let channel = resolve_update_channel(&app, None);
+    serde_json::json!({
+        "channel": channel.as_str(),
+        "auto_check": prefs::auto_check(&app),
+        "auto_install_kernel": prefs::auto_install_kernel(&app),
+        "skipped": prefs::skipped_version(&app, channel.as_str()),
+        "env_override": std::env::var("EXVLAN_UPDATE_CHANNEL").ok(),
+    })
+}
+
+#[tauri::command]
+fn set_update_flag(app: AppHandle, key: String, value: bool) -> Result<(), String> {
+    prefs::set_update_flag(&app, &key, value)
+}
+
+#[tauri::command]
+fn skip_update_version(app: AppHandle, version: String) -> Result<(), String> {
+    let channel = resolve_update_channel(&app, None);
+    prefs::set_skipped_version(&app, channel.as_str(), Some(&version))
+}
+
+#[tauri::command]
+fn unskip_update_version(app: AppHandle) -> Result<(), String> {
+    let channel = resolve_update_channel(&app, None);
+    prefs::set_skipped_version(&app, channel.as_str(), None)
+}
+
 /// 内核更新信息（当前版本 / 最新版本 / 可用版本列表 / 分发源）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
-async fn kernel_update_info(source: Option<String>) -> Result<upgrade::kernel::UpdateInfo, String> {
+async fn kernel_update_info(
+    app: AppHandle,
+    source: Option<String>,
+    channel: Option<String>,
+) -> Result<upgrade::kernel::UpdateInfo, String> {
+    let ch = resolve_update_channel(&app, channel.as_deref());
     let base = source.unwrap_or_else(|| upgrade::KERNEL_BASE_URL.to_string());
-    upgrade::kernel::check_update(&base, env!("CARGO_PKG_VERSION"))
+    upgrade::kernel::check_update(&base, env!("CARGO_PKG_VERSION"), ch)
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -5486,23 +5550,43 @@ async fn kernel_update_info(source: Option<String>) -> Result<upgrade::kernel::U
 /// 安装指定内核版本（下载 → 校验 → 提权写入系统目录 → 重启服务）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
-async fn kernel_install_version(version: String, source: Option<String>) -> Result<(), String> {
+async fn kernel_install_version(
+    app: AppHandle,
+    version: String,
+    source: Option<String>,
+    channel: Option<String>,
+) -> Result<(), String> {
     logger::record("kernel.install", format!("version={version}"));
+    let ch = resolve_update_channel(&app, channel.as_deref());
     let base = source.unwrap_or_else(|| upgrade::KERNEL_BASE_URL.to_string());
-    upgrade::kernel::install_version(&base, &version, env!("CARGO_PKG_VERSION"))
+    upgrade::kernel::install_version(&base, &version, env!("CARGO_PKG_VERSION"), ch)
         .await
         .map_err(|e| format!("{e:#}"))
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
-async fn kernel_update_info(_source: Option<String>) -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({"available": false, "versions": []}))
+async fn kernel_update_info(
+    app: AppHandle,
+    _source: Option<String>,
+    channel: Option<String>,
+) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "available": false,
+        "versions": [],
+        "channel": resolve_update_channel(&app, channel.as_deref()).as_str(),
+        "choices": [],
+    }))
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
-async fn kernel_install_version(_version: String, _source: Option<String>) -> Result<(), String> {
+async fn kernel_install_version(
+    _app: AppHandle,
+    _version: String,
+    _source: Option<String>,
+    _channel: Option<String>,
+) -> Result<(), String> {
     Err("移动端内核随应用发布，不支持在线升级".to_string())
 }
 
@@ -5513,16 +5597,19 @@ async fn kernel_install_version(_version: String, _source: Option<String>) -> Re
 async fn app_update_info(
     app: AppHandle,
     source: Option<String>,
+    channel: Option<String>,
 ) -> Result<upgrade::app::AppUpdateInfo, String> {
+    let ch = resolve_update_channel(&app, channel.as_deref());
+    let base = source
+        .clone()
+        .unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
     if source.is_none() {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        if let Some(info) = upgrade::app::check_update_official(&app).await {
+        if let Some(info) = upgrade::app::check_update_official(&app, &base, ch).await {
             return Ok(info);
         }
-        let _ = &app;
     }
-    let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
-    upgrade::app::check_update(&base)
+    upgrade::app::check_update(&base, ch)
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -5533,8 +5620,10 @@ async fn app_update_apply(
     app: AppHandle,
     version: String,
     source: Option<String>,
+    channel: Option<String>,
 ) -> Result<(), String> {
     logger::record("update.apply", format!("version={version}"));
+    let ch = resolve_update_channel(&app, channel.as_deref());
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if source.is_none() {
         match upgrade::app::install_official(&app).await {
@@ -5546,7 +5635,7 @@ async fn app_update_apply(
     }
     let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
     let dest = update_download_dir(&app)?;
-    let path = upgrade::app::download_installer(&base, &version, dest.as_deref())
+    let path = upgrade::app::download_installer(&base, &version, ch, dest.as_deref())
         .await
         .map_err(|e| format!("{e:#}"))?;
     app_install_update(app, path.display().to_string())
@@ -5558,10 +5647,12 @@ async fn app_download_update(
     app: AppHandle,
     version: String,
     source: Option<String>,
+    channel: Option<String>,
 ) -> Result<String, String> {
+    let ch = resolve_update_channel(&app, channel.as_deref());
     let base = source.unwrap_or_else(|| upgrade::APP_BASE_URL.to_string());
     let dest = update_download_dir(&app)?;
-    upgrade::app::download_installer(&base, &version, dest.as_deref())
+    upgrade::app::download_installer(&base, &version, ch, dest.as_deref())
         .await
         .map(|p| p.display().to_string())
         .map_err(|e| format!("{e:#}"))
@@ -6001,6 +6092,12 @@ pub fn run_gui() -> std::process::ExitCode {
             gateway_remote::gateway_delete_instance,
             gateway_remote::gateway_validate,
             runtime_apply,
+            get_update_channel,
+            set_update_channel,
+            get_update_prefs,
+            set_update_flag,
+            skip_update_version,
+            unskip_update_version,
             remote_ping,
             service_uninstall,
             service_whitelist_info,

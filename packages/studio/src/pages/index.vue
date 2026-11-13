@@ -25,6 +25,7 @@ import { GatewayRemoteClient } from "~/modules/gateway_api";
 import {
   gatewayRemotes,
   gatewaySystem,
+  getUpdatePrefs,
   logDiagStep,
   uploadDiagnostics,
 } from "~/composables/backend";
@@ -349,6 +350,8 @@ async function retryStartup() {
 }
 const appUpdateDialogVisible = ref(false);
 const appUpdateVersion = ref("");
+/** 有可用更新（应用或内核）→ 设置齿轮上的小红点；不弹窗打扰。 */
+const hasUpdateDot = ref(false);
 const appUpdateNotes = ref("");
 const appUpdating = ref(false);
 
@@ -920,28 +923,31 @@ async function ensureLocalKernel(mode: Mode) {
   await ensureKernelServiceGuarded(merged);
 }
 
-/** 应用更新：启动静默检查（24h 节流，已忽略的版本不再打扰）。 */
+/**
+ * 启动静默检查（24h 节流）：
+ * - 尊重设置里的「自动检查」（开关在 prefs）；
+ * - 有更新只点小红点，不弹窗；
+ * - 点过「跳过此版本」的不再提示（后端按通道记录）。
+ */
 async function maybeCheckAppUpdate() {
   const KEY_LAST = "upgrade_last_check";
-  const KEY_IGNORED = "upgrade_ignored_version";
-
   const last = Number(localStorage.getItem(KEY_LAST) || 0);
   if (Date.now() - last < 24 * 3600 * 1000) {
     return;
   }
 
   try {
+    const prefs = await getUpdatePrefs();
+    if (!prefs.auto_check) {
+      return;
+    }
     const info = await appUpdateInfo();
     localStorage.setItem(KEY_LAST, String(Date.now()));
-    if (!info.available || !info.latest) {
-      return;
+    if (info.available && info.latest && prefs.skipped !== info.latest) {
+      hasUpdateDot.value = true;
+      appUpdateVersion.value = info.latest;
+      appUpdateNotes.value = info.notes || "";
     }
-    if (localStorage.getItem(KEY_IGNORED) === info.latest) {
-      return;
-    }
-    appUpdateVersion.value = info.latest;
-    appUpdateNotes.value = info.notes || "";
-    appUpdateDialogVisible.value = true;
   } catch (e) {
     // 更新源未同步/离线：静默
     console.warn("app update check failed", e);
@@ -1536,9 +1542,15 @@ const configServerConnectionStatus = computed(() => {
         icon="pi pi-cog"
         text
         rounded
+        class="relative"
         :aria-label="t('settings.title')"
-        @click="settingsVisible = true"
-      />
+        @click="
+          settingsVisible = true;
+          hasUpdateDot = false;
+        "
+      >
+        <span v-if="hasUpdateDot" class="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
+      </Button>
       <Button
         icon="pi pi-power-off"
         text
@@ -1556,6 +1568,7 @@ const configServerConnectionStatus = computed(() => {
     />
 
     <SettingsDialog
+      :remote-target="isGatewayTarget"
       v-model:visible="settingsVisible"
       :initial-section="settingsSection"
       :mode="currentMode"

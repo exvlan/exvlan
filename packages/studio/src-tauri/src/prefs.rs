@@ -31,6 +31,8 @@ struct Prefs {
     ui: UiSection,
     #[serde(default)]
     diag: DiagSection,
+    #[serde(default)]
+    update: UpdateSection,
     /// 未知键原样保留，避免升级丢数据。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     misc: BTreeMap<String, String>,
@@ -58,6 +60,23 @@ struct DiagSection {
     last_upload_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     updated_at: Option<String>,
+}
+
+/// 更新偏好：通道、自动检查、以及「跳过此版本」（按通道各记一个）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct UpdateSection {
+    /// `stable|rc|beta|dev|nightly`；缺省时按当前版本串推断
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    channel: Option<String>,
+    /// 启动后静默检查（默认开）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    auto_check: Option<bool>,
+    /// 自动安装内核更新（默认关，风险操作）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    auto_install_kernel: Option<bool>,
+    /// 用户点过「跳过此版本」的记录：channel → version
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    skipped: BTreeMap<String, String>,
 }
 
 /// Linux 的 state 目录（XDG）。Android/iOS 走 app_config_dir，不用这里。
@@ -280,6 +299,85 @@ pub fn set_ui_state(
         prefs.diag.updated_at = Some(crate::logger::timestamp());
     }
     save(&app, &prefs)
+}
+
+// ---------------------------------------------------------------------------
+// 更新通道（`[update]` 段）
+// ---------------------------------------------------------------------------
+
+/// 读通道偏好；未设置返回 `None`（由调用方按版本串推断）。
+pub fn update_channel(app: &tauri::AppHandle) -> Option<String> {
+    let _guard = prefs_guard();
+    let prefs = load_or_migrate(app);
+    prefs.update.channel.filter(|c| !c.trim().is_empty())
+}
+
+/// 写通道偏好（大小写归一，非法值返回错误）。
+pub fn set_update_channel(app: &tauri::AppHandle, channel: &str) -> Result<(), String> {
+    let normalized = channel.trim().to_ascii_lowercase();
+    if !matches!(
+        normalized.as_str(),
+        "stable" | "rc" | "beta" | "dev" | "nightly"
+    ) {
+        return Err(format!("未知通道: {channel}"));
+    }
+    let _guard = prefs_guard();
+    let mut prefs = load_or_migrate(app);
+    prefs.update.channel = Some(normalized);
+    save(app, &prefs)
+}
+
+/// 「跳过此版本」：该通道下已经跳过的版本号。
+pub fn skipped_version(app: &tauri::AppHandle, channel: &str) -> Option<String> {
+    let _guard = prefs_guard();
+    let prefs = load_or_migrate(app);
+    prefs.update.skipped.get(channel).cloned()
+}
+
+/// 记录/清除「跳过此版本」（`version = None` 表示取消跳过）。
+pub fn set_skipped_version(
+    app: &tauri::AppHandle,
+    channel: &str,
+    version: Option<&str>,
+) -> Result<(), String> {
+    let _guard = prefs_guard();
+    let mut prefs = load_or_migrate(app);
+    match version.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(v) => {
+            prefs
+                .update
+                .skipped
+                .insert(channel.to_string(), v.to_string());
+        }
+        None => {
+            prefs.update.skipped.remove(channel);
+        }
+    }
+    save(app, &prefs)
+}
+
+/// 启动时静默检查是否开启（默认开）。
+pub fn auto_check(app: &tauri::AppHandle) -> bool {
+    let _guard = prefs_guard();
+    load_or_migrate(app).update.auto_check.unwrap_or(true)
+}
+
+/// 自动安装内核更新是否开启（默认关）。
+pub fn auto_install_kernel(app: &tauri::AppHandle) -> bool {
+    let _guard = prefs_guard();
+    load_or_migrate(app).update.auto_install_kernel.unwrap_or(false)
+}
+
+/// 写开关（`key` 只接受 `auto_check` / `auto_install_kernel`）。
+pub fn set_update_flag(app: &tauri::AppHandle, key: &str, value: bool) -> Result<(), String> {
+    let _guard = prefs_guard();
+    let mut prefs = load_or_migrate(app);
+    match key {
+        "auto_check" => prefs.update.auto_check = Some(value),
+        "auto_install_kernel" => prefs.update.auto_install_kernel = Some(value),
+        other => return Err(format!("未知更新开关: {other}")),
+    }
+    save(app, &prefs)
 }
 
 /// 偏好文件路径（诊断用）。
