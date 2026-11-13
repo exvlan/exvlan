@@ -383,3 +383,36 @@ pre.17 在 macOS 真机（10.254.1.6，pre.16 → pre.17 实测）验收时暴�
 | F7  | `gateway` 的 `/system` 与 `migrate.done` 版本串缺 `-pre.N`                                                                                      | 统一用 `EXVLAN_BUILD_VERSION`（CI 注入），本地构建回落 crate 版本                                                                       |
 
 验收脚本同步加了第 6 项：检查内核 `--rpc-portal` 是否只绑回环（`script/lab/pre17-acceptance.sh`）。
+
+### 14.8 pre.19：Windows 控制面修复 + 移动端存储统一
+
+**W1（阻断）Windows 命名管道只支持 1 个并发实例**
+
+- 现象：GUI 启动后常驻一条会话连接，把唯一实例占死 → `exvlan-cli`/gateway/doctor/
+  GUI 的 `apply`/`mode.set`/`config.write` 全部 `ERROR_PIPE_BUSY (os error 231)`。
+- 根因：`pipe_loop()` 是「建 1 个 → 阻塞等连接 → 交线程 → 再建下一个」；
+  `PIPE_UNLIMITED_INSTANCES` 只是上限，不会自动扩容（Unix socket 有 backlog 才没暴露）。
+- 修法：启动时**预建 16 个实例**，每实例一个线程「等连接 → 处理 → 断开 → 再等」，
+  句柄复用；停服时自连 N 次逐个唤醒。客户端遇 231 走 `WaitNamedPipe(600ms)` 重试 4 次；
+  `doctor` 新增 `service.pipe_busy`。
+
+**W2 自更新在 Windows 上反复失败**
+
+- 现象：`service.apply` 三种失败（`服务返回空响应` = W1、`备份当前内核失败`、
+  `RPC 端口被占`）→ 每次升级都退回 UAC 提权。
+- 修法：`apply` 的 kernel → `.prev` 改名改为轮询重试（10×100ms，等 Windows 释放 exe 句柄）；
+  仍失败则**不动原内核**并返回 `kernel_busy`（GUI 提示「关掉所有 Exvlan 后重试」）。
+
+**W3 VS Code Remote-SSH 自动转发抢 1995**
+
+- 不是 WSL：该机 `wsl` 未安装，VS Code 用 Remote-SSH，默认 `remote.autoForwardPorts`
+  把对端 1995 绑到本机 `127.0.0.1:1995`。
+- 缓解：VS Code 设置 `remote.portsAttributes: { "1995": { "onAutoForward": "ignore" } }`；
+  产品侧保持「结构化错误 + GUI 卡片 + doctor 换端口」（不自动顺延）。
+
+**M1 移动端存储统一（配置目录唯一权威）**
+
+- 移动端也写 `<app_config_dir>/config/<id>.toml`（禁用 `.toml.disabled`），
+  `get_networks`/`set_networks` 变成配置目录视图；FFI 只负责按 TOML 起实例。
+- 旧 `networks.toml` 做**一次性转换**（`networks-migrated` 标记；任一条失败则保留源文件、
+  不写标记、下次重试），下一版删除这段（`networks/legacy.rs`）。
