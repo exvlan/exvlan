@@ -362,11 +362,11 @@ CI 硬门禁：`service.yml` 的 Windows 作业真实 `--install` 一次，断�
 
 ### 14.6 本地 IPC 的边界（pre.17 现状与后续）
 
-| 平台    | 鉴权                                                                                                                                                                                                      | 现状                                                                                          | 后续                                                    |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| macOS   | unix socket `0600` + 属主 uid（`peercred` 校验）                                                                                                                                                          | 已按属主收紧                                                                                  | —                                                       |
-| Windows | 命名管道 DACL：`SY`/`BA` 全权 + **安装者 SID** 读写（`exvlan_control::current_user_sid()` → `--install <uid> <sid>` → `service.toml owner_sid`，服务启动据此构造 ACL）；已加 `PIPE_REJECT_REMOTE_CLIENTS` | 已收窄：只有装服务的那个用户能连。SID 取不到/为空（旧安装）时**回退 `IU`** 并写日志，绝不锁门 | 升级安装会刷新 SID；`--diagnose` 显示 `owner_sid(boot)` |
-| Linux   | 无特权服务（core backend），systemd 以 root 跑内核                                                                                                                                                        | 配置目录 chown 给属主（0700），root 内核只读                                                  | 如需常驻服务再补 systemd 版 `exvlan-service`            |
+| 平台    | 鉴权                                                                                                                                                                                                      | 现状                                                                                          | 后续                                                      |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| macOS   | unix socket `0600` + 属主 uid（`peercred` 校验）                                                                                                                                                          | 已按属主收紧                                                                                  | —                                                         |
+| Windows | 命名管道 DACL：`SY`/`BA` 全权 + **安装者 SID** 读写（`exvlan_control::current_user_sid()` → `--install <uid> <sid>` → `service.toml owner_sid`，服务启动据此构造 ACL）；已加 `PIPE_REJECT_REMOTE_CLIENTS` | 已收窄：只有装服务的那个用户能连。SID 取不到/为空（旧安装）时**回退 `IU`** 并写日志，绝不锁门 | 升级安装会刷新 SID；`--diagnose` 显示 `owner_sid(boot)`   |
+| Linux   | 无特权服务（core backend），systemd 以 root 跑内核                                                                                                                                                        | 配置目录 chown 给属主（0700），root 内核只读                                                  | **dev.1 起补齐**：systemd unit + 前台 daemon（见 §14.12） |
 
 ### 14.7 pre.18 热修（真机验收抓出的问题）
 
@@ -559,3 +559,33 @@ port = 2016
 - 经 gateway 不支持 VPN 门户客户端增删（明确提示到对端本机操作）。
 - 裸核（core）模式没有服务托管 gateway：需要远端接入时另装系统服务（systemd/launchd/SCM）。
 - 移动端经 gateway 可用，但 `parse_config`（TOML→结构）依赖桌面端的本地转换命令，移动端会给出明确错误。
+
+### 14.12 Linux 服务平权（dev.1 的前置项）
+
+**为什么现在做**：三个平台不该有两套控制面。现状里 Linux 是「无服务 + GUI supervisor」，
+带来一整套 `stub` 分支（`control` / `studio::service_client`）与 `supervisor.rs`，
+而协议换代（IPC v2）、内核在线升级都需要一个**能跑服务的 Linux** 来做验证。
+长期发中间态版本、每次都要在两台 mac/win 机器上绕，不如一次补齐。
+
+**范围**
+
+| 项       | 内容                                                                                                      |
+| -------- | --------------------------------------------------------------------------------------------------------- |
+| 运行形态 | 前台 `--daemon`（容器/嵌入式）+ systemd unit（桌面/服务器），二者共用同一二进制                           |
+| 安装     | `--install` / `--uninstall` / `--status` / `--restart` / `--diagnose` 与 mac/win 同一套代码               |
+| IPC      | unix socket `/var/run/era.exvlan.studio/service.sock`，属主 = 安装者 uid，0600                            |
+| 托管     | 内核、gateway、tools 全部由服务托管（与 §14.10 的 `[gateway]` 配置一致）                                  |
+| 清理     | 删除 `studio/src-tauri/src/supervisor.rs`，以及 `control` / `studio::service_client` 的 Linux `stub` 分支 |
+| 打包     | Linux GUI 包带 `exvlan-service` + unit 模板；首次安装一次授权                                             |
+| 语义变化 | Linux 从「setcap + PDEATHSIG」变为「有服务（root）」，与 macOS/Windows 一致                               |
+
+**发布口径**：dev.1 不再按「做完一项就发一个预览」的节奏。dev.1 的门槛是下面全部完成：
+
+1. 更新通道（P1，已完成）
+2. IPC 协议 v2 接线（服务 + 三个客户端）
+3. Linux 服务平权（本节）
+4. 内核在线升级（`kernel.install`：下载 → sha256 → `kernel.sig` 验签 → 原子替换/回滚）
+5. 镜像通道化 + nightly（`pipeline.yml` 内）
+6. 双端（macOS/Windows）+ Linux 验证通过
+
+中间不再发「只改了一半」的预览版本。
