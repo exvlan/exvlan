@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
@@ -49,6 +49,12 @@ const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 const MINISIGN_PUBKEY: &str = "RWSFKUboUUaFQYx/ap73a7ySNbuI5kjDGsiVJBtceshu+Ml99YPMFqe9";
+
+/// 内核更新镜像根（`<base><channel>/manifest.json`，资产同目录）。
+///
+/// 优先级：`service.toml [update] base` > `kernel.install.start` 请求里的 `base`
+/// > 这个编译期常量。镜像端部署见 `docs/rules/workflow/kernel-mirror.md`。
+const KERNEL_BASE_URL: &str = "https://dl.exvlan.era-x.cn/core/";
 /// RPC 端口（在内核与 GUI 之间保持一致；service.toml 可覆盖）。
 const RPC_PORT: u16 = 1995;
 /// 默认只绑回环：远端管理走 gateway（`docs/decisions-7.3.md` §14.2）。
@@ -330,6 +336,20 @@ pub struct ServiceConfig {
     /// 迁移工具会把旧机器显式写成 true，避免升级即断远端直连。
     #[serde(default)]
     pub rpc_mesh_whitelist: bool,
+    /// 内核在线升级的下载源（`kernel.install.*`）。
+    #[serde(default)]
+    pub update: UpdateConfig,
+}
+
+/// `service.toml [update]`：内核升级任务的下载源覆盖。
+///
+/// 留空 = 走编译期常量 `KERNEL_BASE_URL`。私有部署/内网镜像改这里即可，
+/// 不必重新打包服务。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct UpdateConfig {
+    /// 镜像根，形如 `https://dl.example.com/core/`（末尾 `/` 可有可无）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
 }
 
 /// `service.toml [gateway]`：控制面网关的托管配置。
@@ -374,6 +394,7 @@ impl Default for ServiceConfig {
             rpc_portal: None,
             rpc_mesh_whitelist: false,
             gateway: GatewayConfig::default(),
+            update: UpdateConfig::default(),
         }
     }
 }
@@ -442,8 +463,9 @@ fn format_line(msg: &str) -> String {
 // ---------------------------------------------------------------------------
 
 use exvlan_control::protocol::{
-    ConfigEntry, ErrorCode, GatewayInfo, KernelInfo, Mode as ProtoMode, Occupant, PROTO, Payload,
-    Request as WireOp, Response, WhitelistInfo, WireRequest,
+    ConfigEntry, ErrorCode, GatewayInfo, InstallState, InstallStatus, KernelInfo,
+    Mode as ProtoMode, Occupant, PROTO, Payload, Request as WireOp, Response, WhitelistInfo,
+    WireRequest,
 };
 
 /// 两段解析的第一段：**只取 `proto` / `op`**，不碰业务字段。
@@ -558,6 +580,9 @@ struct Inner {
 pub struct State {
     paths: Paths,
     inner: Mutex<Inner>,
+    /// 内核升级任务单槽：同一时刻只允许一个任务，完成后保留供重复查询，
+    /// 直到下一次 `kernel.install.start` 覆盖。
+    install: Mutex<Option<Arc<InstallJob>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1294,6 +1319,7 @@ impl State {
                 gateway_child: None,
                 gateway_restarts: 0,
             }),
+            install: Mutex::new(None),
         }
     }
 
@@ -1698,6 +1724,264 @@ impl State {
     }
 
     // -----------------------------------------------------------------------
+    // 内核在线升级（kernel.install.*）：服务自己下载 + 校验 + 验签 + 安装
+    // -----------------------------------------------------------------------
+
+    fn install_lock(&self) -> std::sync::MutexGuard<'_, Option<Arc<InstallJob>>> {
+        self.install.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 占任务槽：上一个任务还没结束就拒绝（`KernelBusy`）。
+    ///
+    /// 结束（`done` / `failed`）的任务仍留在槽里，供重复查询，直到下一次
+    /// `start` 覆盖它 —— 客户端拿到 `job_id` 后可能轮询很久。
+    fn claim_install_slot(&self, job: Arc<InstallJob>) -> Result<(), ErrorCode> {
+        let mut slot = self.install_lock();
+        if slot.as_ref().is_some_and(|current| !current.is_finished()) {
+            return Err(ErrorCode::KernelBusy);
+        }
+        *slot = Some(job);
+        Ok(())
+    }
+
+    fn install_status(&self, id: &str) -> Response {
+        let slot = self.install_lock();
+        match slot.as_ref() {
+            Some(job) if job.id == id => Response::ok(Payload::KernelInstallStatus {
+                status: job.snapshot(),
+            }),
+            _ => Response::err(ErrorCode::NotFound, format!("升级任务不存在: {id}")),
+        }
+    }
+
+    fn install_start(
+        self: &Arc<Self>,
+        version: String,
+        channel: String,
+        base: Option<String>,
+    ) -> Response {
+        let version = version.trim().to_string();
+        let channel = channel.trim().to_string();
+        if version.is_empty() {
+            return Response::err(ErrorCode::BadRequest, "version 不能为空");
+        }
+        // version 会拼进下载文件名（`<core>/download/<version>.zip`），必须是
+        // 单个路径片段，不能被 `../` 带出 core 目录。
+        if !is_safe_segment(&version) {
+            return Response::err(ErrorCode::BadRequest, format!("版本号不合法: {version}"));
+        }
+        if !is_safe_segment(&channel) {
+            return Response::err(ErrorCode::BadRequest, format!("通道名不合法: {channel}"));
+        }
+        let base = self.install_base(base.as_deref());
+        if !(base.starts_with("http://") || base.starts_with("https://")) {
+            return Response::err(
+                ErrorCode::BadRequest,
+                format!("更新源必须是 http(s) 地址: {base}"),
+            );
+        }
+        let job = Arc::new(InstallJob::new(new_job_id(), version));
+        if let Err(code) = self.claim_install_slot(Arc::clone(&job)) {
+            return Response::err(code, "已有内核升级任务在运行，请等它结束后再试");
+        }
+        self.log(format!(
+            "kernel install {} started: {} from {base}{channel}/",
+            job.id, job.version
+        ));
+
+        let state = Arc::clone(self);
+        let worker = Arc::clone(&job);
+        let spawned = std::thread::Builder::new()
+            .name("kernel-install".to_string())
+            .spawn(move || {
+                if let Err(err) = state.run_install(&worker, &channel, &base) {
+                    state.log(format!(
+                        "kernel install {} failed: {} ({})",
+                        worker.id,
+                        err.message,
+                        err.code.as_str()
+                    ));
+                    worker.fail(err.code, err.message, err.rolled_back);
+                }
+            });
+        if let Err(err) = spawned {
+            // 线程起不来也必须把状态置成 Failed，不能只丢一条日志。
+            job.fail(
+                ErrorCode::Internal,
+                format!("无法启动下载线程: {err}"),
+                false,
+            );
+            return Response::err(ErrorCode::Internal, format!("无法启动下载线程: {err}"));
+        }
+        Response::ok(Payload::KernelInstallStart {
+            job_id: job.id.clone(),
+        })
+    }
+
+    /// 下载源优先级：`service.toml [update] base` > 请求里的 `base` > 编译期常量。
+    fn install_base(&self, requested: Option<&str>) -> String {
+        let configured = self.lock_inner().config.update.base.clone();
+        let raw = configured
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or_else(|| requested.map(str::trim).filter(|value| !value.is_empty()))
+            .unwrap_or(KERNEL_BASE_URL);
+        normalize_base(raw)
+    }
+
+    /// 跑一次完整升级；无论成败都清 staging（失败时保留下载包，便于复现）。
+    fn run_install(
+        &self,
+        job: &InstallJob,
+        channel: &str,
+        base: &str,
+    ) -> Result<(), InstallFailure> {
+        let staging = self.paths.core.join(format!("staging-{}", job.id));
+        let archive = self
+            .paths
+            .core
+            .join("download")
+            .join(format!("{}.zip", job.version));
+        let result = self.install_pipeline(job, &staging, &archive, channel, base);
+        if let Err(err) = std::fs::remove_dir_all(&staging)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            self.log(format!("清理 staging {} 失败: {err}", staging.display()));
+        }
+        match result {
+            Ok(()) => {
+                if let Err(err) = std::fs::remove_file(&archive) {
+                    self.log(format!("清理下载包 {} 失败: {err}", archive.display()));
+                }
+                Ok(())
+            }
+            Err(err) => {
+                self.log(format!("下载包保留在 {}（未自动重试）", archive.display()));
+                Err(err)
+            }
+        }
+    }
+
+    fn install_pipeline(
+        &self,
+        job: &InstallJob,
+        staging: &Path,
+        archive: &Path,
+        channel: &str,
+        base: &str,
+    ) -> Result<(), InstallFailure> {
+        let runtime = install_runtime().map_err(|err| {
+            InstallFailure::new(ErrorCode::Internal, format!("初始化下载运行时失败: {err}"))
+        })?;
+        let platform = exvlan_control::platform_key();
+        let manifest_url = format!("{base}{channel}/manifest.json");
+
+        job.update(InstallState::Downloading, 0, "读取更新清单…");
+        let manifest = runtime
+            .block_on(fetch_manifest(&manifest_url))
+            .map_err(|err| {
+                InstallFailure::new(
+                    ErrorCode::DownloadFailed,
+                    format!("拉取更新清单失败: {err}"),
+                )
+            })?;
+        let entry = manifest
+            .versions
+            .iter()
+            .find(|item| item.version == job.version)
+            .ok_or_else(|| {
+                InstallFailure::new(
+                    ErrorCode::NotFound,
+                    format!(
+                        "更新清单里没有版本 {}（最新为 {}）",
+                        job.version, manifest.latest
+                    ),
+                )
+            })?;
+        let asset = entry.assets.get(&platform).cloned().ok_or_else(|| {
+            InstallFailure::new(
+                ErrorCode::NotFound,
+                format!("版本 {} 没有 {platform} 平台的包", job.version),
+            )
+        })?;
+        if asset.sha256.trim().is_empty() {
+            return Err(InstallFailure::new(
+                ErrorCode::Sha256Mismatch,
+                "更新清单缺少 sha256，拒绝安装未校验的包",
+            ));
+        }
+
+        let url = format!("{base}{channel}/{}", asset.file);
+        if let Some(dir) = archive.parent() {
+            std::fs::create_dir_all(dir).map_err(|err| {
+                InstallFailure::new(
+                    ErrorCode::DownloadFailed,
+                    format!("创建下载目录 {} 失败: {err}", dir.display()),
+                )
+            })?;
+        }
+        job.update(
+            InstallState::Downloading,
+            1,
+            format!("下载 {}…", asset.file),
+        );
+
+        // 进度只按整数百分比刷新，避免每个 chunk 都抢一次状态锁。
+        let mut last_percent = -2;
+        runtime
+            .block_on(download_to(&url, archive, |done, total| {
+                let percent = match total.filter(|size| *size > 0) {
+                    Some(size) => ((done.min(size) * 70) / size) as i32,
+                    None => -1,
+                };
+                if percent == last_percent {
+                    return;
+                }
+                last_percent = percent;
+                job.update(
+                    InstallState::Downloading,
+                    percent,
+                    format!(
+                        "已下载 {} / {}",
+                        human_bytes(done),
+                        total
+                            .map(human_bytes)
+                            .unwrap_or_else(|| "未知大小".to_string())
+                    ),
+                );
+            }))
+            .map_err(|err| {
+                InstallFailure::new(ErrorCode::DownloadFailed, format!("下载 {url} 失败: {err}"))
+            })?;
+
+        job.update(InstallState::Verifying, 70, "校验 sha256…");
+        let actual = sha256_file(archive).map_err(|err| {
+            InstallFailure::new(ErrorCode::Internal, format!("计算 sha256 失败: {err}"))
+        })?;
+        if !actual.eq_ignore_ascii_case(asset.sha256.trim()) {
+            return Err(InstallFailure::new(
+                ErrorCode::Sha256Mismatch,
+                format!("sha256 不符：清单 {} / 实际 {actual}", asset.sha256.trim()),
+            ));
+        }
+
+        job.update(InstallState::Verifying, 78, "解包并检查签名…");
+        extract_staging(job, archive, &asset, staging)?;
+
+        job.update(
+            InstallState::Installing,
+            88,
+            format!("安装内核 {}…", job.version),
+        );
+        self.apply(staging).map_err(apply_failure)?;
+        job.update(InstallState::Restarting, 96, "重启内核…");
+        job.finish(format!("已升级到 {}", job.version));
+        self.log(format!("kernel install {} done: {}", job.id, job.version));
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // gateway 托管（服务模式）：随服务启停 + 异常退避重启
     // -----------------------------------------------------------------------
 
@@ -1967,7 +2251,7 @@ impl State {
     ///
     /// 业务逻辑（起停内核 / 白名单推导 / 配置读写 / 端口探测）全在各自的
     /// 函数里，这里不做任何编排。
-    fn handle(&self, req: WireOp) -> Response {
+    fn handle(self: &Arc<Self>, req: WireOp) -> Response {
         match req {
             WireOp::Hello => Response::ok(Payload::Hello {
                 proto: PROTO,
@@ -2199,15 +2483,13 @@ impl State {
                     Err(err) => Response::err(ErrorCode::KillFailed, err.to_string()),
                 },
             },
-            // 内核升级任务：协议已定，实现留到后续版本（本轮只占位，不做任何动作）。
-            WireOp::KernelInstallStart { .. } => Response::err(
-                ErrorCode::NotImplemented,
-                "kernel.install.start 尚未实现（请用 apply 走 GUI 的随包升级）",
-            ),
-            WireOp::KernelInstallStatus { id } => Response::err(
-                ErrorCode::NotImplemented,
-                format!("kernel.install.status 尚未实现（job {id}）"),
-            ),
+            // 内核在线升级：服务自己下载 + 校验 + 验签 + 安装。
+            WireOp::KernelInstallStart {
+                version,
+                channel,
+                base,
+            } => self.install_start(version, channel, base),
+            WireOp::KernelInstallStatus { id } => self.install_status(&id),
         }
     }
 
@@ -2447,6 +2729,410 @@ fn decode_signature_text(text: &str) -> String {
         return trimmed.to_string();
     };
     String::from_utf8(bytes).unwrap_or_else(|_| trimmed.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// 内核在线升级：任务句柄 / 镜像清单 / 下载
+// ---------------------------------------------------------------------------
+
+/// 一次升级任务的运行句柄。服务端后台线程写，IPC 线程读。
+struct InstallJob {
+    id: String,
+    version: String,
+    status: Mutex<InstallStatus>,
+}
+
+impl InstallJob {
+    fn new(id: String, version: String) -> Self {
+        Self {
+            status: Mutex::new(InstallStatus {
+                job_id: id.clone(),
+                state: InstallState::Queued,
+                progress: -1,
+                version: version.clone(),
+                message: "任务已排队".to_string(),
+                code: None,
+                rolled_back: false,
+            }),
+            id,
+            version,
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, InstallStatus> {
+        self.status.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn snapshot(&self) -> InstallStatus {
+        self.lock().clone()
+    }
+
+    fn is_finished(&self) -> bool {
+        matches!(self.lock().state, InstallState::Done | InstallState::Failed)
+    }
+
+    fn update(&self, state: InstallState, progress: i32, message: impl Into<String>) {
+        let mut guard = self.lock();
+        guard.state = state;
+        guard.progress = progress;
+        guard.message = message.into();
+    }
+
+    fn finish(&self, message: impl Into<String>) {
+        self.update(InstallState::Done, 100, message);
+    }
+
+    fn fail(&self, code: ErrorCode, message: impl Into<String>, rolled_back: bool) {
+        let mut guard = self.lock();
+        guard.state = InstallState::Failed;
+        guard.code = Some(code.as_str().to_string());
+        guard.rolled_back = rolled_back;
+        guard.message = message.into();
+    }
+}
+
+/// 升级失败的结构化结果：`code` 会写进 `InstallStatus.code`（不能只打日志）。
+struct InstallFailure {
+    code: ErrorCode,
+    message: String,
+    rolled_back: bool,
+}
+
+impl InstallFailure {
+    fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            rolled_back: false,
+        }
+    }
+}
+
+/// `apply` 的错误 → 结构化的升级失败。
+///
+/// `apply` 内部已做验签与回滚，这里只按错误文案分档（它的错误串是稳定的：
+/// `verify_minisign` 的「签名不匹配」、`rename_with_retry` 的 `kernel_busy:`、
+/// 回滚分支的 `kernel_rollback:`）。
+fn apply_failure(err: anyhow::Error) -> InstallFailure {
+    let text = err.to_string();
+    if text.contains("kernel_rollback") {
+        let mut failure = InstallFailure::new(
+            ErrorCode::KernelRollback,
+            format!("新内核起不来，已回滚到上一版: {text}"),
+        );
+        failure.rolled_back = true;
+        return failure;
+    }
+    if text.contains("kernel_busy") {
+        return InstallFailure::new(
+            ErrorCode::KernelBusy,
+            format!("内核仍在退出，备份旧内核失败: {text}"),
+        );
+    }
+    if text.contains("签名") || text.contains("staging 缺少") {
+        return InstallFailure::new(ErrorCode::SigInvalid, format!("签名校验失败: {text}"));
+    }
+    InstallFailure::new(ErrorCode::Internal, format!("安装内核失败: {text}"))
+}
+
+/// `<base><channel>/manifest.json`（与 GUI 的 `upgrade::Manifest` 同一份契约）。
+#[derive(Debug, Deserialize)]
+struct UpdateManifest {
+    #[serde(default)]
+    latest: String,
+    #[serde(default)]
+    versions: Vec<UpdateVersion>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateVersion {
+    version: String,
+    #[serde(default)]
+    assets: std::collections::BTreeMap<String, UpdateAsset>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct UpdateAsset {
+    file: String,
+    #[serde(default)]
+    sha256: String,
+    /// 压缩包内的入口文件名（内核二进制）；空 = 平台默认名。
+    #[serde(default)]
+    entry: String,
+}
+
+/// 全局单线程 runtime：下载是 async（reqwest），但服务本身是 std 线程模型，
+/// 只有升级线程 `block_on` 它，不把整个服务改成 async。
+fn install_runtime() -> anyhow::Result<&'static tokio::runtime::Runtime> {
+    static RT: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("kernel-install-io")
+            .enable_all()
+            .build()
+            .map_err(|err| format!("创建 tokio runtime 失败: {err}"))
+    })
+    .as_ref()
+    .map_err(|err| anyhow::anyhow!("{err}"))
+}
+
+fn update_client() -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(60))
+        .user_agent(format!("exvlan-service/{BUILD_VERSION}"))
+        .build()
+        .context("创建 HTTP 客户端失败")
+}
+
+async fn fetch_manifest(url: &str) -> anyhow::Result<UpdateManifest> {
+    let client = update_client()?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("请求 {url} 失败"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        bail!("{url} 返回 {status}");
+    }
+    let body = resp
+        .text()
+        .await
+        .with_context(|| format!("读取 {url} 响应失败"))?;
+    serde_json::from_str(&body).with_context(|| format!("解析 {url} 失败"))
+}
+
+/// 边下边写盘，按 chunk 回调 `(已下载字节, 总大小)`；总大小未知时第二项为 `None`。
+async fn download_to(
+    url: &str,
+    dest: &Path,
+    mut on_progress: impl FnMut(u64, Option<u64>),
+) -> anyhow::Result<()> {
+    use std::io::Write as _;
+    let client = update_client()?;
+    let mut resp = client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("请求 {url} 失败"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        bail!("{url} 返回 {status}");
+    }
+    let total = resp.content_length();
+    let mut file =
+        std::fs::File::create(dest).with_context(|| format!("创建 {} 失败", dest.display()))?;
+    let mut done: u64 = 0;
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .with_context(|| format!("下载 {url} 中断"))?
+    {
+        file.write_all(&chunk)
+            .with_context(|| format!("写入 {} 失败", dest.display()))?;
+        done += chunk.len() as u64;
+        on_progress(done, total);
+    }
+    file.flush().context("落盘下载包失败")?;
+    if done == 0 {
+        bail!("{url} 返回空内容");
+    }
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> anyhow::Result<String> {
+    use sha2::{Digest as _, Sha256};
+    use std::io::Read as _;
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("打开 {} 失败", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buf)
+            .with_context(|| format!("读取 {} 失败", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+/// 从内核包里取二进制与其签名，落到 staging 的 `kernel` + `kernel.sig`
+/// （`apply` 只认这两个名字），并写入 `version` 供安装后落版本文件。
+fn extract_staging(
+    job: &InstallJob,
+    archive: &Path,
+    asset: &UpdateAsset,
+    staging: &Path,
+) -> Result<(), InstallFailure> {
+    let file = std::fs::File::open(archive).map_err(|err| {
+        InstallFailure::new(ErrorCode::Internal, format!("打开内核包失败: {err}"))
+    })?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|err| {
+        InstallFailure::new(ErrorCode::Internal, format!("解析内核包失败: {err}"))
+    })?;
+
+    std::fs::create_dir_all(staging).map_err(|err| {
+        InstallFailure::new(
+            ErrorCode::Internal,
+            format!("创建 staging {} 失败: {err}", staging.display()),
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        // `apply` 会拒绝 group/other 可写的 staging（签名包不能被别人替换）。
+        std::fs::set_permissions(staging, std::fs::Permissions::from_mode(0o700)).map_err(
+            |err| InstallFailure::new(ErrorCode::Internal, format!("设置 staging 权限失败: {err}")),
+        )?;
+    }
+
+    let entry = if asset.entry.trim().is_empty() {
+        default_kernel_entry().to_string()
+    } else {
+        asset.entry.trim().to_string()
+    };
+    let sig_entry = format!("{entry}.sig");
+
+    let mut bin_index = None;
+    let mut sig_index = None;
+    for index in 0..zip.len() {
+        let name = zip
+            .by_index(index)
+            .map_err(|err| {
+                InstallFailure::new(ErrorCode::Internal, format!("读取内核包目录失败: {err}"))
+            })?
+            .name()
+            .map_err(|err| {
+                InstallFailure::new(ErrorCode::Internal, format!("内核包条目名非法: {err}"))
+            })?
+            .to_string();
+        if bin_index.is_none() && (name == entry || name.ends_with(&format!("/{entry}"))) {
+            bin_index = Some(index);
+        }
+        if sig_index.is_none() && (name == sig_entry || name.ends_with(&format!("/{sig_entry}"))) {
+            sig_index = Some(index);
+        }
+    }
+
+    let bin_index = bin_index.ok_or_else(|| {
+        InstallFailure::new(ErrorCode::Internal, format!("内核包里找不到 {entry}"))
+    })?;
+    let sig_index = sig_index.ok_or_else(|| {
+        InstallFailure::new(
+            ErrorCode::SigInvalid,
+            format!("内核包里缺少签名 {sig_entry}，拒绝安装未签名内核"),
+        )
+    })?;
+
+    write_zip_entry(&mut zip, bin_index, &staging.join("kernel"), 0o755)?;
+    write_zip_entry(&mut zip, sig_index, &staging.join("kernel.sig"), 0o644)?;
+    std::fs::write(staging.join("version"), &job.version).map_err(|err| {
+        InstallFailure::new(
+            ErrorCode::Internal,
+            format!("写入 staging 版本文件失败: {err}"),
+        )
+    })?;
+    job.update(InstallState::Verifying, 85, "签名与二进制已解出");
+    Ok(())
+}
+
+fn write_zip_entry(
+    zip: &mut zip::ZipArchive<std::fs::File>,
+    index: usize,
+    dest: &Path,
+    mode: u32,
+) -> Result<(), InstallFailure> {
+    use std::io::Read as _;
+    let mut entry = zip.by_index(index).map_err(|err| {
+        InstallFailure::new(ErrorCode::Internal, format!("读取内核包条目失败: {err}"))
+    })?;
+    let mut buf = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut buf).map_err(|err| {
+        InstallFailure::new(
+            ErrorCode::Internal,
+            format!("解出 {} 失败: {err}", dest.display()),
+        )
+    })?;
+    std::fs::write(dest, &buf).map_err(|err| {
+        InstallFailure::new(
+            ErrorCode::Internal,
+            format!("写出 {} 失败: {err}", dest.display()),
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(mode)).map_err(|err| {
+            InstallFailure::new(
+                ErrorCode::Internal,
+                format!("设置 {} 权限失败: {err}", dest.display()),
+            )
+        })?;
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    Ok(())
+}
+
+/// 清单没写 `entry` 时的平台默认内核文件名。
+fn default_kernel_entry() -> &'static str {
+    if cfg!(windows) {
+        "exvlan.exe"
+    } else {
+        "exvlan"
+    }
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    let value = bytes as f64;
+    if value >= MB {
+        format!("{:.1} MB", value / MB)
+    } else {
+        format!("{:.0} KB", value / KB)
+    }
+}
+
+fn normalize_base(base: &str) -> String {
+    let trimmed = base.trim();
+    if trimmed.ends_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/")
+    }
+}
+
+/// `k-<8hex>`：只是任务句柄（用于 `kernel.install.status` 关联），不是安全凭据。
+fn new_job_id() -> String {
+    use std::hash::{BuildHasher as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    hasher.write_u128(nanos);
+    hasher.write_u32(std::process::id());
+    format!("k-{:08x}", hasher.finish() as u32)
+}
+
+/// 通道名/版本号只允许单个路径片段（防止把 `../` 拼进镜像 URL 或本地文件名）。
+fn is_safe_segment(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
 }
 
 // ---------------------------------------------------------------------------
@@ -3631,6 +4317,7 @@ fn install(p: &Paths, uid: u32, _sid: &str) -> anyhow::Result<()> {
         rpc_portal: old.rpc_portal,
         rpc_mesh_whitelist: old.rpc_mesh_whitelist,
         gateway: old.gateway,
+        update: old.update,
     };
     save_config(p, &cfg)?;
 
@@ -4597,6 +5284,415 @@ mod install_tools_tests {
         }
         // 只拷这两个，目录里的杂项不带走
         assert_eq!(std::fs::read_dir(&core).unwrap().count(), 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// 内核在线升级（`kernel.install.*`）：状态机串行 + 真实失败路径。
+///
+/// 下载源用本机 `python3 -m http.server`（`file://` 不可行 —— 服务只该走
+/// HTTP/HTTPS，reqwest 也不支持 file）。成功路径需要 CI 私钥签出的包，
+/// 本地**不伪造签名**，因此只验证失败分档。
+#[cfg(test)]
+mod install_tests {
+    use super::*;
+    use std::io::Write as _;
+    use std::net::TcpStream;
+
+    fn temp_root(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "exvlan-install-{tag}-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// 用临时目录拼一套 `Paths`，不碰真实系统路径。
+    fn state_at(root: &Path) -> Arc<State> {
+        let core = root.join("core");
+        std::fs::create_dir_all(&core).expect("create core dir");
+        Arc::new(State::new(Paths {
+            config: root.join("config"),
+            core: core.clone(),
+            logs: root.join("logs"),
+            kernel: core.join("exvlan"),
+            kernel_prev: core.join("exvlan.prev"),
+            service_bin: root.join("bin").join("exvlan-service"),
+            service_config: root.join("service.toml"),
+            service_log: root.join("logs").join("service.log"),
+            cli_bin: core.join("exvlan-cli"),
+            gateway_bin: core.join("exvlan-gateway"),
+        }))
+    }
+
+    fn temp_state(tag: &str) -> (Arc<State>, PathBuf) {
+        let root = temp_root(tag);
+        let state = state_at(&root);
+        (state, root)
+    }
+
+    fn write_zip(path: &Path, files: &[(&str, &[u8])]) {
+        let file = std::fs::File::create(path).expect("create zip");
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for (name, bytes) in files {
+            writer.start_file(*name, options).expect("start zip entry");
+            writer.write_all(bytes).expect("write zip entry");
+        }
+        writer.finish().expect("finish zip");
+    }
+
+    fn manifest_json(version: &str, file: &str, sha256: &str, entry: &str) -> String {
+        let platform = exvlan_control::platform_key();
+        serde_json::json!({
+            "schema": 1,
+            "channel": "dev",
+            "latest": version,
+            "versions": [{
+                "version": version,
+                "rpc_schema": 1,
+                "min_studio_version": "0",
+                "assets": {
+                    (platform): { "file": file, "sha256": sha256, "entry": entry },
+                },
+            }],
+        })
+        .to_string()
+    }
+
+    /// 本机 HTTP 源：`python3 -m http.server`（子进程，Drop 时杀掉）。
+    struct HttpSource {
+        child: std::process::Child,
+        port: u16,
+    }
+
+    impl HttpSource {
+        // 子进程归 `HttpSource` 所有，`Drop` 里 kill + wait；就绪前 panic 时也会
+        // 先 drop 自卫对象，不会留僵尸进程（clippy 看不穿 Drop）。
+        #[allow(clippy::zombie_processes)]
+        fn serve(dir: &Path, tag: &str) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind free port");
+            let port = listener.local_addr().expect("local addr").port();
+            drop(listener);
+            let child = Command::new("python3")
+                .args([
+                    "-m",
+                    "http.server",
+                    &port.to_string(),
+                    "--bind",
+                    "127.0.0.1",
+                    "--directory",
+                ])
+                .arg(dir)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap_or_else(|err| panic!("{tag}: 启动 python3 -m http.server 失败: {err}"));
+            let source = Self { child, port };
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < deadline {
+                if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                    return source;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            panic!("{tag}: python3 http.server 10s 内未就绪");
+        }
+
+        fn base(&self) -> String {
+            format!("http://127.0.0.1:{}/", self.port)
+        }
+    }
+
+    impl Drop for HttpSource {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    fn install_start(state: &Arc<State>, version: &str, base: &str) -> String {
+        let resp = state.install_start(version.to_string(), "dev".to_string(), Some(base.into()));
+        assert!(resp.ok, "install_start 失败: {:?}", resp.message);
+        match resp.data {
+            Some(Payload::KernelInstallStart { job_id }) => job_id,
+            other => panic!("unexpected payload: {other:?}"),
+        }
+    }
+
+    fn wait_finished(state: &State, job_id: &str) -> InstallStatus {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let resp = state.install_status(job_id);
+            assert!(resp.ok, "查状态失败: {:?}", resp.message);
+            let status = match resp.data {
+                Some(Payload::KernelInstallStatus { status }) => status,
+                other => panic!("unexpected payload: {other:?}"),
+            };
+            if matches!(status.state, InstallState::Done | InstallState::Failed) {
+                return status;
+            }
+            assert!(Instant::now() < deadline, "任务 {job_id} 超时: {status:?}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn staging_dirs(root: &Path) -> usize {
+        std::fs::read_dir(root.join("core"))
+            .map(|items| {
+                items
+                    .flatten()
+                    .filter(|item| item.file_name().to_string_lossy().starts_with("staging-"))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn one_install_job_at_a_time() {
+        let (state, root) = temp_state("busy");
+        let first = Arc::new(InstallJob::new(new_job_id(), "26.410.20720".into()));
+        assert_eq!(state.claim_install_slot(Arc::clone(&first)), Ok(()));
+        let second = Arc::new(InstallJob::new(new_job_id(), "26.410.20721".into()));
+        assert_eq!(
+            state.claim_install_slot(Arc::clone(&second)),
+            Err(ErrorCode::KernelBusy),
+            "同一时刻只允许一个升级任务"
+        );
+        // 结束（无论 done / failed）后允许覆盖；期间旧任务仍可查询
+        first.fail(ErrorCode::DownloadFailed, "网络不可达", false);
+        assert_eq!(
+            state.claim_install_slot(Arc::clone(&second)),
+            Ok(()),
+            "已结束的任务不应继续挡住新任务"
+        );
+        let status = second.snapshot();
+        assert_eq!(status.state, InstallState::Queued);
+        assert_eq!(status.progress, -1);
+        assert!(status.code.is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn status_of_unknown_job_is_not_found() {
+        let (state, root) = temp_state("nojob");
+        assert_eq!(
+            state.install_status("k-deadbeef").code,
+            Some(ErrorCode::NotFound)
+        );
+        let job = Arc::new(InstallJob::new("k-0000aaaa".into(), "26.410.20720".into()));
+        assert_eq!(state.claim_install_slot(job), Ok(()));
+        // 槽里有任务，但 id 不匹配 → 一样是 NotFound（不能把别人的任务吐出去）
+        assert_eq!(
+            state.install_status("k-deadbeef").code,
+            Some(ErrorCode::NotFound)
+        );
+        let resp = state.install_status("k-0000aaaa");
+        assert!(resp.ok);
+        match resp.data {
+            Some(Payload::KernelInstallStatus { status }) => {
+                assert_eq!(status.job_id, "k-0000aaaa");
+                assert_eq!(status.state, InstallState::Queued);
+                assert_eq!(status.version, "26.410.20720");
+            }
+            other => panic!("unexpected payload: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn update_base_prefers_service_toml() {
+        let root = temp_root("base");
+        // 无配置：请求里的 base 覆盖编译期常量
+        let state = state_at(&root);
+        assert_eq!(state.install_base(None), KERNEL_BASE_URL);
+        assert_eq!(
+            state.install_base(Some("http://request.example")),
+            "http://request.example/"
+        );
+        // service.toml 优先于请求
+        std::fs::write(
+            root.join("service.toml"),
+            "[update]\nbase = \"http://cfg.example/core\"\n",
+        )
+        .expect("write service.toml");
+        let state = state_at(&root);
+        assert_eq!(
+            state.install_base(Some("http://request.example")),
+            "http://cfg.example/core/"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn channel_must_be_a_single_path_segment() {
+        for good in [
+            "dev",
+            "rc",
+            "nightly",
+            "v26.410",
+            "26.410.20720-pre.9",
+            "26.410.20712+abc123",
+        ] {
+            assert!(is_safe_segment(good), "{good} 应被接受");
+        }
+        for bad in ["", ".", "..", "../etc", "dev/../x", "a b", "dev\\x", "网"] {
+            assert!(!is_safe_segment(bad), "{bad:?} 必须被拒绝");
+        }
+    }
+
+    #[test]
+    fn sha256_mismatch_fails_the_job() {
+        let (state, root) = temp_state("sha");
+        let channel = root.join("site").join("dev");
+        std::fs::create_dir_all(&channel).expect("create channel dir");
+        write_zip(
+            &channel.join("kernel.zip"),
+            &[
+                ("exvlan", b"not-the-real-kernel".as_slice()),
+                ("exvlan.sig", b"untrusted comment: test\n".as_slice()),
+            ],
+        );
+        let wrong = "0".repeat(64);
+        std::fs::write(
+            channel.join("manifest.json"),
+            manifest_json("26.410.20720", "kernel.zip", &wrong, "exvlan"),
+        )
+        .expect("write manifest");
+        let server = HttpSource::serve(&root.join("site"), "sha256");
+
+        let job_id = install_start(&state, "26.410.20720", &server.base());
+        assert!(job_id.starts_with("k-"), "{job_id}");
+
+        let status = wait_finished(&state, &job_id);
+        println!(
+            "[smoke sha256] {job_id} → {}",
+            serde_json::to_string(&status).expect("serialize status")
+        );
+        assert_eq!(status.state, InstallState::Failed, "{status:?}");
+        assert_eq!(
+            status.code.as_deref(),
+            Some("sha256_mismatch"),
+            "{status:?}"
+        );
+        assert!(
+            status.message.contains("sha256"),
+            "文案要能直接展示: {}",
+            status.message
+        );
+        assert!(!status.rolled_back, "还没到安装阶段，不该回滚");
+        // 失败保留下载包（便于复现），staging 已清掉
+        assert!(root.join("core/download/26.410.20720.zip").is_file());
+        assert_eq!(staging_dirs(&root), 0);
+
+        drop(server);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_signature_fails_the_job() {
+        let (state, root) = temp_state("nosig");
+        let channel = root.join("site").join("dev");
+        std::fs::create_dir_all(&channel).expect("create channel dir");
+        let archive = channel.join("kernel.zip");
+        write_zip(
+            &archive,
+            &[("exvlan", b"signed-kernel-without-sig".as_slice())],
+        );
+        let digest = sha256_file(&archive).expect("sha256");
+        std::fs::write(
+            channel.join("manifest.json"),
+            manifest_json("26.410.20720", "kernel.zip", &digest, "exvlan"),
+        )
+        .expect("write manifest");
+        let server = HttpSource::serve(&root.join("site"), "nosig");
+
+        let job_id = install_start(&state, "26.410.20720", &server.base());
+        let status = wait_finished(&state, &job_id);
+        println!(
+            "[smoke nosig] {job_id} → {}",
+            serde_json::to_string(&status).expect("serialize status")
+        );
+        assert_eq!(status.state, InstallState::Failed, "{status:?}");
+        assert_eq!(status.code.as_deref(), Some("sig_invalid"), "{status:?}");
+        assert!(status.message.contains("签名"), "{}", status.message);
+        assert_eq!(staging_dirs(&root), 0);
+
+        drop(server);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bogus_signature_is_rejected_before_touching_the_kernel() {
+        let (state, root) = temp_state("badsig");
+        let channel = root.join("site").join("dev");
+        std::fs::create_dir_all(&channel).expect("create channel dir");
+        let archive = channel.join("kernel.zip");
+        write_zip(
+            &archive,
+            &[
+                ("exvlan", b"impostor-kernel".as_slice()),
+                (
+                    "exvlan.sig",
+                    b"untrusted comment: not a real signature\n".as_slice(),
+                ),
+            ],
+        );
+        let digest = sha256_file(&archive).expect("sha256");
+        std::fs::write(
+            channel.join("manifest.json"),
+            manifest_json("26.410.20720", "kernel.zip", &digest, "exvlan"),
+        )
+        .expect("write manifest");
+        let server = HttpSource::serve(&root.join("site"), "badsig");
+
+        let job_id = install_start(&state, "26.410.20720", &server.base());
+        let status = wait_finished(&state, &job_id);
+        println!(
+            "[smoke badsig] {job_id} → {}",
+            serde_json::to_string(&status).expect("serialize status")
+        );
+        // sha256 与解包都过了，卡在 `apply` 的 minisign 验签 —— 状态是
+        // failed/sig_invalid，且内核没有被替换（不是「装完才发现」）。
+        assert_eq!(status.state, InstallState::Failed, "{status:?}");
+        assert_eq!(status.code.as_deref(), Some("sig_invalid"), "{status:?}");
+        assert!(!root.join("core/exvlan").exists(), "验签失败不得落内核");
+        assert_eq!(staging_dirs(&root), 0);
+
+        drop(server);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unknown_version_is_not_found() {
+        let (state, root) = temp_state("noversion");
+        let channel = root.join("site").join("dev");
+        std::fs::create_dir_all(&channel).expect("create channel dir");
+        std::fs::write(
+            channel.join("manifest.json"),
+            manifest_json("26.410.20720", "kernel.zip", &"0".repeat(64), "exvlan"),
+        )
+        .expect("write manifest");
+        let server = HttpSource::serve(&root.join("site"), "noversion");
+
+        let job_id = install_start(&state, "26.410.20700", &server.base());
+        let status = wait_finished(&state, &job_id);
+        assert_eq!(status.state, InstallState::Failed, "{status:?}");
+        assert_eq!(status.code.as_deref(), Some("not_found"), "{status:?}");
+        assert!(
+            status.message.contains("26.410.20700"),
+            "{}",
+            status.message
+        );
+
+        drop(server);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

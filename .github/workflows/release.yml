@@ -60,6 +60,16 @@ jobs:
           path: release_assets
           pattern: mobile-*
 
+      # 内核签名（minisign）：来自 studio 的 `kernel-sig-<platform>` 产物。
+      # 一个都没有时不阻塞发版 —— 打包步骤会逐平台打印 `::warning::`（该包将无法
+      # 在线升级），不会静默漏掉。
+      - name: Download kernel signature artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: release_assets
+          pattern: kernel-sig-*
+
       - name: Package release assets
         env:
           VERSION: ${{ inputs.version }}
@@ -70,8 +80,26 @@ jobs:
           shopt -s nullglob
 
           # core-<platform> -> <platform>-<version>.zip（二进制置于 zip 根）
+          # 内核签名来自 studio 产物 `kernel-sig-<platform>/`（名字与平台键一致）：
+          # 服务端 `kernel.install.*` 只安装 minisign 校验通过的内核，缺签名的包
+          # 装上就会被拒，所以必须与二进制一起进 zip（文件名为 `<entry>.sig`）。
           for d in core-*; do
             name="${d#core-}"
+            if [ -f "$d/exvlan.exe" ]; then entry=exvlan.exe; else entry=exvlan; fi
+            sig=""
+            if [ -f "kernel-sig-${name}/${entry}.sig" ]; then
+              sig="kernel-sig-${name}/${entry}.sig"
+            elif [ -f "${entry}.sig" ]; then
+              # download-artifact 在 pattern 只命中一个产物时会把内容摊到 path 根，
+              # 没有子目录可查（多平台发版时不会走到这里）。
+              sig="${entry}.sig"
+            fi
+            if [ -n "$sig" ]; then
+              cp "$sig" "$d/${entry}.sig"
+              echo "core-${name}: 已带上内核签名 $(basename "$sig")"
+            else
+              echo "::warning::core-${name} 缺少内核签名 ${entry}.sig（未找到 kernel-sig-${name} 产物）—— 该包无法在线升级，服务端会以 sig_invalid 拒绝"
+            fi
             ( cd "$d" && zip -r "../../zipped_assets/${name}-${VERSION}.zip" . )
           done
 

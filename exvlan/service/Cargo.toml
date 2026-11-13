@@ -16,6 +16,14 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 minisign-verify = "0.3"
 base64.workspace = true
+sha2.workspace = true
+# 内核在线升级：下载走 rustls（**不要** native-tls：macOS/Linux/Windows 三端
+# 交叉编译时它要连系统 TLS 库）；zip 只开纯 Rust 的 deflate 后端。
+reqwest = { workspace = true, features = ["rustls"] }
+zip = { version = "9.1.3", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# 服务是 std 线程模型：只用一个全局 runtime 跑下载（见 `install_runtime`），
+# 不把整个服务改成 async。
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 # 读 `<config-dir>/*.toml` 推导 RPC 白名单（见 `rpc_whitelist`）
 toml.workspace = true
 # IPC 协议类型（唯一真源）。只取 `protocol` feature：

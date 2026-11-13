@@ -40,3 +40,59 @@ pub fn local_rpc_addr() -> String {
 pub fn local_gateway_addr() -> String {
     format!("127.0.0.1:{DEFAULT_GATEWAY_PORT}")
 }
+
+/// 当前平台在镜像 `manifest.json` 里的键名（`assets` 的键）。
+///
+/// 镜像只托管 6 个平台：`macos-x86_64` / `macos-aarch64` / `windows-x86_64` /
+/// `windows-arm64` / `linux-x86_64` / `linux-aarch64`。注意 Windows 的 arm64 键
+/// 是 `arm64`（与 `core-<ARTIFACT_NAME>` 产物名一致），不是 `aarch64`。
+///
+/// 服务端下载内核、客户端查更新都从这里取，避免两边各写一份拼错的键。
+pub fn platform_key() -> String {
+    let os = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "freebsd") {
+        // FreeBSD 有产物但不在镜像托管范围内（在线升级会明确报「无此平台包」）。
+        "freebsd"
+    } else {
+        "linux"
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" if cfg!(target_os = "windows") => "arm64",
+        "aarch64" => "aarch64",
+        "x86_64" => "x86_64",
+        // 镜像产物名是 `windows-i686`；32 位 x86 在其它平台无镜像资产。
+        "x86" => "i686",
+        // 镜像不托管 arm 变体（armv7hf/armv7/armhf 三套 eabi 无法在 cfg 层区分）。
+        "arm" => "armv7hf",
+        other => other,
+    };
+    format!("{os}-{arch}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::platform_key;
+
+    #[test]
+    fn platform_key_uses_mirror_names() {
+        let key = platform_key();
+        let (os, arch) = key.split_once('-').expect("键形如 <os>-<arch>");
+        assert!(
+            matches!(os, "macos" | "windows" | "linux" | "freebsd"),
+            "{key}"
+        );
+        // Windows 的 arm64 键在镜像里写作 `arm64`（产物名 windows-arm64）
+        if cfg!(target_os = "windows") && cfg!(target_arch = "aarch64") {
+            assert_eq!(arch, "arm64");
+        } else {
+            assert_ne!(arch, "arm64", "{key}");
+        }
+        // Linux/macOS x86_64 是最常见的验证机，键必须与镜像完全一致
+        if cfg!(target_arch = "x86_64") {
+            assert!(key.ends_with("-x86_64"), "{key}");
+        }
+    }
+}

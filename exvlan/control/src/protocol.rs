@@ -223,7 +223,7 @@ pub enum ErrorCode {
     ApplyFailed,
     /// 新内核起不来，已回滚到上一版
     KernelRollback,
-    /// 该 op 已定义但尚未实现（例如 `kernel.install.*`）
+    /// 该 op 已定义但尚未实现（客户端据此提示「当前版本不支持」）
     NotImplemented,
     /// 下载失败（网络/404/超时）
     DownloadFailed,

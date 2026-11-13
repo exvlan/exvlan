@@ -63,8 +63,13 @@ pub struct Asset {
 }
 
 /// 当前平台在 manifest 里的键名。
+///
+/// 桌面三端与服务端**同一真源**（[`exvlan_control::platform_key`]）：
+/// `macos-x86_64` / `windows-x86_64` / `linux-aarch64` …（Windows 的 arm64 键
+/// 是 `arm64`）。Android/iOS 走 ABI 键，只有客户端用得到，留在本地。
 pub fn platform_key() -> String {
-    if cfg!(target_os = "android") || cfg!(target_os = "ios") {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
         let abi = if cfg!(target_arch = "aarch64") {
             "arm64-v8a"
         } else if cfg!(target_arch = "arm") {
@@ -74,26 +79,13 @@ pub fn platform_key() -> String {
         } else {
             "x86_64"
         };
-        return format!("android-{abi}");
+        format!("android-{abi}")
     }
 
-    let os = if cfg!(target_os = "macos") {
-        "macos"
-    } else if cfg!(target_os = "windows") {
-        "windows"
-    } else {
-        "linux"
-    };
-    let arch = if cfg!(target_arch = "aarch64") {
-        "aarch64"
-    } else if cfg!(target_arch = "x86_64") {
-        "x86_64"
-    } else if cfg!(target_arch = "arm") {
-        "arm"
-    } else {
-        "unknown"
-    };
-    format!("{os}-{arch}")
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        exvlan_control::platform_key()
+    }
 }
 
 pub fn normalize_base(base: &str, default: &str) -> String {

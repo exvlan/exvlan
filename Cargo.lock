@@ -3212,11 +3212,15 @@ dependencies = [
  "exvlan-control",
  "libc",
  "minisign-verify",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "tokio",
  "toml 1.1.8+spec-1.1.0",
  "windows-service",
  "windows-sys 0.59.0",
+ "zip",
 ]
 
 [[package]]

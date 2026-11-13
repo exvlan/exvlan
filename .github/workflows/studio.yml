@@ -253,6 +253,18 @@ jobs:
           pnpm tauri signer sign "src-tauri/resources/service/$SERVICE"
           ls -l src-tauri/resources/kernel/ src-tauri/resources/service/
 
+      # 内核签名单独作为产物：release.yml 打 `core-<platform>.zip` 时要把它一并
+      # 塞进 zip（`<binary>.sig`），否则服务端的在线升级会硬拒这个包
+      # （`kernel.install.*` 只安装 minisign 校验通过的内核）。
+      # 名字用 `ARTIFACT_NAME`（= 镜像平台键），与 core-<platform> 一一对应。
+      - name: Upload kernel signature
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: kernel-sig-${{ matrix.ARTIFACT_NAME }}
+          path: packages/studio/src-tauri/resources/kernel/*.sig
+          if-no-files-found: error
+          retention-days: 14
+
       - name: copy correct DLLs (Windows)
         if: ${{ contains(matrix.GUI_TARGET, 'windows') }}
         run: |
