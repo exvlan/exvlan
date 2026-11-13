@@ -14,7 +14,8 @@ use exvlan_rpc::exvlan_proto::api::config::{
 use exvlan_rpc::exvlan_proto::api::manage::{
     CollectNetworkInfoRequest, DeleteNetworkInstanceRequest, GetNetworkInstanceConfigRequest,
     ListNetworkInstanceMetaRequest, ListNetworkInstanceRequest, NetworkConfig,
-    RunNetworkInstanceRequest, ValidateConfigRequest, VpnPortalClientConfig,
+    RetainNetworkInstanceRequest, RunNetworkInstanceRequest, ValidateConfigRequest,
+    VpnPortalClientConfig,
 };
 use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
 use exvlan_rpc::transport::{RpcTransport as _, TunnelTransport};
@@ -98,6 +99,32 @@ impl Kernel {
             .inst_id
             .map(|id| Uuid::from(id).to_string())
             .unwrap_or_default())
+    }
+
+    /// 停止实例但**不动配置目录**（`retain` 只保留给定 id，其余被停掉）。
+    ///
+    /// 为什么要单独一个：`delete` 在「实例由配置目录加载」时会顺手删掉 `<id>.toml`，
+    /// 用它做「停用」会直接丢配置（R1 实测）。停用应该：先改名成 `.disabled`，
+    /// 再用这里停掉实例。
+    pub async fn stop(&self, id: &str) -> anyhow::Result<()> {
+        let inst = parse_id(id)?;
+        let keep: Vec<_> = self
+            .list_ids()
+            .await?
+            .into_iter()
+            .filter_map(|other| parse_id(&other).ok())
+            .filter(|other| *other != inst)
+            .map(Into::into)
+            .collect();
+        self.transport
+            .web_client()
+            .retain_network_instance(
+                BaseController::default(),
+                RetainNetworkInstanceRequest { inst_ids: keep },
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("retain_network_instance: {e:#}"))?;
+        Ok(())
     }
 
     /// 删除实例。

@@ -873,20 +873,27 @@ async fn patch_instance(
 
     if let Some(disabled) = value.get("disabled").and_then(serde_json::Value::as_bool) {
         if disabled {
-            // 先停实例，再把文件改成 disabled（顺序反了会让内核重启时又拉起来）。
+            // 顺序很重要：**先改名**（`.toml` → `.toml.disabled`），再停实例。
+            // 反了会出事：内核的 delete 会顺手删掉 `<id>.toml`，配置直接丢（实测）。
+            // 临时实例（没有配置文件）没有可改名的对象，直接停即可。
+            let has_file = exvlan_service_client::config::read(&id).is_ok();
+            if has_file && let Err(e) = exvlan_service_client::config::set_enabled(&id, false) {
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "config_write", e);
+            }
+            // `retain`：只保留其它实例 → 停掉本实例，不碰配置目录。
             let stopped = with_kernel(|kernel| {
                 let id = id.clone();
-                Box::pin(async move { kernel.delete(&id).await })
+                Box::pin(async move { kernel.stop(&id).await })
             })
             .await;
             if let Err(resp) = stopped {
                 return *resp;
             }
-            if let Err(e) = exvlan_service_client::config::set_enabled(&id, false) {
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "config_write", e);
-            }
         } else {
-            // 从配置目录读回配置再跑起来（文件是权威）。
+            // 先把文件名恢复（`.toml.disabled` → `.toml`），再从配置目录读回并跑起来。
+            if let Err(e) = exvlan_service_client::config::set_enabled(&id, true) {
+                return err(StatusCode::NOT_FOUND, "not_found", e);
+            }
             let saved = match exvlan_service_client::config::read(&id) {
                 Ok(s) => s,
                 Err(e) => return err(StatusCode::NOT_FOUND, "not_found", e),
@@ -921,9 +928,6 @@ async fn patch_instance(
             .await;
             if let Err(resp) = started {
                 return *resp;
-            }
-            if let Err(e) = exvlan_service_client::config::set_enabled(&id, true) {
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "config_write", e);
             }
         }
     }
@@ -1021,13 +1025,22 @@ async fn delete_instance(
     if let Err(resp) = require_scope(&state, &headers, Some("kernel:write")) {
         return resp;
     }
+    let target = id.clone();
     match with_kernel(|kernel| {
         let id = id.clone();
         Box::pin(async move { kernel.delete(&id).await.map(|_| json!({"deleted": id})) })
     })
     .await
     {
-        Ok(v) => Json(v).into_response(),
+        Ok(v) => {
+            // 配置目录里的文件也一并删掉：内核只在「实例正在跑」时才顺手删文件，
+            // 停用中的实例删了之后重启又会出现（语义不一致）。
+            match exvlan_service_client::config::delete(&target) {
+                Ok(_) => {}
+                Err(e) => tracing::warn!(%target, error = %e, "删除配置文件失败"),
+            }
+            Json(v).into_response()
+        }
         Err(resp) => *resp,
     }
 }
