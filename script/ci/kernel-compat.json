@@ -1,0 +1,6 @@
+{
+  "rpc_schema": 1,
+  "min_studio_version": "26.410.20712",
+  "note": "内核 RPC 契约版本；不兼容变更时才 +1。min_studio_version 是能管理该内核的最低 GUI 版本（schema 变更时一起改）。",
+  "updated_at": "2026-11-14"
+}

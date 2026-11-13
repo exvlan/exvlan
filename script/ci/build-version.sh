@@ -28,11 +28,17 @@ if [[ -z "$base" ]]; then
   exit 1
 fi
 
-ref="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
-if [[ "$ref" == v* ]]; then
-  version="${ref#v}"
+# 显式覆盖优先：nightly 的 tag 固定叫 `nightly`（不是 v*），版本串里的
+# `-nightly.<MMDD>` 只能由 workflow 注入。
+if [[ -n "${EXVLAN_BUILD_VERSION_OVERRIDE:-}" ]]; then
+  version="${EXVLAN_BUILD_VERSION_OVERRIDE}"
 else
-  version="$base"
+  ref="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+  if [[ "$ref" == v* ]]; then
+    version="${ref#v}"
+  else
+    version="$base"
+  fi
 fi
 
 sha="${GITHUB_SHA:-$(git rev-parse HEAD)}"

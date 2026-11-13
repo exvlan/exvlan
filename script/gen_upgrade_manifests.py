@@ -92,6 +92,11 @@ def main() -> int:
         default="https://dl.exvlan.era-x.cn/upgrade/",
         help="更新包对外下载前缀（需以 / 结尾）",
     )
+    parser.add_argument(
+        "--channel",
+        default="",
+        help="发布通道（stable/rc/beta/dev/nightly）；写入清单便于排查",
+    )
     parser.add_argument("--notes", default="")
     parser.add_argument(
         "--magisk-changelog",
@@ -197,6 +202,11 @@ def main() -> int:
         print(f"[upgrade] Magisk 更新清单：{magisk_zip.name} versionCode={version_code}")
 
     out_dir = args.assets_dir
+    # 通道写进清单：镜像按通道目录存放，客户端也按通道读；
+    # 这里是给排查用的（例如「这个包到底属于哪条线」）。
+    if args.channel:
+        manifest["channel"] = args.channel
+        latest["channel"] = args.channel
     (out_dir / "upgrade-manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )

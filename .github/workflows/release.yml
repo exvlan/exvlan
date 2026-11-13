@@ -123,9 +123,19 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          # 通道由 tag 后缀推导：-rc/-beta/-dev/-nightly → 对应通道；无后缀 = stable
+          case "${VERSION}" in
+            *-rc.*) CHANNEL=rc ;;
+            *-beta.*) CHANNEL=beta ;;
+            *-dev.*) CHANNEL=dev ;;
+            *-nightly.*) CHANNEL=nightly ;;
+            *) CHANNEL=stable ;;
+          esac
+          echo "CHANNEL=${CHANNEL}" >> "$GITHUB_ENV"
           python3 script/gen_upgrade_manifests.py \
             --assets-dir zipped_assets \
             --version "${VERSION#v}" \
+            --channel "${CHANNEL}" \
             --macos-arch x86_64 \
             --notes "Exvlan ${VERSION#v}"
           ls -l zipped_assets/upgrade-*.json
@@ -141,10 +151,13 @@ jobs:
           import hashlib, json, os, pathlib, sys
 
           version = os.environ["VERSION"]
-          # 内核 RPC 契约版本；不兼容变更时才 +1
-          RPC_SCHEMA = 1
-          # GUI 最低版本基线（新架构首发版本）；不要求升级内核时同步升 GUI
-          MIN_STUDIO = "26.410.20712"
+          # RPC 契约与最低 GUI 基线：单一真源在 script/ci/kernel-compat.json
+          # （schema 变更时必须同时改 min_studio_version，避免“升级了 schema 忘了升 GUI”）
+          compat = json.loads(
+              pathlib.Path("script/ci/kernel-compat.json").read_text(encoding="utf-8")
+          )
+          RPC_SCHEMA = int(compat["rpc_schema"])
+          MIN_STUDIO = str(compat["min_studio_version"])
 
           assets = {}
           for meta_path in sorted(pathlib.Path("release_assets").glob("core-*/kernel.json")):
@@ -168,6 +181,7 @@ jobs:
 
           manifest = {
               "schema": 1,
+              "channel": os.environ.get("CHANNEL", "stable"),
               "latest": version,
               "versions": [{
                   "version": version,
