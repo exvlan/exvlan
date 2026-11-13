@@ -189,20 +189,16 @@ fn to_toml(cfg: &NetworkConfig) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 fn migrate_legacy_once(app: &tauri::AppHandle) {
-    let Ok(base) = app_dir(app) else {
+    let Ok(dir) = config_dir(app) else {
         return;
     };
-    let marker = base.join(MIGRATED_MARKER);
-    if marker.is_file() {
-        return;
-    }
-    let legacy_path = base.join(LEGACY_FILE);
+    // 旧移动端把列表写在 `<app_config_dir>/config/networks.toml`
+    // （与新的 `<id>.toml` **同一个目录**）——不是 app 根目录。
+    let legacy_path = dir.join(LEGACY_FILE);
     if !legacy_path.is_file() {
-        // 没有旧数据：直接写标记，避免每次启动都 stat 一遍。
-        let _ = std::fs::write(&marker, b"nothing-to-do\n");
+        // 没有旧数据：不写标记（以后出现 Legacy 文件时仍能被处理）。
         return;
     }
-    let dir = base.join(CONFIG_DIR);
     let text = match std::fs::read_to_string(&legacy_path) {
         Ok(text) => text,
         Err(err) => {
@@ -229,7 +225,7 @@ fn migrate_legacy_once(app: &tauri::AppHandle) {
             Ok(text) => text,
             Err(err) => {
                 crate::logger::record("networks.migrate", format!("{id}: 生成内核配置失败: {err}"));
-                return; // 原子性：一条失败就整体不推进
+                return; // 原子性：一条失败就整体不推进（源文件保留）
             }
         };
         if let Err(err) = write_in(&dir, &id, &toml_text, true) {
@@ -238,7 +234,7 @@ fn migrate_legacy_once(app: &tauri::AppHandle) {
         }
         converted += 1;
     }
-    // 全部成功才删源 + 写标记。
+    // 全部成功才删源 + 写标记（标记只用于观测，不作为下次的闸门）。
     if let Err(err) = std::fs::remove_file(&legacy_path) {
         crate::logger::record(
             "networks.migrate",
@@ -246,7 +242,10 @@ fn migrate_legacy_once(app: &tauri::AppHandle) {
         );
         return;
     }
-    let _ = std::fs::write(&marker, format!("converted={converted}\n").as_bytes());
+    let _ = std::fs::write(
+        app_dir(app).unwrap_or(dir.clone()).join(MIGRATED_MARKER),
+        format!("converted={converted}\n").as_bytes(),
+    );
     crate::logger::record(
         "networks.migrate",
         format!("legacy networks.toml → {converted} 个配置文件"),
