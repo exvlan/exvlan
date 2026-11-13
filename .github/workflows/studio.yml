@@ -151,25 +151,25 @@ jobs:
           branch="${GITHUB_REF_NAME}"
           repo="${{ github.repository }}"
 
-          # 为什么不用 `status=success` 作为查询参数：实测偶发返回空列表
-          # （同一查询手工执行却有结果），一次抖动就让整个 studio 作业失败。
-          # 改成「拉最近 50 条 + 客户端过滤 + 重试」。
+          # 关键：不能只挑「最近一次成功运行」——它可能是**又一次复用**（那轮
+          # core_desktop 被路径门控跳过），于是里面根本没有 core-* 产物。
+          # 直接按**产物名**反查（仓库级 artifacts 支持 name 过滤），
+          # 取最近一个未过期的，它必然来自真正构建过内核的那一轮。
+          name="core-${{ matrix.ARTIFACT_NAME }}"
           run_id=""
           for attempt in 1 2 3; do
             run_id=$(gh api \
-              "repos/${repo}/actions/workflows/pipeline.yml/runs?branch=${branch}&per_page=50" \
-              --jq '[.workflow_runs[]
-                     | select((.event == "push" or .event == "workflow_dispatch")
-                              and .conclusion == "success")]
-                    | .[0].id // empty' 2>/dev/null || true)
+              "repos/${repo}/actions/artifacts?name=${name}&per_page=20" \
+              --jq '[.artifacts[] | select(.expired == false)] | .[0].workflow_run.id // empty' \
+              2>/dev/null || true)
             if [[ -n "$run_id" ]]; then
               break
             fi
-            echo "attempt ${attempt}: 未找到可复用的成功运行，5s 后重试"
+            echo "attempt ${attempt}: 没找到未过期的 ${name} 产物，5s 后重试"
             sleep 5
           done
           if [[ -z "$run_id" ]]; then
-            echo "::error::找不到可复用的成功运行（branch=${branch}）——先让一次 core_desktop 成功跑完，或手动重跑本作业"
+            echo "::error::找不到可复用的 ${name} 产物——先让一次 core_desktop 成功构建（或打 tag 跑全量）"
             exit 1
           fi
           echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
