@@ -278,8 +278,6 @@ jobs:
           path: ./debug-apk/app-arm64-debug.apk
           if-no-files-found: error
           retention-days: 14
-          if-no-files-found: error
-          retention-days: 14
 
   mobile-result:
     runs-on: ubuntu-latest
