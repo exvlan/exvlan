@@ -24,6 +24,8 @@ const props = defineProps<{
   api: Api.RemoteClient;
   newConfigGenerator?: () => NetworkTypes.NetworkConfig;
   pauseAutoRefresh?: boolean;
+  /** 只读目标（例如「经 gateway」的远端）：隐藏新增/编辑入口，写操作由 api 侧拒绝。 */
+  readonly?: boolean;
 }>();
 
 const instanceId = defineModel("instanceId", {
@@ -295,6 +297,9 @@ const cancelEditNetwork = () => {
 };
 
 const editNetwork = async () => {
+  if (props.readonly) {
+    return;
+  }
   if (!instanceId.value) {
     toast.add({
       severity: "error",
@@ -614,7 +619,7 @@ onUnmounted(() => {
         <div class="flex gap-2 shrink-0 button-container items-center">
           <!-- Create/Cancel button based on state -->
           <Button
-            v-if="!isEditingNetwork"
+            v-if="!isEditingNetwork && !readonly"
             @click="newNetwork"
             icon="pi pi-plus"
             :label="screenWidth > 640 ? t('web.device_management.create_new') : undefined"
@@ -630,7 +635,7 @@ onUnmounted(() => {
           />
 
           <Button
-            v-else
+            v-else-if="!readonly"
             @click="cancelEditNetwork"
             icon="pi pi-times"
             :label="screenWidth > 640 ? t('web.device_management.cancel_edit') : undefined"
@@ -664,8 +669,18 @@ onUnmounted(() => {
 
     <!-- Main Content Area -->
     <div class="network-content">
+      <!-- 只读目标：停用的网络也不再展示编辑表单，只说明原因 -->
+      <div v-if="readonly" class="px-3 py-2">
+        <Message severity="info" :closable="false" class="text-sm">
+          {{ t("web.device_management.readonly_target") }}
+        </Message>
+      </div>
+
       <!-- Network Creation Form -->
-      <div v-if="isEditingNetwork || networkIsDisabled" class="network-creation-container">
+      <div
+        v-if="!readonly && (isEditingNetwork || networkIsDisabled)"
+        class="network-creation-container"
+      >
         <div class="network-creation-header flex items-center gap-2 mb-3">
           <i class="pi pi-plus-circle text-primary text-xl"></i>
           <h2 class="text-xl font-medium">{{ t("web.device_management.edit_network") }}</h2>

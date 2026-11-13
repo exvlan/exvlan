@@ -11,16 +11,34 @@ import { persistUiStateNow } from "./persist";
 
 export type RuntimeKind = "service" | "normal" | "off";
 
+/**
+ * 远端的两种接法：
+ * - `direct`：直连对端内核 RPC（1995，无鉴权，靠对端 RPC 白名单兜底）
+ * - `gateway`：走对端 gateway（2016，Bearer token；token 由对端配对签发）
+ *
+ * 两者并存、由用户显式选择 —— 不做静默降级（权限与暴露面不同，
+ * 静默切换会让「我到底连到了哪」变模糊）。
+ */
+export type RemoteMode = "direct" | "gateway";
+
 export interface RemoteTarget {
   id: string;
   /** 显示名（缺省用 host:port） */
   name: string;
   host: string;
   port: number;
+  /** 缺省 = direct（旧数据没有这个字段） */
+  mode?: RemoteMode;
 }
 
 export const LOCAL_TARGET = "local";
 export const DEFAULT_RPC_PORT = 1995;
+/** gateway 默认端口（`service.toml [gateway].port`）。 */
+export const DEFAULT_GATEWAY_PORT = 2016;
+
+export function remoteMode(target: RemoteTarget): RemoteMode {
+  return target.mode === "gateway" ? "gateway" : "direct";
+}
 
 const KEY_RUNTIME = "runtime";
 const KEY_TARGET = "target";
@@ -67,9 +85,13 @@ export function loadRemotes(): RemoteTarget[] {
             item.host.length > 0
           );
         })
-        // 端口由对端自动发现（默认 RPC 1995 / gateway 2016）。
+        // 直连：端口固定 1995（由对端自动发现）；gateway：默认 2016，可显式改。
         // 归一化历史数据里的手误端口，避免用户去猜。
-        .map((item) => ({ ...item, port: DEFAULT_RPC_PORT }))
+        .map((item) =>
+          item.mode === "gateway"
+            ? { ...item, port: item.port || DEFAULT_GATEWAY_PORT }
+            : { ...item, port: DEFAULT_RPC_PORT, mode: "direct" as const },
+        )
     );
   } catch {
     return [];
@@ -113,15 +135,27 @@ export function targetLabel(id: string, localLabel: string): string {
   if (id === LOCAL_TARGET) return localLabel;
   const remote = findRemote(id);
   if (!remote) return id;
-  return remote.name || `${remote.host}:${remote.port || DEFAULT_RPC_PORT}`;
+  return remote.name || remoteAddress(remote);
 }
 
-export function newRemote(host = "", port = DEFAULT_RPC_PORT): RemoteTarget {
+/** `10.254.1.6:2016`（只用于显示；直连目标不显示端口以免误导）。 */
+export function remoteAddress(remote: RemoteTarget): string {
+  const host =
+    remote.host.includes(":") && !remote.host.startsWith("[") ? `[${remote.host}]` : remote.host;
+  return remoteMode(remote) === "gateway" ? `${host}:${remote.port || DEFAULT_GATEWAY_PORT}` : host;
+}
+
+export function newRemote(
+  host = "",
+  port = DEFAULT_RPC_PORT,
+  mode: RemoteMode = "direct",
+): RemoteTarget {
   return {
     id: `rm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     name: "",
     host,
-    port,
+    port: mode === "gateway" ? DEFAULT_GATEWAY_PORT : port,
+    mode,
   };
 }
 
@@ -132,13 +166,21 @@ const ACCEPTED_PORTS = new Set([DEFAULT_RPC_PORT, 15999]);
  * 解析「远程目标主机」。端口会由对端自动发现（默认 RPC 1995 / gateway 2016），
  * 因此只做“去掉显式端口 + 拒绝明显手误”的处理。
  */
-export function parseRemoteHost(input: string): { host: string } | { error: "port" } | null {
+export function parseRemoteHost(
+  input: string,
+  mode: RemoteMode = "direct",
+): { host: string; port?: number } | { error: "port" } | null {
   let text = input.trim();
   if (!text) return null;
   text = text.replace(/^tcp:\/\//i, "").replace(/\/.*$/, "");
   const v6 = text.match(/^\[([^\]]+)\](?::(\d+))?$/);
   if (v6) {
-    if (v6[2] && !ACCEPTED_PORTS.has(Number(v6[2]))) return { error: "port" };
+    if (!v6[2]) return { host: v6[1] };
+    const port = Number(v6[2]);
+    if (mode === "gateway") {
+      return port > 0 && port <= 65535 ? { host: v6[1], port } : { error: "port" };
+    }
+    if (!ACCEPTED_PORTS.has(port)) return { error: "port" };
     return { host: v6[1] };
   }
   const parts = text.split(":");
@@ -146,6 +188,10 @@ export function parseRemoteHost(input: string): { host: string } | { error: "por
     return { host: parts[0] };
   }
   const port = Number(parts[parts.length - 1]);
+  if (mode === "gateway") {
+    if (!Number.isFinite(port) || port <= 0 || port > 65535) return { error: "port" };
+    return { host: parts.slice(0, -1).join(":"), port };
+  }
   if (!ACCEPTED_PORTS.has(port)) {
     return { error: "port" };
   }

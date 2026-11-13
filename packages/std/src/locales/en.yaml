@@ -523,6 +523,7 @@ web:
     central_networks: Joined Networks
 
   device_management:
+    readonly_target: This is a read-only target reached through the peer gateway. You can view and diagnose; make changes on that machine.
     confirm_delete_network: Delete network {name}? It will be removed from the config directory.
     edit_network: Edit Network
     export_config: Export Config
@@ -788,11 +789,29 @@ target:
   test_all: Test all
   port_hint: Port is fixed at {port} (remote access goes over the mesh only, no key, no HTTPS).
   port_fixed: Remote targets always use port {port}; remove the other port and retry.
+  mode: Connection
+  mode_direct: Direct kernel RPC ({port})
+  mode_direct_short: Direct
+  mode_gateway: Via gateway (Bearer token)
+  mode_gateway_short: Via gateway
+  mode_hint: Direct needs the peer kernel RPC whitelist to include this machine; the gateway route uses a pairing token issued by the peer (read-only, revocable on the peer).
+  port_gateway: Gateway port
+  port_gateway_hint: Defaults to {port} (the peer can change [gateway].port in service.toml).
+  pair: Pair
+  pair_title: Enter the 6-digit pairing code from the peer
+  pair_hint: 'Generated on the peer ("Remote assistance"): valid for 5 minutes, single use, first redemption binds the source IP.'
+  pair_code: 6 digits
+  pair_code_invalid: The pairing code must be 6 digits
+  pair_done: Paired
+  pair_failed: Pairing failed
+  paired: Paired
+  not_paired: Not paired
+  gateway_unreachable: "Cannot reach the gateway at {addr}: {error}"
   remote_rejected: Connected to {addr} but it never replies. Usually the remote kernel RPC whitelist does not include this machine — make sure the remote runs pre.14 or newer (older builds only allow loopback).
   switch_hint: switch from the status bar or tray
   hint: |-
-    Remote targets are reached over the mesh network only (port is discovered
-    automatically, no key, no HTTPS). Switching target does NOT stop the local kernel;
+    Two routes: direct kernel RPC (1995, relies on the peer whitelist) or via gateway
+    (2016, Bearer token, read-only). Switching target does NOT stop the local kernel;
     "remote + local normal mode" can coexist.
 
 service_settings:

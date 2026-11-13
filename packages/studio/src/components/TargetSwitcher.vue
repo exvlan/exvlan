@@ -7,15 +7,16 @@ import { useI18n } from "vue-i18n";
 import { type as osType } from "@tauri-apps/plugin-os";
 import { useToast } from "openvue";
 import {
-  DEFAULT_RPC_PORT,
   LOCAL_TARGET,
   type RemoteTarget,
   type RuntimeKind,
   loadRemotes,
+  remoteAddress,
+  remoteMode,
   remoteUrl,
 } from "~/composables/target";
 import RemoteManager from "~/components/RemoteManager.vue";
-import { remotePing } from "~/composables/backend";
+import { gatewaySystem, remotePing } from "~/composables/backend";
 
 const props = defineProps<{
   runtime: RuntimeKind;
@@ -44,9 +45,9 @@ const isMobile = computed(() => {
   return p === "android" || p === "ios";
 });
 
-/** `vServer · 10.254.1.1`，没填名字时只显示地址。 */
+/** `vServer · 10.254.1.1:2016`，没填名字时只显示地址。 */
 function remoteLabel(remote: RemoteTarget): string {
-  const addr = `${remote.host}:${remote.port || DEFAULT_RPC_PORT}`;
+  const addr = remoteAddress(remote);
   return remote.name ? `${remote.name} · ${addr}` : addr;
 }
 
@@ -112,7 +113,12 @@ const items = computed(() => {
       ...remotes.value.map((remote) => ({
         // 名字与地址都给出来：只显示 name 时看不出连的是哪台机器
         label: remoteLabel(remote),
-        icon: props.targetId === remote.id ? "pi pi-check" : "pi pi-globe",
+        icon:
+          props.targetId === remote.id
+            ? "pi pi-check"
+            : remoteMode(remote) === "gateway"
+              ? "pi pi-shield"
+              : "pi pi-globe",
         command: () => emit("switch-target", remote.id),
       })),
       { separator: true },
@@ -141,8 +147,14 @@ async function testAll() {
   for (const remote of remotes.value) {
     testing.value = remote.id;
     try {
-      const ms = await remotePing(remoteUrl(remote));
-      lines.push(`${remote.name || remote.host} · ${ms}ms`);
+      if (remoteMode(remote) === "gateway") {
+        // 经 gateway：用 /system 探活（顺带验证 token 是否仍有效）。
+        const system = await gatewaySystem(remote.id);
+        lines.push(`${remote.name || remote.host} · gateway ${String(system.version ?? "ok")}`);
+      } else {
+        const ms = await remotePing(remoteUrl(remote));
+        lines.push(`${remote.name || remote.host} · ${ms}ms`);
+      }
     } catch (e: unknown) {
       lines.push(`${remote.name || remote.host} · ✗ ${String(e).slice(0, 80)}`);
     }

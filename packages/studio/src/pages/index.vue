@@ -21,7 +21,8 @@ import {
 import { executeVpnTileAction } from "~/composables/mobile_vpn_tile";
 import { dedupeNetworkInstances } from "~/composables/instance_dedupe";
 import { GUIRemoteClient } from "~/modules/api";
-import { logDiagStep, uploadDiagnostics } from "~/composables/backend";
+import { GatewayRemoteClient } from "~/modules/gateway_api";
+import { gatewaySystem, logDiagStep, uploadDiagnostics } from "~/composables/backend";
 import { buildFrontendState } from "~/composables/diagnostics";
 
 import { useToast, useConfirm } from "openvue";
@@ -34,6 +35,8 @@ import {
   loadRemotes,
   loadRuntime,
   loadTargetId,
+  remoteAddress,
+  remoteMode,
   remoteUrl,
   saveRuntime,
   saveTargetId,
@@ -518,7 +521,7 @@ async function refreshTrayMenu() {
       remotes.map((remote) =>
         MenuItem.new({
           id: `target-${remote.id}`,
-          text: `${targetId.value === remote.id ? "✓ " : ""}${remote.name || `${remote.host}:${remote.port}`}`,
+          text: `${targetId.value === remote.id ? "✓ " : ""}${remote.name || remoteAddress(remote)}`,
           action: async () => {
             await switchTarget(remote.id);
           },
@@ -578,6 +581,26 @@ async function initWithMode(rawMode: Mode) {
     // 运行方式=停止：本机没有 RPC 可连，界面保持「未运行」并提供重试入口。
     startupError.value = t("runtime.off_hint");
     clientRunning.value = false;
+    return;
+  }
+
+  // 「经 gateway」的远端目标：控制面走对端 HTTP（Bearer），不拨内核 RPC。
+  // 本机内核仍按 runtime 维护（互不影响），所以这里只探一次连通性。
+  if (remote && remoteMode(remote) === "gateway") {
+    void ensureRuntimeQuiet();
+    try {
+      await gatewaySystem(remote.id);
+    } catch (e) {
+      startupError.value = t("target.gateway_unreachable", {
+        addr: remoteAddress(remote),
+        error: e instanceof Error ? e.message : String(e),
+      });
+      clientRunning.value = false;
+      void reportFrontendError("fe:gateway-unreachable", startupError.value);
+      return;
+    }
+    // 只读目标：不做「推本地配置」那套（那是写操作）。
+    await afterConnect(mode, true);
     return;
   }
   const running_inst_ids = remote
@@ -672,10 +695,12 @@ async function connectWithRetry(mode: Mode, url: string | undefined, retrys: num
 }
 
 /** 连接成功后的收尾：记状态、恢复上次网络。 */
-async function afterConnect(mode: Mode) {
+async function afterConnect(mode: Mode, running?: boolean) {
   currentMode.value = mode;
   startupError.value = "";
-  clientRunning.value = await isClientRunning();
+  // 经 gateway 的目标没有本机 RPC 连接，`isClientRunning()` 必然是 false，
+  // 由调用方显式传 true（已探通对端）。
+  clientRunning.value = running ?? (await isClientRunning());
 
   // 连接成功后再恢复一次上次网络（不依赖 clientRunning 的 false→true 翻转）
   // 注意：切模式后配置目录不同，上次的网络 ID 可能在新内核里不存在，
@@ -1047,7 +1072,17 @@ onMounted(async () => {
 useTray(type() !== "android" && type() !== "ios");
 let toast = useToast();
 
-const remoteClient = computed(() => new GUIRemoteClient());
+/** 当前目标（`undefined` = 本机）。 */
+const currentRemote = computed(() => findRemote(targetId.value));
+/** 「经 gateway」的只读目标：控制面走 HTTP + Bearer，不拨内核 RPC。 */
+const isGatewayTarget = computed(
+  () => !!currentRemote.value && remoteMode(currentRemote.value) === "gateway",
+);
+const remoteClient = computed(() =>
+  isGatewayTarget.value && currentRemote.value
+    ? new GatewayRemoteClient(currentRemote.value.id)
+    : new GUIRemoteClient(),
+);
 const instanceId = ref<string | undefined>(undefined);
 const clientRunning = ref(false);
 
@@ -1438,6 +1473,7 @@ const configServerConnectionStatus = computed(() => {
       v-if="clientRunning"
       class="flex-1 overflow-y-auto"
       :api="remoteClient"
+      :readonly="isGatewayTarget"
       :pause-auto-refresh="isModeSaving"
       v-model:instance-id="instanceId"
     />

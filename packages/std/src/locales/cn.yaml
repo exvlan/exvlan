@@ -523,6 +523,7 @@ web:
     central_networks: 所属网络
 
   device_management:
+    readonly_target: 这是「经 gateway」的只读目标：可以查看与诊断，修改请到对端本机操作。
     confirm_delete_network: 确定删除网络 {name}？删除后该网络会从配置目录里移除。
     edit_network: 编辑网络
     export_config: 导出配置
@@ -788,10 +789,28 @@ target:
   test_all: 全部测速
   port_hint: 端口固定为 {port}（远程只走 mesh，无密钥、无 HTTPS）。
   port_fixed: 远程目标固定使用端口 {port}，请去掉其他端口后重试。
+  mode: 连接方式
+  mode_direct: 直连内核（RPC {port}）
+  mode_direct_short: 直连
+  mode_gateway: 经 gateway（Bearer token）
+  mode_gateway_short: 经 gateway
+  mode_hint: 直连需要对端内核的 RPC 白名单包含本机；经 gateway 用配对 token（由对端签发），只读、可在对端随时吊销。
+  port_gateway: gateway 端口
+  port_gateway_hint: 默认 {port}（对端可在 service.toml 的 [gateway].port 修改）。
+  pair: 配对
+  pair_title: 输入对端的 6 位配对码
+  pair_hint: 在对端「远程协助」里生成：5 分钟内有效、一次性、首次兑换绑定来源 IP。
+  pair_code: 6 位数字
+  pair_code_invalid: 配对码应为 6 位数字
+  pair_done: 配对成功
+  pair_failed: 配对失败
+  paired: 已配对
+  not_paired: 未配对
+  gateway_unreachable: 连不上 {addr} 的 gateway：{error}
   remote_rejected: 已连上 {addr}，但对方没有应答。通常是对端内核的 RPC 白名单未包含本机 —— 请确认对端已升级到 pre.14 及以上（旧版本默认只允许回环）。
   switch_hint: 在状态栏或托盘切换
   hint: |-
-    远程目标只通过 mesh 内网访问（端口自动发现，无密钥、无 HTTPS）。
+    两种接法：直连内核（RPC 1995，靠对端白名单）或经 gateway（2016，Bearer token，只读）。
     切换目标**不会**停止本机内核；「远程 + 本机普通模式」可以同时存在。
 
 service_settings:

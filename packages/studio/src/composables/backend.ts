@@ -255,6 +255,53 @@ export async function remotePing(url: string) {
   return await invoke<number>("remote_ping", { url });
 }
 
+// ---------------------------------------------------------------------------
+// 经 gateway 的远端目标（R2：只读）
+// ---------------------------------------------------------------------------
+
+/** 配对结果（token 留在 Rust 侧，这里只拿到摘要）。 */
+export interface GatewayPairResult {
+  id: string;
+  host: string;
+  port: number;
+  token_id: string;
+  scopes: string[];
+  paired_at: number;
+  expires_at: number;
+}
+
+/** 已配对目标（不含 token）。 */
+export interface GatewayRemoteSummary extends GatewayPairResult {}
+
+/** 用对端给的 6 位一次性码换 token（**token 由对端签发**）。 */
+export async function gatewayPair(opts: {
+  targetId: string;
+  host: string;
+  port?: number;
+  code: string;
+  client?: string;
+}) {
+  return await invoke<GatewayPairResult>("gateway_pair", opts);
+}
+
+export async function gatewayRemotes() {
+  return await invoke<GatewayRemoteSummary[]>("gateway_remotes");
+}
+
+export async function gatewayForget(targetId: string) {
+  return await invoke("gateway_forget", { targetId });
+}
+
+/** 对端概览（`/api/v1/system`）：连通性与版本信息。 */
+export async function gatewaySystem(targetId: string) {
+  return await invoke<Record<string, unknown>>("gateway_system", { targetId });
+}
+
+/** 对端诊断（`/api/v1/doctor`）。 */
+export async function gatewayDoctor(targetId: string) {
+  return await invoke<Record<string, unknown>>("gateway_doctor", { targetId });
+}
+
 export async function initRpcConnection(isNormalMode: boolean, url?: string) {
   return await invoke("init_rpc_connection", { isNormalMode, url });
 }

@@ -4,6 +4,7 @@
 mod config_store;
 mod diagnostics;
 mod elevate;
+mod gateway_remote;
 #[cfg(target_os = "android")]
 mod ffi;
 mod kernel;
@@ -5987,6 +5988,13 @@ pub fn run_gui() -> std::process::ExitCode {
             service_kernel_restart,
             service_reinstall,
             init_rpc_connection,
+            gateway_remote::gateway_pair,
+            gateway_remote::gateway_remotes,
+            gateway_remote::gateway_forget,
+            gateway_remote::gateway_system,
+            gateway_remote::gateway_doctor,
+            gateway_remote::gateway_overview,
+            gateway_remote::gateway_instance,
             runtime_apply,
             remote_ping,
             service_uninstall,
