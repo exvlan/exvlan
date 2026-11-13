@@ -197,10 +197,23 @@ const stopNetwork = async () => {
 };
 
 const confirm = useConfirm();
+// 「更多操作」按钮：既用来开菜单，也作为确认框的锚点
+// （ConfirmPopup 没有 target 会贴在视口左上角，桌面端离按钮很远）。
+const actionsAnchor = ref<HTMLElement | null>(null);
+const openActionsMenu = (event: Event) => {
+  actionsAnchor.value = event.currentTarget as HTMLElement | null;
+  menuRef.value?.toggle(event);
+};
+
 const confirmDeleteNetwork = () => {
   confirm.require({
     // 统一由宿主 App 的 `<ConfirmPopup>` 渲染（本组件不再自带 ConfirmPopup，
     // 否则同一个 require 会同时弹出「内联 + 模态」两个确认框）。
+    // target 必须给：popup 按锚点定位。
+    target:
+      actionsAnchor.value ??
+      (document.querySelector("#root") as HTMLElement | null) ??
+      document.body,
     message: t("web.device_management.confirm_delete_network", {
       name: currentNetworkMeta.value?.network_name || instanceId.value || "",
     }),
@@ -658,7 +671,7 @@ onUnmounted(() => {
             class="p-button-rounded flex items-center justify-center"
             severity="help"
             style="width: 3rem !important; height: 3rem !important; font-size: 1.2rem"
-            @click="menuRef.toggle($event)"
+            @click="openActionsMenu($event)"
             :aria-label="t('web.device_management.more_actions')"
             :tooltip="t('web.device_management.more_actions')"
             tooltipOptions="{ position: 'bottom' }"
