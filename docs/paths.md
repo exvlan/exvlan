@@ -8,7 +8,7 @@
 1. 唯一标识 `era.exvlan.studio`（bundle id / applicationId / 服务 label / 目录名四者一致）
 2. 每端最多两个根：用户根 + 系统根（Android 只有用户根）
 3. 子结构统一：`config/` `core/` `logs/` `diagnostics/` `tmp/`
-4. 文件名全小写：`prefs.toml` `networks.toml` `machine_id` `error.log` `events.log` `studio.log` `exvlan.log` `helper.log`
+4. 文件名全小写：`prefs.toml` `networks.toml` `machine_id` `remote-tokens.json` `error.log` `events.log` `studio.log` `exvlan.log` `helper.log`
 5. 不保留向后兼容：旧 `exvlan` 路径只用于一次性清理
 
 ## 落点
@@ -16,7 +16,7 @@
 ### macOS
 
 ```
-~/Library/Application Support/era.exvlan.studio/   prefs.toml · networks.toml · machine_id
+~/Library/Application Support/era.exvlan.studio/   prefs.toml · networks.toml · machine_id · remote-tokens.json(0600)
 ~/Library/Logs/era.exvlan.studio/                  error.log · events.log · studio.log · diagnostics/
 /Library/Application Support/era.exvlan.studio/    config/ · core/{exvlan, exvlan.sig, version}
 /Library/Logs/era.exvlan.studio/                   exvlan.log · helper.log
@@ -29,7 +29,7 @@ $TMPDIR/era.exvlan.studio/                         elevate.log（0600）
 ### Windows
 
 ```
-%APPDATA%\era.exvlan.studio\        prefs.toml · networks.toml
+%APPDATA%\era.exvlan.studio\        prefs.toml · networks.toml · remote-tokens.json
 %LOCALAPPDATA%\era.exvlan.studio\   machine_id · logs\（error.log · events.log · studio.log · diagnostics\）
 %ProgramData%\era.exvlan.studio\    config\ · core\{exvlan.exe, version} · logs\exvlan.log
 %TEMP%\era.exvlan.studio\           elevate.log
@@ -40,7 +40,7 @@ Windows 没有 POSIX 权限，依赖用户目录的默认 DACL（等价 0600）�
 ### Android
 
 ```
-filesDir/   prefs.toml · networks.toml · machine_id · logs/
+filesDir/   prefs.toml · networks.toml · machine_id · remote-tokens.json · logs/
 cacheDir/   diagnostics/ · tmp/
 ```
 
