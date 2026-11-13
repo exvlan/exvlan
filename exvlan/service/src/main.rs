@@ -235,7 +235,11 @@ fn paths() -> Paths {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let data = PathBuf::from("/var/lib/era.exvlan.studio");
-        let core = data.join("core");
+        // 内核/工具的落点必须与 `control::paths` / `studio::paths` 一致
+        // （`/opt/era.exvlan.studio/core`）。历史上这里写成 `data/core`，
+        // 会让 Linux 服务把内核装到 GUI 看不见的目录（`need_kernel` 恒真、
+        // `doctor` 显示 `kernel=-`）。Linux 服务是 dev.1 新增，此处对齐无迁移成本。
+        let core = PathBuf::from("/opt/era.exvlan.studio").join("core");
         let core_cli = core.join("exvlan-cli");
         let core_gw = core.join("exvlan-gateway");
         Paths {
