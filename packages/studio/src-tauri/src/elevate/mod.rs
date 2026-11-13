@@ -4,7 +4,54 @@
  *  Licensed under the MIT License. See License in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 use std::convert::From;
+use std::path::PathBuf;
 use std::process::Command as StdCommand;
+use std::sync::Mutex;
+
+/// 随包 askpass 脚本（`resources/tools/exvlan-askpass.sh`）的位置。
+///
+/// 由 GUI 启动时注入（只有 Tauri 上下文知道 `resource_dir()`）；`sudo -A`
+/// 回落到它来弹窗输入密码。空/不存在表示没有可用脚本。
+static ASKPASS: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// 记录 askpass 脚本位置（非 Linux 平台没有 `sudo -A`，此处仅占位）。
+pub(crate) fn set_askpass_path(path: Option<PathBuf>) {
+    let script = path.filter(|candidate| candidate.is_file());
+    // `sudo -A` 要求 askpass 是**可执行**程序：打包器不保留 0755 时要能看出来，
+    // 否则现场只会得到一句莫名其妙的 "askpass program not found"。
+    if let Some(candidate) = script.as_ref()
+        && !is_executable(candidate)
+    {
+        crate::logger::record(
+            "elevate",
+            format!(
+                "askpass 脚本不可执行：{}（sudo 回落不可用）",
+                candidate.display()
+            ),
+        );
+        *ASKPASS.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        return;
+    }
+    *ASKPASS.lock().unwrap_or_else(|e| e.into_inner()) = script;
+}
+
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::metadata(path)
+        .map(|meta| meta.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(_path: &std::path::Path) -> bool {
+    true
+}
+
+/// 当前的 askpass 脚本（不存在时为 `None`）。
+pub(crate) fn askpass_path() -> Option<PathBuf> {
+    ASKPASS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
 
 /// Wrap of std::process::command and escalate privileges while executing
 pub struct Command {

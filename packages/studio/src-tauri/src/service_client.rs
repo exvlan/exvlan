@@ -1,7 +1,9 @@
 //! `exvlan-service` 客户端：GUI 与唯一常驻特权进程之间的 IPC。
 //!
-//! macOS / Windows：unix socket / 命名管道；Linux 不引入常驻服务
-//! （普通模式走 setcap + PDEATHSIG，服务模式走 systemd）。
+//! macOS / Linux：unix socket（`/var/run/<app>/service.sock`）；Windows：命名管道。
+//! Linux 的特权服务由 systemd 托管（§14.12），与 macOS/Windows 同一套 IPC；
+//! 服务**没有装/没起来**时仍回落到 supervisor（setcap + PDEATHSIG），
+//! 保证「装不上服务」不会让界面连不上本机内核。
 //!
 //! 设计要点：
 //! - 模式只是生命周期策略：`mode.set(service ↔ normal)` **不重启内核**；
@@ -53,6 +55,9 @@ pub fn bundled_service(app: &tauri::AppHandle) -> Option<PathBuf> {
     .find(|candidate| candidate.is_file())
 }
 
+/// 随包的 askpass 脚本（`resources/tools/exvlan-askpass.sh`，Linux `sudo -A` 用）。
+pub const ASKPASS_SCRIPT: &str = "exvlan-askpass.sh";
+
 /// 随包的控制面工具目录（`resources/tools/`：cli / gateway / migrate）。
 pub fn bundled_tools_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
     use tauri::Manager as _;
@@ -88,14 +93,14 @@ pub struct ServiceState {
     pub status: String,
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub use imp::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
     is_installed, is_ready, kernel_status, pair_start, port_cleanup, port_owner, restart_kernel,
     set_extra_whitelist, set_mode, state, stop, stop_kernel, update, whitelist_info,
 };
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub use stub::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
     is_installed, is_ready, kernel_status, pair_start, port_cleanup, port_owner, restart_kernel,
@@ -103,10 +108,10 @@ pub use stub::{
 };
 
 // ---------------------------------------------------------------------------
-// macOS / Windows：IPC 实现
+// macOS / Linux / Windows：IPC 实现
 // ---------------------------------------------------------------------------
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod imp {
     use super::*;
     use std::io::{BufRead as _, BufReader, Write};
@@ -121,7 +126,7 @@ mod imp {
 
     static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 
-    #[cfg(target_os = "macos")]
+    #[cfg(unix)]
     fn connect() -> Result<Session, String> {
         let path = crate::paths::privileged_service_socket();
         let stream = std::os::unix::net::UnixStream::connect(&path)
@@ -201,8 +206,10 @@ mod imp {
         {
             installed_service_bin().is_file() && crate::paths::privileged_service_plist().is_file()
         }
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
+            // Linux：systemd 由服务自己 `--install` 写 unit，GUI 只看二进制是否落盘
+            // （与 Windows 一致；版本串在 `<bin>.version` 里）。
             installed_service_bin().is_file()
         }
     }
@@ -279,6 +286,7 @@ mod imp {
     }
 
     /// 首次安装（提权一次）：跑随包 `exvlan-service --install <uid>`。
+    #[cfg(not(target_os = "linux"))]
     pub fn install(app: &tauri::AppHandle) -> Result<(), String> {
         // 按平台拼文件名：Windows 是 .exe，写死会让错误信息本身就无法执行。
         let bin = if cfg!(windows) {
@@ -313,8 +321,104 @@ mod imp {
         Err("服务已安装但 IPC 未就绪（见诊断包 service 段）".to_string())
     }
 
+    /// Linux：提权跑随包 `exvlan-service --install <uid> [--tools-dir <dir>]`，
+    /// 由服务自己写 systemd unit、`enable --now` 并等 `sd_notify READY=1`。
+    #[cfg(target_os = "linux")]
+    pub fn install(app: &tauri::AppHandle) -> Result<(), String> {
+        let src = bundled_service(app).ok_or_else(|| {
+            "安装包内未找到服务二进制（resources/service/exvlan-service）".to_string()
+        })?;
+        let uid = current_uid();
+        let tools = bundled_tools_dir(app);
+
+        let mut args: Vec<String> = vec!["--install".to_string(), uid.to_string()];
+        if let Some(dir) = tools.as_ref() {
+            args.push("--tools-dir".to_string());
+            args.push(dir.display().to_string());
+        }
+
+        let mut command = std::process::Command::new(&src);
+        command.args(&args);
+        // 提权链路：pkexec → sudo -A（见 `elevate::linux`）。
+        match crate::elevate::Command::new(command).output() {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => {
+                let detail = {
+                    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    if stdout.is_empty() { stderr } else { stdout }
+                };
+                return Err(linux_install_help(
+                    &src,
+                    uid,
+                    tools.as_deref(),
+                    format!(
+                        "安装特权服务失败（exit={}）：{}",
+                        out.status,
+                        if detail.is_empty() {
+                            "（无输出）"
+                        } else {
+                            &detail
+                        }
+                    ),
+                ));
+            }
+            Err(err) => {
+                return Err(linux_install_help(
+                    &src,
+                    uid,
+                    tools.as_deref(),
+                    format!("无法提权执行安装: {err:#}"),
+                ));
+            }
+        }
+
+        // 服务侧已经等过 READY，这里再给 systemd 一点余量（冷启动时 unit 依赖较多）。
+        for _ in 0..50 {
+            if is_ready() {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        Err(format!(
+            "服务已安装但 IPC 未就绪（{}）。排查：journalctl -u {SERVICE_LABEL} -n 20",
+            crate::paths::privileged_service_socket().display()
+        ))
+    }
+
+    /// 提权不可用/失败时补一段**可直接复制**的手动命令（界面直接展示这段文本）。
+    #[cfg(target_os = "linux")]
+    fn linux_install_help(
+        src: &std::path::Path,
+        uid: u32,
+        tools: Option<&std::path::Path>,
+        reason: String,
+    ) -> String {
+        let installed = installed_service_bin();
+        let tools_arg = tools
+            .map(|dir| format!(" --tools-dir '{}'", dir.display()))
+            .unwrap_or_default();
+        format!(
+            "{reason}\n可在终端手动执行（复制即可）：\n  sudo cp '{src}' '{installed}'\n  sudo {installed} --install {uid}{tools_arg}",
+            src = src.display(),
+            installed = installed.display(),
+        )
+    }
+
+    /// Linux：没有「服务自替换」（`--replace-updater` 仅 mac/win 实现），
+    /// 版本不一致时直接提权重装一次，systemd 会把新二进制拉起来。
+    #[cfg(target_os = "linux")]
+    pub fn update(app: &tauri::AppHandle) -> Result<bool, String> {
+        if installed_version().as_deref() == Some(crate::BUILD_VERSION) {
+            return Ok(false);
+        }
+        install(app)?;
+        Ok(true)
+    }
+
     /// 免密升级服务本体：把新二进制交给运行中的服务，由它自己替换并重启。
     /// 返回 `true` = 确实做了替换。
+    #[cfg(not(target_os = "linux"))]
     pub fn update(app: &tauri::AppHandle) -> Result<bool, String> {
         let want = crate::BUILD_VERSION;
         if installed_version().as_deref() == Some(want) {
@@ -419,14 +523,27 @@ mod imp {
     }
 
     /// 普通模式：建 session → mode=normal → 确保内核在跑。
+    ///
+    /// Linux：服务没装/没起来时回落到 supervisor（setcap + PDEATHSIG 子进程）——
+    /// 「装不上服务」不应该连本机内核都起不来。
     pub fn ensure_normal(_app: &tauri::AppHandle) -> Result<String, String> {
+        #[cfg(target_os = "linux")]
+        if !is_ready() {
+            return super::stub::ensure_normal(_app);
+        }
         set_mode("normal")?;
         ensure_kernel()?;
         Ok("127.0.0.1:1995".to_string())
     }
 
     /// 服务模式：建 session → mode=service → 确保内核在跑。
+    ///
+    /// Linux 无服务时内核已由提权 provision 起好，直接返回地址（与旧行为一致）。
     pub fn ensure_service(_app: &tauri::AppHandle) -> Result<String, String> {
+        #[cfg(target_os = "linux")]
+        if !is_ready() {
+            return super::stub::ensure_service(_app);
+        }
         set_mode("service")?;
         ensure_kernel()?;
         Ok("127.0.0.1:1995".to_string())
@@ -435,6 +552,8 @@ mod imp {
     pub fn stop() {
         let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
         *guard = None; // 断开连接：normal 模式下服务会停内核
+        #[cfg(target_os = "linux")]
+        super::stub::stop(); // supervisor 回退路径（未装服务时）也要停
     }
 
     /// 生效的 RPC 白名单（回环 + 各虚拟网段 + 额外追加）。
@@ -508,7 +627,7 @@ mod imp {
 }
 
 // ---------------------------------------------------------------------------
-// Linux：没有常驻服务，普通模式交给 supervisor（setcap + PDEATHSIG）
+// 移动端：没有特权服务；Linux 未装服务时也用它回落（supervisor 起内核）
 // ---------------------------------------------------------------------------
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

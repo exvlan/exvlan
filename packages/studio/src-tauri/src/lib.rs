@@ -4982,10 +4982,28 @@ async fn ensure_kernel_service(
     let mut opts = opts;
     normalize_service_options(&mut opts);
 
-    // Linux 不引入常驻特权服务：服务模式仍是 systemd unit（准备给内核 + setcap），
-    // 普通模式是 GUI 子进程（PDEATHSIG）。保持原有行为。
+    // Linux：特权服务已装且在线时，内核/工具/unit 全部由服务托管 —— 必须走 IPC，
+    // 不能再走 `linux_ensure`（legacy 内核 systemd unit）。两者用的是**同一个
+    // unit 名**（`era.exvlan.studio.service`），重复 provision 会把服务的 unit
+    // 覆盖成「内核前台 daemon」，随后界面又判定「服务未就绪」→ 每次启动都弹授权。
+    // 服务没装/没起来时保持原有行为（提权 provision，setcap + systemd）。
     #[cfg(target_os = "linux")]
     {
+        let app2 = app.clone();
+        let done = tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
+            if crate::service_client::is_installed() && crate::service_client::is_ready() {
+                ensure_service_and_kernel(&app2).map(Some)
+            } else {
+                Ok(None)
+            }
+        })
+        .await
+        .map_err(|e| format!("服务任务失败: {e}"))??;
+        if let Some(done) = done {
+            // 让 legacy 指纹也跟上：万一服务被卸载，回落 provision 时不会白跑一次提权。
+            service::mark_current(&opts);
+            return Ok(done);
+        }
         return linux_ensure(&app, &opts).await;
     }
 
@@ -6005,6 +6023,14 @@ pub fn run_gui() -> std::process::ExitCode {
 
             install_panic_hook();
             record_boot_line(&handle);
+
+            // Linux 提权回落（`sudo -A`）要用的随包 askpass 脚本：只有这里能拿到
+            // `resource_dir()`，所以启动时注入一次（缺失时提权会退回「可复制命令」）。
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            crate::elevate::set_askpass_path(
+                crate::service_client::bundled_tools_dir(&handle)
+                    .map(|dir| dir.join(crate::service_client::ASKPASS_SCRIPT)),
+            );
 
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             maybe_repair_user_dirs(&handle);

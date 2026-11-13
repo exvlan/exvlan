@@ -3720,6 +3720,15 @@ fn install(p: &Paths, uid: u32, _sid: &str) -> anyhow::Result<()> {
 
     // 5) 生效 + 启动。`daemon-reload` 必须在写 unit 之后、`enable` 之前。
     systemctl(&["daemon-reload"])?;
+    // 同名 unit 可能正被**旧实现**跑着（7.3 之前 Linux 的「内核前台 daemon」用同名 unit）。
+    // `enable --now` 对一个已 active 的单位是空操作 → 新二进制根本不会被拉起，
+    // 随后 probe 超时还会把它 disable 掉。先停一次，保证接下来起来的是本服务。
+    if let Err(err) = systemctl(&["stop", SERVICE_LABEL]) {
+        log_line(
+            p,
+            &format!("install: 预停同名 unit 失败（通常表示尚未运行）: {err:#}"),
+        );
+    }
     systemctl(&["enable", "--now", SERVICE_LABEL])?;
 
     // 6) 等就绪（≤10s）。等不到就回滚停用，别把「装上了但起不来」的 unit

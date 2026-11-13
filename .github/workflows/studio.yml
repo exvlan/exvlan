@@ -196,7 +196,7 @@ jobs:
           chmod +x packages/studio/src-tauri/resources/kernel/exvlan || true
           ls -l packages/studio/src-tauri/resources/kernel/
 
-      # 特权服务（macOS + Windows）：唯一的常驻特权进程。
+      # 特权服务（macOS + Windows + Linux）：唯一的常驻特权进程。
       # 首次安装授权一次；之后的升级通过 IPC 自更新（`service.update`），零弹窗。
       # 同时构建控制面工具（gateway / cli / migrate），它们都是本机控制面的一部分：
       # - gateway：127.0.0.1 的 HTTP/WS，CLI / agent / 远端客户端用
@@ -224,6 +224,13 @@ jobs:
           done
           echo "bundled tools: $TOOLS (BUNDLE_MIGRATE=$BUNDLE_MIGRATE)"
           chmod +x packages/studio/src-tauri/resources/service/* packages/studio/src-tauri/resources/tools/* || true
+          # Linux：`sudo -A` 回落用的 askpass 脚本随 `resources/tools/*` 一起进包，
+          # 这里兜一次可执行位（git 里已是 0755，打包器可能不保留）。
+          if [[ "$GUI_TARGET" =~ linux ]]; then
+            test -f packages/studio/src-tauri/resources/tools/exvlan-askpass.sh \
+              || { echo "::error::缺少 resources/tools/exvlan-askpass.sh"; exit 1; }
+            chmod 0755 packages/studio/src-tauri/resources/tools/exvlan-askpass.sh
+          fi
           ls -l packages/studio/src-tauri/resources/service/ packages/studio/src-tauri/resources/tools/
 
       # 内核 + 服务本体签名：服务只安装 minisign 校验通过的包
@@ -332,6 +339,21 @@ jobs:
                 || { echo "::error::$setup 里没有 $f（检查 resources/tools 与 studio.yml 的构建步骤）"; grep -i exvlan /tmp/nsis-list.txt || true; exit 1; }
             done
             echo "NSIS 安装包包含: exvlan-service.exe $REQUIRED"
+          elif [[ "$GUI_TARGET" =~ linux ]]; then
+            # Linux：deb/rpm/AppImage。daemon 由 systemd 托管，必须同时带上
+            # `exvlan-service`（服务本体）与 askpass 脚本（sudo 回落时弹密码框）。
+            # deb 能用 dpkg-deb 直接列内容；其它格式退化为 staging 校验。
+            deb=$(find "target/$GUI_TARGET/release/bundle/deb" -name '*.deb' 2>/dev/null | head -1 || true)
+            if [ -n "$deb" ] && command -v dpkg-deb >/dev/null 2>&1; then
+              dpkg-deb -c "$deb" > /tmp/deb-list.txt
+              for f in exvlan-service exvlan-askpass.sh; do
+                grep -q "$f" /tmp/deb-list.txt \
+                  || { echo "::error::$deb 里没有 $f（检查 resources/service、resources/tools 与 studio.yml）"; grep -i -m20 exvlan /tmp/deb-list.txt || true; exit 1; }
+              done
+              echo "deb 包含: exvlan-service exvlan-askpass.sh"
+            else
+              echo "::warning::未找到 .deb（或 dpkg-deb 不可用），仅校验 staging 目录"
+            fi
           fi
 
       - name: Verify kernel bundled
