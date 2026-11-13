@@ -2292,11 +2292,36 @@ impl State {
         };
         std::fs::copy(&new_bin, &staged).context("暂存新服务二进制失败")?;
 
+        // 随包工具（cli/gateway）一并更新：否则升级完 `core/` 里还是旧版 gateway，
+        // 「配对 / 写操作 / 服务托管」这些新能力等于装了但没生效。
+        let tools_src = staging.join("tools");
+        let tools_staged = self.paths.core.join("tools.new");
+        let mut tools_arg: Option<PathBuf> = None;
+        if tools_src.is_dir() {
+            let _ = std::fs::remove_dir_all(&tools_staged);
+            std::fs::create_dir_all(&tools_staged).context("暂存工具目录失败")?;
+            for entry in std::fs::read_dir(&tools_src)
+                .context("读取随包工具目录失败")?
+                .flatten()
+            {
+                let src = entry.path();
+                if !src.is_file() {
+                    continue;
+                }
+                let dst = tools_staged.join(entry.file_name());
+                std::fs::copy(&src, &dst)
+                    .with_context(|| format!("暂存 {} 失败", src.display()))?;
+            }
+            tools_arg = Some(tools_staged);
+        }
+
         let exe = std::env::current_exe().context("定位自身可执行文件失败")?;
         let mut cmd = Command::new(&exe);
-        cmd.arg("--replace-updater")
-            .arg(&staged)
-            .stdin(Stdio::null())
+        cmd.arg("--replace-updater").arg(&staged);
+        if let Some(ref tools) = tools_arg {
+            cmd.arg(tools);
+        }
+        cmd.stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         #[cfg(windows)]
@@ -2525,7 +2550,11 @@ fn run_cli(p: &Paths, args: &[String]) -> anyhow::Result<()> {
         // 提权入口：重启服务本体（不改配置、不换二进制）。
         Some("--restart") => restart_service(),
         // 自更新落点：由运行中的服务 fork 出来，等它退出后替换二进制并拉起。
-        Some("--replace-updater") => replace_updater(p, args.get(1).map(String::as_str)),
+        Some("--replace-updater") => replace_updater(
+            p,
+            args.get(1).map(String::as_str),
+            args.get(2).map(String::as_str),
+        ),
         _ => {
             eprintln!(
                 "usage: exvlan-service --daemon | --install <uid> | --uninstall | --status | --diagnose | --restart"
@@ -3320,8 +3349,12 @@ fn install_tools(p: &Paths, dir: &Path) -> anyhow::Result<()> {
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        std::fs::copy(&src, dst)
-            .with_context(|| format!("拷贝 {} → {} 失败", src.display(), dst.display()))?;
+        // 先写临时文件再 rename：gateway 可能正在运行（macOS 上覆写运行中的可执行
+        // 文件会 ETXTBSY），rename 是原子替换，运行中的旧进程继续用旧 inode。
+        let tmp = dst.with_extension("new");
+        std::fs::copy(&src, &tmp)
+            .with_context(|| format!("拷贝 {} → {} 失败", src.display(), tmp.display()))?;
+        std::fs::rename(&tmp, dst).with_context(|| format!("替换 {} 失败", dst.display()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
@@ -3614,7 +3647,7 @@ fn cleanup_legacy_windows() {
 }
 
 #[cfg(target_os = "windows")]
-fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
+fn replace_updater(p: &Paths, new_exe: Option<&str>, tools: Option<&str>) -> anyhow::Result<()> {
     let Some(new_exe) = new_exe else {
         bail!("--replace-updater 需要新二进制路径");
     };
@@ -3644,6 +3677,15 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
     // 不在这里写 `service.version`：本进程是**旧**二进制，写进去的是旧版本；
     // 新服务启动时 `boot()` 会写自己的版本。
 
+    // 2.5) 随包工具（服务已停，gateway 子进程也随之退出 → 文件不再被占用）
+    if let Some(dir) = tools {
+        match install_tools(p, Path::new(dir)) {
+            Ok(()) => {}
+            Err(err) => log_line(p, &format!("tools update failed: {err:#}")),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     // 3) 拉起；失败回滚
     let start = hidden("sc").args(["start", SERVICE_LABEL]).output()?;
     if !start.status.success() {
@@ -3655,7 +3697,7 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
+fn replace_updater(p: &Paths, new_exe: Option<&str>, tools: Option<&str>) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     let Some(new_exe) = new_exe else {
         bail!("--replace-updater 需要新二进制路径");
@@ -3671,6 +3713,15 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
     let _ = std::fs::set_permissions(&p.service_bin, std::fs::Permissions::from_mode(0o755));
     chown_root(&p.service_bin);
     // 同上：版本文件由新服务启动时写入，避免这里写成旧版本。
+
+    // 随包工具（cli/gateway）：旧进程还在跑也没关系（rename 原子替换 + 新进程用新 inode）。
+    if let Some(dir) = tools {
+        match install_tools(p, Path::new(dir)) {
+            Ok(()) => {}
+            Err(err) => log_line(p, &format!("tools update failed: {err:#}")),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     // kickstart -k：杀掉旧进程并按 plist 重新拉起（此时已是新二进制）。
     let out = Command::new("/bin/launchctl")
@@ -3690,7 +3741,7 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>) -> anyhow::Result<()> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn replace_updater(_p: &Paths, _new_exe: Option<&str>) -> anyhow::Result<()> {
+fn replace_updater(_p: &Paths, _new_exe: Option<&str>, _tools: Option<&str>) -> anyhow::Result<()> {
     bail!("exvlan-service 只在 macOS/Windows 上运行")
 }
 

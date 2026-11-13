@@ -343,6 +343,21 @@ mod imp {
         });
         std::fs::copy(&src, &staged).map_err(|e| e.to_string())?;
         std::fs::copy(&sig, staging.join("service.sig")).map_err(|e| e.to_string())?;
+        // 随包工具一并交给服务替换：否则升级后 `core/` 里还是旧版 gateway/cli，
+        // 「配对 / 写操作 / 服务托管」这些新能力等于装了但没生效。
+        if let Some(tools) = bundled_tools_dir(app) {
+            let dst = staging.join("tools");
+            std::fs::create_dir_all(&dst).map_err(|e| format!("创建工具 staging 失败: {e}"))?;
+            let exe = if cfg!(windows) { ".exe" } else { "" };
+            for name in ["exvlan-cli", "exvlan-gateway"] {
+                let file = format!("{name}{exe}");
+                let from = tools.join(&file);
+                if from.is_file() {
+                    std::fs::copy(&from, dst.join(&file))
+                        .map_err(|e| format!("拷贝 {file} 失败: {e}"))?;
+                }
+            }
+        }
 
         let result = request(
             "service.update",
