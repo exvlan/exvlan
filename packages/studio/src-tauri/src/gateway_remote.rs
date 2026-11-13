@@ -216,10 +216,7 @@ pub async fn gateway_pair(
                 .collect()
         })
         .unwrap_or_default();
-    let expires_in = value
-        .get("expires_in")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let expires_in = value.get("expires_in").and_then(Value::as_u64).unwrap_or(0);
 
     let paired_at = now_secs();
     let entry = RemoteToken {
@@ -242,9 +239,7 @@ pub async fn gateway_pair(
     save(&app, &file)?;
     crate::logger::event(
         "gateway",
-        format!(
-            "paired target={target_id} host={host}:{port} token={token_id} scopes={scopes:?}"
-        ),
+        format!("paired target={target_id} host={host}:{port} token={token_id} scopes={scopes:?}"),
     );
     Ok(summary(&entry))
 }
@@ -352,12 +347,18 @@ pub async fn gateway_instance(
 
 #[cfg(test)]
 mod tests {
-    use super::{base_url, host_for_url, truncate};
+    use super::{DEFAULT_GATEWAY_PORT, base_url, host_for_url, truncate};
 
     #[test]
     fn ipv6_hosts_are_bracketed() {
-        assert_eq!(base_url("fd00::1", 2016), "http://[fd00::1]:2016");
-        assert_eq!(base_url("10.254.1.6", 2016), "http://10.254.1.6:2016");
+        assert_eq!(
+            base_url("fd00::1", DEFAULT_GATEWAY_PORT),
+            "http://[fd00::1]:2016"
+        );
+        assert_eq!(
+            base_url("10.254.1.6", DEFAULT_GATEWAY_PORT),
+            "http://10.254.1.6:2016"
+        );
         assert_eq!(host_for_url("127.0.0.1"), "127.0.0.1");
     }
 

@@ -4,9 +4,9 @@
 mod config_store;
 mod diagnostics;
 mod elevate;
-mod gateway_remote;
 #[cfg(target_os = "android")]
 mod ffi;
+mod gateway_remote;
 mod kernel;
 mod logger;
 mod migrate;
