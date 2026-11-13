@@ -146,12 +146,14 @@ fi
 
 # ---------------------------------------------------------------- 5. 策略
 step 5 "生命周期（policy 词汇）"
-ST=$("$CLI" service status 2>/dev/null)
+# IPC `status` 返回的键是 `mode`，值是规范词汇（resident/session/stopped）。
+ST=$("$CLI" service status 2>/dev/null | tr -d ' \n\r\t')
 if [ -n "$ST" ]; then
   case "$ST" in
-    *'"policy":"resident"'* | *'"policy":"session"'* | *'"policy":"stopped"'*)
-      ok "policy 使用规范词汇" ;;
-    *'"mode"'*) note "policy 仍显示旧词汇（旧服务未升级）" ;;
+    *'"mode":"resident"'* | *'"mode":"session"'* | *'"mode":"stopped"'*)
+      ok "policy 使用规范词汇（$(printf '%s' "$ST" | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p')）" ;;
+    *'"mode":"service"'* | *'"mode":"normal"'* | *'"mode":"off"'*)
+      note "policy 仍是旧词汇（service/normal/off）—— 服务未升级到 pre.17+" ;;
     *) note "没读到 policy（core 后端？）" ;;
   esac
 fi
@@ -161,8 +163,8 @@ step 6 "RPC portal 绑定（默认应只有回环）"
 PORTAL=$(ps -axo command 2>/dev/null | grep -E "core/exvlan .*--rpc-portal" | grep -v grep | head -1 | sed -n 's/.*--rpc-portal \([^ ]*\).*/\1/p')
 if [ -n "${PORTAL:-}" ]; then
   case "$PORTAL" in
-    127.0.0.1:* | "[::1]":*) ok "rpc-portal $PORTAL（仅回环）" ;;
-    *) note "rpc-portal $PORTAL 对外监听（如需 GUI 直连远端内核才这样配；见 service.toml rpc_portal）" ;;
+    127.0.0.1:* | "[::1]":*) ok "rpc-portal ${PORTAL}（仅回环）" ;;
+    *) note "rpc-portal ${PORTAL} 对外监听（如需 GUI 直连远端内核才这样配；见 service.toml rpc_portal）" ;;
   esac
 else
   note "没找到内核 RPC 参数（内核未运行？）"
