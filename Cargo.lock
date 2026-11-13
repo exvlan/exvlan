@@ -3083,6 +3083,7 @@ version = "26.410.20712"
 dependencies = [
  "anyhow",
  "axum",
+ "exvlan-core",
  "exvlan-rpc",
  "exvlan-service-client",
  "serde",

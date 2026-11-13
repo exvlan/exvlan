@@ -21,4 +21,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 exvlan-service-client = { path = "../service-client" }
 exvlan-rpc = { path = "../rpc", features = ["rpc"] }
+# `NetworkConfigExt`（TOML ↔ NetworkConfig）在 `browser-config` 下启用：
+# PATCH /instances/{id} {disabled:false} 要从配置目录读回配置再拉起实例。
+exvlan-core = { path = "../core", features = ["browser-config"] }
 uuid.workspace = true

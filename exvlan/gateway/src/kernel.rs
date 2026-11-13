@@ -8,9 +8,13 @@ use std::sync::Arc;
 use anyhow::{Context as _, bail};
 use exvlan_rpc::exvlan_core::connectivity::protocol::raw::TunnelDialer as _;
 use exvlan_rpc::exvlan_core::rpc::bidirect::BidirectRpcManager;
+use exvlan_rpc::exvlan_proto::api::config::{
+    ConfigPatchAction, PatchConfigRequest, VpnPortalClientPatch,
+};
 use exvlan_rpc::exvlan_proto::api::manage::{
-    DeleteNetworkInstanceRequest, GetNetworkInstanceConfigRequest, ListNetworkInstanceRequest,
-    NetworkConfig, RunNetworkInstanceRequest,
+    CollectNetworkInfoRequest, DeleteNetworkInstanceRequest, GetNetworkInstanceConfigRequest,
+    ListNetworkInstanceMetaRequest, ListNetworkInstanceRequest, NetworkConfig,
+    RunNetworkInstanceRequest, ValidateConfigRequest, VpnPortalClientConfig,
 };
 use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
 use exvlan_rpc::transport::{RpcTransport as _, TunnelTransport};
@@ -109,6 +113,100 @@ impl Kernel {
             )
             .await
             .map_err(|e| anyhow::anyhow!("delete_network_instance: {e:#}"))?;
+        Ok(())
+    }
+}
+
+impl Kernel {
+    /// 运行信息（collect_network_info）。
+    pub async fn collect_info(&self, id: &str) -> anyhow::Result<serde_json::Value> {
+        let inst = parse_id(id)?;
+        let resp = self
+            .transport
+            .web_client()
+            .collect_network_info(
+                BaseController::default(),
+                CollectNetworkInfoRequest {
+                    inst_ids: vec![inst.into()],
+                },
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("collect_network_info: {e:#}"))?;
+        Ok(serde_json::to_value(resp).unwrap_or(serde_json::Value::Null))
+    }
+
+    /// 实例元信息（名字/来源等）。
+    pub async fn meta(&self, id: &str) -> anyhow::Result<Option<serde_json::Value>> {
+        let inst = parse_id(id)?;
+        let resp = self
+            .transport
+            .web_client()
+            .list_network_instance_meta(
+                BaseController::default(),
+                ListNetworkInstanceMetaRequest {
+                    inst_ids: vec![inst.into()],
+                },
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("list_network_instance_meta: {e:#}"))?;
+        Ok(resp
+            .metas
+            .into_iter()
+            .next()
+            .and_then(|m| serde_json::to_value(m).ok()))
+    }
+
+    /// 校验配置并返回内核 TOML（内核自己 `gen_config().dump()`）。
+    pub async fn validate(&self, config: NetworkConfig) -> anyhow::Result<String> {
+        let resp = self
+            .transport
+            .web_client()
+            .validate_config(
+                BaseController::default(),
+                ValidateConfigRequest {
+                    config: Some(config),
+                },
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("validate_config: {e:#}"))?;
+        Ok(resp.toml_config)
+    }
+
+    /// 改单条 VPN portal 客户端（add/remove/clear）。
+    pub async fn patch_portal(
+        &self,
+        id: &str,
+        action: &str,
+        client: Option<VpnPortalClientConfig>,
+    ) -> anyhow::Result<()> {
+        let inst = parse_id(id)?;
+        let action = match action {
+            "add" => ConfigPatchAction::Add as i32,
+            "remove" => ConfigPatchAction::Remove as i32,
+            "clear" => ConfigPatchAction::Clear as i32,
+            other => bail!("未知 portal action: {other}（add|remove|clear）"),
+        };
+        let patch = VpnPortalClientPatch { action, client };
+        self.transport
+            .config()
+            .patch_config(
+                BaseController::default(),
+                PatchConfigRequest {
+                    instance: Some(exvlan_rpc::exvlan_proto::api::instance::InstanceIdentifier {
+                        selector: Some(
+                            exvlan_rpc::exvlan_proto::api::instance::instance_identifier::Selector::Id(
+                                inst.into(),
+                            ),
+                        ),
+                    }),
+                    patch: Some(exvlan_rpc::exvlan_proto::api::config::InstanceConfigPatch {
+                        vpn_portal_clients: vec![patch],
+                        ..Default::default()
+                    }),
+                },
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("patch_config: {e:#}"))?;
         Ok(())
     }
 }

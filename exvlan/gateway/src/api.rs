@@ -31,6 +31,8 @@ use axum::{
 };
 use serde_json::{Value, json};
 
+use exvlan_core::config::api_input::NetworkConfigExt as _;
+
 use crate::Config;
 
 /// 展示版本：CI 注入的构建串（`<标准版本>[-pre.N][+sha]`），本地构建回落 crate 版本。
@@ -64,9 +66,12 @@ pub fn router(cfg: Config, token: String) -> Router {
             get(list_instances).post(create_instance),
         )
         .route(
-            "/api/v1/instances/{id}/config",
-            get(get_instance_config).delete(delete_instance),
+            "/api/v1/instances/{id}",
+            get(get_instance)
+                .patch(patch_instance)
+                .delete(delete_instance),
         )
+        .route("/api/v1/validate", post(validate_config))
         .route("/api/v1/configs", get(list_configs))
         .route(
             "/api/v1/configs/{id}",
@@ -215,8 +220,10 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
             "POST /api/v1/service/kernel/restart",
             "GET  /api/v1/instances",
             "POST /api/v1/instances",
-            "GET  /api/v1/instances/{id}/config",
-            "DELETE /api/v1/instances/{id}/config",
+            "GET  /api/v1/instances/{id}",
+            "PATCH /api/v1/instances/{id}",
+            "DELETE /api/v1/instances/{id}",
+            "POST /api/v1/validate",
             "GET  /api/v1/configs",
             "GET  /api/v1/configs/{id}",
             "PUT  /api/v1/configs/{id}",
@@ -566,7 +573,10 @@ async fn list_instances(State(state): State<AppState>, headers: HeaderMap) -> Re
     }
 }
 
-async fn get_instance_config(
+/// `GET /instances/{id}`：实例快照（config + 运行信息 + 元信息 + 已保存文件状态）。
+///
+/// 「已保存」= 配置目录里的文件；「在跑」= 内核里的实例。两者都返回，客户端自己判断。
+async fn get_instance(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxumPath(id): AxumPath<String>,
@@ -574,14 +584,180 @@ async fn get_instance_config(
     if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
         return resp;
     }
-    match with_kernel(|kernel| {
+    let saved = exvlan_service_client::config::read(&id).ok();
+    // config 是主信息（拿不到就是 5xx）；info/meta 是附加信息（best-effort）。
+    let config = match with_kernel(|kernel| {
         let id = id.clone();
         Box::pin(async move { kernel.get_config(&id).await })
     })
     .await
     {
-        Ok(Some(cfg)) => Json(json!({"id": id, "config": cfg})).into_response(),
-        Ok(None) => err(StatusCode::NOT_FOUND, "not_found", "实例不存在或读不到配置"),
+        Ok(v) => v,
+        Err(resp) => return *resp,
+    };
+    let info = with_kernel(|kernel| {
+        let id = id.clone();
+        Box::pin(async move { kernel.collect_info(&id).await })
+    })
+    .await
+    .ok();
+    let meta = with_kernel(|kernel| {
+        let id = id.clone();
+        Box::pin(async move { kernel.meta(&id).await })
+    })
+    .await
+    .ok()
+    .flatten();
+    let running = config.is_some();
+    if !running && saved.is_none() {
+        return err(StatusCode::NOT_FOUND, "not_found", "实例不存在或读不到配置");
+    }
+    Json(json!({
+        "id": id,
+        "running": running,
+        "config": config,
+        "info": info.unwrap_or(serde_json::Value::Null),
+        "meta": meta.unwrap_or(serde_json::Value::Null),
+        "saved": saved.map(|s| json!({ "enabled": s.enabled, "text": s.text })),
+    }))
+    .into_response()
+}
+
+/// `PATCH /instances/{id}`：改状态。
+///
+/// 支持两种 body（可同时给）：
+/// - `{"disabled": true|false}` —— 停/起；同时把配置目录里的文件改成
+///   `<id>.toml.disabled` / `<id>.toml`（配置目录是权威，重启后状态不丢）
+/// - `{"portal": {"action": "add"|"remove"|"clear", "client": {...}}}`
+async fn patch_instance(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(id): AxumPath<String>,
+    body: String,
+) -> Response {
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:write")) {
+        return resp;
+    }
+    let value: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                format!("body 不是 JSON: {e}"),
+            );
+        }
+    };
+
+    if let Some(disabled) = value.get("disabled").and_then(serde_json::Value::as_bool) {
+        if disabled {
+            // 先停实例，再把文件改成 disabled（顺序反了会让内核重启时又拉起来）。
+            let stopped = with_kernel(|kernel| {
+                let id = id.clone();
+                Box::pin(async move { kernel.delete(&id).await })
+            })
+            .await;
+            if let Err(resp) = stopped {
+                return *resp;
+            }
+            if let Err(e) = exvlan_service_client::config::set_enabled(&id, false) {
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "config_write", e);
+            }
+        } else {
+            // 从配置目录读回配置再跑起来（文件是权威）。
+            let saved = match exvlan_service_client::config::read(&id) {
+                Ok(s) => s,
+                Err(e) => return err(StatusCode::NOT_FOUND, "not_found", e),
+            };
+            let loader =
+                match exvlan_core::config::toml::TomlConfigLoader::new_from_str(&saved.text) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "config_parse",
+                            e.to_string(),
+                        );
+                    }
+                };
+            let config = match exvlan_rpc::exvlan_proto::api::manage::NetworkConfig::new_from_config(
+                &loader,
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "config_parse",
+                        e.to_string(),
+                    );
+                }
+            };
+            let started = with_kernel(|kernel| {
+                let config = config.clone();
+                Box::pin(async move { kernel.run(config, true).await })
+            })
+            .await;
+            if let Err(resp) = started {
+                return *resp;
+            }
+            if let Err(e) = exvlan_service_client::config::set_enabled(&id, true) {
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "config_write", e);
+            }
+        }
+    }
+
+    if let Some(portal) = value.get("portal") {
+        let action = portal
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("add");
+        let client = portal.get("client").and_then(|c| {
+            serde_json::from_value::<exvlan_rpc::exvlan_proto::api::manage::VpnPortalClientConfig>(
+                c.clone(),
+            )
+            .ok()
+        });
+        let patched = with_kernel(|kernel| {
+            let id = id.clone();
+            let action = action.to_string();
+            Box::pin(async move { kernel.patch_portal(&id, &action, client).await })
+        })
+        .await;
+        if let Err(resp) = patched {
+            return *resp;
+        }
+    }
+
+    Json(json!({ "id": id, "ok": true })).into_response()
+}
+
+/// `POST /validate`：校验配置并返回内核 TOML（不启动实例）。
+async fn validate_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
+        return resp;
+    }
+    let config: exvlan_rpc::exvlan_proto::api::manage::NetworkConfig =
+        match serde_json::from_str(&body) {
+            Ok(c) => c,
+            Err(e) => {
+                return err(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    format!("配置解析失败: {e}"),
+                );
+            }
+        };
+    match with_kernel(|kernel| {
+        let config = config.clone();
+        Box::pin(async move { kernel.validate(config).await })
+    })
+    .await
+    {
+        Ok(toml_config) => Json(json!({ "toml_config": toml_config })).into_response(),
         Err(resp) => *resp,
     }
 }
