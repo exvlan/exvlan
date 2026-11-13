@@ -149,11 +149,27 @@ jobs:
         run: |
           set -euo pipefail
           branch="${GITHUB_REF_NAME}"
-          run_id=$(gh api \
-            "repos/${{ github.repository }}/actions/workflows/pipeline.yml/runs?branch=${branch}&status=success&per_page=30" \
-            --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | .[0].id // empty')
+          repo="${{ github.repository }}"
+
+          # 为什么不用 `status=success` 作为查询参数：实测偶发返回空列表
+          # （同一查询手工执行却有结果），一次抖动就让整个 studio 作业失败。
+          # 改成「拉最近 50 条 + 客户端过滤 + 重试」。
+          run_id=""
+          for attempt in 1 2 3; do
+            run_id=$(gh api \
+              "repos/${repo}/actions/workflows/pipeline.yml/runs?branch=${branch}&per_page=50" \
+              --jq '[.workflow_runs[]
+                     | select((.event == "push" or .event == "workflow_dispatch")
+                              and .conclusion == "success")]
+                    | .[0].id // empty' 2>/dev/null || true)
+            if [[ -n "$run_id" ]]; then
+              break
+            fi
+            echo "attempt ${attempt}: 未找到可复用的成功运行，5s 后重试"
+            sleep 5
+          done
           if [[ -z "$run_id" ]]; then
-            echo "::error::找不到可复用的成功运行（branch=${branch}），无法获取内核产物"
+            echo "::error::找不到可复用的成功运行（branch=${branch}）——先让一次 core_desktop 成功跑完，或手动重跑本作业"
             exit 1
           fi
           echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
