@@ -244,6 +244,40 @@ jobs:
         with:
           name: mobile-${{ matrix.ARCH }}
           path: ./artifacts
+
+      # 真机验证用的 arm64 debug 包（可 `adb shell run-as` 直读 files/config/*.toml）。
+      # 由仓库变量 `BUILD_DEBUG_APK=1` 开启；平时不构建、不影响发版。
+      # 用正式 release keystore 重签 → `adb install -r` 可覆盖正式包（保留设备旧数据）。
+      - name: Build debug APK for device verification
+        if: matrix.ARCH == 'aarch64' && vars.BUILD_DEBUG_APK == '1'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          set -euo pipefail
+          cd packages/studio
+          pnpm tauri android build --apk --debug --target "$ARCH"
+          cd ../..
+          src=$(ls packages/studio/src-tauri/gen/android/app/build/outputs/apk/*/debug/*.apk | head -1)
+          echo "debug apk: $src"
+          btdir=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$btdir/zipalign" -f -p 4 "$src" "$RUNNER_TEMP/aligned.apk"
+          "$btdir/apksigner" sign \
+            --ks "$KEYSTORE_PATH" --ks-key-alias "$KEYSTORE_ALIAS" \
+            --ks-pass "env:KEYSTORE_PASSWORD" --key-pass "env:KEYSTORE_PASSWORD" \
+            --out "$RUNNER_TEMP/app-arm64-debug.apk" "$RUNNER_TEMP/aligned.apk"
+          "$btdir/apksigner" verify --print-certs "$RUNNER_TEMP/app-arm64-debug.apk" | head -3
+          mkdir -p ./debug-apk
+          cp "$RUNNER_TEMP/app-arm64-debug.apk" ./debug-apk/
+
+      - name: Upload debug APK
+        if: matrix.ARCH == 'aarch64' && vars.BUILD_DEBUG_APK == '1'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: app-arm64-debug
+          path: ./debug-apk/app-arm64-debug.apk
+          if-no-files-found: error
+          retention-days: 14
           if-no-files-found: error
           retention-days: 14
 
