@@ -1967,7 +1967,7 @@ impl State {
         }
 
         job.update(InstallState::Verifying, 78, "解包并检查签名…");
-        extract_staging(job, archive, &asset, staging)?;
+        extract_staging(job, archive, &asset, staging, &self.paths.core)?;
 
         job.update(
             InstallState::Installing,
@@ -2972,6 +2972,7 @@ fn extract_staging(
     archive: &Path,
     asset: &UpdateAsset,
     staging: &Path,
+    core_dir: &Path,
 ) -> Result<(), InstallFailure> {
     let file = std::fs::File::open(archive).map_err(|err| {
         InstallFailure::new(ErrorCode::Internal, format!("打开内核包失败: {err}"))
@@ -3035,6 +3036,52 @@ fn extract_staging(
 
     write_zip_entry(&mut zip, bin_index, &staging.join("kernel"), 0o755)?;
     write_zip_entry(&mut zip, sig_index, &staging.join("kernel.sig"), 0o644)?;
+
+    // Windows：内核从自己所在目录加载 `Packet.dll` / `wintun.dll` / `WinDivert*.sys`。
+    // 把包里其余 `*.dll` / `*.sys` 摊平铺到 `core/`（与 GUI 的 `extract_runtime_deps`
+    // 一致）；否则在线升级后内核会以 STATUS_DLL_NOT_FOUND 起不来，只能靠回滚救回。
+    std::fs::create_dir_all(core_dir).map_err(|err| {
+        InstallFailure::new(
+            ErrorCode::Internal,
+            format!("创建内核目录 {} 失败: {err}", core_dir.display()),
+        )
+    })?;
+    let mut deps = 0usize;
+    for index in 0..zip.len() {
+        if index == bin_index || index == sig_index {
+            continue;
+        }
+        let name = zip
+            .by_index(index)
+            .map_err(|err| {
+                InstallFailure::new(ErrorCode::Internal, format!("读取内核包目录失败: {err}"))
+            })?
+            .name()
+            .map_err(|err| {
+                InstallFailure::new(ErrorCode::Internal, format!("内核包条目名非法: {err}"))
+            })?
+            .to_string();
+        let base = match name.rsplit('/').next() {
+            Some(v) if !name.ends_with('/') && !v.is_empty() => v.to_string(),
+            _ => continue,
+        };
+        if base == entry || base == sig_entry || base == "version" || base == "kernel.json" {
+            continue;
+        }
+        let lower = base.to_ascii_lowercase();
+        if !(lower.ends_with(".dll") || lower.ends_with(".sys")) {
+            continue;
+        }
+        write_zip_entry(&mut zip, index, &core_dir.join(&base), 0o644)?;
+        deps += 1;
+    }
+    if deps > 0 {
+        job.update(
+            InstallState::Verifying,
+            82,
+            format!("已铺 {deps} 个运行时依赖到 core/"),
+        );
+    }
     std::fs::write(staging.join("version"), &job.version).map_err(|err| {
         InstallFailure::new(
             ErrorCode::Internal,
