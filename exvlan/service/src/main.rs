@@ -1785,6 +1785,14 @@ impl State {
         cmd.env("EXVLAN_GATEWAY_BIND", self.gateway_bind())
             .env("EXVLAN_GATEWAY_PORT", cfg.port.to_string())
             .env("EXVLAN_GATEWAY_TOKEN_FILE", &token_file)
+            // 服务以 root 跑（$HOME=/var/root）：token store 必须固定在服务数据目录，
+            // 否则配对签发的 token 会散落在 /var/root 下，换启动环境即全失效。
+            .env(
+                "EXVLAN_TOKEN_STORE",
+                self.paths
+                    .service_config
+                    .with_file_name("gateway-tokens.json"),
+            )
             // 父进程存亡靠 stdin EOF 传播：服务没了 → gateway 自行退出，
             // 不会留下孤儿进程占着端口（比信号处理跨平台可靠得多）。
             .env("EXVLAN_GATEWAY_PARENT_STDIN", "1")

@@ -89,7 +89,19 @@ impl Claims {
 }
 
 impl Store {
+    /// token store 路径。
+    ///
+    /// `EXVLAN_TOKEN_STORE` 可覆盖：服务托管 gateway 时以 **root** 身份跑，
+    /// `$HOME` 是 `/var/root`，token 若跟着 HOME 走就会和「服务状态」分家
+    /// （换启动方式/换 HOME 后所有配对 token 集体失效）。服务因此显式指定
+    /// `<data>/gateway-tokens.json`。
     pub fn path() -> PathBuf {
+        if let Ok(custom) = std::env::var("EXVLAN_TOKEN_STORE") {
+            let custom = custom.trim();
+            if !custom.is_empty() {
+                return PathBuf::from(custom);
+            }
+        }
         crate::paths::user_paths().data.join("gateway-tokens.json")
     }
 
