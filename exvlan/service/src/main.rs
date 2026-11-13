@@ -296,6 +296,9 @@ pub struct ServiceConfig {
     /// 可显式写成 `rpc_portal = "0.0.0.0:1995"`（等于把 RPC 暴露给白名单网段）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rpc_portal: Option<String>,
+    /// 本机 gateway（控制面 HTTP/WS）。由服务托管：随服务启停、异常退避重启。
+    #[serde(default)]
+    pub gateway: GatewayConfig,
     /// 是否把各虚拟网段（config-dir 推导）与额外网段放进 RPC 白名单。
     ///
     /// **默认 false**：RPC 只绑回环，远端统一走 gateway（安全优先）。
@@ -303,6 +306,38 @@ pub struct ServiceConfig {
     /// 迁移工具会把旧机器显式写成 true，避免升级即断远端直连。
     #[serde(default)]
     pub rpc_mesh_whitelist: bool,
+}
+
+/// `service.toml [gateway]`：控制面网关的托管配置。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GatewayConfig {
+    /// 是否由服务拉起（默认 true）。
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 监听地址。空 = 自动取本机 mesh 虚拟地址；也可写 `127.0.0.1` / `0.0.0.0`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bind: Option<String>,
+    /// 监听端口（默认 2016）。
+    #[serde(default = "default_gateway_port")]
+    pub port: u16,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_gateway_port() -> u16 {
+    2016
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bind: None,
+            port: default_gateway_port(),
+        }
+    }
 }
 
 impl Default for ServiceConfig {
@@ -314,6 +349,7 @@ impl Default for ServiceConfig {
             owner_sid: String::new(),
             rpc_portal: None,
             rpc_mesh_whitelist: false,
+            gateway: GatewayConfig::default(),
         }
     }
 }
@@ -406,6 +442,20 @@ struct Request {
     /// `config.write` 是否启用（false → `<id>.toml.disabled`，内核不加载）
     #[serde(default)]
     enabled: Option<bool>,
+    /// `gateway.set` 的增量修改（未给的字段保持不变）
+    #[serde(default)]
+    gateway: Option<GatewayPatch>,
+}
+
+/// `gateway.set`：只写给出的字段，其余沿用当前配置。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct GatewayPatch {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    bind: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
 }
 
 #[derive(Debug, Serialize)]
@@ -413,6 +463,14 @@ struct KernelInfo {
     pid: u32,
     running: bool,
     rpc: String,
+}
+
+#[derive(Debug, Serialize)]
+struct GatewayInfo {
+    pid: u32,
+    running: bool,
+    addr: String,
+    enabled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -426,6 +484,8 @@ struct Response {
     mode: Option<Mode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     kernel: Option<KernelInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gateway: Option<GatewayInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -443,6 +503,7 @@ impl Response {
             service: None,
             mode: None,
             kernel: None,
+            gateway: None,
             code: None,
             message: None,
             data: None,
@@ -482,6 +543,7 @@ impl Response {
             service: None,
             mode: None,
             kernel: None,
+            gateway: None,
             code: Some(code.to_string()),
             message: Some(message.into()),
             data: None,
@@ -504,6 +566,10 @@ struct Inner {
     sessions: usize,
     /// 正在执行「原子重启内核」：期间不要因会话归零而停内核。
     restarting: bool,
+    /// 托管的 gateway 子进程（stdin 管道保持打开：服务没了 → 对端读到 EOF 自行退出）。
+    gateway_child: Option<Child>,
+    /// gateway 连续重启次数（用于指数退避；稳定运行一轮后清零）。
+    gateway_restarts: u32,
 }
 
 pub struct State {
@@ -839,6 +905,50 @@ fn configured_networks(config_dir: &Path) -> (Vec<String>, Vec<String>) {
     (cidrs, notes)
 }
 
+/// 取本机在某个虚拟网络里的地址（`ipv4 = "10.254.1.6/27"` → `10.254.1.6`）。
+///
+/// gateway 默认绑这里：绑回环只有本机能用，绑 mesh 地址才能被远端接入。
+fn configured_self_ip(config_dir: &Path) -> Option<String> {
+    let mut fallback: Option<String> = None;
+    let entries = std::fs::read_dir(config_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = toml::from_str::<toml::Value>(&text) else {
+            continue;
+        };
+        for key in ["ipv4", "ipv6"] {
+            let Some(raw) = value.get(key).and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let host = raw.split('/').next().unwrap_or(raw).trim();
+            if host.is_empty() || host.parse::<std::net::IpAddr>().is_err() {
+                continue;
+            }
+            // 优先私有网段（EasyTier 默认池就是 10.126/10.254 这类）。
+            if host.starts_with("10.")
+                || host.starts_with("192.168.")
+                || host.starts_with("172.")
+                || host.starts_with("fd")
+            {
+                return Some(host.to_string());
+            }
+            if fallback.is_none() {
+                fallback = Some(host.to_string());
+            }
+        }
+    }
+    fallback
+}
+
+/// gateway 的 spawn 串行化（watchdog + IPC 可能同时触发）。
+static GATEWAY_SPAWN_LOCK: Mutex<()> = Mutex::new(());
+
 /// 统一把 `port_in_use|{json}` 的错误拆成结构化响应；其它错误保持原 code。
 fn conflict_or(err: anyhow::Error, fallback_code: &str) -> Response {
     let msg = err.to_string();
@@ -1150,6 +1260,8 @@ impl State {
                 config,
                 sessions: 0,
                 restarting: false,
+                gateway_child: None,
+                gateway_restarts: 0,
             }),
         }
     }
@@ -1478,12 +1590,17 @@ impl State {
         }
         self.log(format!("mode set to {mode:?}"));
         match mode {
-            Mode::Off => self.stop_kernel()?,
+            Mode::Off => {
+                self.stop_kernel()?;
+                // 服务完全不干活时把 gateway 也收掉（否则远端还能看到它）。
+                self.stop_gateway();
+            }
             // service ↔ normal：**不重启内核**，只改变“断开是否停”的策略。
             Mode::Service | Mode::Normal => {
                 if self.kernel_pid() == 0 {
                     self.ensure_kernel()?;
                 }
+                self.ensure_gateway()?;
             }
         }
         Ok(())
@@ -1549,6 +1666,184 @@ impl State {
         Ok(())
     }
 
+    // -----------------------------------------------------------------------
+    // gateway 托管（服务模式）：随服务启停 + 异常退避重启
+    // -----------------------------------------------------------------------
+
+    fn gateway_config(&self) -> GatewayConfig {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config
+            .gateway
+            .clone()
+    }
+
+    /// 监听地址：`[gateway].bind` 优先；为空时自动取本机 mesh 虚拟地址
+    /// （拿不到就退回回环 —— 宁可本机可用，也不要绑到 0.0.0.0）。
+    fn gateway_bind(&self) -> String {
+        let cfg = self.gateway_config();
+        match cfg.bind.as_deref().map(str::trim) {
+            Some(bind) if !bind.is_empty() => bind.to_string(),
+            _ => configured_self_ip(&self.paths.config).unwrap_or_else(|| "127.0.0.1".to_string()),
+        }
+    }
+
+    fn gateway_addr(&self) -> String {
+        format!("{}:{}", self.gateway_bind(), self.gateway_config().port)
+    }
+
+    /// gateway 的静态 token 文件（服务创建、0600；远端 CLI 读同一份）。
+    fn gateway_token_file(&self) -> PathBuf {
+        self.paths
+            .service_config
+            .parent()
+            .map(|dir| dir.join("gateway-token"))
+            .unwrap_or_else(|| self.paths.service_config.with_file_name("gateway-token"))
+    }
+
+    /// 拉起 gateway（幂等）。二进制缺失时只记日志：内核仍可用，重装会带回。
+    fn ensure_gateway(&self) -> anyhow::Result<u32> {
+        // watchdog 与 IPC 可能同时触发，串行化避免双开（端口冲突）。
+        let _serial = GATEWAY_SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(pid) = self.gateway_pid() {
+            return Ok(pid);
+        }
+        let cfg = self.gateway_config();
+        if !cfg.enabled {
+            return Ok(0);
+        }
+        let bin = &self.paths.gateway_bin;
+        if !bin.is_file() {
+            self.log(format!("gateway 未安装（{}），跳过", bin.display()));
+            return Ok(0);
+        }
+        let addr = self.gateway_addr();
+        let token_file = self.gateway_token_file();
+
+        #[cfg(target_os = "windows")]
+        let mut cmd = hidden(bin);
+        #[cfg(not(target_os = "windows"))]
+        let mut cmd = Command::new(bin);
+
+        cmd.env("EXVLAN_GATEWAY_BIND", self.gateway_bind())
+            .env("EXVLAN_GATEWAY_PORT", cfg.port.to_string())
+            .env("EXVLAN_GATEWAY_TOKEN_FILE", &token_file)
+            // 父进程存亡靠 stdin EOF 传播：服务没了 → gateway 自行退出，
+            // 不会留下孤儿进程占着端口（比信号处理跨平台可靠得多）。
+            .env("EXVLAN_GATEWAY_PARENT_STDIN", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        // gateway 自己的日志单独一份，排查「远端连不上」时不用翻 service.log。
+        let log_path = self.paths.logs.join("gateway.log");
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            && let Ok(clone) = file.try_clone()
+        {
+            cmd.stdout(Stdio::from(clone));
+            cmd.stderr(Stdio::from(file));
+        }
+
+        let child = cmd.spawn().context("拉起 gateway 失败")?;
+        let pid = child.id();
+        self.lock_inner().gateway_child = Some(child);
+        self.log(format!("gateway started pid={pid} addr={addr}"));
+        Ok(pid)
+    }
+
+    fn gateway_pid(&self) -> Option<u32> {
+        let mut guard = self.lock_inner();
+        let child = guard.gateway_child.as_mut()?;
+        match child.try_wait() {
+            Ok(None) => Some(child.id()),
+            _ => {
+                // 已退出：顺手回收，避免僵尸。
+                guard.gateway_child = None;
+                None
+            }
+        }
+    }
+
+    fn stop_gateway(&self) {
+        let mut guard = self.lock_inner();
+        if let Some(mut child) = guard.gateway_child.take() {
+            let pid = child.id();
+            let _ = child.kill();
+            let _ = child.wait();
+            drop(guard);
+            self.log(format!("gateway stopped pid={pid}"));
+        }
+    }
+
+    fn restart_gateway(&self) -> anyhow::Result<u32> {
+        self.stop_gateway();
+        let pid = self.ensure_gateway()?;
+        self.lock_inner().gateway_restarts = 0;
+        Ok(pid)
+    }
+
+    fn gateway_info(&self) -> GatewayInfo {
+        let enabled = self.gateway_config().enabled;
+        let pid = self.gateway_pid().unwrap_or(0);
+        GatewayInfo {
+            pid,
+            running: pid != 0,
+            addr: self.gateway_addr(),
+            enabled,
+        }
+    }
+
+    /// gateway 监督：每 5s 探一次，异常退出按 1→2→5→10s 指数退避重启。
+    /// 稳定运行一轮后把退避清零（否则偶发崩溃会一路涨到 10s 上限）。
+    fn spawn_gateway_watchdog(self: &Arc<Self>) {
+        // 模式切换会重复调用；只允许起一个监督线程。
+        static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let me = self.clone();
+        std::thread::spawn(move || {
+            let mut backoff = Duration::from_secs(1);
+            loop {
+                std::thread::sleep(Duration::from_secs(5));
+                let cfg = me.gateway_config();
+                if !cfg.enabled || me.lock_inner().mode == Mode::Off {
+                    continue;
+                }
+                if me.gateway_pid().is_some() {
+                    if me.lock_inner().gateway_restarts != 0 {
+                        me.lock_inner().gateway_restarts = 0;
+                        backoff = Duration::from_secs(1);
+                    }
+                    continue;
+                }
+                std::thread::sleep(backoff);
+                match me.ensure_gateway() {
+                    Ok(pid) if pid != 0 => {
+                        let n = {
+                            let mut guard = me.lock_inner();
+                            guard.gateway_restarts = guard.gateway_restarts.saturating_add(1);
+                            guard.gateway_restarts
+                        };
+                        me.log(format!("gateway restarted pid={pid} (n={n})"));
+                        backoff = match n {
+                            1 => Duration::from_secs(1),
+                            2 => Duration::from_secs(2),
+                            3 => Duration::from_secs(5),
+                            _ => Duration::from_secs(10),
+                        };
+                    }
+                    Ok(_) => {}
+                    Err(err) => me.log(format!("gateway restart failed: {err}")),
+                }
+            }
+        });
+    }
+
     /// 端口冲突 → 结构化错误（`port_in_use|{json}`），由 `handle()` 拆成 Response。
     fn port_conflict_error(&self, owner: PortOwner) -> anyhow::Error {
         let kind = classify_port_owner(&owner, &self.paths.kernel);
@@ -1594,6 +1889,7 @@ impl State {
             running: pid != 0,
             rpc: LOCAL_RPC.into(),
         });
+        resp.gateway = Some(self.gateway_info());
         resp
     }
 
@@ -1700,6 +1996,72 @@ impl State {
                 r.data = Some(self.whitelist_info());
                 r
             }
+            // -- gateway 托管 --------------------------------------------------
+            "gateway.status" => {
+                let mut r = Response::ok();
+                r.gateway = Some(self.gateway_info());
+                r
+            }
+            "gateway.set" => {
+                let Some(patch) = req.gateway else {
+                    return Response::err("bad_request", "gateway 缺失");
+                };
+                if let Some(port) = patch.port
+                    && port == 0
+                {
+                    return Response::err("bad_port", "端口不能为 0");
+                }
+                if let Some(bind) = patch.bind.as_deref() {
+                    let trimmed = bind.trim();
+                    if !trimmed.is_empty()
+                        && trimmed != "localhost"
+                        && trimmed.parse::<std::net::IpAddr>().is_err()
+                    {
+                        // 只接受 IP 字面量：主机名解析结果不可预期，监听地址必须确定。
+                        return Response::err("bad_bind", format!("bind 需为 IP 地址: {trimmed}"));
+                    }
+                }
+                {
+                    let mut guard = self.lock_inner();
+                    if let Some(enabled) = patch.enabled {
+                        guard.config.gateway.enabled = enabled;
+                    }
+                    if let Some(bind) = patch.bind {
+                        let trimmed = bind.trim();
+                        guard.config.gateway.bind = if trimmed.is_empty() || trimmed == "auto" {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        };
+                    }
+                    if let Some(port) = patch.port {
+                        guard.config.gateway.port = port;
+                    }
+                    let cfg = guard.config.clone();
+                    drop(guard);
+                    if let Err(err) = save_config(&self.paths, &cfg) {
+                        return Response::err("save_failed", err.to_string());
+                    }
+                }
+                match self.restart_gateway() {
+                    Ok(pid) => {
+                        self.log(format!("gateway 配置已更新 pid={pid}"));
+                        let mut r = Response::ok();
+                        r.gateway = Some(self.gateway_info());
+                        r
+                    }
+                    Err(err) => Response::err("gateway_failed", err.to_string()),
+                }
+            }
+            "gateway.restart" => match self.restart_gateway() {
+                Ok(pid) => {
+                    let mut r = Response::ok();
+                    r.data = Some(serde_json::json!({ "pid": pid, "addr": self.gateway_addr() }));
+                    r.gateway = Some(self.gateway_info());
+                    r
+                }
+                Err(err) => Response::err("gateway_failed", err.to_string()),
+            },
             "config.list" => {
                 let items = list_network_configs(&self.paths.config);
                 let mut r = Response::ok();
@@ -2160,7 +2522,7 @@ fn spawn_boot_watchdog(paths: Paths) {
 }
 
 /// 服务启动时按持久化 mode 决定是否拉起内核（macOS / Windows 共用）。
-fn boot(state: &State) {
+fn boot(state: &Arc<State>) {
     // 每次启动都写一遍版本文件：替换二进制成功后（新进程启动时）版本立刻反映，
     // 不必等下一次 install/update；也顺带修复「版本文件丢失」的情况。
     let _ = write_version_file(&state.paths);
@@ -2182,6 +2544,16 @@ fn boot(state: &State) {
             }
         }
         Mode::Normal | Mode::Off => state.log(format!("boot mode={mode:?}: 不自动启动内核")),
+    }
+    // gateway 由服务托管：service/normal 都要在（normal 模式下 GUI 关了也照样能远端管理）；
+    // Off 表示「服务不干活」，不拉。
+    if mode != Mode::Off {
+        match state.ensure_gateway() {
+            Ok(0) => {}
+            Ok(pid) => state.log(format!("boot: gateway pid={pid}")),
+            Err(err) => state.log(format!("boot ensure_gateway failed: {err}")),
+        }
+        state.spawn_gateway_watchdog();
     }
     // 无论成功失败，boot 到这里就算走完：看门狗据此区分「卡住」与「失败」。
     BOOT_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -2551,6 +2923,7 @@ mod win {
         if let Err(err) = state.stop_kernel() {
             state.log(format!("stop kernel on exit failed: {err}"));
         }
+        state.stop_gateway();
         let _ = status_handle.set_service_status(status(ServiceState::Stopped));
         state.log("windows service stopped");
     }
@@ -2925,6 +3298,7 @@ fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
         // 重装保留用户显式配置的绑定地址与白名单开关（默认回环/关闭）。
         rpc_portal: load_config(p).rpc_portal,
         rpc_mesh_whitelist: load_config(p).rpc_mesh_whitelist,
+        gateway: load_config(p).gateway,
     };
     save_config(p, &cfg)?;
 
@@ -3024,6 +3398,7 @@ fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
         // 重装保留用户显式配置的绑定地址与白名单开关。
         rpc_portal: load_config(p).rpc_portal,
         rpc_mesh_whitelist: load_config(p).rpc_mesh_whitelist,
+        gateway: load_config(p).gateway,
     };
     save_config(p, &cfg)?;
 
@@ -3338,7 +3713,7 @@ fn diagnose(p: &Paths) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod whitelist_tests {
-    use super::{cidr_network, compute_whitelist, validate_cidr};
+    use super::{cidr_network, compute_whitelist, configured_self_ip, validate_cidr};
     use std::path::Path;
 
     /// 端到端：从 `<config-dir>/*.toml` 推导出网段。
@@ -3384,6 +3759,40 @@ mod whitelist_tests {
         assert!(!effective.contains("0.0.0.0/0"), "{effective}");
         assert!(!effective.contains("8.8.8.0/24"), "{effective}");
         assert_eq!(notes.iter().filter(|n| n.contains("已忽略")).count(), 2);
+    }
+
+    #[test]
+    fn gateway_defaults_are_enabled_on_2016() {
+        let cfg: ServiceConfig = toml::from_str("policy = \"service\"\n").expect("parse");
+        assert!(cfg.gateway.enabled, "默认应托管 gateway");
+        assert_eq!(cfg.gateway.port, 2016);
+        assert!(cfg.gateway.bind.is_none(), "默认自动取 mesh 地址");
+    }
+
+    #[test]
+    fn gateway_config_reads_section() {
+        let text = "policy = \"service\"\n\n[gateway]\nenabled = false\nbind = \"0.0.0.0\"\nport = 12016\n";
+        let cfg: ServiceConfig = toml::from_str(text).expect("parse");
+        assert!(!cfg.gateway.enabled);
+        assert_eq!(cfg.gateway.bind.as_deref(), Some("0.0.0.0"));
+        assert_eq!(cfg.gateway.port, 12016);
+    }
+
+    #[test]
+    fn configured_self_ip_reads_mesh_address() {
+        let dir = temp_config_dir("gw-ip");
+        std::fs::write(dir.join("a.toml"), "ipv4 = \"10.254.1.6/27\"\n").unwrap();
+        assert_eq!(configured_self_ip(&dir).as_deref(), Some("10.254.1.6"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn configured_self_ip_ignores_dhcp_and_broken() {
+        let dir = temp_config_dir("gw-ip-bad");
+        std::fs::write(dir.join("a.toml"), "dhcp = true\n").unwrap();
+        std::fs::write(dir.join("b.toml"), "not = toml [[[").unwrap();
+        assert_eq!(configured_self_ip(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

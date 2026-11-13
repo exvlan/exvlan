@@ -116,6 +116,29 @@ fn random_token() -> String {
 }
 
 async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
-    tracing::info!("shutdown signal received");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => tracing::info!("shutdown signal received"),
+        _ = parent_exit() => tracing::info!("parent exited (stdin closed), shutting down"),
+    }
+}
+
+/// 由服务托管时，父进程把我们的 stdin 接成管道：父进程一退出，管道就 EOF。
+///
+/// 比依赖 SIGTERM 可靠得多 —— macOS launchd / Windows SCM 杀掉父进程时，
+/// 信号未必传到子进程；靠 EOF 则不会被漏掉（也就不会留下占端口的孤儿 gateway）。
+async fn parent_exit() {
+    use tokio::io::AsyncReadExt as _;
+    if std::env::var("EXVLAN_GATEWAY_PARENT_STDIN").as_deref() != Ok("1") {
+        std::future::pending::<()>().await;
+        return;
+    }
+    let mut stdin = tokio::io::stdin();
+    let mut buf = [0u8; 64];
+    loop {
+        match stdin.read(&mut buf).await {
+            Ok(0) | Err(_) => return,
+            // 父进程本就不会写数据；写了也忽略。
+            Ok(_) => {}
+        }
+    }
 }

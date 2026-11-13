@@ -481,15 +481,31 @@ msiexec /i EXVlan.Studio_<ver>_x64_en-US.msi /qn REINSTALL=ALL REINSTALLMODE=vom
 配对需要 gateway 在兑换时落一条 token 记录，因此规则改为：
 **token 只能由「对端」的本机进程（CLI 或对端 gateway）签发/写入；控制端永远不签发、不写对端的 token 文件。**
 
-**gateway 的托管**：不再由人工起进程 —— 由 `exvlan-service` 作为子进程监管
-（macOS launchd / Windows SCM / Linux systemd 下由服务 fork），配置来自 `service.toml`：
+**gateway 的托管（按 backend 分流）**
+
+| backend                       | 谁管 gateway                                                                                                                                  |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `service`（特权服务托管内核） | **由 `exvlan-service` 托管**：随服务启停、异常退出退避重启（1→2→5→10s）、`status` 报告 pid/地址、`gateway.set` / `gateway.restart` 可热改配置 |
+| `core`（裸核，无本服务）      | 不归 `exvlan-service` 管；需要被远端接入时**可选**装一个独立系统服务（systemd unit / launchd plist / SCM）托管同一个 `exvlan-gateway` 二进制  |
+
+配置来自 `service.toml`：
 
 ```toml
 [gateway]
-enabled = true # 默认 true（本机回环）
-bind = "127.0.0.1" # 需要被远端接入时改成 mesh 地址
+enabled = true # 默认 true
+bind = "10.254.1.6" # 省略/留空 = 自动取本机 mesh 虚拟地址（取不到退回 127.0.0.1）
 port = 2016
-token_file = "<data>/gateway-token"
 ```
 
-服务负责：随服务启停、异常重启、`status` 里报告 gateway pid/地址。
+- **默认绑定**：自动取 `<config-dir>/*.toml` 里的本机地址（mesh IP），因此「装好就能被远端配对接入」；
+  想只做本机控制面就把 `bind` 写成 `127.0.0.1`。gateway 本身有 Bearer 鉴权，
+  绑 mesh 不等于无鉴权暴露，但**不默认 `0.0.0.0`**（物理 LAN 暴露面更大，需显式配置）。
+- **token 文件**：固定在 `<data>/gateway-token`（0600，服务创建），不放进 `service.toml` 以免路径写错导致「服务和你各用一份 token」。
+- **不留孤儿**：服务以 stdin 管道 fork gateway（`EXVLAN_GATEWAY_PARENT_STDIN=1`），服务退出→EOF→gateway 自行退出。
+  比信号传播可靠（launchd/SCM 杀父进程时 SIGTERM 未必到子进程），避免残留进程占着 2016。
+
+**R2 前端选路（pre.20 决策）**
+
+- GUI 远端目标**新增一类「经 gateway」**（与现有直连 1995 并存，用户显式选择），不做静默降级 ——
+  直连/经 gateway 的权限与可见面不同，静默切换会让「我到底连到了哪」变模糊。
+- R2 只读：列表 / 详情（config+info+meta）/ 诊断。写操作留到 R3。
