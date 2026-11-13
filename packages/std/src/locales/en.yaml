@@ -523,6 +523,7 @@ web:
     central_networks: Joined Networks
 
   device_management:
+    confirm_delete_network: Delete network {name}? It will be removed from the config directory.
     edit_network: Edit Network
     export_config: Export Config
     delete_network: Delete Network

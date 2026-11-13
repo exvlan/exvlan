@@ -523,6 +523,7 @@ web:
     central_networks: 所属网络
 
   device_management:
+    confirm_delete_network: 确定删除网络 {name}？删除后该网络会从配置目录里移除。
     edit_network: 编辑网络
     export_config: 导出配置
     delete_network: 删除网络
