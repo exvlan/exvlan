@@ -156,6 +156,20 @@ enum KernelCmd {
 
 #[derive(Subcommand, Debug)]
 enum AuthCmd {
+    /// 生成一次性配对码（**必须在本机执行**：只在被管机器上出码）
+    ///
+    /// 控制端拿这个码去换 token；token 由本机的 gateway 签发。
+    Pair {
+        /// 授予的权限：readonly | config | admin
+        #[arg(long, default_value = "readonly")]
+        role: String,
+        /// 有效期（秒，60–900）
+        #[arg(long, default_value_t = 300)]
+        ttl: u64,
+        /// 覆盖 gateway 地址（默认本机 127.0.0.1:2016）
+        #[arg(long)]
+        gateway: Option<String>,
+    },
     /// scoped token 管理（远程访问用）
     Token {
         #[command(subcommand)]
@@ -576,7 +590,18 @@ fn api(method: &str, path: &str, data: Option<&str>, yes: bool) -> i32 {
 }
 
 fn http_request(method: &str, path: &str, body: Option<&str>) -> Result<(u16, String), String> {
-    let base = gateway_base();
+    http_request_at(method, &gateway_base(), path, body, true)
+}
+
+/// 与本机 gateway 通信。`auth=false` 用于 `pair/start`（只允许回环、不校验 token）。
+fn http_request_at(
+    method: &str,
+    base: &str,
+    path: &str,
+    body: Option<&str>,
+    auth: bool,
+) -> Result<(u16, String), String> {
+    let base = base.trim_end_matches('/').to_string();
     let rest = base
         .strip_prefix("http://")
         .ok_or_else(|| format!("仅支持 http://（当前 {base}）"))?;
@@ -589,9 +614,13 @@ fn http_request(method: &str, path: &str, body: Option<&str>) -> Result<(u16, St
     } else {
         format!("{}{}", prefix.trim_end_matches('/'), path)
     };
-    let token = gateway_token().ok_or_else(|| {
-        "没有 gateway token：先运行 `exvlan-cli auth login` 或启动 gateway 生成".to_string()
-    })?;
+    let token = if auth {
+        Some(gateway_token().ok_or_else(|| {
+            "没有 gateway token：先运行 `exvlan-cli auth login` 或启动 gateway 生成".to_string()
+        })?)
+    } else {
+        None
+    };
 
     let mut stream = std::net::TcpStream::connect(authority)
         .map_err(|e| format!("连接 {authority} 失败: {e}"))?;
@@ -599,9 +628,11 @@ fn http_request(method: &str, path: &str, body: Option<&str>) -> Result<(u16, St
     let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
 
     use std::io::{Read as _, Write as _};
-    let mut req = format!(
-        "{method} {full_path} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n"
-    );
+    let mut req =
+        format!("{method} {full_path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n");
+    if let Some(token) = token {
+        req.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
     if let Some(b) = body {
         req.push_str("Content-Type: application/json\r\n");
         req.push_str(&format!("Content-Length: {}\r\n", b.len()));
@@ -644,6 +675,7 @@ fn token_path() -> PathBuf {
 fn auth_cmd(cmd: AuthCmd) -> i32 {
     let path = token_path();
     match cmd {
+        AuthCmd::Pair { role, ttl, gateway } => auth_pair(&role, ttl, gateway.as_deref()),
         AuthCmd::Token { cmd } => token_cmd(cmd),
         AuthCmd::Status => {
             let exists = path.is_file();
@@ -683,6 +715,56 @@ fn auth_cmd(cmd: AuthCmd) -> i32 {
                 2
             }
         },
+    }
+}
+
+/// 生成一次性配对码（本机出码；远端无法给自己发码）。
+fn auth_pair(role: &str, ttl: u64, gateway: Option<&str>) -> i32 {
+    let base = gateway
+        .map(|g| {
+            let g = g.trim();
+            if g.starts_with("http://") {
+                g.to_string()
+            } else {
+                format!("http://{g}")
+            }
+        })
+        .unwrap_or_else(gateway_base);
+    let body = json!({ "role": role, "ttl": ttl }).to_string();
+    match http_request_at("POST", &base, "/api/v1/pair/start", Some(&body), false) {
+        Ok((status, text)) => {
+            let value: serde_json::Value =
+                serde_json::from_str(&text).unwrap_or_else(|_| json!({ "raw": text }));
+            if !(200..300).contains(&status) {
+                eprintln!("生成配对码失败（{status}）: {value}");
+                return 2;
+            }
+            let code = value.get("code").and_then(|v| v.as_str()).unwrap_or("");
+            let expires = value
+                .get("expires_in")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(ttl);
+            let scopes = value
+                .get("scopes")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            print_json(&value);
+            if !code.is_empty() {
+                // 给人看的一行：控制端要照着输，别让人去 JSON 里找。
+                eprintln!(
+                    "配对码 {code}（{expires}s 内有效，一次性；权限 {scopes}）\n\
+                     在对端打开 EXVlan → 目标 → 管理远程 → 经 gateway → 配对，输入该码。"
+                );
+            }
+            0
+        }
+        Err(err) => {
+            eprintln!("连接本机 gateway 失败: {err}");
+            eprintln!(
+                "先确认 gateway 在跑（服务模式由 exvlan-service 托管，日志见 logs/gateway.log）"
+            );
+            3
+        }
     }
 }
 
