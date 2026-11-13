@@ -319,7 +319,14 @@ pub async fn gateway_doctor(app: AppHandle, target_id: String) -> Result<Value, 
 #[tauri::command]
 pub async fn gateway_overview(app: AppHandle, target_id: String) -> Result<Value, String> {
     let entry = find(&app, &target_id)?;
-    let running = get_json(&entry.host, entry.port, &entry.token, "/api/v1/instances").await?;
+    // 内核可能没跑（policy=stopped）：这时只剩配置目录里的实例，不能整个页面报错。
+    let running = match get_json(&entry.host, entry.port, &entry.token, "/api/v1/instances").await {
+        Ok(v) => v,
+        Err(err) => {
+            crate::logger::record("gateway", format!("target={target_id} instances: {err}"));
+            json!({ "instances": [] })
+        }
+    };
     let saved = get_json(&entry.host, entry.port, &entry.token, "/api/v1/configs").await?;
     let running_ids: Vec<String> = running
         .get("instances")
@@ -331,19 +338,17 @@ pub async fn gateway_overview(app: AppHandle, target_id: String) -> Result<Value
                 .collect()
         })
         .unwrap_or_default();
+    // 「禁用」= 配置文件存在但内核里没跑（显式 disabled，或内核没起来）。
     let disabled_ids: Vec<String> = saved
         .get("configs")
         .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
-                .filter(|item| {
-                    item.get("enabled")
-                        .and_then(Value::as_bool)
-                        .map(|enabled| !enabled)
-                        .unwrap_or(false)
+                .filter_map(|item| {
+                    let id = item.get("id").and_then(Value::as_str)?;
+                    let enabled = item.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+                    (!enabled || !running_ids.iter().any(|r| r == id)).then(|| id.to_string())
                 })
-                .filter_map(|item| item.get("id").and_then(Value::as_str))
-                .map(|s| s.to_string())
                 .collect()
         })
         .unwrap_or_default();
