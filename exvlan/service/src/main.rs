@@ -296,6 +296,13 @@ pub struct ServiceConfig {
     /// 可显式写成 `rpc_portal = "0.0.0.0:1995"`（等于把 RPC 暴露给白名单网段）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rpc_portal: Option<String>,
+    /// 是否把各虚拟网段（config-dir 推导）与额外网段放进 RPC 白名单。
+    ///
+    /// **默认 false**：RPC 只绑回环，远端统一走 gateway（安全优先）。
+    /// 旧版本（pre.19 及更早）的 GUI 直连远端内核依赖这项为 true ——
+    /// 迁移工具会把旧机器显式写成 true，避免升级即断远端直连。
+    #[serde(default)]
+    pub rpc_mesh_whitelist: bool,
 }
 
 impl Default for ServiceConfig {
@@ -306,6 +313,7 @@ impl Default for ServiceConfig {
             rpc_extra_whitelist: Vec::new(),
             owner_sid: String::new(),
             rpc_portal: None,
+            rpc_mesh_whitelist: false,
         }
     }
 }
@@ -1097,9 +1105,19 @@ fn terminate_pid(_pid: u32) -> anyhow::Result<()> {
 /// 生效白名单 = 回环 + 各虚拟网段 + 用户额外追加。
 ///
 /// **无锁纯函数**：调用方可以在任意状态（包括持锁）安全调用。
-fn compute_whitelist(config_dir: &Path, extra: &[String]) -> (String, Vec<String>) {
-    let (networks, mut notes) = configured_networks(config_dir);
+fn compute_whitelist(
+    config_dir: &Path,
+    extra: &[String],
+    mesh_whitelist: bool,
+) -> (String, Vec<String>) {
     let mut list: Vec<String> = RPC_LOOPBACK.iter().map(|s| s.to_string()).collect();
+    let mut notes = Vec::new();
+    if !mesh_whitelist {
+        // 默认：RPC 只服务回环（远端走 gateway）。显式 open 时才把网段放进来。
+        return (list.join(","), notes);
+    }
+    let (networks, more) = configured_networks(config_dir);
+    notes.extend(more);
     for cidr in networks {
         if !list.contains(&cidr) {
             list.push(cidr);
@@ -1160,7 +1178,13 @@ impl State {
             .config
             .rpc_extra_whitelist
             .clone();
-        let (effective, more_notes) = compute_whitelist(&self.paths.config, &extra);
+        let mesh_whitelist = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config
+            .rpc_mesh_whitelist;
+        let (effective, more_notes) = compute_whitelist(&self.paths.config, &extra, mesh_whitelist);
         notes.extend(more_notes);
         let applied = self
             .inner
@@ -1287,7 +1311,13 @@ impl State {
     /// 真正的启动动作。**不持有 `inner` 锁**，只读一次配置快照。
     fn start_kernel(&self) -> anyhow::Result<(Child, String)> {
         let extra = self.lock_inner().config.rpc_extra_whitelist.clone();
-        let (whitelist, notes) = compute_whitelist(&self.paths.config, &extra);
+        let mesh_whitelist = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config
+            .rpc_mesh_whitelist;
+        let (whitelist, notes) = compute_whitelist(&self.paths.config, &extra, mesh_whitelist);
         self.log(format!("rpc whitelist = {whitelist}"));
         for note in notes {
             self.log(format!("rpc whitelist: {note}"));
@@ -2892,8 +2922,9 @@ fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
         } else {
             sid.to_string()
         },
-        // 重装保留用户显式配置的绑定地址（默认回环）。
+        // 重装保留用户显式配置的绑定地址与白名单开关（默认回环/关闭）。
         rpc_portal: load_config(p).rpc_portal,
+        rpc_mesh_whitelist: load_config(p).rpc_mesh_whitelist,
     };
     save_config(p, &cfg)?;
 
@@ -2990,8 +3021,9 @@ fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
         } else {
             sid.to_string()
         },
-        // 重装保留用户显式配置的绑定地址（默认回环）。
+        // 重装保留用户显式配置的绑定地址与白名单开关。
         rpc_portal: load_config(p).rpc_portal,
+        rpc_mesh_whitelist: load_config(p).rpc_mesh_whitelist,
     };
     save_config(p, &cfg)?;
 
@@ -3324,7 +3356,7 @@ mod whitelist_tests {
         std::fs::write(dir.join("broken.toml"), "this is not = toml [[[").unwrap();
         std::fs::write(dir.join("ignored.txt"), "ipv4 = \"10.9.9.9/24\"\n").unwrap();
 
-        let (effective, notes) = compute_whitelist(&dir, &[]);
+        let (effective, notes) = compute_whitelist(&dir, &[], true);
         let list: Vec<&str> = effective.split(',').collect();
         assert!(list.contains(&"127.0.0.0/8"), "{effective}");
         assert!(list.contains(&"::1/128"), "{effective}");
@@ -3347,11 +3379,32 @@ mod whitelist_tests {
             "0.0.0.0/0".to_string(),  // 必须被拒绝
             "8.8.8.0/24".to_string(), // 公网，必须被拒绝
         ];
-        let (effective, notes) = compute_whitelist(dir, &extra);
+        let (effective, notes) = compute_whitelist(dir, &extra, true);
         assert!(effective.contains("172.20.0.0/16"), "{effective}");
         assert!(!effective.contains("0.0.0.0/0"), "{effective}");
         assert!(!effective.contains("8.8.8.0/24"), "{effective}");
         assert_eq!(notes.iter().filter(|n| n.contains("已忽略")).count(), 2);
+    }
+
+    #[test]
+    fn rpc_whitelist_defaults_to_loopback_only() {
+        let dir = temp_config_dir("wl-off");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("net.toml"), "ipv4 = \"10.254.1.22/27\"\n").unwrap();
+
+        let (effective, notes) = compute_whitelist(&dir, &["172.20.0.0/16".to_string()], false);
+        assert!(effective.contains("127.0.0.0/8"), "{effective}");
+        assert!(
+            !effective.contains("10.254.1.0/27"),
+            "默认不应包含 mesh 网段: {effective}"
+        );
+        assert!(
+            !effective.contains("172.20.0.0/16"),
+            "默认不应包含额外网段: {effective}"
+        );
+        assert!(notes.is_empty(), "{notes:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

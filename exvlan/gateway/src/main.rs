@@ -74,10 +74,14 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .context("非法监听地址")?;
     let listener = TcpListener::bind(addr).await.context("绑定端口失败")?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("gateway 退出")?;
+    // 需要 ConnectInfo（配对码兑换要按来源 IP 限速 + 绑定）。
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("gateway 退出")?;
     Ok(())
 }
 

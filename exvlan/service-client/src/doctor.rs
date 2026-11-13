@@ -108,6 +108,7 @@ pub fn collect() -> Report {
     version_checks(&mut out, &p);
     port_checks(&mut out);
     port_conflict_check(&mut out);
+    rpc_whitelist_check(&mut out);
     config_checks(&mut out);
     storage_checks(&mut out, &user);
     #[cfg(target_os = "macos")]
@@ -320,6 +321,40 @@ fn port_conflict_check(out: &mut Vec<Finding>) {
              或把 service.toml 的 rpc_portal 改成 \"127.0.0.1:{}\"",
             crate::DEFAULT_RPC_PORT.saturating_add(1)
         ),
+        evidence: data.clone(),
+        fixable: false,
+    });
+}
+
+/// RPC 白名单模式：默认只回环（远端走 gateway）；旧机器可能显式打开 mesh 网段。
+fn rpc_whitelist_check(out: &mut Vec<Finding>) {
+    if !backend::detect().has_service() {
+        return;
+    }
+    let Ok(resp) = ipc::request("whitelist.get", json!({})) else {
+        return;
+    };
+    let Some(data) = resp.get("data") else {
+        return;
+    };
+    let effective = data
+        .get("effective")
+        .or_else(|| data.get("whitelist"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let mesh = effective
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .any(|s| !(s.starts_with("127.") || s.starts_with("::1")));
+    out.push(Finding {
+        id: "net.rpc_whitelist",
+        level: "info",
+        summary: if mesh {
+            format!("RPC 白名单含 mesh 网段（远端可直连内核）：{effective}")
+        } else {
+            "RPC 白名单只含回环（远端统一走 gateway）".to_string()
+        },
         evidence: data.clone(),
         fixable: false,
     });

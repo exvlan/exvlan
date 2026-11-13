@@ -17,12 +17,14 @@
 //! 远端客户端要「保存并生效」就是先 `PUT /configs/{id}` 再 `POST /instances`。
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::{
     Json, Router,
     extract::{
-        Path as AxumPath, Query, State,
+        ConnectInfo, Path as AxumPath, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode},
@@ -44,13 +46,37 @@ const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
 #[derive(Clone)]
 struct AppState {
     token: Arc<String>,
+    /// 一次性配对码（**只能由对端本机生成**；兑换时由对端签发 token）。
+    pair: Arc<Mutex<PairState>>,
 }
+
+/// 一个配对码：5 分钟有效、一次性、首次兑换绑定来源 IP。
+#[derive(Clone)]
+struct PairCode {
+    role: String,
+    expires_at: Instant,
+    used: bool,
+    bound_ip: Option<IpAddr>,
+}
+
+#[derive(Default)]
+struct PairState {
+    codes: HashMap<String, PairCode>,
+    /// 每 IP 的兑换尝试（计数, 窗口起点）——防暴力猜码。
+    attempts: HashMap<IpAddr, (u32, Instant)>,
+}
+
+/// 每个 IP 每分钟最多 5 次兑换尝试。
+const PAIR_ATTEMPTS_PER_MIN: u32 = 5;
+/// 配对码有效期。
+const PAIR_CODE_TTL: Duration = Duration::from_secs(300);
 
 /// 构建路由。
 pub fn router(cfg: Config, token: String) -> Router {
     let _ = &cfg; // 预留：端点在后续版本会用到 bind/port（例如生成远端 URL）
     let state = AppState {
         token: Arc::new(token),
+        pair: Arc::new(Mutex::new(PairState::default())),
     };
     Router::new()
         .route("/api/v1/system", get(system))
@@ -77,6 +103,8 @@ pub fn router(cfg: Config, token: String) -> Router {
             "/api/v1/configs/{id}",
             get(get_config).put(put_config).delete(delete_config),
         )
+        .route("/api/v1/pair/start", post(pair_start))
+        .route("/api/v1/pair/redeem", post(pair_redeem))
         .route("/api/v1/events", get(events))
         .with_state(state)
 }
@@ -228,8 +256,198 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
             "GET  /api/v1/configs/{id}",
             "PUT  /api/v1/configs/{id}",
             "DELETE /api/v1/configs/{id}",
+            "POST /api/v1/pair/start",
+            "POST /api/v1/pair/redeem",
             "GET  /api/v1/events",
         ],
+    }))
+    .into_response()
+}
+
+/// `POST /api/v1/pair/start`：**对端本机**生成一次性配对码。
+///
+/// 只允许来自回环（或本机 gateway 自己的调用），远端无法给自己发码。
+/// body 可选 `{"role":"readonly|admin","ttl":300}`。
+async fn pair_start(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    body: String,
+) -> Response {
+    if !peer.ip().is_loopback() {
+        return err(
+            StatusCode::FORBIDDEN,
+            "loopback_only",
+            "配对码只能在被管机器本机生成（请在那台机器上执行 exvlan-cli auth pair）",
+        );
+    }
+    let req: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+    let role = req
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("readonly")
+        .to_string();
+    let Some(scopes) = exvlan_service_client::tokens::scopes_for_role(&role) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "bad_role",
+            format!("未知角色 {role}（readonly|config|admin）"),
+        );
+    };
+    let ttl = req
+        .get("ttl")
+        .and_then(Value::as_u64)
+        .map(|s| Duration::from_secs(s.clamp(60, 900)))
+        .unwrap_or(PAIR_CODE_TTL);
+
+    // 6 位数字码；与现有未过期码冲突时重试。
+    let mut guard = state.pair.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    guard.codes.retain(|_, c| !c.used && c.expires_at > now);
+    let mut code = String::new();
+    for _ in 0..32 {
+        let candidate = format!("{:06}", uuid::Uuid::new_v4().as_u128() % 1_000_000);
+        if !guard.codes.contains_key(&candidate) {
+            code = candidate;
+            break;
+        }
+    }
+    if code.is_empty() {
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "pair_code",
+            "生成配对码失败",
+        );
+    }
+    guard.codes.insert(
+        code.clone(),
+        PairCode {
+            role: role.clone(),
+            expires_at: now + ttl,
+            used: false,
+            bound_ip: None,
+        },
+    );
+    Json(json!({
+        "code": code,
+        "role": role,
+        "scopes": scopes,
+        "expires_in": ttl.as_secs(),
+    }))
+    .into_response()
+}
+
+/// `POST /api/v1/pair/redeem`：控制端用码换 token（**token 由对端签发**）。
+///
+/// 一次性 + 5 分钟 + 首次兑换绑定来源 IP + 每 IP 限速。
+async fn pair_redeem(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    body: String,
+) -> Response {
+    let req: Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                format!("body 不是 JSON: {e}"),
+            );
+        }
+    };
+    let code = req
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let client = req
+        .get("client")
+        .and_then(Value::as_str)
+        .unwrap_or("remote-client")
+        .to_string();
+    if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
+        return err(StatusCode::BAD_REQUEST, "bad_code", "配对码应为 6 位数字");
+    }
+
+    // 限速：每 IP 每分钟 5 次。
+    {
+        let mut guard = state.pair.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        let entry = guard.attempts.entry(peer.ip()).or_insert((0, now));
+        if now.duration_since(entry.1) > Duration::from_secs(60) {
+            *entry = (0, now);
+        }
+        entry.0 += 1;
+        if entry.0 > PAIR_ATTEMPTS_PER_MIN {
+            return err(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                "尝试过于频繁，请稍后再试",
+            );
+        }
+    }
+
+    // 校验并消费配对码。
+    let (role, scopes) = {
+        let mut guard = state.pair.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(entry) = guard.codes.get_mut(&code) else {
+            return err(StatusCode::NOT_FOUND, "bad_code", "配对码不存在或已失效");
+        };
+        if entry.used {
+            return err(StatusCode::GONE, "code_used", "配对码已被使用");
+        }
+        if entry.expires_at <= Instant::now() {
+            return err(StatusCode::GONE, "code_expired", "配对码已过期");
+        }
+        // 首次兑换绑定来源 IP；之后从别的 IP 用同一个码必须失败。
+        match entry.bound_ip {
+            None => entry.bound_ip = Some(peer.ip()),
+            Some(ip) if ip == peer.ip() => {}
+            Some(_) => {
+                return err(
+                    StatusCode::FORBIDDEN,
+                    "ip_mismatch",
+                    "配对码已绑定到其它来源 IP",
+                );
+            }
+        }
+        entry.used = true;
+        let role = entry.role.clone();
+        let Some(scopes) = exvlan_service_client::tokens::scopes_for_role(&role) else {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "bad_role",
+                "配对码角色异常",
+            );
+        };
+        (role, scopes)
+    };
+
+    // **对端签发**：写对端自己的 token 文件（只存 sha256）。
+    let path = exvlan_service_client::tokens::Store::path();
+    let mut store = exvlan_service_client::tokens::Store::load(&path);
+    let name = format!("pair:{client}@{}", peer.ip());
+    let (token, record) = store.create(&name, scopes.clone(), Some(3600));
+    if let Err(e) = store.save(&path) {
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "token_save",
+            e.to_string(),
+        );
+    }
+    tracing::info!(
+        "pair redeemed: token={} role={} client={} from={}",
+        record.id,
+        role,
+        client,
+        peer.ip()
+    );
+    Json(json!({
+        "token": token,
+        "scopes": scopes,
+        "token_id": record.id,
+        "expires_in": 3600,
+        "role": role,
     }))
     .into_response()
 }

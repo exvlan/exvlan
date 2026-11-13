@@ -475,6 +475,10 @@ fn convert_service(src: &Path, dst: &Path, log: &mut Logger) -> anyhow::Result<(
     out.push_str("# 由 exvlan-migrate 从 service.json 转换（pre.17）\n");
     out.push_str(&format!("owner_uid = {owner}\n"));
     out.push_str(&format!("policy = \"{policy}\"\n"));
+    // 旧版本的远端直连依赖「把虚拟网段放进 RPC 白名单」；新版本默认关闭
+    // （远端统一走 gateway）。迁移时显式打开，避免升级即断远端管理。
+    out.push_str("# 迁移保留旧行为：RPC 白名单包含虚拟网段（远端直连仍可用）\n");
+    out.push_str("rpc_mesh_whitelist = true\n");
     if !extra.is_empty() {
         let list = extra
             .iter()
