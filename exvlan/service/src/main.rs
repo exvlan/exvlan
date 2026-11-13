@@ -2538,7 +2538,13 @@ fn run_cli(p: &Paths, args: &[String]) -> anyhow::Result<()> {
         Some("--install") => {
             let uid = args.get(1).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
             // 第 3 个参数是 Windows 安装者 SID（macOS/Linux 忽略）。
-            let sid = args.get(2).map(String::as_str).unwrap_or("");
+            // 注意：macOS 不传 SID，此时 args[2] 可能是 `--tools-dir` —— 不能把它
+            // 当 SID 存进 service.toml（历史 bug：macOS 的 owner_sid 会变成这个字面量）。
+            let sid = args
+                .get(2)
+                .map(String::as_str)
+                .filter(|v| !v.starts_with("--"))
+                .unwrap_or("");
             install(p, uid, sid)?;
             // 控制面工具（cli/gateway）随安装包分发，但只有服务有权限把它们
             // 放到系统路径（GUI 跑在用户态）。缺工具不阻断安装：日志里说明。
