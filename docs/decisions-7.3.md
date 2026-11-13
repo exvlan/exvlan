@@ -472,10 +472,23 @@ msiexec /i EXVlan.Studio_<ver>_x64_en-US.msi /qn REINSTALL=ALL REINSTALLMODE=vom
 
 **安全约束**
 
-- 出码必须发生在对端本机（`pair/start` 仅回环可调，或走 IPC）——远端无法给自己发码；
+- 出码必须发生在对端本机：`pair/start` 准入 = **回环来源** 或 **带 `gateway:admin` 权限的 token**
+  （本机 admin token 在 `0600` 文件里，远端拿不到；服务托管时 gateway 可能只绑 mesh 地址，
+  所以不能只靠回环判断）。
 - 兑换：一次性 + 5 分钟 + 首次兑换绑定来源 IP + 每 IP 5 次/分钟限速；
 - token 只存 sha256（对端）、可过期/吊销、带 scope；审计记录 `token_id + client + 来源 IP`；
 - 控制端本地保存的是**明文 token**（它必须能用来发请求），文件 0600、可随时在对端吊销。
+
+**两端入口（都已做进 GUI）**
+
+| 端                     | 入口                                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
+| 被管端（出码）         | 「目标」菜单 → **生成配对码**（选角色：只读 / 可改配置 / 全权），显示 6 位码 + 有效期 + 一键复制 |
+| 被管端（CLI / 无 GUI） | `exvlan-cli auth pair --role readonly`（优先走服务 IPC；裸核模式退回直连 gateway）               |
+| 控制端（输码）         | 「目标」→ 管理远程 → 连接方式选「经 gateway」→ 保存 → **配对** → 输入 6 位码                     |
+
+服务侧的 IPC 是 `gateway.pair.start {role, ttl}`：服务知道 gateway 绑在哪、也持有 admin token，
+所以用户态既不需要读 token、也不需要知道绑定地址。
 
 **对「单写者」的修订**：原决策是「只有 CLI 写 token 文件，gateway 只读」。
 配对需要 gateway 在兑换时落一条 token 记录，因此规则改为：
