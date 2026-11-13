@@ -4806,6 +4806,12 @@ fn install_tools_linux(dir: &std::path::Path) -> anyhow::Result<usize> {
             use std::os::unix::fs::PermissionsExt as _;
             let _ = std::fs::set_permissions(dst, std::fs::Permissions::from_mode(0o755));
         }
+        // 系统路径下的工具必须是 root 所有（这段在提权子进程里跑）。
+        if let Ok(c) = std::ffi::CString::new(dst.as_os_str().to_string_lossy().as_bytes()) {
+            unsafe {
+                libc::chown(c.as_ptr(), 0, 0);
+            }
+        }
         copied += 1;
     }
     Ok(copied)

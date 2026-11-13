@@ -125,6 +125,14 @@ fn service_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
             evidence: json!({"service_bin": p.service_bin.display().to_string()}),
             fixable: false,
         }),
+        Err(err) if is_pipe_busy(&err) => out.push(Finding {
+            id: "service.pipe_busy",
+            level: "error",
+            summary: "服务管道实例耗尽（ERROR_PIPE_BUSY）：GUI 会话占满了唯一实例，                      其它客户端（CLI/gateway/自更新/保存配置）全部连不上。                      pre.19 已改为预建多实例；旧版本请先关掉 GUI 再跑 CLI"
+                .into(),
+            evidence: json!({"error": err, "os_error": 231}),
+            fixable: false,
+        }),
         Err(err) => out.push(Finding {
             id: "service.ipc",
             level: "error",
@@ -259,6 +267,12 @@ fn config_checks(out: &mut Vec<Finding>) {
         }),
         fixable: false,
     });
+}
+
+/// 是否是「管道实例全被占用」（Windows 的 `ERROR_PIPE_BUSY`）。
+fn is_pipe_busy(err: &str) -> bool {
+    // 系统消息会随语言本地化，认 os error 码最稳。
+    err.contains("os error 231") || err.to_ascii_lowercase().contains("pipe instance")
 }
 
 fn version_checks(out: &mut Vec<Finding>, p: &paths::Paths) {

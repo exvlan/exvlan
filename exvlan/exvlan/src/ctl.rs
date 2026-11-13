@@ -169,9 +169,23 @@ enum AuthCmd {
     Logout,
 }
 
+/// 真实构建串（CI 注入）；本地直接 `cargo build` 时回落到 crate 版本。
+fn build_version() -> &'static str {
+    match option_env!("EXVLAN_BUILD_VERSION") {
+        Some(v) => v,
+        None => env!("CARGO_PKG_VERSION"),
+    }
+}
+
 /// 入口分发：命中我们的子命令则执行并返回退出码。
 pub fn maybe_run() -> Option<i32> {
     let first = std::env::args().nth(1)?;
+    // `--version/-V` 由上游 clap 输出的是 crate 版本（不含 `-pre.N+sha`），
+    // 排查时容易误判「装的是哪个包」。这里前置拦截，打印真实构建串。
+    if matches!(first.as_str(), "--version" | "-V" | "version") {
+        println!("exvlan-cli {}", build_version());
+        return Some(0);
+    }
     if !matches!(
         first.as_str(),
         "service" | "config" | "doctor" | "diag" | "auth" | "api"

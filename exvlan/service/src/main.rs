@@ -169,6 +169,29 @@ fn write_version_file(p: &Paths) -> std::io::Result<()> {
     Ok(())
 }
 
+/// `rename` + 轮询重试。
+///
+/// Windows 上刚停掉的内核可能还握着 exe 句柄（进程退出 → 句柄释放是异步的），
+/// 直接 rename 会失败（实测 os error 32「另一个程序正在使用此文件」）。
+fn rename_with_retry(from: &Path, to: &Path, attempts: u32) -> anyhow::Result<()> {
+    let mut last: Option<std::io::Error> = None;
+    for attempt in 0..attempts {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                last = Some(err);
+                std::thread::sleep(Duration::from_millis(100 * u64::from(attempt + 1)));
+            }
+        }
+    }
+    Err(anyhow::anyhow!(
+        "rename {} → {} 失败（已重试 {attempts} 次）: {}",
+        from.display(),
+        to.display(),
+        last.map(|e| e.to_string()).unwrap_or_default()
+    ))
+}
+
 fn paths() -> Paths {
     #[cfg(target_os = "macos")]
     {
@@ -1366,10 +1389,14 @@ impl State {
         self.cleanup_stale_kernel()?;
 
         // 保留上一版，失败可回滚。
+        //
+        // Windows 上刚停掉的内核可能还握着 exe 句柄（杀进程 → 句柄释放是异步的），
+        // 直接 rename 会失败（实测 error 32）。这里轮询重试；**失败就不动原内核**，
+        // 把原因结构化返回（GUI 提示「关掉所有 Exvlan 后重试」），而不是把机器留在半截。
         if self.paths.kernel.is_file() {
             let _ = std::fs::remove_file(&self.paths.kernel_prev);
-            std::fs::rename(&self.paths.kernel, &self.paths.kernel_prev)
-                .context("备份当前内核失败")?;
+            rename_with_retry(&self.paths.kernel, &self.paths.kernel_prev, 10)
+                .context("kernel_busy: 备份当前内核失败（内核可能仍在退出，请稍后重试）")?;
         }
         std::fs::copy(&new_kernel, &self.paths.kernel).context("安装新内核失败")?;
         #[cfg(unix)]
@@ -2462,24 +2489,33 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
     use windows_sys::Win32::Storage::FileSystem::*;
     use windows_sys::Win32::System::Pipes::*;
 
+    /// 预建的管道实例数。
+    ///
+    /// **必须 > 1**：GUI 启动后会常驻一条会话连接（`ensure_session`），
+    /// 之前每次只建 1 个实例、接完再建下一个 → 那条会话把唯一实例占死，
+    /// 之后所有客户端（`exvlan-cli`、gateway、doctor、GUI 的 apply/mode.set、
+    /// config.write）全部 `ERROR_PIPE_BUSY (os error 231)`。
+    /// `PIPE_UNLIMITED_INSTANCES` 只是上限，**不会**自动扩容。
+    const PIPE_INSTANCES: usize = 16;
+
     let name: Vec<u16> = "\\\\.\\pipe\\era.exvlan.studio.service\0"
         .encode_utf16()
         .collect();
-    // 显式 DACL：不依赖 LocalSystem 的默认 ACL（默认值随 Windows 版本/策略变化，
-    // macOS 那次已经证明「默认权限」不可假设）。
-    //   SY = LocalSystem  GA、BA = Administrators  GA、IU = 交互式登录用户  GRGW
+    // 显式 DACL：不依赖 LocalSystem 的默认 ACL（默认值随 Windows 版本/策略变化）。
+    //   SY = LocalSystem GA、BA = Administrators GA、装者 SID 或 IU = 客户端 GRGW
     let sa = pipe_security_attributes();
     let sa_ptr = match &sa {
         Some(s) => s as *const windows_sys::Win32::Security::SECURITY_ATTRIBUTES,
         None => std::ptr::null(),
     };
-    while win::RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+
+    let mut workers = 0usize;
+    for _ in 0..PIPE_INSTANCES {
         let handle = unsafe {
             CreateNamedPipeW(
                 name.as_ptr(),
                 PIPE_ACCESS_DUPLEX,
-                // `PIPE_REJECT_REMOTE_CLIENTS`：这个管道永远只服务本机 GUI，
-                // 显式拒绝 SMB 远端客户端（默认值在旧系统上是「允许」）。
+                // `PIPE_REJECT_REMOTE_CLIENTS`：只服务本机客户端，拒绝 SMB 远端。
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
@@ -2489,31 +2525,74 @@ fn pipe_loop(state: Arc<State>) -> anyhow::Result<()> {
             )
         };
         if handle == INVALID_HANDLE_VALUE {
-            std::thread::sleep(Duration::from_millis(500));
-            continue;
+            log_line(
+                &state.paths,
+                &format!(
+                    "CreateNamedPipe 第 {} 个实例失败（继续用已建好的 {} 个）：os error {}",
+                    workers + 1,
+                    workers,
+                    unsafe { GetLastError() }
+                ),
+            );
+            break;
         }
+        let st = state.clone();
+        let pipe = SendHandle(handle);
+        std::thread::spawn(move || {
+            // 必须走方法调用：直接读 `pipe.0` 会被闭包按字段精确捕获，
+            // 从而绕过 SendHandle 的 Send 实现。
+            pipe_instance_loop(&st, pipe.into_inner());
+        });
+        workers += 1;
+    }
+    if workers == 0 {
+        anyhow::bail!("没有任何管道实例创建成功");
+    }
+    state.log(format!("pipe listening: {workers} instances"));
+
+    // 阻塞到服务停止（SCM Stop/Shutdown 会把 RUNNING 拉低并自连唤醒）。
+    while win::RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    // 每个实例都阻塞在 ConnectNamedPipe，自连 N 次把它们逐个唤醒。
+    for _ in 0..workers {
+        let _ = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(r"\\.\pipe\era.exvlan.studio.service");
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    Ok(())
+}
+
+/// 单个管道实例的循环：等连接 → 处理 → 断开 → 再等。
+///
+/// 句柄在整个服务生命周期内复用（不反复 Create/Close），实例数恒定 = 预建数。
+#[cfg(target_os = "windows")]
+fn pipe_instance_loop(state: &Arc<State>, handle: windows_sys::Win32::Foundation::HANDLE) {
+    use windows_sys::Win32::Foundation::*;
+    use windows_sys::Win32::System::Pipes::*;
+
+    loop {
         let connected = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) } != 0
             || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
         if connected {
-            let st = state.clone();
-            let pipe = SendHandle(handle);
-            std::thread::spawn(move || {
-                // 必须走方法调用：直接读 `pipe.0` 会被闭包按字段精确捕获，
-                // 从而绕过 SendHandle 的 Send 实现。
-                let handle = pipe.into_inner();
-                handle_pipe_conn(&st, handle);
-                unsafe {
-                    DisconnectNamedPipe(handle);
-                    CloseHandle(handle);
-                }
-            });
-        } else {
+            handle_pipe_conn(state, handle);
             unsafe {
-                CloseHandle(handle);
+                DisconnectNamedPipe(handle);
             }
         }
+        if !win::RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+            break;
+        }
+        if !connected {
+            // 管道被关闭/出错：该实例退休（其余实例继续服务）。
+            break;
+        }
     }
-    Ok(())
+    unsafe {
+        CloseHandle(handle);
+    }
 }
 
 /// `HANDLE` 是 `*mut c_void`，不实现 Send；句柄本身可跨线程使用。
@@ -2630,6 +2709,9 @@ fn install_tools(p: &Paths, dir: &Path) -> anyhow::Result<()> {
         {
             use std::os::unix::fs::PermissionsExt as _;
             let _ = std::fs::set_permissions(dst, std::fs::Permissions::from_mode(0o755));
+            // macOS 的 `fs::copy` 会保留源文件属主（app 包里的工具属于安装者），
+            // 但系统路径里的可执行文件必须是 root —— 否则普通用户可替换它。
+            chown_root(dst);
         }
         copied.push(dst.display().to_string());
     }
