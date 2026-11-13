@@ -24,3 +24,9 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_Pipes",
   "Win32_System_Threading",
 ] }
+
+[features]
+# `protocol` 只依赖 serde/serde_json：特权服务仅需要协议类型时启用它，
+# 不会把 uuid/sha2/windows-sys 与 IPC 客户端连坐进 root 二进制。
+default = []
+protocol = []

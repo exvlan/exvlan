@@ -2,7 +2,8 @@
 //!
 //! 只解决「怎么连、对面是谁」，**不含任何策略**：
 //!
-//! - [`ipc`]：特权服务 IPC（unix socket / Windows 命名管道），`{proto:1,op}` 行式 JSON；
+//! - [`protocol`]：服务 IPC 的请求/响应类型（wire v2，`{proto,op,params}`）——**唯一真源**；
+//! - [`ipc`]：特权服务 IPC 传输（unix socket / Windows 命名管道），行式 JSON；
 //! - [`backend`]：探测当前是 `core`（裸核，无服务）还是 `service`（有特权服务）；
 //! - [`config`]：网络配置（内核 `config-dir/*.toml`）唯一写者入口；
 //! - [`paths`]：三平台统一的目录/二进制/凭据位置。
@@ -19,6 +20,7 @@ pub mod doctor;
 pub mod identity;
 pub mod ipc;
 pub mod paths;
+pub mod protocol;
 pub mod tokens;
 
 pub use backend::{Backend, detect};
