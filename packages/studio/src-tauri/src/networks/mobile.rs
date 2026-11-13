@@ -9,8 +9,6 @@
 
 use std::path::{Path, PathBuf};
 
-use exvlan_rpc::exvlan_core::config::api_input::NetworkConfigExt as _;
-use exvlan_rpc::exvlan_core::config::toml::{ConfigLoader as _, TomlConfigLoader};
 use exvlan_rpc::exvlan_proto::api::manage::NetworkConfig;
 
 use super::legacy;
@@ -159,10 +157,31 @@ fn delete_in(dir: &Path, id: &str) -> Result<bool, String> {
     Ok(removed)
 }
 
+// 移动端**不能**链接 `exvlan-core`（CI 会断言 Android 依赖树里没有它），所以
+// TOML ↔ NetworkConfig 的转换走 FFI 暴露的内部服务 `exvlan.internal.ConfigConvert`
+// （与导入/导出、`generate_network_config` 同一份实现，语义与桌面完全一致）。
+
+const CONFIG_CONVERT_SERVICE: &str = "exvlan.internal.ConfigConvert";
+
 /// 与桌面同形：内核 TOML → `NetworkConfig`。
 fn from_toml(text: &str) -> Result<NetworkConfig, String> {
-    let loader = TomlConfigLoader::new_from_str(text).map_err(|e| e.to_string())?;
-    NetworkConfig::new_from_config(&loader).map_err(|e| e.to_string())
+    let value = exvlan_rpc::ffi_rpc::call(
+        CONFIG_CONVERT_SERVICE,
+        "toml_to_config",
+        "",
+        serde_json::json!({ "tomlConfig": text }),
+    )?;
+    serde_json::from_value(value).map_err(|e| format!("解析内核配置失败: {e}"))
+}
+
+/// 与桌面同形：`NetworkConfig` → 内核 TOML（走内核自己的 `gen_config`）。
+fn to_toml(cfg: &NetworkConfig) -> Result<String, String> {
+    let payload = serde_json::to_value(cfg).map_err(|e| format!("序列化网络配置失败: {e}"))?;
+    let value = exvlan_rpc::ffi_rpc::call(CONFIG_CONVERT_SERVICE, "config_to_toml", "", payload)?;
+    value
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| "config_to_toml 未返回字符串".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -206,10 +225,10 @@ fn migrate_legacy_once(app: &tauri::AppHandle) {
         let Some(id) = cfg.instance_id.clone().filter(|id| !id.is_empty()) else {
             continue;
         };
-        let toml_text = match cfg.gen_config() {
-            Ok(toml_cfg) => toml_cfg.dump(),
+        let toml_text = match to_toml(cfg) {
+            Ok(text) => text,
             Err(err) => {
-                crate::logger::record("networks.migrate", format!("{id}: gen_config 失败: {err}"));
+                crate::logger::record("networks.migrate", format!("{id}: 生成内核配置失败: {err}"));
                 return; // 原子性：一条失败就整体不推进
             }
         };
@@ -287,10 +306,7 @@ pub fn set_networks(app: tauri::AppHandle, networks: String) -> Result<(), Strin
             .clone()
             .filter(|id| !id.is_empty())
             .ok_or_else(|| "网络配置缺少 instance_id".to_string())?;
-        let text = config
-            .gen_config()
-            .map_err(|e| format!("生成内核配置失败: {e}"))?
-            .dump();
+        let text = to_toml(&config)?;
         let enabled = read_in(&dir, &id).map(|s| s.enabled).unwrap_or(true);
         write_in(&dir, &id, &text, enabled)?;
     }
