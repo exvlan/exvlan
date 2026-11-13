@@ -22,8 +22,8 @@ pub struct MigrateStatus {
 
 /// 旧版本遗留数据（用户侧 + 内核侧的 `.prev`）。
 pub fn legacy_items() -> Vec<String> {
-    let user = exvlan_service_client::paths::user_paths();
-    let p = exvlan_service_client::paths::paths();
+    let user = exvlan_control::paths::user_paths();
+    let p = exvlan_control::paths::paths();
     let mut out = Vec::new();
     let mut push = |path: PathBuf| {
         if path.exists() {
@@ -58,7 +58,7 @@ fn tool_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 
 #[tauri::command]
 pub fn migrate_status(app: tauri::AppHandle) -> MigrateStatus {
-    let user = exvlan_service_client::paths::user_paths();
+    let user = exvlan_control::paths::user_paths();
     let done = user.data.join("migrate.done").is_file();
     let items = legacy_items();
     MigrateStatus {

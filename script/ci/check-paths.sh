@@ -13,8 +13,8 @@ cd "$repo_root"
 # 每个“组件根”允许在自己的 paths 定义里出现字面量，其余文件一律禁止。
 pairs=(
   "packages/studio/src-tauri/src:packages/studio/src-tauri/src/paths.rs"
-  "exvlan/service-client/src:exvlan/service-client/src/paths.rs"
-  # 服务的路径定义目前仍在 main.rs 的 paths() 里（后续统一到 service-client）
+  "exvlan/control/src:exvlan/control/src/paths.rs"
+  # 服务的路径定义目前仍在 main.rs 的 paths() 里（后续统一到 exvlan/control）
   "exvlan/service/src:exvlan/service/src/main.rs"
 )
 

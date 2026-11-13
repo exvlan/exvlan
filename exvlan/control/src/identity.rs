@@ -5,7 +5,7 @@
 //! 取自己的 SID 交给安装器，安装器写进 `service.toml`（root/SYSTEM 持有），
 //! 服务启动时据此构造 ACL。
 //!
-//! 放在 service-client 而不是 GUI：这样 CLI / gateway 也能用，并且这个 crate
+//! 放在 control 而不是 GUI：这样 CLI / gateway 也能用，并且这个 crate
 //! 只依赖 windows-sys（纯 Rust），可以交叉编译验证，不需要 MSVC 工具链。
 
 /// 当前用户 uid（unix）；Windows 返回 0（与既有行为一致）。

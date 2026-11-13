@@ -64,7 +64,7 @@ fn main() {
         i += 1;
     }
 
-    let user = exvlan_service_client::paths::user_paths();
+    let user = exvlan_control::paths::user_paths();
     let log_file = log_path.unwrap_or_else(|| user.logs.join("migrate.log"));
     let mut log = Logger::new(&log_file);
 
@@ -140,7 +140,7 @@ impl Logger {
 
 fn now_ts() -> String {
     // 尽量少依赖：用 UNIX 秒 + 简单格式化。
-    let secs = exvlan_service_client::tokens::now_secs();
+    let secs = exvlan_control::tokens::now_secs();
     format!("unix:{secs}")
 }
 
@@ -167,8 +167,8 @@ struct Legacy {
 }
 
 fn detect(
-    user: &exvlan_service_client::paths::UserPaths,
-    p: &exvlan_service_client::paths::Paths,
+    user: &exvlan_control::paths::UserPaths,
+    p: &exvlan_control::paths::Paths,
 ) -> Legacy {
     let mut l = Legacy::default();
     let n = user.data.join("networks.toml");
@@ -201,12 +201,12 @@ fn detect(
 
 fn migrate(
     dry_run: bool,
-    user: &exvlan_service_client::paths::UserPaths,
+    user: &exvlan_control::paths::UserPaths,
     log: &mut Logger,
     json_out: bool,
     owner_uid: Option<u32>,
 ) -> anyhow::Result<()> {
-    let p = exvlan_service_client::paths::paths();
+    let p = exvlan_control::paths::paths();
     let legacy = detect(user, &p);
     let mut items: Vec<String> = Vec::new();
     if let Some(v) = &legacy.networks_toml {
@@ -253,7 +253,7 @@ fn migrate(
     // 1) 备份
     let backup = user.data.join(format!(
         "exvlan-migrate-backup-{}",
-        exvlan_service_client::tokens::now_secs()
+        exvlan_control::tokens::now_secs()
     ));
     std::fs::create_dir_all(&backup)
         .with_context(|| format!("创建备份目录失败: {}", backup.display()))?;
@@ -355,11 +355,11 @@ fn migrate(
     // 5) 标记 + 报告
     let report = json!({
         "tool_version": TOOL_VERSION,
-        "backend": exvlan_service_client::detect().as_str(),
+        "backend": exvlan_control::detect().as_str(),
         "backup": backup.display().to_string(),
         "converted_networks": converted,
         "removed": removed,
-        "ts": exvlan_service_client::tokens::now_secs(),
+        "ts": exvlan_control::tokens::now_secs(),
     });
     std::fs::write(
         backup.join("migrate-report.json"),
@@ -371,7 +371,7 @@ fn migrate(
         &marker,
         serde_json::to_string_pretty(&json!({
             "version": TOOL_VERSION,
-            "ts": exvlan_service_client::tokens::now_secs(),
+            "ts": exvlan_control::tokens::now_secs(),
             "backup": backup.display().to_string(),
         }))?,
     )
@@ -502,7 +502,7 @@ fn convert_service(src: &Path, dst: &Path, log: &mut Logger) -> anyhow::Result<(
 
 fn rollback_from(
     dir: &Path,
-    user: &exvlan_service_client::paths::UserPaths,
+    user: &exvlan_control::paths::UserPaths,
     log: &mut Logger,
 ) -> anyhow::Result<()> {
     if !dir.is_dir() {
@@ -616,7 +616,7 @@ fn uuid_like() -> String {
 fn uuid_hex() -> String {
     let mut out = String::new();
     while out.len() < 32 {
-        out.push_str(&exvlan_service_client::tokens::now_secs().to_string());
+        out.push_str(&exvlan_control::tokens::now_secs().to_string());
         out.push_str(&std::process::id().to_string());
         out.push_str(&TOOL_VERSION.replace('.', ""));
     }

@@ -4788,7 +4788,7 @@ fn provision(req: &ProvisionPayload) -> anyhow::Result<()> {
 #[cfg(target_os = "linux")]
 fn install_tools_linux(dir: &std::path::Path) -> anyhow::Result<usize> {
     use anyhow::Context as _;
-    let p = exvlan_service_client::paths::paths();
+    let p = exvlan_control::paths::paths();
     let mut copied = 0usize;
     for (name, dst) in [
         ("exvlan-cli", &p.cli_bin),
@@ -5031,7 +5031,7 @@ async fn linux_ensure(app: &AppHandle, opts: &service::ServiceOptions) -> Result
         service: need_service.then(|| opts.clone()),
         service_src: None,
         owner_uid: crate::service_client::current_uid(),
-        owner_sid: exvlan_service_client::current_user_sid(),
+        owner_sid: exvlan_control::current_user_sid(),
         tools_dir: crate::service_client::bundled_tools_dir(app).map(|d| d.display().to_string()),
     };
     let json = serde_json::to_string(&payload).map_err(|e| logger::other("cmd:linux_ensure", e))?;
@@ -5109,7 +5109,7 @@ fn ensure_service_and_kernel(app: &AppHandle) -> Result<String, String> {
                     service: None,
                     service_src: None,
                     owner_uid: crate::service_client::current_uid(),
-                    owner_sid: exvlan_service_client::current_user_sid(),
+                    owner_sid: exvlan_control::current_user_sid(),
                     tools_dir: crate::service_client::bundled_tools_dir(app)
                         .map(|d| d.display().to_string()),
                 };
@@ -5164,7 +5164,7 @@ async fn ensure_kernel_only(app: AppHandle) -> Result<String, String> {
         service: None,
         service_src: None,
         owner_uid: crate::service_client::current_uid(),
-        owner_sid: exvlan_service_client::current_user_sid(),
+        owner_sid: exvlan_control::current_user_sid(),
         tools_dir: crate::service_client::bundled_tools_dir(&app).map(|d| d.display().to_string()),
     };
     let json =

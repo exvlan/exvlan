@@ -57,7 +57,7 @@ local_only:
   - exvlan.code-workspace # ← 由上游 EasyTier.code-workspace 改名
   # 我方控制面组件（上游没有对应物，绝不可被映射覆盖/删除）
   - exvlan/service # 特权服务 exvlan-service（原 packages/studio/service）
-  - exvlan/service-client # 服务 IPC + 提权 + backend 探测（GUI/CLI/gateway 共用）
+  - exvlan/control # 服务 IPC + 提权 + backend 探测（GUI/CLI/gateway 共用）
   - exvlan/gateway # 控制面 HTTP/WS（127.0.0.1）
   - exvlan/migrate # 一次性迁移工具（仅 pre.17 随包）
 

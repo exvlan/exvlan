@@ -134,11 +134,11 @@ fn require_scope(
     state: &AppState,
     headers: &HeaderMap,
     scope: Option<&str>,
-) -> Result<exvlan_service_client::tokens::Claims, Response> {
-    use exvlan_service_client::tokens::{ALL_SCOPES, Store, VerifyError};
+) -> Result<exvlan_control::tokens::Claims, Response> {
+    use exvlan_control::tokens::{ALL_SCOPES, Store, VerifyError};
     let token = bearer(headers).ok_or_else(unauthorized)?;
     if constant_time_eq(token.as_bytes(), state.token.as_bytes()) {
-        return Ok(exvlan_service_client::tokens::Claims {
+        return Ok(exvlan_control::tokens::Claims {
             id: "local-admin".into(),
             name: "local-admin".into(),
             scopes: ALL_SCOPES.iter().map(|s| s.to_string()).collect(),
@@ -193,7 +193,7 @@ fn err(status: StatusCode, code: &str, message: impl Into<String>) -> Response {
 
 // Response 较大，错误分支装箱（clippy: result_large_err）。
 fn ipc(op: &str, extra: Value) -> Result<Value, Box<Response>> {
-    exvlan_service_client::ipc::request(op, extra)
+    exvlan_control::ipc::request(op, extra)
         .map_err(|e| Box::new(err(StatusCode::BAD_GATEWAY, "service_ipc", e)))
 }
 
@@ -205,11 +205,11 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
         return resp;
     }
-    let backend = exvlan_service_client::detect();
-    let p = exvlan_service_client::paths::paths();
-    let user = exvlan_service_client::paths::user_paths();
+    let backend = exvlan_control::detect();
+    let p = exvlan_control::paths::paths();
+    let user = exvlan_control::paths::user_paths();
     let service = if backend.has_service() {
-        exvlan_service_client::ipc::request("status", json!({})).ok()
+        exvlan_control::ipc::request("status", json!({})).ok()
     } else {
         None
     };
@@ -217,12 +217,12 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
         "api_version": 1,
         "gateway": BUILD_VERSION,
         "backend": backend.as_str(),
-        "supervisor": exvlan_service_client::backend::supervisor(),
+        "supervisor": exvlan_control::backend::supervisor(),
         "policy": service.as_ref().and_then(|s| s.get("mode").cloned()),
         "privileged": backend.has_service(),
         "endpoints": {
-            "rpc": exvlan_service_client::local_rpc_addr(),
-            "gateway": exvlan_service_client::local_gateway_addr(),
+            "rpc": exvlan_control::local_rpc_addr(),
+            "gateway": exvlan_control::local_gateway_addr(),
         },
         "paths": {
             "data": user.data.display().to_string(),
@@ -290,7 +290,7 @@ async fn pair_start(
         .and_then(Value::as_str)
         .unwrap_or("readonly")
         .to_string();
-    let Some(scopes) = exvlan_service_client::tokens::scopes_for_role(&role) else {
+    let Some(scopes) = exvlan_control::tokens::scopes_for_role(&role) else {
         return err(
             StatusCode::BAD_REQUEST,
             "bad_role",
@@ -417,7 +417,7 @@ async fn pair_redeem(
         }
         entry.used = true;
         let role = entry.role.clone();
-        let Some(scopes) = exvlan_service_client::tokens::scopes_for_role(&role) else {
+        let Some(scopes) = exvlan_control::tokens::scopes_for_role(&role) else {
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "bad_role",
@@ -428,8 +428,8 @@ async fn pair_redeem(
     };
 
     // **对端签发**：写对端自己的 token 文件（只存 sha256）。
-    let path = exvlan_service_client::tokens::Store::path();
-    let mut store = exvlan_service_client::tokens::Store::load(&path);
+    let path = exvlan_control::tokens::Store::path();
+    let mut store = exvlan_control::tokens::Store::load(&path);
     let name = format!("pair:{client}@{}", peer.ip());
     let (token, record) = store.create(&name, scopes.clone(), Some(3600));
     if let Err(e) = store.save(&path) {
@@ -460,15 +460,15 @@ async fn doctor(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
         return resp;
     }
-    Json(exvlan_service_client::doctor::collect().to_json()).into_response()
+    Json(exvlan_control::doctor::collect().to_json()).into_response()
 }
 
 async fn doctor_fix(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(resp) = require_scope(&state, &headers, Some("service:control")) {
         return resp;
     }
-    let mut report = exvlan_service_client::doctor::collect();
-    exvlan_service_client::doctor::fix(&mut report);
+    let mut report = exvlan_control::doctor::collect();
+    exvlan_control::doctor::fix(&mut report);
     Json(report.to_json()).into_response()
 }
 
@@ -476,12 +476,12 @@ async fn diag(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
         return resp;
     }
-    let report = exvlan_service_client::doctor::collect();
-    let p = exvlan_service_client::paths::paths();
-    let user = exvlan_service_client::paths::user_paths();
+    let report = exvlan_control::doctor::collect();
+    let p = exvlan_control::paths::paths();
+    let user = exvlan_control::paths::user_paths();
     Json(json!({
         "gateway": BUILD_VERSION,
-        "backend": exvlan_service_client::detect().as_str(),
+        "backend": exvlan_control::detect().as_str(),
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "paths": {
@@ -499,7 +499,7 @@ async fn service(State(state): State<AppState>, headers: HeaderMap) -> Response 
     if let Err(resp) = require_scope(&state, &headers, Some("service:read")) {
         return resp;
     }
-    if !exvlan_service_client::detect().has_service() {
+    if !exvlan_control::detect().has_service() {
         return Json(json!({
             "backend": "core",
             "capabilities": {"service": false},
@@ -592,7 +592,7 @@ fn kernel_url() -> String {
     std::env::var("EXVLAN_RPC")
         .ok()
         .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| format!("tcp://{}", exvlan_service_client::local_rpc_addr()))
+        .unwrap_or_else(|| format!("tcp://{}", exvlan_control::local_rpc_addr()))
 }
 
 async fn kernel_reachable() -> bool {
@@ -663,7 +663,7 @@ async fn list_configs(
         params.get("full").map(String::as_str),
         Some("1") | Some("true")
     );
-    match exvlan_service_client::config::list() {
+    match exvlan_control::config::list() {
         Ok(items) => {
             let list: Vec<Value> = items
                 .iter()
@@ -700,7 +700,7 @@ async fn get_config(
     if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
         return resp;
     }
-    match exvlan_service_client::config::read(&id) {
+    match exvlan_control::config::read(&id) {
         Ok(saved) => Json(json!({
             "id": saved.id,
             "enabled": saved.enabled,
@@ -748,7 +748,7 @@ async fn put_config(
     if text.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "bad_request", "text 为空");
     }
-    match exvlan_service_client::config::write(&id, &text, enabled) {
+    match exvlan_control::config::write(&id, &text, enabled) {
         Ok(()) => Json(json!({ "id": id, "enabled": enabled, "ok": true })).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, "config_write", e),
     }
@@ -762,7 +762,7 @@ async fn delete_config(
     if let Err(resp) = require_scope(&state, &headers, Some("kernel:write")) {
         return resp;
     }
-    match exvlan_service_client::config::delete(&id) {
+    match exvlan_control::config::delete(&id) {
         Ok(true) => Json(json!({ "id": id, "removed": true })).into_response(),
         Ok(false) => err(
             StatusCode::NOT_FOUND,
@@ -806,7 +806,7 @@ async fn get_instance(
     if let Err(resp) = require_scope(&state, &headers, Some("kernel:read")) {
         return resp;
     }
-    let saved = exvlan_service_client::config::read(&id).ok();
+    let saved = exvlan_control::config::read(&id).ok();
     // config 是主信息（拿不到就是 5xx）；info/meta 是附加信息（best-effort）。
     let config = match with_kernel(|kernel| {
         let id = id.clone();
@@ -876,8 +876,8 @@ async fn patch_instance(
             // 顺序很重要：**先改名**（`.toml` → `.toml.disabled`），再停实例。
             // 反了会出事：内核的 delete 会顺手删掉 `<id>.toml`，配置直接丢（实测）。
             // 临时实例（没有配置文件）没有可改名的对象，直接停即可。
-            let has_file = exvlan_service_client::config::read(&id).is_ok();
-            if has_file && let Err(e) = exvlan_service_client::config::set_enabled(&id, false) {
+            let has_file = exvlan_control::config::read(&id).is_ok();
+            if has_file && let Err(e) = exvlan_control::config::set_enabled(&id, false) {
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "config_write", e);
             }
             // `retain`：只保留其它实例 → 停掉本实例，不碰配置目录。
@@ -891,10 +891,10 @@ async fn patch_instance(
             }
         } else {
             // 先把文件名恢复（`.toml.disabled` → `.toml`），再从配置目录读回并跑起来。
-            if let Err(e) = exvlan_service_client::config::set_enabled(&id, true) {
+            if let Err(e) = exvlan_control::config::set_enabled(&id, true) {
                 return err(StatusCode::NOT_FOUND, "not_found", e);
             }
-            let saved = match exvlan_service_client::config::read(&id) {
+            let saved = match exvlan_control::config::read(&id) {
                 Ok(s) => s,
                 Err(e) => return err(StatusCode::NOT_FOUND, "not_found", e),
             };
@@ -1035,7 +1035,7 @@ async fn delete_instance(
         Ok(v) => {
             // 配置目录里的文件也一并删掉：内核只在「实例正在跑」时才顺手删文件，
             // 停用中的实例删了之后重启又会出现（语义不一致）。
-            match exvlan_service_client::config::delete(&target) {
+            match exvlan_control::config::delete(&target) {
                 Ok(_) => {}
                 Err(e) => tracing::warn!(%target, error = %e, "删除配置文件失败"),
             }
@@ -1064,7 +1064,7 @@ async fn push_loop(mut socket: WebSocket) {
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(2));
     loop {
         ticker.tick().await;
-        let report = exvlan_service_client::doctor::collect();
+        let report = exvlan_control::doctor::collect();
         let payload = json!({
             "type": "status",
             "ok": report.ok(),

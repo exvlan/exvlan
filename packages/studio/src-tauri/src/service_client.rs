@@ -292,7 +292,7 @@ mod imp {
         // Windows：把**当前用户**的 SID 交给安装器，服务据此把命名管道 DACL
         // 收窄到本人（服务以 LocalSystem 跑，事后反推不出是谁装的）。
         // 取不到就传空串 → 服务退回 `IU`（不会锁门）。
-        let sid = exvlan_service_client::current_user_sid().unwrap_or_default();
+        let sid = exvlan_control::current_user_sid().unwrap_or_default();
         let tools = bundled_tools_dir(app)
             .map(|d| d.display().to_string())
             .unwrap_or_default();

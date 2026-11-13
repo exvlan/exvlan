@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 SCAN_ROOTS = [
     "exvlan/service",
-    "exvlan/service-client",
+    "exvlan/control",
     "exvlan/gateway",
     "exvlan/migrate",
     "packages/studio/src",

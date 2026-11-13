@@ -46,7 +46,7 @@ SCAN_SUFFIXES = {".rs", ".ts", ".tsx", ".vue", ".yaml", ".yml", ".json"}
 # 不在这里跟；安装脚本里的 peer 监听端口是用户可见默认值，单独放行。
 SCAN_ROOTS = [
     "exvlan/service",
-    "exvlan/service-client",
+    "exvlan/control",
     "exvlan/gateway",
     "exvlan/migrate",
     "packages/studio/src",
@@ -86,7 +86,7 @@ ALLOW_FILES = {
     "packages/std/src/locales/cn.yaml": "端口文案（不含字面量时也不报错）",
     "packages/std/src/locales/en.yaml": "端口文案（不含字面量时也不报错）",
     "exvlan/rpc/src/rpc.rs": "URL 解析单测夹具",
-    "exvlan/service-client/src/lib.rs": "DEFAULT_RPC_PORT / DEFAULT_GATEWAY_PORT 默认值",
+    "exvlan/control/src/lib.rs": "DEFAULT_RPC_PORT / DEFAULT_GATEWAY_PORT 默认值",
     "packages/studio/src-tauri/src/gateway_remote.rs": "DEFAULT_GATEWAY_PORT 默认值（对端可在 service.toml 改，配对成功后由用户覆盖）",
 }
 

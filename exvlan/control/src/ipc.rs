@@ -25,7 +25,7 @@ pub struct Client {
 
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("service-client::Client")
+        f.write_str("control::Client")
     }
 }
 

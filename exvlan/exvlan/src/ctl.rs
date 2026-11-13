@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use exvlan_service_client::{Backend, detect, paths};
+use exvlan_control::{Backend, detect, paths};
 use serde_json::json;
 
 #[derive(Parser, Debug)]
@@ -234,7 +234,7 @@ pub fn maybe_run() -> Option<i32> {
 // ---------------------------------------------------------------------------
 
 fn config_cmd(cmd: ConfigCmd) -> i32 {
-    use exvlan_service_client::config as cfg;
+    use exvlan_control::config as cfg;
     let result = match cmd {
         ConfigCmd::List { json: as_json } => cfg::list().map(|items| {
             if as_json {
@@ -318,7 +318,7 @@ fn fmt_ts(secs: u64) -> String {
 // ---------------------------------------------------------------------------
 
 fn ipc(op: &str, extra: serde_json::Value) -> Result<serde_json::Value, String> {
-    exvlan_service_client::ipc::request(op, extra)
+    exvlan_control::ipc::request(op, extra)
 }
 
 fn service_cmd(cmd: ServiceCmd) -> i32 {
@@ -356,7 +356,7 @@ fn show_status() -> Result<(), String> {
     let backend = detect();
     let mut out = json!({
         "backend": backend.as_str(),
-        "supervisor": exvlan_service_client::backend::supervisor(),
+        "supervisor": exvlan_control::backend::supervisor(),
         "service_bin": p.service_bin.display().to_string(),
         "service_installed": p.service_bin.is_file(),
         "kernel_bin": p.kernel_bin.display().to_string(),
@@ -476,13 +476,13 @@ fn euid() -> u32 {
 }
 
 // ---------------------------------------------------------------------------
-// doctor / diag（实现见 exvlan_service_client::doctor，CLI 与 gateway 共用）
+// doctor / diag（实现见 exvlan_control::doctor，CLI 与 gateway 共用）
 // ---------------------------------------------------------------------------
 
 fn doctor(json_out: bool, fix: bool) -> i32 {
-    let mut report = exvlan_service_client::doctor::collect();
+    let mut report = exvlan_control::doctor::collect();
     if fix {
-        exvlan_service_client::doctor::fix(&mut report);
+        exvlan_control::doctor::fix(&mut report);
     }
     if json_out {
         print_json(&report.to_json());
@@ -494,12 +494,12 @@ fn doctor(json_out: bool, fix: bool) -> i32 {
 
 fn diag(_json_out: bool) -> i32 {
     let p = paths::paths();
-    let user = exvlan_service_client::paths::user_paths();
-    let report = exvlan_service_client::doctor::collect();
+    let user = exvlan_control::paths::user_paths();
+    let report = exvlan_control::doctor::collect();
     print_json(&json!({
         "version": env!("CARGO_PKG_VERSION"),
         "backend": detect().as_str(),
-        "supervisor": exvlan_service_client::backend::supervisor(),
+        "supervisor": exvlan_control::backend::supervisor(),
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "paths": {
@@ -525,7 +525,7 @@ fn gateway_base() -> String {
     std::env::var("EXVLAN_API")
         .ok()
         .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| format!("http://{}", exvlan_service_client::local_gateway_addr()))
+        .unwrap_or_else(|| format!("http://{}", exvlan_control::local_gateway_addr()))
 }
 
 fn gateway_token() -> Option<String> {
@@ -534,7 +534,7 @@ fn gateway_token() -> Option<String> {
     {
         return Some(t.trim().to_string());
     }
-    let path = exvlan_service_client::paths::user_paths()
+    let path = exvlan_control::paths::user_paths()
         .data
         .join("gateway-token");
     std::fs::read_to_string(path)
@@ -667,7 +667,7 @@ fn http_request_at(
 // ---------------------------------------------------------------------------
 
 fn token_path() -> PathBuf {
-    exvlan_service_client::paths::user_paths()
+    exvlan_control::paths::user_paths()
         .data
         .join("gateway-token")
 }
@@ -724,7 +724,7 @@ fn auth_cmd(cmd: AuthCmd) -> i32 {
 /// 服务创建的 0600 文件（用户态读不到）。裸核模式（没有服务）再退回直连 HTTP。
 fn auth_pair(role: &str, ttl: u64, gateway: Option<&str>) -> i32 {
     if gateway.is_none() {
-        match exvlan_service_client::ipc::request(
+        match exvlan_control::ipc::request(
             "gateway.pair.start",
             json!({ "role": role, "ttl": ttl }),
         ) {
@@ -799,7 +799,7 @@ fn print_pair(value: &serde_json::Value, ttl: u64) -> i32 {
 }
 
 fn token_cmd(cmd: TokenCmd) -> i32 {
-    use exvlan_service_client::tokens::{Store, parse_ttl, scopes_for_role};
+    use exvlan_control::tokens::{Store, parse_ttl, scopes_for_role};
     let path = Store::path();
     let mut store = Store::load(&path);
     match cmd {
@@ -817,7 +817,7 @@ fn token_cmd(cmd: TokenCmd) -> i32 {
                 }
             };
             for s in scopes {
-                if !exvlan_service_client::tokens::ALL_SCOPES.contains(&s.as_str()) {
+                if !exvlan_control::tokens::ALL_SCOPES.contains(&s.as_str()) {
                     eprintln!("未知 scope: {s}");
                     return 2;
                 }

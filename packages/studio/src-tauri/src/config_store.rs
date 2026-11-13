@@ -5,14 +5,14 @@
 //! 真正加载的那批文件。
 //!
 //! 读写语义（服务 IPC 优先、裸核本地文件兜底）由
-//! [`exvlan_service_client::config`] 统一实现；这里只做 GUI 侧的薄适配
+//! [`exvlan_control::config`] 统一实现；这里只做 GUI 侧的薄适配
 //! （错误信息带上下文 + 挂到 `error.log`）。
 
 #![cfg(not(any(target_os = "android", target_os = "ios")))]
 
-pub use exvlan_service_client::config::Saved as SavedConfig;
+pub use exvlan_control::config::Saved as SavedConfig;
 
-use exvlan_service_client::config as svc;
+use exvlan_control::config as svc;
 
 /// 配置目录（诊断面板展示用）。
 pub fn dir() -> String {

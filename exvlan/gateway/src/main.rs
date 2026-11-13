@@ -4,7 +4,7 @@
 //! 只做「鉴权 + 路由 + 转发」，业务判断全部在被调方：
 //!
 //! - 服务相关（policy / kernel / 安装）→ `exvlan-service`（IPC）
-//! - 体检 / 诊断 → `exvlan-service-client::doctor`（同一份 findings）
+//! - 体检 / 诊断 → `exvlan-control::doctor`（同一份 findings）
 //!
 //! 默认只监听 `127.0.0.1`，鉴权用 Bearer token（`<user>/gateway-token`，0600）。
 //! 远端访问需要显式开启 mesh 监听（opt-in），属后续版本。
@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let user = exvlan_service_client::paths::user_paths();
+    let user = exvlan_control::paths::user_paths();
     let token_file = std::env::var("EXVLAN_GATEWAY_TOKEN_FILE")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| user.data.join("gateway-token"));
@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
         bind: env_or("EXVLAN_GATEWAY_BIND", "127.0.0.1"),
         port: env_or(
             "EXVLAN_GATEWAY_PORT",
-            &exvlan_service_client::DEFAULT_GATEWAY_PORT.to_string(),
+            &exvlan_control::DEFAULT_GATEWAY_PORT.to_string(),
         )
         .parse()
         .context("EXVLAN_GATEWAY_PORT 必须是端口号")?,
@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let token = load_or_create_token(&cfg.token_file)?;
     tracing::info!(
         "token store: {}",
-        exvlan_service_client::tokens::Store::path().display()
+        exvlan_control::tokens::Store::path().display()
     );
     tracing::info!(
         "gateway listening on {}:{} (token file: {})",

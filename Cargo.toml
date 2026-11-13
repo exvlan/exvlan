@@ -8,7 +8,7 @@ members = [
   "exvlan/api",
   "packages/studio/src-tauri",
   "exvlan/service",
-  "exvlan/service-client",
+  "exvlan/control",
   "exvlan/gateway",
   "exvlan/migrate",
   "exvlan/contrib/ffi",

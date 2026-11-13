@@ -2836,10 +2836,10 @@ dependencies = [
  "derive_builder",
  "derive_more",
  "encoding",
+ "exvlan-control",
  "exvlan-core",
  "exvlan-proto",
  "exvlan-rpc",
- "exvlan-service-client",
  "flume 0.12.0",
  "forwarded-header-value",
  "futures",
@@ -2993,6 +2993,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "exvlan-control"
+version = "26.410.20712"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "toml 1.1.8+spec-1.1.0",
+ "uuid",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "exvlan-core"
 version = "26.410.20712"
 dependencies = [
@@ -3083,9 +3096,9 @@ version = "26.410.20712"
 dependencies = [
  "anyhow",
  "axum",
+ "exvlan-control",
  "exvlan-core",
  "exvlan-rpc",
- "exvlan-service-client",
  "serde",
  "serde_json",
  "tokio",
@@ -3112,9 +3125,9 @@ name = "exvlan-migrate"
 version = "26.410.20712"
 dependencies = [
  "anyhow",
+ "exvlan-control",
  "exvlan-core",
  "exvlan-proto",
- "exvlan-service-client",
  "libc",
  "serde",
  "serde_json",
@@ -3206,27 +3219,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "exvlan-service-client"
-version = "26.410.20712"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "toml 1.1.8+spec-1.1.0",
- "uuid",
- "windows-sys 0.59.0",
-]
-
-[[package]]
 name = "exvlan-studio"
 version = "26.410.20712"
 dependencies = [
  "anyhow",
  "async-trait",
  "dashmap",
+ "exvlan-control",
  "exvlan-rpc",
- "exvlan-service-client",
  "hickory-resolver",
  "if-addrs",
  "jni 0.22.4",
