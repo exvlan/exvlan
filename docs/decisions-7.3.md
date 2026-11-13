@@ -609,14 +609,16 @@ port = 2016
                                         ← stable 的**符号链接**（老客户端零迁移）
 ```
 
-| 项          | 决定                                                                                                                                                          |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 保留        | stable 5 / rc·beta·dev 各 3 / nightly **1**（每轮整目录替换）                                                                                                 |
-| `SINCE_TAG` | **只约束 stable**；其余通道按 `KEEP_<CHANNEL>` 从最新往前取                                                                                                   |
-| 空通道      | **不创建目录/清单**；客户端对单通道 404 只跳过（已实现）                                                                                                      |
-| 别名        | 符号链接指向 `stable/`，发布时原子替换链接（不复制文件，避免两份不一致）                                                                                      |
-| 磁盘        | `MAX_BYTES` 提到 **8 GiB**（当前 1.07 GB）                                                                                                                    |
-| 对外        | 通道目录**公开可达**；Caddy `@manifest` 扩为 `/core/*/manifest.json`、`/upgrade/*/{manifest,latest}.json`（无缓存）                                           |
-| 脚本真源    | 仓库 `script/kernel-mirror/*` 为唯一真源；发布机容器启动时用已挂载的 gh 凭据从**最新 stable tag** 拉取（`MIRROR_REF` 可临时覆盖），拉不到则保留现有脚本并告警 |
-| 状态文件    | `mirror-status.json` 增 `channels.{stable,rc,beta,dev,nightly}`                                                                                               |
-| legacy      | `-pre.*` / `preview-*` 不镜像（已在 §14.12 清理）                                                                                                             |
+| 项           | 决定                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 保留         | stable 5 / rc·beta·dev 各 3 / nightly **1**（每轮整目录替换）                                                                                                 |
+| `SINCE_TAG`  | **只约束 stable**；其余通道按 `KEEP_<CHANNEL>` 从最新往前取                                                                                                   |
+| 空通道       | **不创建目录/清单**；客户端对单通道 404 只跳过（已实现）                                                                                                      |
+| 别名         | 符号链接指向 `stable/`，发布时原子替换链接（不复制文件，避免两份不一致）                                                                                      |
+| 磁盘         | `MAX_BYTES` 提到 **8 GiB**（当前 1.07 GB）                                                                                                                    |
+| 对外         | 通道目录**公开可达**；Caddy `@manifest` 扩为 `/core/*/manifest.json`、`/upgrade/*/{manifest,latest}.json`（无缓存）                                           |
+| 脚本真源     | 仓库 `script/kernel-mirror/*` 为唯一真源；发布机容器启动时用已挂载的 gh 凭据从**最新 stable tag** 拉取（`MIRROR_REF` 可临时覆盖），拉不到则保留现有脚本并告警 |
+| 状态文件     | `mirror-status.json` 增 `channels.{stable,rc,beta,dev,nightly}`                                                                                               |
+| legacy       | `-pre.*` / `preview-*` 不镜像（已在 §14.12 清理）                                                                                                             |
+| nightly 版本 | 构建时把 base 的 patch **+1**（develop 20713 → `26.410.20714-nightly.1115`），保证 nightly 永远高于 stable，避免被推到 stable 后卡住                          |
+| nightly 上线 | **随 dev.1 一起上线**（代码 + 调度都在 dev.1），但首次夜间构建在 dev.1 发布后手动触发一次验证，不阻塞发版                                                     |
