@@ -3,18 +3,21 @@
 //! 协议：unix socket（macOS/Linux）或 Windows 命名管道，**行式 JSON**：
 //!
 //! ```text
-//! → {"proto":1,"op":"kernel.ensure"}
-//! ← {"ok":true,"mode":"service","kernel":{...}}
+//! → {"proto":2,"op":"kernel.ensure"}
+//! ← {"ok":true,"proto":2,"data":{"kind":"kernel.ensure","kernel":{...}}}
 //! ```
+//!
+//! 请求/响应类型见 [`crate::protocol`]（唯一真源）。协议版本不匹配时服务端
+//! 会硬拒并回 `proto_mismatch`，这里把它翻译成「请一起升级」的可读错误。
 //!
 //! 鉴权由操作系统负责（socket `0600` + 属主 / 命名管道 SDDL），这里不做自建鉴权。
 
 use std::io::{BufRead as _, BufReader, Write};
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::paths;
-use crate::protocol::{Request, Response, WireRequest};
+use crate::protocol::{ErrorCode, PROTO, Request, Response, WireRequest};
 
 /// 一条持久会话。
 ///
@@ -58,35 +61,24 @@ impl Client {
         Ok(Self { writer, reader })
     }
 
-    /// 发送 hello：把这条连接登记为「一个会话」（normal 策略据此决定是否停内核）。
+    /// 发送 hello：把这条连接登记为「一个会话」（session 策略据此决定是否停内核）。
     pub fn hello(&mut self) -> Result<(), String> {
-        self.send(json!({"proto":1,"op":"hello"}))?;
-        self.read_reply().map(|_| ())
+        self.call(&Request::Hello).map(|_| ())
     }
 
-    /// 发一个请求并等待响应。
-    pub fn request(&mut self, op: &str, extra: Value) -> Result<Value, String> {
-        let mut body = json!({ "proto": 1, "op": op });
-        if let (Some(dst), Some(src)) = (body.as_object_mut(), extra.as_object()) {
-            for (k, v) in src {
-                dst.insert(k.clone(), v.clone());
-            }
-        }
-        self.send(body)?;
-        self.read_reply()
-    }
-
-    /// 发送**类型化**请求（协议 v2）并解析成类型化响应。
+    /// 发送类型化请求并解析成类型化响应。
     ///
-    /// 与 [`Client::request`] 并存的原因：服务端接线前仍是 v1（平铺）。等
-    /// 服务切到 v2 后，`request` 会删除、所有调用点改用 `call`。
+    /// 失败（`ok=false`）统一转成 `"<code>: <message>"`；协议版本不一致时给出
+    /// 明确的升级指引，而不是一句「解析失败」。
     pub fn call(&mut self, req: &Request) -> Result<Response, String> {
         let wire = serde_json::to_value(WireRequest::new(req.clone()))
             .map_err(|e| format!("序列化请求失败: {e}"))?;
         self.send(wire)?;
         let value = self.read_reply()?;
-        serde_json::from_value(value)
-            .map_err(|e| format!("响应不是协议 v2（服务端可能还是旧版，请一起升级）: {e}"))
+        let resp: Response = serde_json::from_value(value).map_err(|e| {
+            format!("响应不是协议 v2（服务端可能还是旧版，请把客户端与服务一起升级）: {e}")
+        })?;
+        into_result(resp)
     }
 
     fn send(&mut self, body: Value) -> Result<(), String> {
@@ -103,19 +95,33 @@ impl Client {
         if line.trim().is_empty() {
             return Err("服务返回空响应".to_string());
         }
-        let resp: Value =
-            serde_json::from_str(line.trim()).map_err(|e| format!("解析响应失败: {e}"))?;
-        if resp.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-            Ok(resp)
-        } else {
-            let code = resp.get("code").and_then(Value::as_str).unwrap_or("error");
-            let msg = resp
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("服务返回失败");
-            Err(format!("{code}: {msg}"))
-        }
+        serde_json::from_str(line.trim()).map_err(|e| format!("解析响应失败: {e}"))
     }
+}
+
+/// 把响应信封变成 `Result`：`ok=false` 一律错误，`code` 保留在消息前缀里。
+///
+/// 公开给**自带传输层**的客户端（GUI 要保持一条常驻 session，不复用 [`Client`]），
+/// 保证两边的错误文案与协议校验完全一致。
+pub fn into_result(resp: Response) -> Result<Response, String> {
+    if resp.ok {
+        // 老服务（v1）的成功响应没有 `proto`：不能当成 v2 结果继续用。
+        if resp.proto != Some(PROTO) {
+            return Err(
+                "服务响应不是协议 v2（服务端可能还是旧版，请把客户端与服务一起升级）".to_string(),
+            );
+        }
+        return Ok(resp);
+    }
+    let code = resp.code.unwrap_or(ErrorCode::Unknown);
+    let message = resp.message.unwrap_or_else(|| "服务返回失败".to_string());
+    if code == ErrorCode::ProtoMismatch {
+        return Err(format!(
+            "{}: {message}（客户端与服务 IPC 协议不一致，请升级到同一版本）",
+            code.as_str()
+        ));
+    }
+    Err(format!("{}: {message}", code.as_str()))
 }
 
 /// Windows：打开命名管道，遇到 `ERROR_PIPE_BUSY (231)` 时等实例空出来再试。
@@ -158,16 +164,18 @@ fn open_pipe_with_retry(addr: &std::path::Path) -> Result<std::fs::File, String>
 }
 
 /// 一次性请求（连接 → 请求 → 关闭）。适合 CLI/doctor 这类短命令。
-pub fn request(op: &str, extra: Value) -> Result<Value, String> {
-    let mut client = Client::connect()?;
-    client.request(op, extra)
-}
-
-/// 一次性类型化调用（协议 v2）：连上 → 发 → 断开。
 ///
 /// 注意：服务把「连接」当会话（`session` 策略下用它判断内核该不该停），
 /// 所以这条短连接的生命周期就是本次调用。
 pub fn call(req: &Request) -> Result<Response, String> {
     let mut client = Client::connect()?;
     client.call(req)
+}
+
+/// 诊断用：把响应负载转成 JSON（`doctor` 的 evidence 要原样带出去）。
+pub fn data_json(resp: &Response) -> Value {
+    resp.data
+        .as_ref()
+        .and_then(|d| serde_json::to_value(d).ok())
+        .unwrap_or(Value::Null)
 }

@@ -49,7 +49,6 @@ const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 const MINISIGN_PUBKEY: &str = "RWSFKUboUUaFQYx/ap73a7ySNbuI5kjDGsiVJBtceshu+Ml99YPMFqe9";
-const PROTO: u32 = 1;
 /// RPC 端口（在内核与 GUI 之间保持一致；service.toml 可覆盖）。
 const RPC_PORT: u16 = 1995;
 /// 默认只绑回环：远端管理走 gateway（`docs/decisions-7.3.md` §14.2）。
@@ -275,6 +274,27 @@ pub enum Mode {
     Off,
 }
 
+/// 组合配置里的 `Mode` ↔ 协议 `Mode`（wire 上都是 resident/session/stopped）。
+impl From<Mode> for ProtoMode {
+    fn from(mode: Mode) -> Self {
+        match mode {
+            Mode::Service => ProtoMode::Resident,
+            Mode::Normal => ProtoMode::Session,
+            Mode::Off => ProtoMode::Stopped,
+        }
+    }
+}
+
+impl From<ProtoMode> for Mode {
+    fn from(mode: ProtoMode) -> Self {
+        match mode {
+            ProtoMode::Resident => Mode::Service,
+            ProtoMode::Session => Mode::Normal,
+            ProtoMode::Stopped => Mode::Off,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServiceConfig {
     #[serde(default)]
@@ -418,146 +438,99 @@ fn format_line(msg: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// 协议
+// 协议（唯一真源在 `exvlan_control::protocol`）
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
-struct Request {
-    // 只有 unix 分支读它（Windows 管道由 ACL 限制），但两端都要反序列化。
-    #[cfg_attr(not(unix), allow(dead_code))]
+use exvlan_control::protocol::{
+    ConfigEntry, ErrorCode, GatewayInfo, KernelInfo, Mode as ProtoMode, Occupant, PROTO, Payload,
+    Request as WireOp, Response, WhitelistInfo, WireRequest,
+};
+
+/// 两段解析的第一段：**只取 `proto` / `op`**，不碰业务字段。
+///
+/// 先判版本再解析请求体：低版本客户端连业务语义都不用谈（而且 v1 的平铺
+/// 字段在 v2 结构里根本反序列化不过去），必须硬拒且**不执行任何操作**。
+#[derive(Deserialize)]
+struct OpProbe {
     #[serde(default)]
     proto: u32,
+    #[serde(default)]
     op: String,
-    #[serde(default)]
-    mode: Option<Mode>,
-    #[serde(default)]
-    staging: Option<String>,
-    #[serde(default)]
-    version: Option<String>,
-    /// `whitelist.set` 的额外网段
-    #[serde(default)]
-    extra: Option<Vec<String>>,
-    /// `config.*` 的网络实例 id（也是配置文件名 `<id>.toml`）
-    #[serde(default)]
-    id: Option<String>,
-    /// `config.write` 的配置正文（内核 TOML）
-    #[serde(default)]
-    text: Option<String>,
-    /// `config.write` 是否启用（false → `<id>.toml.disabled`，内核不加载）
-    #[serde(default)]
-    enabled: Option<bool>,
-    /// `gateway.set` 的增量修改（未给的字段保持不变）
-    #[serde(default)]
-    gateway: Option<GatewayPatch>,
-    /// `gateway.pair.start` 的角色（readonly|config|admin）
-    #[serde(default)]
-    role: Option<String>,
-    /// `gateway.pair.start` 的配对码有效期（秒）
-    #[serde(default)]
-    ttl: Option<u64>,
 }
 
-/// `gateway.set`：只写给出的字段，其余沿用当前配置。
-#[derive(Debug, Clone, Default, Deserialize)]
-struct GatewayPatch {
-    #[serde(default)]
-    enabled: Option<bool>,
-    #[serde(default)]
-    bind: Option<String>,
-    #[serde(default)]
-    port: Option<u16>,
-}
-
-#[derive(Debug, Serialize)]
-struct KernelInfo {
-    pid: u32,
-    running: bool,
-    rpc: String,
-}
-
-#[derive(Debug, Serialize)]
-struct GatewayInfo {
-    pid: u32,
-    running: bool,
-    addr: String,
-    enabled: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct Response {
-    ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    proto: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    service: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mode: Option<Mode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    kernel: Option<KernelInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    gateway: Option<GatewayInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    message: Option<String>,
-    /// 结构化数据（whitelist / port 这类查询）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<serde_json::Value>,
-}
-
-impl Response {
-    fn ok() -> Self {
-        Self {
-            ok: true,
-            proto: None,
-            service: None,
-            mode: None,
-            kernel: None,
-            gateway: None,
-            code: None,
-            message: None,
-            data: None,
-        }
+/// 解析一行请求：版本不符 → `ProtoMismatch`；其余解析失败 → `BadRequest`。
+fn parse_request(line: &str) -> Result<WireOp, Box<Response>> {
+    let probe: OpProbe = serde_json::from_str(line).map_err(|err| {
+        Box::new(Response::err(
+            ErrorCode::BadRequest,
+            format!("请求不是合法 JSON: {err}"),
+        ))
+    })?;
+    if probe.proto != PROTO {
+        let message = format!("期望 proto={PROTO}，收到 {}，请一起升级", probe.proto);
+        return Err(Box::new(Response::err(ErrorCode::ProtoMismatch, message)));
     }
-    /// 把 `port_in_use|{json}` 形式的错误拆成结构化响应（GUI 据此渲染卡片）。
-    fn conflict(payload: serde_json::Value) -> Self {
-        let port = payload.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
-        let name = payload
-            .get("occupant")
-            .and_then(|o| o.get("name"))
+    serde_json::from_str::<WireRequest>(line)
+        .map(|wire| wire.request)
+        .map_err(|err| {
+            Box::new(Response::err(
+                ErrorCode::BadRequest,
+                format!("unknown op: {} ({err})", probe.op),
+            ))
+        })
+}
+
+/// v1 的 `port_in_use|{json}` 现在走结构化错误：[`PortInUse`] 挂在 `anyhow`
+/// 错误链上（业务函数签名不变），由 `conflict_or` 拆成 `Payload::PortInUse`。
+#[derive(Debug)]
+struct PortInUse {
+    port: u16,
+    owner: PortOwner,
+    kind: PortKind,
+}
+
+impl std::fmt::Display for PortInUse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 文案被 GUI 的正则解析（端口冲突卡片），**不要改**。
+        write!(
+            f,
+            "RPC 端口 {} 被 {}（pid={}, kind={}）占用",
+            self.port,
+            self.owner.name,
+            self.owner.pid,
+            self.kind.as_str()
+        )
+    }
+}
+
+impl std::error::Error for PortInUse {}
+
+/// `gateway.pair.start` 的回复来自本机 gateway 的 JSON：转成协议负载。
+fn pair_payload(value: &serde_json::Value, role: &str, ttl: u64) -> Payload {
+    let text = |key: &str, fallback: &str| {
+        value
+            .get(key)
             .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let pid = payload
-            .get("occupant")
-            .and_then(|o| o.get("pid"))
+            .unwrap_or(fallback)
+            .to_string()
+    };
+    Payload::GatewayPairStart {
+        code: text("code", ""),
+        expires_in: value
+            .get("expires_in")
             .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let kind = payload
-            .get("kind")
-            .and_then(|v| v.as_str())
-            .unwrap_or("foreign");
-        let message = format!("RPC 端口 {port} 被 {name}（pid={pid}, kind={kind}）占用");
-        Self::err_with_data("port_in_use", message, payload)
-    }
-
-    fn err_with_data(code: &str, message: impl Into<String>, data: serde_json::Value) -> Self {
-        let mut r = Self::err(code, message);
-        r.data = Some(data);
-        r
-    }
-
-    fn err(code: &str, message: impl Into<String>) -> Self {
-        Self {
-            ok: false,
-            proto: None,
-            service: None,
-            mode: None,
-            kernel: None,
-            gateway: None,
-            code: Some(code.to_string()),
-            message: Some(message.into()),
-            data: None,
-        }
+            .unwrap_or(ttl),
+        role: text("role", role),
+        scopes: value
+            .get("scopes")
+            .and_then(|v| v.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -714,18 +687,6 @@ fn config_file_path(config_dir: &Path, id: &str, enabled: bool) -> PathBuf {
         CONFIG_DISABLED_SUFFIX
     };
     config_dir.join(format!("{id}{suffix}"))
-}
-
-#[derive(Debug, Serialize)]
-struct ConfigEntry {
-    id: String,
-    enabled: bool,
-    bytes: u64,
-    /// 最后修改时间（UNIX 秒）；拿不到时为 0。
-    modified: u64,
-    /// 配置正文。列表一次带回来，客户端不必再逐条 `config.read`
-    /// （UI 每次轮询都要列表，N+1 次 IPC 会明显变慢）。
-    text: String,
 }
 
 /// 列出配置目录里的网络（`*.toml` + `*.toml.disabled`）。
@@ -1009,15 +970,25 @@ fn http_json(
 /// gateway 的 spawn 串行化（watchdog + IPC 可能同时触发）。
 static GATEWAY_SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
-/// 统一把 `port_in_use|{json}` 的错误拆成结构化响应；其它错误保持原 code。
-fn conflict_or(err: anyhow::Error, fallback_code: &str) -> Response {
-    let msg = err.to_string();
-    if let Some(rest) = msg.strip_prefix("port_in_use|")
-        && let Ok(payload) = serde_json::from_str::<serde_json::Value>(rest)
-    {
-        return Response::conflict(payload);
+/// 统一把端口冲突错误拆成结构化响应；其它错误保持原 code。
+fn conflict_or(err: anyhow::Error, fallback: ErrorCode) -> Response {
+    if let Some(conflict) = err.downcast_ref::<PortInUse>() {
+        return Response::err_with_data(
+            ErrorCode::PortInUse,
+            conflict.to_string(),
+            Payload::PortInUse {
+                port: conflict.port,
+                occupant: Occupant {
+                    pid: conflict.owner.pid,
+                    name: conflict.owner.name.clone(),
+                    path: conflict.owner.path.clone(),
+                },
+                owner_kind: conflict.kind.as_str().to_string(),
+                hint: conflict.kind.hint().to_string(),
+            },
+        );
     }
-    Response::err(fallback_code, msg)
+    Response::err(fallback, err.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -1341,7 +1312,7 @@ impl State {
     }
 
     /// 结构化白名单信息（GUI 的「设置 → 服务」展示用）。
-    fn whitelist_info(&self) -> serde_json::Value {
+    fn whitelist_info(&self) -> WhitelistInfo {
         let (networks, mut notes) = configured_networks(&self.paths.config);
         let extra = self
             .inner
@@ -1366,17 +1337,17 @@ impl State {
             .clone();
         // 配置改了但内核还没重启时，新网段暂时不生效（远程管理会连不上）。
         let needs_restart = applied.as_deref().is_some_and(|a| a != effective);
-        serde_json::json!({
-            "effective": effective,
-            "applied": applied,
-            "needs_restart": needs_restart,
-            "loopback": RPC_LOOPBACK,
-            "networks": networks,
-            "extra": extra,
-            "notes": notes,
-            "dhcp_fallback": DHCP_FALLBACK_POOL,
-            "max_extra": MAX_EXTRA_WHITELIST,
-        })
+        WhitelistInfo {
+            effective,
+            applied,
+            needs_restart,
+            loopback: RPC_LOOPBACK.iter().map(|s| s.to_string()).collect(),
+            networks,
+            extra,
+            notes,
+            dhcp_fallback: DHCP_FALLBACK_POOL.to_string(),
+            max_extra: MAX_EXTRA_WHITELIST,
+        }
     }
 
     /// 计算生效的 RPC 白名单：回环 + 各虚拟网段 + 用户额外追加。
@@ -1947,20 +1918,13 @@ impl State {
         });
     }
 
-    /// 端口冲突 → 结构化错误（`port_in_use|{json}`），由 `handle()` 拆成 Response。
+    /// 端口冲突 → 结构化错误（`ErrorCode::PortInUse` + `Payload::PortInUse`）。
     fn port_conflict_error(&self, owner: PortOwner) -> anyhow::Error {
-        let kind = classify_port_owner(&owner, &self.paths.kernel);
-        let payload = serde_json::json!({
-            "port": self.rpc_port(),
-            "occupant": {
-                "pid": owner.pid,
-                "name": owner.name,
-                "path": owner.path,
-            },
-            "kind": kind.as_str(),
-            "hint": kind.hint(),
-        });
-        anyhow::anyhow!("port_in_use|{payload}")
+        anyhow::Error::new(PortInUse {
+            port: self.rpc_port(),
+            kind: classify_port_owner(&owner, &self.paths.kernel),
+            owner,
+        })
     }
 
     /// 生效的 RPC portal 绑定地址（`service.toml` 的 `rpc_portal` 优先）。
@@ -1982,107 +1946,101 @@ impl State {
             .unwrap_or(RPC_PORT)
     }
 
-    fn status(&self) -> Response {
-        let pid = self.kernel_pid();
-        let mode = self.inner.lock().unwrap_or_else(|e| e.into_inner()).mode;
-        let mut resp = Response::ok();
-        resp.mode = Some(mode);
-        resp.kernel = Some(KernelInfo {
-            pid,
-            running: pid != 0,
-            rpc: LOCAL_RPC.into(),
-        });
-        resp.gateway = Some(self.gateway_info());
-        resp
+    fn mode(&self) -> Mode {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).mode
     }
 
-    fn handle(&self, req: Request) -> Response {
-        match req.op.as_str() {
-            "hello" => {
-                let mut r = Response::ok();
-                r.proto = Some(PROTO);
-                r.service = Some(BUILD_VERSION.to_string());
-                r
-            }
-            "ping" => Response::ok(),
-            "status" => self.status(),
-            "mode.get" => {
-                let mut r = Response::ok();
-                r.mode = Some(self.inner.lock().unwrap_or_else(|e| e.into_inner()).mode);
-                r
-            }
-            "mode.set" => match req.mode {
-                Some(mode) => match self.set_mode(mode) {
-                    Ok(()) => self.status(),
-                    Err(err) => Response::err("mode_failed", err.to_string()),
-                },
-                None => Response::err("bad_request", "mode 缺失"),
-            },
-            "kernel.ensure" => match self.ensure_kernel() {
-                Ok(info) => {
-                    let mut r = self.status();
-                    r.kernel = Some(info);
-                    r
-                }
-                Err(err) => conflict_or(err, "kernel_start_failed"),
-            },
-            "kernel.stop" => match self.stop_kernel() {
-                Ok(()) => self.status(),
-                Err(err) => Response::err("internal", err.to_string()),
-            },
-            "kernel.restart" => match self.restart_kernel() {
-                Ok(info) => {
-                    let mut r = self.status();
-                    r.kernel = Some(info);
-                    r
-                }
-                Err(err) => conflict_or(err, "kernel_restart_failed"),
-            },
-            "apply" => match req.staging.as_deref() {
-                Some(dir) => match self.apply(Path::new(dir)) {
-                    Ok(()) => self.status(),
-                    Err(err) => {
-                        let msg = err.to_string();
-                        if msg.starts_with("port_in_use|") {
-                            conflict_or(err, "apply_failed")
-                        } else if msg.contains("kernel_rollback") {
-                            Response::err("kernel_rollback", msg)
-                        } else {
-                            Response::err("apply_failed", msg)
-                        }
-                    }
-                },
-                None => Response::err("bad_request", "staging 缺失"),
-            },
-            "service.update" => match req.staging.as_deref() {
-                Some(dir) => match self.update_self(Path::new(dir), req.version.as_deref()) {
-                    Ok(()) => Response::ok(),
-                    Err(err) => Response::err("update_failed", err.to_string()),
-                },
-                None => Response::err("bad_request", "staging 缺失"),
-            },
-            "whitelist.get" => {
-                let mut r = Response::ok();
-                r.data = Some(self.whitelist_info());
-                r
-            }
-            "whitelist.set" => {
-                let raw = req.extra.unwrap_or_default();
-                if raw.len() > MAX_EXTRA_WHITELIST {
+    fn status(&self) -> Response {
+        let pid = self.kernel_pid();
+        Response::ok(Payload::Status {
+            mode: self.mode().into(),
+            kernel: Some(KernelInfo {
+                pid,
+                running: pid != 0,
+                rpc: LOCAL_RPC.into(),
+            }),
+            gateway: Some(self.gateway_info()),
+        })
+    }
+
+    /// 单层 dispatch：每个分支只做「前置校验 → 调既有函数 → 组装 `Payload`」。
+    ///
+    /// 业务逻辑（起停内核 / 白名单推导 / 配置读写 / 端口探测）全在各自的
+    /// 函数里，这里不做任何编排。
+    fn handle(&self, req: WireOp) -> Response {
+        match req {
+            WireOp::Hello => Response::ok(Payload::Hello {
+                proto: PROTO,
+                service: BUILD_VERSION.to_string(),
+            }),
+            WireOp::Ping => Response::ok_empty(),
+            WireOp::Status => self.status(),
+            WireOp::ModeGet => Response::ok(Payload::ModeGet {
+                mode: self.mode().into(),
+            }),
+            WireOp::ModeSet { mode } => {
+                let Some(mode) = ProtoMode::parse(&mode) else {
                     return Response::err(
-                        "too_many",
+                        ErrorCode::BadRequest,
+                        format!("未知模式: {mode}（resident|session|stopped）"),
+                    );
+                };
+                let mode: Mode = mode.into();
+                match self.set_mode(mode) {
+                    Ok(()) => Response::ok(Payload::ModeSet { mode: mode.into() }),
+                    Err(err) => Response::err(ErrorCode::ModeFailed, err.to_string()),
+                }
+            }
+            WireOp::KernelEnsure => match self.ensure_kernel() {
+                Ok(info) => Response::ok(Payload::KernelEnsure { kernel: Some(info) }),
+                Err(err) => conflict_or(err, ErrorCode::KernelStartFailed),
+            },
+            WireOp::KernelStop => match self.stop_kernel() {
+                Ok(()) => Response::ok(Payload::KernelStop),
+                Err(err) => Response::err(ErrorCode::Internal, err.to_string()),
+            },
+            WireOp::KernelRestart => match self.restart_kernel() {
+                Ok(info) => Response::ok(Payload::KernelRestart { kernel: Some(info) }),
+                Err(err) => conflict_or(err, ErrorCode::KernelRestartFailed),
+            },
+            WireOp::Apply { staging } => match self.apply(Path::new(&staging)) {
+                Ok(()) => Response::ok(Payload::Apply),
+                Err(err) => {
+                    // 端口冲突优先（GUI 要渲染冲突卡片），其余按回滚/普通失败分。
+                    if err.downcast_ref::<PortInUse>().is_some() {
+                        conflict_or(err, ErrorCode::ApplyFailed)
+                    } else if err.to_string().contains("kernel_rollback") {
+                        Response::err(ErrorCode::KernelRollback, err.to_string())
+                    } else {
+                        Response::err(ErrorCode::ApplyFailed, err.to_string())
+                    }
+                }
+            },
+            WireOp::ServiceUpdate { staging, version } => {
+                match self.update_self(Path::new(&staging), version.as_deref()) {
+                    Ok(()) => Response::ok(Payload::ServiceUpdate),
+                    Err(err) => Response::err(ErrorCode::UpdateFailed, err.to_string()),
+                }
+            }
+            WireOp::WhitelistGet => Response::ok(Payload::WhitelistGet {
+                info: self.whitelist_info(),
+            }),
+            WireOp::WhitelistSet { extra } => {
+                if extra.len() > MAX_EXTRA_WHITELIST {
+                    return Response::err(
+                        ErrorCode::TooMany,
                         format!("额外网段最多 {MAX_EXTRA_WHITELIST} 条"),
                     );
                 }
                 let mut cleaned = Vec::new();
-                for item in &raw {
+                for item in &extra {
                     match validate_cidr(item) {
                         Ok(cidr) => {
                             if !cleaned.contains(&cidr) {
                                 cleaned.push(cidr);
                             }
                         }
-                        Err(err) => return Response::err("bad_cidr", err),
+                        Err(err) => return Response::err(ErrorCode::BadCidr, err),
                     }
                 }
                 {
@@ -2091,28 +2049,23 @@ impl State {
                     let cfg = guard.config.clone();
                     drop(guard);
                     if let Err(err) = save_config(&self.paths, &cfg) {
-                        return Response::err("save_failed", err.to_string());
+                        return Response::err(ErrorCode::SaveFailed, err.to_string());
                     }
                 }
                 self.log("rpc_extra_whitelist updated (restart required)");
-                let mut r = Response::ok();
-                r.data = Some(self.whitelist_info());
-                r
+                Response::ok(Payload::WhitelistSet {
+                    info: self.whitelist_info(),
+                })
             }
             // -- gateway 托管 --------------------------------------------------
-            "gateway.status" => {
-                let mut r = Response::ok();
-                r.gateway = Some(self.gateway_info());
-                r
-            }
-            "gateway.set" => {
-                let Some(patch) = req.gateway else {
-                    return Response::err("bad_request", "gateway 缺失");
-                };
+            WireOp::GatewayStatus => Response::ok(Payload::GatewayStatus {
+                gateway: self.gateway_info(),
+            }),
+            WireOp::GatewaySet { gateway: patch } => {
                 if let Some(port) = patch.port
                     && port == 0
                 {
-                    return Response::err("bad_port", "端口不能为 0");
+                    return Response::err(ErrorCode::BadPort, "端口不能为 0");
                 }
                 if let Some(bind) = patch.bind.as_deref() {
                     let trimmed = bind.trim();
@@ -2121,7 +2074,10 @@ impl State {
                         && trimmed.parse::<std::net::IpAddr>().is_err()
                     {
                         // 只接受 IP 字面量：主机名解析结果不可预期，监听地址必须确定。
-                        return Response::err("bad_bind", format!("bind 需为 IP 地址: {trimmed}"));
+                        return Response::err(
+                            ErrorCode::BadBind,
+                            format!("bind 需为 IP 地址: {trimmed}"),
+                        );
                     }
                 }
                 {
@@ -2143,115 +2099,90 @@ impl State {
                     let cfg = guard.config.clone();
                     drop(guard);
                     if let Err(err) = save_config(&self.paths, &cfg) {
-                        return Response::err("save_failed", err.to_string());
+                        return Response::err(ErrorCode::SaveFailed, err.to_string());
                     }
                 }
                 match self.restart_gateway() {
                     Ok(pid) => {
                         self.log(format!("gateway 配置已更新 pid={pid}"));
-                        let mut r = Response::ok();
-                        r.gateway = Some(self.gateway_info());
-                        r
+                        Response::ok(Payload::GatewaySet {
+                            gateway: self.gateway_info(),
+                        })
                     }
-                    Err(err) => Response::err("gateway_failed", err.to_string()),
+                    Err(err) => Response::err(ErrorCode::GatewayFailed, err.to_string()),
                 }
             }
-            "gateway.pair.start" => {
-                let role = req.role.clone().unwrap_or_else(|| "readonly".to_string());
-                let ttl = req.ttl.unwrap_or(300).clamp(60, 900);
+            WireOp::GatewayPairStart { role, ttl } => {
+                let ttl = ttl.clamp(60, 900);
                 match self.pair_start(&role, ttl) {
-                    Ok(value) => {
-                        let mut r = Response::ok();
-                        r.data = Some(value);
-                        r
-                    }
-                    Err(err) => Response::err("pair_failed", err.to_string()),
+                    Ok(value) => Response::ok(pair_payload(&value, &role, ttl)),
+                    Err(err) => Response::err(ErrorCode::PairFailed, err.to_string()),
                 }
             }
-            "gateway.restart" => match self.restart_gateway() {
+            WireOp::GatewayRestart => match self.restart_gateway() {
                 Ok(pid) => {
-                    let mut r = Response::ok();
-                    r.data = Some(serde_json::json!({ "pid": pid, "addr": self.gateway_addr() }));
-                    r.gateway = Some(self.gateway_info());
-                    r
+                    self.log(format!("gateway restarted pid={pid}"));
+                    Response::ok(Payload::GatewayRestart {
+                        gateway: self.gateway_info(),
+                    })
                 }
-                Err(err) => Response::err("gateway_failed", err.to_string()),
+                Err(err) => Response::err(ErrorCode::GatewayFailed, err.to_string()),
             },
-            "config.list" => {
-                let items = list_network_configs(&self.paths.config);
-                let mut r = Response::ok();
-                r.data = Some(serde_json::json!({
-                    "dir": self.paths.config.display().to_string(),
-                    "items": items,
-                }));
-                r
-            }
-            "config.read" => match req.id.as_deref() {
-                None => Response::err("bad_request", "id 缺失"),
-                Some(id) => match read_network_config(&self.paths.config, id) {
-                    Ok((text, enabled)) => {
-                        let mut r = Response::ok();
-                        r.data = Some(serde_json::json!({
-                            "id": id,
-                            "enabled": enabled,
-                            "text": text,
-                        }));
-                        r
+            WireOp::ConfigList => Response::ok(Payload::ConfigList {
+                dir: self.paths.config.display().to_string(),
+                items: list_network_configs(&self.paths.config),
+            }),
+            WireOp::ConfigRead { id } => match read_network_config(&self.paths.config, &id) {
+                Ok((text, enabled)) => Response::ok(Payload::ConfigRead { id, enabled, text }),
+                Err(err) => Response::err(ErrorCode::NotFound, err.to_string()),
+            },
+            WireOp::ConfigWrite { id, text, enabled } => {
+                match write_network_config(&self.paths.config, &id, &text, enabled) {
+                    Ok(bytes) => {
+                        self.log(format!(
+                            "config.write id={id} enabled={enabled} bytes={bytes}"
+                        ));
+                        Response::ok(Payload::ConfigWrite { id, enabled, bytes })
                     }
-                    Err(err) => Response::err("not_found", err.to_string()),
-                },
+                    Err(err) => Response::err(ErrorCode::WriteFailed, err.to_string()),
+                }
+            }
+            WireOp::ConfigDelete { id } => match delete_network_config(&self.paths.config, &id) {
+                Ok(true) => {
+                    self.log(format!("config.delete id={id}"));
+                    Response::ok(Payload::ConfigDelete)
+                }
+                Ok(false) => Response::err(ErrorCode::NotFound, format!("配置不存在: {id}")),
+                Err(err) => Response::err(ErrorCode::DeleteFailed, err.to_string()),
             },
-            "config.write" => match (req.id.as_deref(), req.text.as_deref()) {
-                (Some(id), Some(text)) => {
-                    let enabled = req.enabled.unwrap_or(true);
-                    match write_network_config(&self.paths.config, id, text, enabled) {
-                        Ok(bytes) => {
-                            self.log(format!(
-                                "config.write id={id} enabled={enabled} bytes={bytes}"
-                            ));
-                            let mut r = Response::ok();
-                            r.data = Some(serde_json::json!({
-                                "id": id,
-                                "enabled": enabled,
-                                "bytes": bytes,
-                            }));
-                            r
+            WireOp::PortOwner => {
+                let port = self.rpc_port();
+                Response::ok(match port_owner(port) {
+                    Some(owner) => {
+                        let is_our_kernel = owner.is_our_kernel(&self.paths.kernel);
+                        Payload::PortOwner {
+                            port,
+                            pid: Some(owner.pid),
+                            name: Some(owner.name),
+                            path: Some(owner.path),
+                            is_our_kernel: Some(is_our_kernel),
+                            free: false,
                         }
-                        Err(err) => Response::err("write_failed", err.to_string()),
                     }
-                }
-                (None, _) => Response::err("bad_request", "id 缺失"),
-                (_, None) => Response::err("bad_request", "text 缺失"),
-            },
-            "config.delete" => match req.id.as_deref() {
-                None => Response::err("bad_request", "id 缺失"),
-                Some(id) => match delete_network_config(&self.paths.config, id) {
-                    Ok(true) => {
-                        self.log(format!("config.delete id={id}"));
-                        Response::ok()
-                    }
-                    Ok(false) => Response::err("not_found", format!("配置不存在: {id}")),
-                    Err(err) => Response::err("delete_failed", err.to_string()),
-                },
-            },
-            "port.owner" => {
-                let mut r = Response::ok();
-                r.data = Some(match port_owner(self.rpc_port()) {
-                    Some(owner) => serde_json::json!({
-                        "port": self.rpc_port(),
-                        "pid": owner.pid,
-                        "name": owner.name,
-                        "path": owner.path,
-                        "is_our_kernel": owner.is_our_kernel(&self.paths.kernel),
-                    }),
-                    None => serde_json::json!({ "port": self.rpc_port(), "free": true }),
-                });
-                r
+                    None => Payload::PortOwner {
+                        port,
+                        pid: None,
+                        name: None,
+                        path: None,
+                        is_our_kernel: None,
+                        free: true,
+                    },
+                })
             }
-            "port.cleanup" => match port_owner(self.rpc_port()) {
-                None => Response::err("nothing", "RPC 端口当前没有被占用"),
+            WireOp::PortCleanup => match port_owner(self.rpc_port()) {
+                None => Response::err(ErrorCode::Nothing, "RPC 端口当前没有被占用"),
                 Some(owner) if !owner.is_stale_kernel_of(&self.paths.kernel) => Response::err(
-                    "not_ours",
+                    ErrorCode::NotOurs,
                     format!(
                         "占用者是 {}（pid={}, path={}），不是本产品的内核，拒绝终止",
                         owner.name, owner.pid, owner.path
@@ -2263,12 +2194,20 @@ impl State {
                             "port cleanup: killed stale kernel pid={}",
                             owner.pid
                         ));
-                        Response::ok()
+                        Response::ok(Payload::PortCleanup)
                     }
-                    Err(err) => Response::err("kill_failed", err.to_string()),
+                    Err(err) => Response::err(ErrorCode::KillFailed, err.to_string()),
                 },
             },
-            other => Response::err("bad_request", format!("未知操作: {other}")),
+            // 内核升级任务：协议已定，实现留到后续版本（本轮只占位，不做任何动作）。
+            WireOp::KernelInstallStart { .. } => Response::err(
+                ErrorCode::NotImplemented,
+                "kernel.install.start 尚未实现（请用 apply 走 GUI 的随包升级）",
+            ),
+            WireOp::KernelInstallStatus { id } => Response::err(
+                ErrorCode::NotImplemented,
+                format!("kernel.install.status 尚未实现（job {id}）"),
+            ),
         }
     }
 
@@ -2985,28 +2924,19 @@ fn handle_unix_conn(state: &Arc<State>, stream: std::os::unix::net::UnixStream) 
             Err(_) => break,
         }
         last = Instant::now();
-        let req: Request = match serde_json::from_str(line.trim()) {
+        let req = match parse_request(line.trim()) {
             Ok(r) => r,
-            Err(err) => {
-                let resp = Response::err("bad_request", err.to_string());
+            Err(resp) => {
                 let _ = writeln!(
                     writer,
                     "{}",
-                    serde_json::to_string(&resp).unwrap_or_default()
+                    serde_json::to_string(&*resp).unwrap_or_default()
                 );
                 continue;
             }
         };
-        if req.proto != 0 && req.proto != PROTO {
-            let resp = Response::err("proto_mismatch", format!("service proto={PROTO}"));
-            let _ = writeln!(
-                writer,
-                "{}",
-                serde_json::to_string(&resp).unwrap_or_default()
-            );
-            continue;
-        }
-        if req.op == "hello" && !is_session {
+        // 「连接即会话」的时机不变：发过 hello 的连接才算一个会话。
+        if matches!(req, WireOp::Hello) && !is_session {
             is_session = true;
             state.session_open();
         }
@@ -3442,15 +3372,15 @@ fn handle_pipe_conn(state: &Arc<State>, handle: windows_sys::Win32::Foundation::
         pending.push_str(&String::from_utf8_lossy(&buf[..read as usize]));
         while let Some(pos) = pending.find('\n') {
             let line: String = pending.drain(..=pos).collect();
-            let req: Request = match serde_json::from_str(line.trim()) {
+            let req = match parse_request(line.trim()) {
                 Ok(r) => r,
-                Err(err) => {
-                    let resp = Response::err("bad_request", err.to_string());
+                Err(resp) => {
                     write_pipe(handle, &resp);
                     continue;
                 }
             };
-            if req.op == "hello" && !is_session {
+            // 与 unix 一致：只有发过 hello 的连接才算会话（短命令不会停内核）。
+            if matches!(req, WireOp::Hello) && !is_session {
                 is_session = true;
                 state.session_open();
             }

@@ -18,6 +18,9 @@ minisign-verify = "0.3"
 base64.workspace = true
 # 读 `<config-dir>/*.toml` 推导 RPC 白名单（见 `rpc_whitelist`）
 toml.workspace = true
+# IPC 协议类型（唯一真源）。只取 `protocol` feature：
+# 服务不需要 control 的客户端能力（ipc 传输 / backend 探测 / doctor）。
+exvlan-control = { path = "../control", default-features = false, features = ["protocol"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

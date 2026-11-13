@@ -117,6 +117,8 @@ mod imp {
     use std::io::{BufRead as _, BufReader, Write};
     use std::sync::Mutex;
 
+    use exvlan_control::protocol::{Payload, Request, Response, WireRequest};
+
     /// 保持打开的一条 session（normal 模式的存活锚点）。
     struct Session {
         writer: Box<dyn Write + Send>,
@@ -151,16 +153,22 @@ mod imp {
         Ok(Session { writer, reader })
     }
 
-    fn request(op: &str, extra: serde_json::Value) -> Result<serde_json::Value, String> {
+    /// 一次性类型化调用（连上 → 发 → 断开）。
+    fn call(req: &Request) -> Result<Response, String> {
         let mut session = connect()?;
-        let mut body = serde_json::json!({ "proto": 1, "op": op });
-        if let (Some(obj), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
-            for (k, v) in extra {
-                obj.insert(k.clone(), v.clone());
-            }
-        }
-        writeln!(session.writer, "{body}").map_err(|e| format!("发送请求失败: {e}"))?;
+        send(&mut session, req)?;
+        read_reply(&mut session)
+    }
+
+    fn send(session: &mut Session, req: &Request) -> Result<(), String> {
+        let wire = serde_json::to_string(&WireRequest::new(req.clone()))
+            .map_err(|e| format!("序列化请求失败: {e}"))?;
+        writeln!(session.writer, "{wire}").map_err(|e| format!("发送请求失败: {e}"))?;
         session.writer.flush().ok();
+        Ok(())
+    }
+
+    fn read_reply(session: &mut Session) -> Result<Response, String> {
         let mut line = String::new();
         session
             .reader
@@ -169,18 +177,18 @@ mod imp {
         if line.trim().is_empty() {
             return Err("服务返回空响应".to_string());
         }
-        let resp: serde_json::Value =
-            serde_json::from_str(line.trim()).map_err(|e| format!("解析响应失败: {e}"))?;
-        if resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
-            Ok(resp)
-        } else {
-            let code = resp.get("code").and_then(|v| v.as_str()).unwrap_or("error");
-            let msg = resp
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("服务返回失败");
-            Err(format!("{code}: {msg}"))
-        }
+        let resp: Response = serde_json::from_str(line.trim()).map_err(|e| {
+            format!("响应不是协议 v2（服务端可能还是旧版，请把客户端与服务一起升级）: {e}")
+        })?;
+        // 与 `exvlan-control` 的客户端同一套判据（含 proto 校验与错误文案）。
+        exvlan_control::ipc::into_result(resp)
+    }
+
+    /// 把响应负载转成 JSON（前端 / 诊断包按 JSON 消费）。
+    fn data_json(resp: Response) -> serde_json::Value {
+        resp.data
+            .map(|payload| serde_json::to_value(&payload).unwrap_or_default())
+            .unwrap_or_default()
     }
 
     /// 建立（或复用）session；normal 模式的生命周期由它决定。
@@ -190,13 +198,8 @@ mod imp {
             return Ok(());
         }
         let mut session = connect()?;
-        writeln!(session.writer, r#"{{"proto":1,"op":"hello"}}"#).map_err(|e| e.to_string())?;
-        session.writer.flush().ok();
-        let mut line = String::new();
-        session
-            .reader
-            .read_line(&mut line)
-            .map_err(|e| format!("服务未响应 hello: {e}"))?;
+        send(&mut session, &Request::Hello).map_err(|e| format!("服务未响应 hello: {e}"))?;
+        read_reply(&mut session).map_err(|e| format!("服务未响应 hello: {e}"))?;
         *guard = Some(session);
         Ok(())
     }
@@ -237,43 +240,44 @@ mod imp {
     }
 
     pub fn is_ready() -> bool {
-        request("ping", serde_json::json!({})).is_ok()
+        call(&Request::Ping).is_ok()
     }
 
     pub fn status() -> Result<String, String> {
-        let resp = request("status", serde_json::json!({}))?;
-        let mode = resp
-            .get("mode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let pid = resp
-            .get("kernel")
-            .and_then(|k| k.get("pid"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let service = resp.get("service").and_then(|v| v.as_str()).unwrap_or("-");
+        let st = call(&Request::Status)?;
+        let Some(Payload::Status { mode, kernel, .. }) = st.data else {
+            return Err("服务没有返回 status 负载".to_string());
+        };
+        let pid = kernel.map(|k| k.pid).unwrap_or(0);
+        // 版本串只有 `hello` 上报（status 只管运行态）。
+        let service = match call(&Request::Hello).ok().and_then(|h| h.data) {
+            Some(Payload::Hello { service, .. }) => service,
+            _ => "-".to_string(),
+        };
         Ok(format!(
-            "service={SERVICE_LABEL} v={service} mode={mode} kernel_pid={pid}"
+            "service={SERVICE_LABEL} v={service} mode={} kernel_pid={pid}",
+            mode.as_str()
         ))
     }
 
     pub fn state() -> ServiceState {
         let installed = is_installed();
-        match request("status", serde_json::json!({})) {
-            Ok(resp) => ServiceState {
-                installed,
-                ready: true,
-                mode: resp
-                    .get("mode")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string(),
-                kernel_pid: resp
-                    .get("kernel")
-                    .and_then(|k| k.get("pid"))
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32,
-                status: "ok".to_string(),
+        match call(&Request::Status) {
+            Ok(resp) => match resp.data {
+                Some(Payload::Status { mode, kernel, .. }) => ServiceState {
+                    installed,
+                    ready: true,
+                    mode: mode.as_str().to_string(),
+                    kernel_pid: kernel.map(|k| k.pid).unwrap_or(0),
+                    status: "ok".to_string(),
+                },
+                _ => ServiceState {
+                    installed,
+                    ready: true,
+                    mode: "unknown".to_string(),
+                    kernel_pid: 0,
+                    status: "服务没有返回 status 负载".to_string(),
+                },
             },
             Err(err) => ServiceState {
                 installed,
@@ -463,13 +467,10 @@ mod imp {
             }
         }
 
-        let result = request(
-            "service.update",
-            serde_json::json!({
-                "staging": staging.display().to_string(),
-                "version": want,
-            }),
-        );
+        let result = call(&Request::ServiceUpdate {
+            staging: staging.display().to_string(),
+            version: Some(want.to_string()),
+        });
         let _ = std::fs::remove_dir_all(&staging);
         result?;
 
@@ -490,35 +491,35 @@ mod imp {
 
     pub fn set_mode(mode: &str) -> Result<(), String> {
         ensure_session()?;
-        request("mode.set", serde_json::json!({ "mode": mode })).map(|_| ())
+        call(&Request::ModeSet {
+            mode: mode.to_string(),
+        })
+        .map(|_| ())
     }
 
     pub fn ensure_kernel() -> Result<u32, String> {
         ensure_session()?;
-        let resp = request("kernel.ensure", serde_json::json!({}))?;
-        Ok(resp
-            .get("kernel")
-            .and_then(|k| k.get("pid"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32)
+        let resp = call(&Request::KernelEnsure)?;
+        match resp.data {
+            Some(Payload::KernelEnsure { kernel }) => Ok(kernel.map(|k| k.pid).unwrap_or(0)),
+            _ => Err("服务没有返回 kernel.ensure 负载".to_string()),
+        }
     }
 
     pub fn stop_kernel() -> Result<(), String> {
-        request("kernel.stop", serde_json::json!({})).map(|_| ())
+        call(&Request::KernelStop).map(|_| ())
     }
 
-    /// 原子重启内核（停 → 清残留 → 起），期间服务端会挂起 normal 的停机逻辑。
+    /// 原子重启内核（停 → 清残留 → 起），期间服务端会挂起 session 的停机逻辑。
     pub fn restart_kernel() -> Result<serde_json::Value, String> {
-        request("kernel.restart", serde_json::json!({}))
+        Ok(data_json(call(&Request::KernelRestart)?))
     }
 
     pub fn kernel_status() -> Result<(u32, bool), String> {
-        let resp = request("status", serde_json::json!({}))?;
-        let pid = resp
-            .get("kernel")
-            .and_then(|k| k.get("pid"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
+        let pid = match call(&Request::Status)?.data {
+            Some(Payload::Status { kernel, .. }) => kernel.map(|k| k.pid).unwrap_or(0),
+            _ => 0,
+        };
         Ok((pid, pid != 0))
     }
 
@@ -558,34 +559,32 @@ mod imp {
 
     /// 生效的 RPC 白名单（回环 + 各虚拟网段 + 额外追加）。
     pub fn whitelist_info() -> Result<serde_json::Value, String> {
-        let resp = request("whitelist.get", serde_json::json!({}))?;
-        Ok(resp.get("data").cloned().unwrap_or_default())
+        Ok(data_json(call(&Request::WhitelistGet)?))
     }
 
     /// 设置额外网段；服务端会做 CIDR 校验并拒绝公网段。
     pub fn set_extra_whitelist(extra: &[String]) -> Result<serde_json::Value, String> {
-        let resp = request("whitelist.set", serde_json::json!({ "extra": extra }))?;
-        Ok(resp.get("data").cloned().unwrap_or_default())
+        Ok(data_json(call(&Request::WhitelistSet {
+            extra: extra.to_vec(),
+        })?))
     }
 
     /// 生成本机一次性配对码（对端出码；服务托管时由服务调本机 gateway）。
     pub fn pair_start(role: &str, ttl: u64) -> Result<serde_json::Value, String> {
-        let resp = request(
-            "gateway.pair.start",
-            serde_json::json!({ "role": role, "ttl": ttl }),
-        )?;
-        Ok(resp.get("data").cloned().unwrap_or_default())
+        Ok(data_json(call(&Request::GatewayPairStart {
+            role: role.to_string(),
+            ttl,
+        })?))
     }
 
     /// 谁占着 RPC 端口（诊断用）。
     pub fn port_owner() -> Result<serde_json::Value, String> {
-        let resp = request("port.owner", serde_json::json!({}))?;
-        Ok(resp.get("data").cloned().unwrap_or_default())
+        Ok(data_json(call(&Request::PortOwner)?))
     }
 
     /// 结束占用 RPC 端口的**自家内核**（服务端会校验路径，非自家拒绝）。
     pub fn port_cleanup() -> Result<(), String> {
-        request("port.cleanup", serde_json::json!({})).map(|_| ())
+        call(&Request::PortCleanup).map(|_| ())
     }
 
     /// 免密换内核：把随包内核 + 签名 + 版本放进 staging，再让服务 apply。
@@ -610,14 +609,16 @@ mod imp {
         std::fs::copy(&sig, staging.join("kernel.sig")).map_err(|e| e.to_string())?;
         std::fs::write(staging.join("version"), crate::BUILD_VERSION).map_err(|e| e.to_string())?;
 
-        let body = serde_json::json!({ "staging": staging.display().to_string() });
+        let req = Request::Apply {
+            staging: staging.display().to_string(),
+        };
         // 服务正在重启（例如刚做完自更新）时会读到空响应；等它起来再试一次。
-        let result = match request("apply", body.clone()) {
+        let result = match call(&req) {
             Err(err)
                 if err.contains("空响应") || err.contains("os error 2") || err.contains("拒绝") =>
             {
                 std::thread::sleep(std::time::Duration::from_millis(1500));
-                request("apply", body)
+                call(&req)
             }
             other => other,
         };

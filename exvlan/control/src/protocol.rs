@@ -14,7 +14,8 @@
 //! 与 v1 的差别：字段从平铺改成 `params` 对象。这是**破坏性变更**，因此
 //! [`PROTO`] 从 1 提到 2，服务端会拒绝低版本客户端并给出明确错误。
 //!
-//! 响应仍是统一信封（[`Response`]），`data` 由各 op 自行约定（暂时用 JSON）。
+//! 响应是统一信封（[`Response`]）：所有负载都进 `data`，且**带类型**
+//! （[`Payload`]）—— 以前两边手写 JSON 字面量，字段对不上不会有任何提示。
 
 use serde::{Deserialize, Serialize};
 
@@ -210,10 +211,20 @@ pub enum ErrorCode {
     TooMany,
     Nothing,
     KillFailed,
+    /// 端口占用者不是本产品的内核，拒绝终止（`port.cleanup`）
+    NotOurs,
     BadPort,
     BadBind,
     GatewayFailed,
     PairFailed,
+    /// 切换生命周期策略失败（写 `service.toml` / 起停内核）
+    ModeFailed,
+    /// `apply` 换内核失败（非回滚路径）
+    ApplyFailed,
+    /// 新内核起不来，已回滚到上一版
+    KernelRollback,
+    /// 该 op 已定义但尚未实现（例如 `kernel.install.*`）
+    NotImplemented,
     /// 下载失败（网络/404/超时）
     DownloadFailed,
     /// 包内容与清单 sha256 不一致
@@ -249,10 +260,15 @@ impl ErrorCode {
             ErrorCode::TooMany => "too_many",
             ErrorCode::Nothing => "nothing",
             ErrorCode::KillFailed => "kill_failed",
+            ErrorCode::NotOurs => "not_ours",
             ErrorCode::BadPort => "bad_port",
             ErrorCode::BadBind => "bad_bind",
             ErrorCode::GatewayFailed => "gateway_failed",
             ErrorCode::PairFailed => "pair_failed",
+            ErrorCode::ModeFailed => "mode_failed",
+            ErrorCode::ApplyFailed => "apply_failed",
+            ErrorCode::KernelRollback => "kernel_rollback",
+            ErrorCode::NotImplemented => "not_implemented",
             ErrorCode::DownloadFailed => "download_failed",
             ErrorCode::Sha256Mismatch => "sha256_mismatch",
             ErrorCode::SigInvalid => "sig_invalid",
@@ -265,8 +281,8 @@ impl ErrorCode {
 
 /// 响应负载。`kind` **与请求的 op 同名**，便于日志里一一对照。
 ///
-/// 说明：`config.*` / `whitelist.*` / `port.owner` 的负载目前仍是 JSON，
-/// 等接线到对应 handler 时逐个换成具体结构（避免一次改 20 个形状猜错）。
+/// 字段必须与服务端实际输出逐字段一致：客户端按这些结构反序列化，
+/// 改名/删字段就是线上「解析失败」。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum Payload {
@@ -295,19 +311,49 @@ pub enum Payload {
     #[serde(rename = "service.update")]
     ServiceUpdate,
     #[serde(rename = "whitelist.get")]
-    WhitelistGet { value: serde_json::Value },
+    WhitelistGet {
+        #[serde(flatten)]
+        info: WhitelistInfo,
+    },
     #[serde(rename = "whitelist.set")]
-    WhitelistSet { value: serde_json::Value },
+    WhitelistSet {
+        #[serde(flatten)]
+        info: WhitelistInfo,
+    },
     #[serde(rename = "config.list")]
-    ConfigList { value: serde_json::Value },
+    ConfigList {
+        dir: String,
+        items: Vec<ConfigEntry>,
+    },
     #[serde(rename = "config.read")]
-    ConfigRead { value: serde_json::Value },
+    ConfigRead {
+        id: String,
+        enabled: bool,
+        text: String,
+    },
     #[serde(rename = "config.write")]
-    ConfigWrite,
+    ConfigWrite {
+        id: String,
+        enabled: bool,
+        bytes: u64,
+    },
     #[serde(rename = "config.delete")]
     ConfigDelete,
     #[serde(rename = "port.owner")]
-    PortOwner { value: serde_json::Value },
+    PortOwner {
+        port: u16,
+        /// 端口空闲时只回 `{port, free: true}`，其余字段缺省。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pid: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        is_our_kernel: Option<bool>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        free: bool,
+    },
     #[serde(rename = "port.cleanup")]
     PortCleanup,
     #[serde(rename = "gateway.status")]
@@ -327,6 +373,56 @@ pub enum Payload {
     KernelInstallStart { job_id: String },
     #[serde(rename = "kernel.install.status")]
     KernelInstallStatus { status: InstallStatus },
+    /// `port_in_use` 错误的负载（`ok=false` 也带 `data`，GUI 据此渲染冲突卡片）。
+    ///
+    /// 注：v1 里「占用者性质」的字段名是 `kind`，而 v2 的 `kind` 已经是信封标签
+    /// （serde 内部标签与同名字段互斥），故改名为 `owner_kind`，信息不丢。
+    #[serde(rename = "port_in_use")]
+    PortInUse {
+        port: u16,
+        occupant: Occupant,
+        /// `exvlan` / `forwarded` / `foreign`
+        owner_kind: String,
+        hint: String,
+    },
+}
+
+/// 端口占用者。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Occupant {
+    pub pid: u32,
+    pub name: String,
+    /// 可执行文件路径（拿不到权限时为空串）。
+    pub path: String,
+}
+
+/// `config.list` 的一条配置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigEntry {
+    pub id: String,
+    pub enabled: bool,
+    pub bytes: u64,
+    /// 最后修改时间（UNIX 秒）；拿不到时为 0。
+    pub modified: u64,
+    /// 配置正文（列表一次带回来，避免客户端逐条 `config.read`）。
+    pub text: String,
+}
+
+/// `whitelist.get` / `whitelist.set` 的负载：RPC 白名单的推导结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WhitelistInfo {
+    /// 生效白名单（逗号分隔）。
+    pub effective: String,
+    /// 内核启动时实际用的白名单；`None` = 内核还没由本服务拉起过。
+    pub applied: Option<String>,
+    /// 配置改了但内核还没重启（新网段暂不生效）。
+    pub needs_restart: bool,
+    pub loopback: Vec<String>,
+    pub networks: Vec<String>,
+    pub extra: Vec<String>,
+    pub notes: Vec<String>,
+    pub dhcp_fallback: String,
+    pub max_extra: usize,
 }
 
 /// 统一响应信封：`{ok, proto?, code?, message?, data?}`。
@@ -374,6 +470,14 @@ impl Response {
             code: Some(code),
             message: Some(message.into()),
             data: None,
+        }
+    }
+
+    /// 带结构化负载的错误（例如 `port_in_use` 的 occupant/kind/hint）。
+    pub fn err_with_data(code: ErrorCode, message: impl Into<String>, data: Payload) -> Self {
+        Self {
+            data: Some(data),
+            ..Self::err(code, message)
         }
     }
 }
@@ -525,7 +629,8 @@ mod tests {
         let cases = [
             (
                 Payload::ConfigList {
-                    value: serde_json::json!({}),
+                    dir: "config-dir".into(),
+                    items: Vec::new(),
                 },
                 "config.list",
             ),
@@ -536,6 +641,82 @@ mod tests {
             let json = serde_json::to_value(&payload).unwrap();
             assert_eq!(json["kind"], want);
         }
+    }
+
+    #[test]
+    fn whitelist_payload_is_flat() {
+        let payload = Payload::WhitelistGet {
+            info: WhitelistInfo {
+                effective: "127.0.0.0/8,::1/128".into(),
+                applied: None,
+                needs_restart: false,
+                loopback: vec!["127.0.0.0/8".into()],
+                networks: Vec::new(),
+                extra: Vec::new(),
+                notes: Vec::new(),
+                dhcp_fallback: "10.254.0.0/16".into(),
+                max_extra: 8,
+            },
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        // 负载字段必须摊在 `kind` 同级（客户端按这个形状读），不能嵌一层。
+        assert_eq!(json["kind"], "whitelist.get");
+        assert_eq!(json["effective"], "127.0.0.0/8,::1/128");
+        assert_eq!(json["max_extra"], 8);
+        assert!(json.get("info").is_none());
+        let back: Payload = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, Payload::WhitelistGet { .. }));
+    }
+
+    #[test]
+    fn port_owner_free_omits_occupant_fields() {
+        let free = serde_json::to_value(Payload::PortOwner {
+            port: 4567,
+            pid: None,
+            name: None,
+            path: None,
+            is_our_kernel: None,
+            free: true,
+        })
+        .unwrap();
+        assert_eq!(free["kind"], "port.owner");
+        assert_eq!(free["free"], true);
+        assert!(free.get("pid").is_none());
+
+        let used = serde_json::to_value(Payload::PortOwner {
+            port: 4567,
+            pid: Some(7),
+            name: Some("exvlan".into()),
+            path: Some("exvlan-bin".into()),
+            is_our_kernel: Some(true),
+            free: false,
+        })
+        .unwrap();
+        assert_eq!(used["pid"], 7);
+        assert!(used.get("free").is_none());
+    }
+
+    #[test]
+    fn error_response_can_carry_data() {
+        let resp = Response::err_with_data(
+            ErrorCode::PortInUse,
+            "RPC 端口 4567 被 Code（pid=1, kind=forwarded）占用",
+            Payload::PortInUse {
+                port: 4567,
+                occupant: Occupant {
+                    pid: 1,
+                    name: "Code".into(),
+                    path: "/usr/bin/code".into(),
+                },
+                owner_kind: "forwarded".into(),
+                hint: "停掉转发".into(),
+            },
+        );
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["code"], "port_in_use");
+        assert_eq!(json["data"]["kind"], "port_in_use");
+        assert_eq!(json["data"]["occupant"]["pid"], 1);
     }
 
     #[test]

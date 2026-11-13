@@ -25,7 +25,7 @@ pub mod tokens;
 
 pub use backend::{Backend, detect};
 pub use identity::{current_uid, current_user_sid};
-pub use ipc::{Client, call, request};
+pub use ipc::{Client, call};
 pub use paths::{APP_ID, PRIVILEGED_SERVICE_LABEL, Paths, paths};
 
 /// 内核 RPC portal 默认端口（`service.toml [kernel] rpc_port` 可覆盖）。

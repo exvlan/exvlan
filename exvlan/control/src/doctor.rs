@@ -8,6 +8,7 @@
 
 use serde_json::{Value, json};
 
+use crate::protocol::{Payload, Request};
 use crate::{backend, ipc, paths};
 
 #[derive(Debug, Clone)]
@@ -119,7 +120,7 @@ pub fn collect() -> Report {
 }
 
 fn service_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
-    match ipc::request("ping", json!({})) {
+    match ipc::call(&Request::Ping) {
         Ok(_) => out.push(Finding {
             id: "service.ipc",
             level: "ok",
@@ -144,24 +145,23 @@ fn service_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
         }),
     }
 
-    let Ok(st) = ipc::request("status", json!({})) else {
+    let Ok(status) = ipc::call(&Request::Status) else {
         return;
     };
-    let mode = st.get("mode").and_then(Value::as_str).unwrap_or("-");
-    let pid = st
-        .get("kernel")
-        .and_then(|k| k.get("pid"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let Some(Payload::Status { mode, kernel, .. }) = &status.data else {
+        return;
+    };
+    let mode = mode.as_str();
+    let pid = kernel.as_ref().map(|k| k.pid).unwrap_or(0);
     out.push(Finding {
         id: "service.policy",
         level: "info",
         summary: format!("policy={mode}"),
-        evidence: st.clone(),
+        evidence: ipc::data_json(&status),
         fixable: false,
     });
     // `policy` 的规范词汇是 resident/session/stopped；旧服务会回 off/normal/service。
-    let stopped = matches!(mode, "stopped" | "off");
+    let stopped = mode == "stopped";
     if !stopped && pid == 0 {
         out.push(Finding {
             id: "kernel.running",
@@ -221,24 +221,24 @@ fn config_checks(out: &mut Vec<Finding>) {
         // 有服务：目录归 root，客户端只关心「经 IPC 能不能读写」。
         // 注意这里直接打 IPC，不走 `config::list()`（那条路在服务不可达时会
         // 悄悄退回本地文件，正好把「服务坏了」这个事实藏起来）。
-        return match ipc::request("config.list", json!({})) {
-            Ok(resp) => out.push(Finding {
-                id: "config.dir",
-                level: "ok",
-                summary: format!(
-                    "配置目录经服务可读写（{} 个网络）",
-                    resp.get("data")
-                        .and_then(|d| d.get("items"))
-                        .and_then(|v| v.as_array())
-                        .map(|a| a.len())
-                        .unwrap_or(0)
-                ),
-                evidence: json!({
-                    "dir": p.config.display().to_string(),
-                    "networks": resp.get("data").and_then(|d| d.get("items")).cloned().unwrap_or_else(|| json!([])),
-                }),
-                fixable: false,
-            }),
+        return match ipc::call(&Request::ConfigList) {
+            Ok(resp) => {
+                let count = match &resp.data {
+                    Some(Payload::ConfigList { items, .. }) => items.len(),
+                    _ => 0,
+                };
+                let data = ipc::data_json(&resp);
+                out.push(Finding {
+                    id: "config.dir",
+                    level: "ok",
+                    summary: format!("配置目录经服务可读写（{count} 个网络）"),
+                    evidence: json!({
+                        "dir": p.config.display().to_string(),
+                        "networks": data.get("items").cloned().unwrap_or_else(|| json!([])),
+                    }),
+                    fixable: false,
+                })
+            }
             Err(err) => out.push(Finding {
                 id: "config.dir",
                 level: "error",
@@ -283,35 +283,36 @@ fn port_conflict_check(out: &mut Vec<Finding>) {
     if !backend::detect().has_service() {
         return;
     }
-    let Ok(resp) = ipc::request("port.owner", json!({})) else {
+    let Ok(resp) = ipc::call(&Request::PortOwner) else {
         return;
     };
-    let Some(data) = resp.get("data") else {
+    let evidence = ipc::data_json(&resp);
+    let Some(Payload::PortOwner {
+        port,
+        pid,
+        name,
+        is_our_kernel,
+        free,
+        ..
+    }) = &resp.data
+    else {
         return;
     };
-    if data.get("free").and_then(Value::as_bool).unwrap_or(false) {
+    if *free {
         return;
     }
-    let ours = data
-        .get("is_our_kernel")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let port = data.get("port").and_then(Value::as_u64).unwrap_or(0);
-    if ours {
+    if is_our_kernel.unwrap_or(false) {
         out.push(Finding {
             id: "net.port_conflict",
             level: "ok",
             summary: format!("RPC 端口 {port} 由本机内核占用（正常）"),
-            evidence: data.clone(),
+            evidence,
             fixable: false,
         });
         return;
     }
-    let name = data
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let pid = data.get("pid").and_then(Value::as_u64).unwrap_or(0);
+    let name = name.clone().unwrap_or_else(|| "unknown".to_string());
+    let pid = pid.unwrap_or(0);
     out.push(Finding {
         id: "net.port_conflict",
         level: "error",
@@ -321,7 +322,7 @@ fn port_conflict_check(out: &mut Vec<Finding>) {
              或把 service.toml 的 rpc_portal 改成 \"127.0.0.1:{}\"",
             crate::DEFAULT_RPC_PORT.saturating_add(1)
         ),
-        evidence: data.clone(),
+        evidence,
         fixable: false,
     });
 }
@@ -331,17 +332,13 @@ fn rpc_whitelist_check(out: &mut Vec<Finding>) {
     if !backend::detect().has_service() {
         return;
     }
-    let Ok(resp) = ipc::request("whitelist.get", json!({})) else {
+    let Ok(resp) = ipc::call(&Request::WhitelistGet) else {
         return;
     };
-    let Some(data) = resp.get("data") else {
+    let Some(Payload::WhitelistGet { info }) = &resp.data else {
         return;
     };
-    let effective = data
-        .get("effective")
-        .or_else(|| data.get("whitelist"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let effective = info.effective.clone();
     let mesh = effective
         .split(',')
         .map(str::trim)
@@ -355,7 +352,7 @@ fn rpc_whitelist_check(out: &mut Vec<Finding>) {
         } else {
             "RPC 白名单只含回环（远端统一走 gateway）".to_string()
         },
-        evidence: data.clone(),
+        evidence: ipc::data_json(&resp),
         fixable: false,
     });
 }
@@ -509,7 +506,7 @@ fn migrate_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
 pub fn fix(report: &mut Report) {
     for f in report.findings.iter_mut() {
         if f.id == "kernel.running" && f.level == "error" && f.fixable {
-            match ipc::request("kernel.restart", json!({})) {
+            match ipc::call(&Request::KernelRestart) {
                 Ok(_) => {
                     f.level = "ok";
                     f.summary = "内核已重启".into();

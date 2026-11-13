@@ -9,9 +9,9 @@
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use serde_json::json;
 
 use crate::backend::{self, Backend};
+use crate::protocol::{Payload, Request};
 use crate::{ipc, paths};
 
 const ENABLED_SUFFIX: &str = ".toml";
@@ -55,19 +55,17 @@ fn validate_id(id: &str) -> Result<(), String> {
 
 /// 服务是否可用（装了 + 能应答）。不可用就退回本地文件。
 fn service_ready() -> bool {
-    backend::detect() == Backend::Service && ipc::request("ping", json!({})).is_ok()
+    backend::detect() == Backend::Service && ipc::call(&Request::Ping).is_ok()
 }
 
 /// 配置目录（诊断用；由服务给出，避免客户端各自猜路径）。
 pub fn dir() -> Result<String, String> {
     if service_ready() {
-        let resp = ipc::request("config.list", json!({}))?;
-        return Ok(resp
-            .get("data")
-            .and_then(|d| d.get("dir"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string());
+        let resp = ipc::call(&Request::ConfigList)?;
+        return match resp.data {
+            Some(Payload::ConfigList { dir, .. }) => Ok(dir),
+            _ => Err("服务没有返回 config.list 负载".to_string()),
+        };
     }
     Ok(config_dir().display().to_string())
 }
@@ -75,15 +73,21 @@ pub fn dir() -> Result<String, String> {
 /// 列出配置目录里的网络（启用 + 禁用），带正文。
 pub fn list() -> Result<Vec<Saved>, String> {
     if service_ready() {
-        let resp = ipc::request("config.list", json!({}))?;
+        let resp = ipc::call(&Request::ConfigList)?;
         // 服务一次把正文也带回来（客户端不再逐条 read）。
-        return serde_json::from_value(
-            resp.get("data")
-                .and_then(|d| d.get("items"))
-                .cloned()
-                .unwrap_or_else(|| json!([])),
-        )
-        .map_err(|e| format!("解析 config.list 失败: {e}"));
+        return match resp.data {
+            Some(Payload::ConfigList { items, .. }) => Ok(items
+                .into_iter()
+                .map(|e| Saved {
+                    id: e.id,
+                    enabled: e.enabled,
+                    text: e.text,
+                    bytes: e.bytes,
+                    modified: e.modified,
+                })
+                .collect()),
+            _ => Err("服务没有返回 config.list 负载".to_string()),
+        };
     }
     list_local(&config_dir())
 }
@@ -137,17 +141,10 @@ fn list_local(dir: &Path) -> Result<Vec<Saved>, String> {
 pub fn read(id: &str) -> Result<Saved, String> {
     validate_id(id)?;
     if service_ready() {
-        let resp = ipc::request("config.read", json!({ "id": id }))?;
-        let data = resp.get("data").ok_or("config.read 没有返回 data")?;
-        let text = data
-            .get("text")
-            .and_then(|v| v.as_str())
-            .ok_or("config.read 没有返回 text")?
-            .to_string();
-        let enabled = data
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+        let resp = ipc::call(&Request::ConfigRead { id: id.to_string() })?;
+        let Some(Payload::ConfigRead { enabled, text, .. }) = resp.data else {
+            return Err("服务没有返回 config.read 负载".to_string());
+        };
         return Ok(Saved {
             id: id.to_string(),
             enabled,
@@ -187,10 +184,11 @@ fn read_local(dir: &Path, id: &str) -> Result<Saved, String> {
 pub fn write(id: &str, text: &str, enabled: bool) -> Result<(), String> {
     validate_id(id)?;
     if service_ready() {
-        return ipc::request(
-            "config.write",
-            json!({ "id": id, "text": text, "enabled": enabled }),
-        )
+        return ipc::call(&Request::ConfigWrite {
+            id: id.to_string(),
+            text: text.to_string(),
+            enabled,
+        })
         .map(|_| ());
     }
     write_local(&config_dir(), id, text, enabled)
@@ -241,7 +239,7 @@ fn write_local(dir: &Path, id: &str, text: &str, enabled: bool) -> Result<(), St
 pub fn delete(id: &str) -> Result<bool, String> {
     validate_id(id)?;
     if service_ready() {
-        return match ipc::request("config.delete", json!({ "id": id })) {
+        return match ipc::call(&Request::ConfigDelete { id: id.to_string() }) {
             Ok(_) => Ok(true),
             // 不存在不算错误：调用方通常按「确保它不在」来用。
             Err(err) if err.starts_with("not_found") => Ok(false),

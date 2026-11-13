@@ -33,6 +33,7 @@ use axum::{
 };
 use serde_json::{Value, json};
 
+use exvlan_control::protocol::{Payload, Request};
 use exvlan_core::config::api_input::NetworkConfigExt as _;
 
 use crate::Config;
@@ -192,9 +193,22 @@ fn err(status: StatusCode, code: &str, message: impl Into<String>) -> Response {
 }
 
 // Response 较大，错误分支装箱（clippy: result_large_err）。
-fn ipc(op: &str, extra: Value) -> Result<Value, Box<Response>> {
-    exvlan_control::ipc::request(op, extra)
-        .map_err(|e| Box::new(err(StatusCode::BAD_GATEWAY, "service_ipc", e)))
+//
+// 返回的是**协议负载**（`data`）：HTTP 侧直接把它当 `status` 对象用，
+// 与 v1 的平铺状态形状最接近（只多一个 `kind` 标签）。
+fn ipc(req: &Request) -> Result<Value, Box<Response>> {
+    let resp = exvlan_control::ipc::call(req)
+        .map_err(|e| Box::new(err(StatusCode::BAD_GATEWAY, "service_ipc", e)))?;
+    match resp.data {
+        Some(payload) => serde_json::to_value(&payload).map_err(|e| {
+            Box::new(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "service_payload",
+                format!("服务负载无法序列化: {e}"),
+            ))
+        }),
+        None => Ok(json!({})),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -208,8 +222,13 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let backend = exvlan_control::detect();
     let p = exvlan_control::paths::paths();
     let user = exvlan_control::paths::user_paths();
-    let service = if backend.has_service() {
-        exvlan_control::ipc::request("status", json!({})).ok()
+    let policy = if backend.has_service() {
+        exvlan_control::ipc::call(&Request::Status)
+            .ok()
+            .and_then(|resp| match resp.data {
+                Some(Payload::Status { mode, .. }) => Some(mode.as_str().to_string()),
+                _ => None,
+            })
     } else {
         None
     };
@@ -218,7 +237,7 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
         "gateway": BUILD_VERSION,
         "backend": backend.as_str(),
         "supervisor": exvlan_control::backend::supervisor(),
-        "policy": service.as_ref().and_then(|s| s.get("mode").cloned()),
+        "policy": policy,
         "privileged": backend.has_service(),
         "endpoints": {
             "rpc": exvlan_control::local_rpc_addr(),
@@ -507,7 +526,7 @@ async fn service(State(state): State<AppState>, headers: HeaderMap) -> Response 
         }))
         .into_response();
     }
-    match ipc("status", json!({})) {
+    match ipc(&Request::Status) {
         Ok(v) => Json(v).into_response(),
         Err(resp) => *resp,
     }
@@ -525,7 +544,7 @@ async fn set_policy(State(state): State<AppState>, headers: HeaderMap, body: Str
             "policy 必须是 resident|session|stopped",
         );
     }
-    match ipc("mode.set", json!({ "mode": policy })) {
+    match ipc(&Request::ModeSet { mode: policy }) {
         Ok(v) => Json(v).into_response(),
         Err(resp) => *resp,
     }
@@ -536,9 +555,9 @@ async fn set_desired(State(state): State<AppState>, headers: HeaderMap, body: St
         return resp;
     }
     let desired = parse_field(&body, "desired").unwrap_or_default();
-    let op = match desired.as_str() {
-        "running" => "kernel.ensure",
-        "stopped" => "kernel.stop",
+    let request = match desired.as_str() {
+        "running" => Request::KernelEnsure,
+        "stopped" => Request::KernelStop,
         _ => {
             return err(
                 StatusCode::BAD_REQUEST,
@@ -547,7 +566,7 @@ async fn set_desired(State(state): State<AppState>, headers: HeaderMap, body: St
             );
         }
     };
-    match ipc(op, json!({})) {
+    match ipc(&request) {
         Ok(v) => Json(v).into_response(),
         Err(resp) => *resp,
     }
@@ -557,7 +576,7 @@ async fn kernel_restart(State(state): State<AppState>, headers: HeaderMap) -> Re
     if let Err(resp) = require_scope(&state, &headers, Some("service:control")) {
         return resp;
     }
-    match ipc("kernel.restart", json!({})) {
+    match ipc(&Request::KernelRestart) {
         Ok(v) => Json(v).into_response(),
         Err(resp) => *resp,
     }

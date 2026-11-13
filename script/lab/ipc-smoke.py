@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""服务 IPC 冒烟（协议 v1 / v2 都能跑）。
+"""服务 IPC 冒烟（协议 v2；`--proto 1` 用于回归「旧客户端必须被硬拒」）。
 
 用途：每次改服务 IPC（协议、字段、错误码）后，不依赖 GUI 就能确认
 「服务还活着 + 信封正确 + 关键 op 能答」。
 
 用法：
-    # 当前装机服务（v1 平铺信封）
-    python3 script/lab/ipc-smoke.py
-
-    # 协议 v2（`{proto:2,op,params}` / `{ok,proto,data:{kind}}`）
+    # 协议 v2（`{proto:2,op,params}` / `{ok,proto,data:{kind}}`）—— 当前协议
     python3 script/lab/ipc-smoke.py --proto 2
+
+    # v1 平铺信封：服务会以 `proto_mismatch` 硬拒，**这一轮必须失败**
+    python3 script/lab/ipc-smoke.py --proto 1
 
     # 指定 socket / 管道（默认按平台猜）
     python3 script/lab/ipc-smoke.py --addr /var/run/era.exvlan.studio/service.sock

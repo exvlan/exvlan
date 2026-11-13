@@ -3209,6 +3209,7 @@ version = "26.410.20712"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
+ "exvlan-control",
  "libc",
  "minisign-verify",
  "serde",

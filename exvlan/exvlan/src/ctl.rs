@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use exvlan_control::protocol::{Payload, Request};
 use exvlan_control::{Backend, detect, paths};
 use serde_json::json;
 
@@ -317,26 +318,31 @@ fn fmt_ts(secs: u64) -> String {
 // service
 // ---------------------------------------------------------------------------
 
-fn ipc(op: &str, extra: serde_json::Value) -> Result<serde_json::Value, String> {
-    exvlan_control::ipc::request(op, extra)
+/// 一次性 IPC 调用（协议 v2）：返回整个响应信封的 JSON 视图。
+///
+/// 信封已经带 `ok`/`code`/`message`/`data`，`--json` 输出直接打印它，
+/// agent 读到的就是我们真实发出去的东西。
+fn ipc(req: &Request) -> Result<serde_json::Value, String> {
+    let resp = exvlan_control::ipc::call(req)?;
+    serde_json::to_value(&resp).map_err(|e| format!("序列化响应失败: {e}"))
 }
 
 fn service_cmd(cmd: ServiceCmd) -> i32 {
     let result = match cmd {
         ServiceCmd::Status => show_status(),
         ServiceCmd::Policy { policy } => {
-            ipc("mode.set", json!({ "mode": policy })).map(|v| print_json(&v))
+            ipc(&Request::ModeSet { mode: policy }).map(|v| print_json(&v))
         }
         ServiceCmd::Desired { state } => match state.as_str() {
-            "running" => ipc("kernel.ensure", json!({})).map(|v| print_json(&v)),
-            "stopped" => ipc("kernel.stop", json!({})).map(|v| print_json(&v)),
+            "running" => ipc(&Request::KernelEnsure).map(|v| print_json(&v)),
+            "stopped" => ipc(&Request::KernelStop).map(|v| print_json(&v)),
             other => Err(format!("未知状态: {other}（running|stopped）")),
         },
-        ServiceCmd::Reload => ipc("kernel.restart", json!({})).map(|v| print_json(&v)),
+        ServiceCmd::Reload => ipc(&Request::KernelRestart).map(|v| print_json(&v)),
         ServiceCmd::Kernel { cmd } => match cmd {
-            KernelCmd::Restart => ipc("kernel.restart", json!({})).map(|v| print_json(&v)),
-            KernelCmd::Stop => ipc("kernel.stop", json!({})).map(|v| print_json(&v)),
-            KernelCmd::Ensure => ipc("kernel.ensure", json!({})).map(|v| print_json(&v)),
+            KernelCmd::Restart => ipc(&Request::KernelRestart).map(|v| print_json(&v)),
+            KernelCmd::Stop => ipc(&Request::KernelStop).map(|v| print_json(&v)),
+            KernelCmd::Ensure => ipc(&Request::KernelEnsure).map(|v| print_json(&v)),
         },
         ServiceCmd::Install { backend, user } => install(&backend, user),
         ServiceCmd::Uninstall => uninstall(),
@@ -365,7 +371,7 @@ fn show_status() -> Result<(), String> {
         "ipc": p.service_bin.is_file(),
     });
     if backend.has_service() {
-        match ipc("status", json!({})) {
+        match ipc(&Request::Status) {
             Ok(v) => {
                 out["service"] = v;
             }
@@ -724,20 +730,27 @@ fn auth_cmd(cmd: AuthCmd) -> i32 {
 /// 服务创建的 0600 文件（用户态读不到）。裸核模式（没有服务）再退回直连 HTTP。
 fn auth_pair(role: &str, ttl: u64, gateway: Option<&str>) -> i32 {
     if gateway.is_none() {
-        match exvlan_control::ipc::request(
-            "gateway.pair.start",
-            json!({ "role": role, "ttl": ttl }),
-        ) {
-            Ok(resp) if resp.get("ok").and_then(|v| v.as_bool()) == Some(true) => {
-                let value = resp.get("data").cloned().unwrap_or_else(|| json!({}));
-                return print_pair(&value, ttl);
-            }
+        match exvlan_control::ipc::call(&Request::GatewayPairStart {
+            role: role.to_string(),
+            ttl,
+        }) {
             Ok(resp) => {
-                let message = resp
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("未知错误");
-                eprintln!("服务生成配对码失败: {message}");
+                if let Some(Payload::GatewayPairStart {
+                    code,
+                    expires_in,
+                    role,
+                    scopes,
+                }) = resp.data
+                {
+                    let value = json!({
+                        "code": code,
+                        "expires_in": expires_in,
+                        "role": role,
+                        "scopes": scopes,
+                    });
+                    return print_pair(&value, ttl);
+                }
+                eprintln!("服务没有返回配对码负载");
                 return 2;
             }
             Err(err) => {
