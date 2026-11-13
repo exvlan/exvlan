@@ -1,4 +1,4 @@
-//! EXVlan 特权服务（macOS LaunchDaemon / Windows Service）。
+//! EXVlan 特权服务（macOS LaunchDaemon / Windows Service / Linux systemd unit）。
 //!
 //! 职责（合并了原 helper 与内核服务）：
 //! 1. 持有内核：service 模式常驻；normal 模式随 GUI session 起停
@@ -2518,7 +2518,8 @@ fn main() -> anyhow::Result<()> {
     // Windows 上是 GUI 子系统：stderr 没有去处，PowerShell 也不会等我们退出。
     // 所以 `--install` 之类失败原本是**完全静默**的，现场只能靠猜。
     // 这里把子命令结果写进 service.log（运维/诊断都看得到）。
-    if !op.is_empty() && op != "--daemon" && op != "--version" {
+    // `--purge` 例外：它连日志目录一起删，这里再写一行会把目录重新建出来。
+    if !op.is_empty() && op != "--daemon" && op != "--version" && op != "--purge" {
         match &result {
             Ok(()) => log_line(&p, &format!("cli {op} ok")),
             Err(err) => log_line(&p, &format!("cli {op} failed: {err:#}")),
@@ -2550,6 +2551,8 @@ fn run_cli(p: &Paths, args: &[String]) -> anyhow::Result<()> {
             Ok(())
         }
         Some("--uninstall") => uninstall(p),
+        // 彻底清理（Linux）：在 uninstall 之上再删数据/日志/运行时目录。
+        Some("--purge") => purge(p),
         Some("--status") => {
             println!("{}", serde_json::to_string_pretty(&load_config(p))?);
             Ok(())
@@ -2565,7 +2568,7 @@ fn run_cli(p: &Paths, args: &[String]) -> anyhow::Result<()> {
         ),
         _ => {
             eprintln!(
-                "usage: exvlan-service --daemon | --install <uid> | --uninstall | --status | --diagnose | --restart"
+                "usage: exvlan-service --daemon | --install <uid> | --uninstall | --purge | --status | --diagnose | --restart"
             );
             std::process::exit(2);
         }
@@ -2606,9 +2609,16 @@ fn restart_service() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
 fn restart_service() -> anyhow::Result<()> {
-    bail!("exvlan-service 只在 macOS/Windows 上运行")
+    // 交给 systemd 重启：尊重 unit 的硬化/依赖，也不跟自己 fork 的进程抢 socket。
+    systemctl(&["restart", SERVICE_LABEL])
+        .with_context(|| format!("重启失败；排查：journalctl -u {SERVICE_LABEL} -n 20"))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn restart_service() -> anyhow::Result<()> {
+    bail!("exvlan-service 只在 macOS/Windows/Linux 上运行")
 }
 
 /// Windows：**先** `StartServiceCtrlDispatcherW`，再由 `service_main` 干活。
@@ -2628,9 +2638,15 @@ fn run_daemon(p: Paths) -> anyhow::Result<()> {
 fn run_daemon(p: Paths) -> anyhow::Result<()> {
     let state = Arc::new(State::new(p.clone()));
     log_line(&p, &format!("daemon start pid={}", std::process::id()));
+    // 由 systemd 拉起时接管 SIGTERM（发 STOPPING=1 再退出）；前台跑不受影响。
+    #[cfg(target_os = "linux")]
+    sd::watch_stop(&p);
     spawn_boot_watchdog(p.clone());
     boot(&state);
-    serve_unix(state)
+    let result = serve_unix(state);
+    #[cfg(target_os = "linux")]
+    sd::notify(&p, "STOPPING=1");
+    result
 }
 
 /// 启动看门狗：`boot()` 卡住时主动退出，让 launchd/SCM 重启服务。
@@ -2805,6 +2821,21 @@ fn chown_recursive(root: &std::path::Path, uid: u32) -> std::io::Result<usize> {
 // 平台：macOS / Linux（unix socket + peercred）
 // ---------------------------------------------------------------------------
 
+/// 运行时目录（socket 所在，`/var/run/era.exvlan.studio`，权限见 `serve_unix`）。
+#[cfg(unix)]
+fn socket_dir() -> PathBuf {
+    Path::new("/var/run").join(APP_ID)
+}
+
+/// 系统服务真正用的 socket 落点（**不**看 `EXVLAN_SERVICE_SOCKET`）。
+///
+/// 安装/卸载/冒烟要用它：`EXVLAN_SERVICE_SOCKET` 是给 `--daemon` 的前台/容器
+/// 场景做旁路用的，绝不能影响「装好的 systemd 服务」判断。
+#[cfg(unix)]
+fn default_socket_path() -> PathBuf {
+    socket_dir().join("service.sock")
+}
+
 #[cfg(unix)]
 fn socket_path() -> PathBuf {
     // 容器、嵌入式与冒烟测试不一定能写 /var/run，也可能与系统服务并存。
@@ -2814,7 +2845,7 @@ fn socket_path() -> PathBuf {
             return PathBuf::from(custom);
         }
     }
-    Path::new("/var/run").join(APP_ID).join("service.sock")
+    default_socket_path()
 }
 
 #[cfg(unix)]
@@ -2870,6 +2901,9 @@ fn serve_unix(state: Arc<State>) -> anyhow::Result<()> {
         "listening on {} (owner_uid={owner})",
         path.display()
     ));
+    // bind + listen 都成功了才算「起完了」：systemd `Type=notify` 靠这个 READY 判定。
+    #[cfg(target_os = "linux")]
+    sd::notify(&state.paths, "READY=1");
 
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -2976,6 +3010,113 @@ fn handle_unix_conn(state: &Arc<State>, stream: std::os::unix::net::UnixStream) 
     let _ = last;
     if is_session {
         state.session_close();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 平台：Linux（systemd `Type=notify`）
+// ---------------------------------------------------------------------------
+
+/// 手写 sd_notify（不引第三方 crate）：`NOTIFY_SOCKET` 是 AF_UNIX datagram。
+#[cfg(target_os = "linux")]
+mod sd {
+    use super::{Paths, log_line};
+    use std::mem::offset_of;
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::sync::OnceLock;
+
+    /// 启动时算好的目标地址（信号处理器里不能再读环境变量、不能分配内存）。
+    fn parse_target() -> Option<(libc::sockaddr_un, libc::socklen_t)> {
+        let raw = std::env::var_os("NOTIFY_SOCKET")?;
+        let bytes = raw.as_bytes();
+        if bytes.is_empty() {
+            return None;
+        }
+        // 以 `@` 开头 = 抽象命名空间：sun_path[0] = NUL，名字紧跟其后，长度不含结尾 NUL。
+        let abstract_ns = bytes[0] == b'@';
+        let name = if abstract_ns { &bytes[1..] } else { bytes };
+        let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+        // 两种形态都占 name.len() + 1 字节（抽象=前导 NUL，路径=结尾 NUL）。
+        if name.len() + 1 > addr.sun_path.len() {
+            return None;
+        }
+        let start = usize::from(abstract_ns);
+        for (idx, byte) in name.iter().enumerate() {
+            addr.sun_path[start + idx] = *byte as libc::c_char;
+        }
+        addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+        let len = offset_of!(libc::sockaddr_un, sun_path)
+            + start
+            + name.len()
+            + usize::from(!abstract_ns);
+        Some((addr, len as libc::socklen_t))
+    }
+
+    fn target() -> Option<&'static (libc::sockaddr_un, libc::socklen_t)> {
+        TARGET.get_or_init(parse_target).as_ref()
+    }
+
+    static TARGET: OnceLock<Option<(libc::sockaddr_un, libc::socklen_t)>> = OnceLock::new();
+
+    fn send(state: &str) -> std::io::Result<()> {
+        // 没有 NOTIFY_SOCKET（前台 `--daemon`、容器）→ 不发，也不算错。
+        let Some((addr, len)) = target() else {
+            return Ok(());
+        };
+        // socket/sendto 都在 POSIX 的 async-signal-safe 列表里，可以在信号处理器里直接调。
+        unsafe {
+            let fd = libc::socket(libc::AF_UNIX, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0);
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let rc = libc::sendto(
+                fd,
+                state.as_ptr() as *const libc::c_void,
+                state.len(),
+                0,
+                addr as *const libc::sockaddr_un as *const libc::sockaddr,
+                *len,
+            );
+            let err = std::io::Error::last_os_error();
+            libc::close(fd);
+            if rc < 0 { Err(err) } else { Ok(()) }
+        }
+    }
+
+    /// 发送失败只记日志：通知链路坏了不该让服务起不来。
+    pub fn notify(p: &Paths, state: &str) {
+        if let Err(err) = send(state) {
+            log_line(p, &format!("sd_notify {state} 失败: {err}"));
+        }
+    }
+
+    /// SIGTERM/SIGINT：先 `STOPPING=1` 再退出。
+    ///
+    /// 必须发：unit 是 `Restart=always`，不告诉 systemd「这是被停的」会被当成
+    /// 异常退出 → 立刻重新拉起，表现为「停不下来」。
+    extern "C" fn on_stop(_sig: libc::c_int) {
+        let _ = send("STOPPING=1");
+        unsafe { libc::_exit(0) };
+    }
+
+    /// 只在 `NOTIFY_SOCKET` 存在（= systemd 拉起）时接管停机信号；
+    /// 前台 `--daemon` 保持原行为（SIGTERM 直接退出）。
+    pub fn watch_stop(p: &Paths) {
+        if std::env::var_os("NOTIFY_SOCKET").is_none() {
+            return;
+        }
+        if target().is_none() {
+            log_line(p, "sd_notify: NOTIFY_SOCKET 无法解析为 unix 地址，跳过");
+            return;
+        }
+        unsafe {
+            libc::signal(libc::SIGTERM, on_stop as *const () as libc::sighandler_t);
+            libc::signal(libc::SIGINT, on_stop as *const () as libc::sighandler_t);
+        }
+        log_line(
+            p,
+            "sd_notify: 停机信号已接管（SIGTERM/SIGINT → STOPPING=1）",
+        );
     }
 }
 
@@ -3384,6 +3525,212 @@ fn install_tools(p: &Paths, dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Linux：数据根目录（`/var/lib/era.exvlan.studio`）——`p.config` 的父目录。
+#[cfg(target_os = "linux")]
+fn data_dir(p: &Paths) -> PathBuf {
+    p.config.parent().unwrap_or(&p.config).to_path_buf()
+}
+
+/// Linux：systemd unit 落点。unit 名与 `SERVICE_LABEL` 完全一致（`era.exvlan.studio.service`）。
+#[cfg(target_os = "linux")]
+fn unit_path() -> PathBuf {
+    Path::new("/etc/systemd/system").join(SERVICE_LABEL)
+}
+
+/// Linux：tmpfiles.d 条目。
+///
+/// unit 的 `ReadWritePaths=` 要求路径**启动时已存在**（不存在直接启动失败），
+/// 而 `/run` 是 tmpfs —— 不补这一条，机器重启后单位就起不来了。
+#[cfg(target_os = "linux")]
+fn tmpfiles_path() -> PathBuf {
+    Path::new("/etc/tmpfiles.d").join(format!("{APP_ID}.conf"))
+}
+
+/// Linux：systemd unit 正文（`Type=notify`，靠服务侧 sd_notify 的 `READY=1` 判定启动完成）。
+///
+/// 硬化项见 `docs/decisions-7.3.md` §14.12；`ReadWritePaths` 与 `paths()` 一致
+/// （`/var/run/era.exvlan.studio` 是 `/run/era.exvlan.studio` 的符号链接）。
+#[cfg(target_os = "linux")]
+fn unit_body(bin: &Path) -> String {
+    format!(
+        r#"[Unit]
+Description=Exvlan privileged service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart={bin} --daemon
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=full
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/lib/era.exvlan.studio /var/log/era.exvlan.studio /run/era.exvlan.studio
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE CAP_CHOWN CAP_SETUID CAP_SETGID
+
+[Install]
+WantedBy=multi-user.target
+"#,
+        bin = bin.display()
+    )
+}
+
+/// Linux：`systemctl <args>`，失败时带上 stderr（调用方再补 journalctl 提示）。
+#[cfg(target_os = "linux")]
+fn systemctl(args: &[&str]) -> anyhow::Result<()> {
+    let out = Command::new("systemctl")
+        .args(args)
+        .output()
+        .context("执行 systemctl 失败（本机没有 systemd？）")?;
+    if !out.status.success() {
+        bail!(
+            "systemctl {} 失败: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+/// `journalctl -u <unit> -n 20` 的尾巴（systemctl 起不来时给用户看原因）。
+#[cfg(target_os = "linux")]
+fn journal_tail() -> String {
+    match Command::new("journalctl")
+        .args(["-u", SERVICE_LABEL, "-n", "20", "--no-pager"])
+        .output()
+    {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
+        Err(err) => format!("journalctl 不可用: {err}"),
+    }
+}
+
+/// 连上 socket 并真的完成一次 `hello`（比「文件存在」可靠：崩溃留下的 stale socket 会骗人）。
+#[cfg(target_os = "linux")]
+fn probe_hello(path: &Path) -> bool {
+    use std::io::{BufRead as _, BufReader, Write as _};
+
+    let Ok(mut stream) = std::os::unix::net::UnixStream::connect(path) else {
+        return false;
+    };
+    if stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .is_err()
+        || stream
+            .write_all(b"{\"proto\":1,\"op\":\"hello\"}\n")
+            .is_err()
+    {
+        return false;
+    }
+    let mut line = String::new();
+    if BufReader::new(&stream).read_line(&mut line).is_err() {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(&line)
+        .map(|v| v.get("ok").and_then(serde_json::Value::as_bool) == Some(true))
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn wait_service_ready(timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if probe_hello(&default_socket_path()) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    false
+}
+
+/// Linux：拷二进制 + 写 unit + `enable --now` + 等 READY；起不来回滚。
+#[cfg(target_os = "linux")]
+fn install(p: &Paths, uid: u32, _sid: &str) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    if unsafe { libc::geteuid() } != 0 {
+        bail!("--install 需要 root（要写 /usr/local/bin 与 systemd unit）");
+    }
+    let src = std::env::current_exe()?;
+
+    // 1) 目录先于 unit 建好：ReadWritePaths 要求路径存在。
+    for dir in [data_dir(p), p.core.clone(), p.logs.clone(), socket_dir()] {
+        std::fs::create_dir_all(&dir).with_context(|| format!("创建 {} 失败", dir.display()))?;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+    }
+
+    // 2) 二进制（从已安装位置原地重装时 src == dst：`fs::copy` 会报 EBUSY/EINVAL）
+    if src != p.service_bin {
+        std::fs::copy(&src, &p.service_bin)
+            .with_context(|| format!("拷贝到 {} 失败", p.service_bin.display()))?;
+    }
+    std::fs::set_permissions(&p.service_bin, std::fs::Permissions::from_mode(0o755))?;
+    chown_root(&p.service_bin);
+    let _ = write_version_file(p);
+    // 普通用户（GUI）要能连 socket：属主记成安装者 uid，`serve_unix` 据此 chown。
+    let _ = write_owner_file(p, uid);
+
+    // 3) 配置（重装保留用户手工改过的字段，与 mac/win 同一套）
+    let old = load_config(p);
+    if uid == 0 {
+        log_line(
+            p,
+            "--install 未带 uid：socket 会收紧为 0600 root，普通用户将连不上",
+        );
+    }
+    let cfg = ServiceConfig {
+        owner_uid: uid,
+        policy: old.policy,
+        rpc_extra_whitelist: old.rpc_extra_whitelist,
+        owner_sid: old.owner_sid,
+        rpc_portal: old.rpc_portal,
+        rpc_mesh_whitelist: old.rpc_mesh_whitelist,
+        gateway: old.gateway,
+    };
+    save_config(p, &cfg)?;
+
+    // 4) unit + tmpfiles
+    let unit = unit_path();
+    if let Some(dir) = unit.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    std::fs::write(&unit, unit_body(&p.service_bin))
+        .with_context(|| format!("写 unit {} 失败", unit.display()))?;
+    std::fs::set_permissions(&unit, std::fs::Permissions::from_mode(0o644))?;
+    chown_root(&unit);
+    let tmpfiles = tmpfiles_path();
+    if let Some(dir) = tmpfiles.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    std::fs::write(&tmpfiles, "d /run/era.exvlan.studio 0755 root root -\n")
+        .with_context(|| format!("写 {} 失败", tmpfiles.display()))?;
+    std::fs::set_permissions(&tmpfiles, std::fs::Permissions::from_mode(0o644))?;
+    chown_root(&tmpfiles);
+
+    // 5) 生效 + 启动。`daemon-reload` 必须在写 unit 之后、`enable` 之前。
+    systemctl(&["daemon-reload"])?;
+    systemctl(&["enable", "--now", SERVICE_LABEL])?;
+
+    // 6) 等就绪（≤10s）。等不到就回滚停用，别把「装上了但起不来」的 unit
+    //    留在系统里被 Restart=always 反复拉起。
+    if wait_service_ready(READY_TIMEOUT) {
+        return Ok(());
+    }
+    if let Err(err) = systemctl(&["disable", "--now", SERVICE_LABEL]) {
+        log_line(p, &format!("install: 回滚 disable 失败: {err:#}"));
+    }
+    bail!(
+        "已安装但 {}s 内未就绪（已回滚停用）。排查：journalctl -u {SERVICE_LABEL} -n 20\n---\n{}",
+        READY_TIMEOUT.as_secs(),
+        journal_tail()
+    );
+}
+
 #[cfg(target_os = "macos")]
 fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
@@ -3758,19 +4105,20 @@ fn replace_updater(_p: &Paths, _new_exe: Option<&str>, _tools: Option<&str>) -> 
     bail!("exvlan-service 只在 macOS/Windows 上运行")
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn install(_p: &Paths, _uid: u32, _sid: &str) -> anyhow::Result<()> {
-    bail!("exvlan-service 只在 macOS/Windows 上安装")
+    bail!("exvlan-service 只在 macOS/Windows/Linux 上安装")
 }
 
-fn uninstall(_p: &Paths) -> anyhow::Result<()> {
+#[cfg_attr(target_os = "windows", allow(unused_variables))]
+fn uninstall(p: &Paths) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("/bin/launchctl")
             .args(["bootout", &format!("system/{SERVICE_LABEL}")])
             .output();
         let _ = std::fs::remove_file("/Library/LaunchDaemons/era.exvlan.studio.service.plist");
-        let _ = std::fs::remove_file(&_p.service_bin);
+        let _ = std::fs::remove_file(&p.service_bin);
         return Ok(());
     }
     #[cfg(target_os = "windows")]
@@ -3783,8 +4131,44 @@ fn uninstall(_p: &Paths) -> anyhow::Result<()> {
             .output();
         return Ok(());
     }
+    #[cfg(target_os = "linux")]
+    {
+        // 没装过 / unit 已被删掉时 `disable` 会失败：只记日志，不影响卸载。
+        if let Err(err) = systemctl(&["disable", "--now", SERVICE_LABEL]) {
+            log_line(p, &format!("uninstall: {err:#}"));
+        }
+        let _ = std::fs::remove_file(unit_path());
+        let _ = std::fs::remove_file(tmpfiles_path());
+        if let Err(err) = systemctl(&["daemon-reload"]) {
+            log_line(p, &format!("uninstall: daemon-reload 失败: {err:#}"));
+        }
+        let _ = std::fs::remove_file(&p.service_bin);
+        let _ = std::fs::remove_file(version_path(&p.service_bin));
+        let _ = std::fs::remove_file(owner_path(&p.service_bin));
+        // **保留** `/var/lib`（配置/内核）与 `/var/log`（日志）：彻底清理另用 `--purge`。
+        return Ok(());
+    }
     #[allow(unreachable_code)]
     Ok(())
+}
+
+/// 彻底清理（Linux）：在 `uninstall` 之上再删数据/日志/运行时目录。
+#[cfg(target_os = "linux")]
+fn purge(p: &Paths) -> anyhow::Result<()> {
+    uninstall(p)?;
+    for dir in [data_dir(p), p.logs.clone(), socket_dir()] {
+        if let Err(err) = std::fs::remove_dir_all(&dir)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(anyhow::anyhow!("删除 {} 失败: {err}", dir.display()));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn purge(_p: &Paths) -> anyhow::Result<()> {
+    bail!("--purge 只在 Linux 上可用（macOS/Windows 由安装器负责清理）")
 }
 
 // ---------------------------------------------------------------------------
@@ -4218,5 +4602,52 @@ mod whitelist_tests {
         // kind 的展示串稳定（GUI/日志都依赖）
         assert_eq!(crate::PortKind::Forwarded.as_str(), "forwarded");
         assert!(!crate::PortKind::Forwarded.hint().is_empty());
+    }
+}
+
+/// `--install --tools-dir`：三端同一套代码，Linux 上也要把 cli/gateway 落到
+/// 系统路径（0755、root）。用临时目录模拟 `paths()`，不碰真实系统路径。
+#[cfg(all(test, unix))]
+mod install_tools_tests {
+    use super::{Paths, install_tools};
+    use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn copies_cli_and_gateway_with_0755() {
+        let root = std::env::temp_dir().join(format!("exvlan-tools-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let src = root.join("pkg");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("exvlan-cli"), b"cli").unwrap();
+        std::fs::write(src.join("exvlan-gateway"), b"gw").unwrap();
+        std::fs::write(src.join("unrelated"), b"x").unwrap();
+
+        let core = root.join("core");
+        let p = Paths {
+            config: root.join("config"),
+            core: core.clone(),
+            logs: root.join("logs"),
+            kernel: core.join("exvlan"),
+            kernel_prev: core.join("exvlan.prev"),
+            service_bin: root.join("bin/exvlan-service"),
+            service_config: root.join("service.toml"),
+            service_log: root.join("logs/service.log"),
+            cli_bin: core.join("exvlan-cli"),
+            gateway_bin: core.join("exvlan-gateway"),
+        };
+        install_tools(&p, &src).unwrap();
+        for bin in [&p.cli_bin, &p.gateway_bin] {
+            let meta = std::fs::metadata(bin).unwrap();
+            assert!(meta.is_file(), "{}", bin.display());
+            assert_eq!(
+                meta.permissions().mode() & 0o777,
+                0o755,
+                "{}",
+                bin.display()
+            );
+        }
+        // 只拷这两个，目录里的杂项不带走
+        assert_eq!(std::fs::read_dir(&core).unwrap().count(), 2);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
