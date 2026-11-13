@@ -365,7 +365,10 @@ pub fn auto_check(app: &tauri::AppHandle) -> bool {
 /// 自动安装内核更新是否开启（默认关）。
 pub fn auto_install_kernel(app: &tauri::AppHandle) -> bool {
     let _guard = prefs_guard();
-    load_or_migrate(app).update.auto_install_kernel.unwrap_or(false)
+    load_or_migrate(app)
+        .update
+        .auto_install_kernel
+        .unwrap_or(false)
 }
 
 /// 写开关（`key` 只接受 `auto_check` / `auto_install_kernel`）。

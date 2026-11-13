@@ -2620,19 +2620,17 @@ fn run_daemon(p: Paths) -> anyhow::Result<()> {
     win::run(p)
 }
 
-/// macOS：unix socket + peercred。
-#[cfg(target_os = "macos")]
+/// unix（macOS / Linux）：unix socket + peercred。
+///
+/// Linux 没有 launchd/SCM，由 systemd unit（`Type=notify`）或前台 `--daemon`
+/// 拉起；两种形态共用这一条实现。
+#[cfg(all(unix, not(target_os = "windows")))]
 fn run_daemon(p: Paths) -> anyhow::Result<()> {
     let state = Arc::new(State::new(p.clone()));
     log_line(&p, &format!("daemon start pid={}", std::process::id()));
     spawn_boot_watchdog(p.clone());
     boot(&state);
     serve_unix(state)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn run_daemon(_p: Paths) -> anyhow::Result<()> {
-    bail!("exvlan-service 只在 macOS/Windows 上运行")
 }
 
 /// 启动看门狗：`boot()` 卡住时主动退出，让 launchd/SCM 重启服务。
@@ -2809,6 +2807,13 @@ fn chown_recursive(root: &std::path::Path, uid: u32) -> std::io::Result<usize> {
 
 #[cfg(unix)]
 fn socket_path() -> PathBuf {
+    // 容器、嵌入式与冒烟测试不一定能写 /var/run，也可能与系统服务并存。
+    if let Ok(custom) = std::env::var("EXVLAN_SERVICE_SOCKET") {
+        let custom = custom.trim();
+        if !custom.is_empty() {
+            return PathBuf::from(custom);
+        }
+    }
     Path::new("/var/run").join(APP_ID).join("service.sock")
 }
 

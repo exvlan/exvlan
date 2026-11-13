@@ -155,10 +155,13 @@ impl WireRequest {
 }
 
 /// 内核生命周期策略（与 `service.toml` 的 `policy` 同一套值）。
+///
+/// **规范值是 `resident`**（`service` 是历史别名，服务端以 `resident` 序列化）。
+/// 这是冒烟脚本抓出来的真实漂移：协议里曾写成 `service`，与服务端不一致。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
-    #[serde(rename = "service")]
-    Service,
+    #[serde(rename = "resident", alias = "service", alias = "Service")]
+    Resident,
     #[serde(rename = "session", alias = "normal", alias = "Normal")]
     Session,
     #[serde(rename = "stopped", alias = "off", alias = "Off")]
@@ -168,7 +171,7 @@ pub enum Mode {
 impl Mode {
     pub fn as_str(self) -> &'static str {
         match self {
-            Mode::Service => "service",
+            Mode::Resident => "resident",
             Mode::Session => "session",
             Mode::Stopped => "stopped",
         }
@@ -176,7 +179,7 @@ impl Mode {
 
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "service" => Some(Mode::Service),
+            "resident" | "service" => Some(Mode::Resident),
             "session" | "normal" => Some(Mode::Session),
             "stopped" | "off" => Some(Mode::Stopped),
             _ => None,
@@ -482,9 +485,10 @@ mod tests {
 
     #[test]
     fn install_start_defaults() {
-        let wire: WireRequest =
-            serde_json::from_str(r#"{"proto":2,"op":"kernel.install.start","params":{"version":"1","channel":"dev"}}"#)
-                .unwrap();
+        let wire: WireRequest = serde_json::from_str(
+            r#"{"proto":2,"op":"kernel.install.start","params":{"version":"1","channel":"dev"}}"#,
+        )
+        .unwrap();
         match wire.request {
             Request::KernelInstallStart { base, channel, .. } => {
                 assert!(base.is_none());
@@ -497,11 +501,11 @@ mod tests {
     #[test]
     fn response_carries_payload_in_data() {
         let resp = Response::ok(Payload::Status {
-            mode: Mode::Service,
+            mode: Mode::Resident,
             kernel: Some(KernelInfo {
                 pid: 7,
                 running: true,
-                rpc: "127.0.0.1:1995".into(),
+                rpc: crate::local_rpc_addr(),
             }),
             gateway: None,
         });
@@ -509,7 +513,7 @@ mod tests {
         assert_eq!(json["ok"], true);
         assert_eq!(json["proto"], 2);
         assert_eq!(json["data"]["kind"], "status");
-        assert_eq!(json["data"]["mode"], "service");
+        assert_eq!(json["data"]["mode"], "resident");
         assert_eq!(json["data"]["kernel"]["pid"], 7);
         // 旧的信封顶层字段不再出现
         assert!(json.get("mode").is_none());
@@ -519,7 +523,12 @@ mod tests {
     #[test]
     fn payload_kind_matches_op_name() {
         let cases = [
-            (Payload::ConfigList { value: serde_json::json!({}) }, "config.list"),
+            (
+                Payload::ConfigList {
+                    value: serde_json::json!({}),
+                },
+                "config.list",
+            ),
             (Payload::PortCleanup, "port.cleanup"),
             (Payload::KernelStop, "kernel.stop"),
         ];
@@ -545,7 +554,8 @@ mod tests {
         for (raw, want) in [
             ("\"normal\"", Mode::Session),
             ("\"off\"", Mode::Stopped),
-            ("\"service\"", Mode::Service),
+            ("\"service\"", Mode::Resident),
+            ("\"resident\"", Mode::Resident),
         ] {
             let got: Mode = serde_json::from_str(raw).unwrap();
             assert_eq!(got, want);

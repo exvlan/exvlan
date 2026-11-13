@@ -85,9 +85,8 @@ impl Client {
             .map_err(|e| format!("序列化请求失败: {e}"))?;
         self.send(wire)?;
         let value = self.read_reply()?;
-        serde_json::from_value(value).map_err(|e| {
-            format!("响应不是协议 v2（服务端可能还是旧版，请一起升级）: {e}")
-        })
+        serde_json::from_value(value)
+            .map_err(|e| format!("响应不是协议 v2（服务端可能还是旧版，请一起升级）: {e}"))
     }
 
     fn send(&mut self, body: Value) -> Result<(), String> {

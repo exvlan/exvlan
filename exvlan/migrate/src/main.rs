@@ -166,10 +166,7 @@ struct Legacy {
     prev_kernels: Vec<PathBuf>,
 }
 
-fn detect(
-    user: &exvlan_control::paths::UserPaths,
-    p: &exvlan_control::paths::Paths,
-) -> Legacy {
+fn detect(user: &exvlan_control::paths::UserPaths, p: &exvlan_control::paths::Paths) -> Legacy {
     let mut l = Legacy::default();
     let n = user.data.join("networks.toml");
     if n.is_file() {

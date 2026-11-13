@@ -964,7 +964,10 @@ mod tests {
             Channel::infer_from_version("26.410.20713-nightly.1115"),
             Channel::Nightly
         );
-        assert_eq!(Channel::infer_from_version("26.410.20713-rc.1"), Channel::Rc);
+        assert_eq!(
+            Channel::infer_from_version("26.410.20713-rc.1"),
+            Channel::Rc
+        );
         assert_eq!(Channel::infer_from_version("26.410.20713"), Channel::Stable);
     }
 
