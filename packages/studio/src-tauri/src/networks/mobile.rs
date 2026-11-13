@@ -1,376 +1,304 @@
-//! 移动端网络列表：`networks.toml`（内核在应用进程内，没有特权服务）。
+//! 移动端网络配置：与桌面**同一套语义**（配置目录唯一权威）。
 //!
-//! 桌面端已经改用内核配置目录（见 `networks/desktop.rs`）；移动端暂时保留
-//! 这个文件级存储，后续与桌面统一（需要先让移动端内核也吃 `--config-dir`）。
+//! - 文件：`<app_config_dir>/config/<id>.toml`；禁用 = `<id>.toml.disabled`
+//! - 弹核（FFI）只是执行者：启动时读目录 → 逐条 `run_network_instance(toml)`
+//! - 旧 `networks.toml` 只在**首次升级**时做一次性转换（见 `migrate_legacy_once`），
+//!   与桌面迁移闸门同一语义：失败保留源文件、不写标记、下次重试。
 
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Value};
-#[allow(unused_imports)]
-use tauri::Manager as _;
+use exvlan_rpc::exvlan_core::config::api_input::NetworkConfigExt as _;
+use exvlan_rpc::exvlan_core::config::toml::{ConfigLoader as _, TomlConfigLoader};
+use exvlan_rpc::exvlan_proto::api::manage::NetworkConfig;
 
-const APP_DIR: &str = crate::paths::APP_ID;
-const FILE_NAME: &str = "networks.toml";
-const SCHEMA: i64 = 1;
+use super::legacy;
 
-/// Linux 的配置目录（XDG_CONFIG_HOME）。
-#[cfg(target_os = "linux")]
-fn linux_config_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
-        return Some(PathBuf::from(dir).join(APP_DIR));
-    }
-    let home = std::env::var_os("HOME").filter(|v| !v.is_empty())?;
-    Some(PathBuf::from(home).join(".config").join(APP_DIR))
+const CONFIG_DIR: &str = "config";
+const ENABLED_SUFFIX: &str = ".toml";
+const DISABLED_SUFFIX: &str = ".toml.disabled";
+/// 旧文件（一次性转换后删除）。
+const LEGACY_FILE: &str = "networks.toml";
+/// 转换完成标记（**原子性锚点**：只有全部成功才写）。
+const MIGRATED_MARKER: &str = "networks-migrated";
+
+fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager as _;
+    app.path()
+        .app_config_dir()
+        .map_err(|e| format!("无法定位应用配置目录: {e}"))
 }
 
-pub fn networks_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    #[cfg(target_os = "android")]
+fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_dir(app)?.join(CONFIG_DIR))
+}
+
+/// 实例 id → 文件名。与服务/桌面同一套白名单（挡路径穿越）。
+fn validate_id(id: &str) -> Result<(), String> {
+    if id.is_empty() || id.len() > 64 {
+        return Err("实例 id 长度必须在 1..=64 之间".into());
+    }
+    if !id
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
     {
-        let dir = app
-            .path()
-            .app_config_dir()
-            .map_err(|e| format!("无法定位应用目录: {e}"))?
-            .join("config");
-        Ok(dir.join(FILE_NAME))
+        return Err("实例 id 只允许 [A-Za-z0-9._-]".into());
     }
-    #[cfg(target_os = "linux")]
-    {
-        let _ = app;
-        linux_config_dir()
-            .map(|d| d.join(FILE_NAME))
-            .ok_or_else(|| "无法定位 $XDG_CONFIG_HOME / $HOME".to_string())
-    }
-    #[cfg(not(any(target_os = "android", target_os = "linux")))]
-    {
-        let dir = app
-            .path()
-            .app_config_dir()
-            .map_err(|e| format!("无法定位应用配置目录: {e}"))?;
-        Ok(dir.join(FILE_NAME))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// JSON <-> TOML
-// ---------------------------------------------------------------------------
-
-/// camelCase → snake_case（pb-JSON 的键都是 lowerCamelCase）。
-fn to_snake(key: &str) -> String {
-    let mut out = String::with_capacity(key.len() + 4);
-    for (i, ch) in key.char_indices() {
-        if ch.is_ascii_uppercase() && i > 0 {
-            out.push('_');
-        }
-        out.push(ch.to_ascii_lowercase());
-    }
-    out
-}
-
-/// snake_case → camelCase（`to_snake` 的逆）。
-fn to_camel(key: &str) -> String {
-    let mut out = String::with_capacity(key.len());
-    let mut upper = false;
-    for ch in key.chars() {
-        if ch == '_' {
-            upper = true;
-            continue;
-        }
-        if upper {
-            out.push(ch.to_ascii_uppercase());
-            upper = false;
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-fn json_to_toml(value: &Value) -> Option<toml::Value> {
-    match value {
-        Value::Null => None,
-        Value::Bool(b) => Some(toml::Value::Boolean(*b)),
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Some(toml::Value::Integer(i))
-            } else {
-                n.as_f64().map(toml::Value::Float)
-            }
-        }
-        Value::String(s) => Some(toml::Value::String(s.clone())),
-        Value::Array(items) => {
-            // 数组里出现 null 时 TOML 无法表达；用空字符串占位并不安全，
-            // 因此整段返回 None（调用方会退化为「保留 JSON 字符串」）。
-            let mut out = Vec::with_capacity(items.len());
-            for item in items {
-                let converted = json_to_toml(item)?;
-                out.push(converted);
-            }
-            Some(toml::Value::Array(out))
-        }
-        Value::Object(map) => {
-            let mut table = toml::map::Map::new();
-            for (key, item) in map {
-                if let Some(converted) = json_to_toml(item) {
-                    table.insert(to_snake(key), converted);
-                }
-            }
-            Some(toml::Value::Table(table))
-        }
-    }
-}
-
-fn toml_to_json(value: &toml::Value) -> Value {
-    match value {
-        toml::Value::String(s) => Value::String(s.clone()),
-        toml::Value::Integer(i) => Value::Number((*i).into()),
-        toml::Value::Float(f) => serde_json::Number::from_f64(*f)
-            .map(Value::Number)
-            .unwrap_or(Value::Null),
-        toml::Value::Boolean(b) => Value::Bool(*b),
-        toml::Value::Datetime(dt) => Value::String(dt.to_string()),
-        toml::Value::Array(items) => Value::Array(items.iter().map(toml_to_json).collect()),
-        toml::Value::Table(table) => {
-            let mut map = Map::new();
-            for (key, item) in table {
-                map.insert(to_camel(key), toml_to_json(item));
-            }
-            Value::Object(map)
-        }
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct NetworksFile {
-    #[serde(default)]
-    schema: i64,
-    #[serde(default)]
-    network: Vec<NetworkEntry>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct NetworkEntry {
-    #[serde(default = "default_source")]
-    source: String,
-    /// 配置本体。正常情况下是 TOML 表；无法无损转换时退化为 JSON 字符串。
-    #[serde(default = "empty_table")]
-    config: toml::Value,
-    /// 退化时使用（config 为字符串时的原始 JSON）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    config_json: Option<String>,
-}
-
-fn default_source() -> String {
-    "user".to_string()
-}
-
-fn empty_table() -> toml::Value {
-    toml::Value::Table(toml::map::Map::new())
-}
-
-/// 把前端传来的 `[{config, source}]` 转成 TOML 结构。
-fn encode(networks: &Value) -> Result<NetworksFile, String> {
-    let list = networks
-        .as_array()
-        .ok_or_else(|| "networks 必须是数组".to_string())?;
-    let mut entries = Vec::with_capacity(list.len());
-    for item in list {
-        let source = item
-            .get("source")
-            .and_then(|v| v.as_str())
-            .unwrap_or("user")
-            .to_string();
-        let config = item.get("config").cloned().unwrap_or(Value::Null);
-        // 兼容旧格式：数组元素就是 config 本身。
-        let config = if config.is_null() {
-            item.clone()
-        } else {
-            config
-        };
-
-        match json_to_toml(&config) {
-            Some(toml_value @ toml::Value::Table(_)) => entries.push(NetworkEntry {
-                source,
-                config: toml_value,
-                config_json: None,
-            }),
-            _ => entries.push(NetworkEntry {
-                source,
-                config: toml::Value::Table(toml::map::Map::new()),
-                config_json: Some(
-                    serde_json::to_string(&config)
-                        .map_err(|e| format!("序列化网络配置失败: {e}"))?,
-                ),
-            }),
-        }
-    }
-    Ok(NetworksFile {
-        schema: SCHEMA,
-        network: entries,
-    })
-}
-
-/// TOML → 前端期望的 `[{config, source}]`。
-fn decode(file: &NetworksFile) -> Value {
-    let list: Vec<Value> = file
-        .network
-        .iter()
-        .map(|entry| {
-            let config = match &entry.config_json {
-                Some(raw) => serde_json::from_str(raw).unwrap_or(Value::Null),
-                None => toml_to_json(&entry.config),
-            };
-            serde_json::json!({
-                "config": config,
-                "source": entry.source,
-            })
-        })
-        .collect();
-    Value::Array(list)
-}
-
-// ---------------------------------------------------------------------------
-// 命令
-// ---------------------------------------------------------------------------
-
-fn read_file(path: &Path) -> Result<Option<String>, String> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => Ok(Some(text)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(format!("读取 {} 失败: {err}", path.display())),
-    }
-}
-
-/// 旧 `localStorage` 的 `networkList` 迁移：文件不存在时调用一次。
-#[tauri::command]
-pub fn migrate_networks(app: tauri::AppHandle, networks: String) -> Result<bool, String> {
-    let path = networks_path(&app)?;
-    if path.is_file() {
-        return Ok(false);
-    }
-    let value: Value =
-        serde_json::from_str(&networks).map_err(|e| format!("网络列表不是合法 JSON: {e}"))?;
-    if value.as_array().map(|a| a.is_empty()).unwrap_or(true) {
-        return Ok(false);
-    }
-    save_value(&app, &value)?;
-    crate::logger::record(
-        "networks",
-        "migrated localStorage networkList → networks.toml",
-    );
-    Ok(true)
-}
-
-fn save_value(app: &tauri::AppHandle, value: &Value) -> Result<(), String> {
-    let path = networks_path(app)?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("创建配置目录失败（{}）: {e}", dir.display()))?;
-    }
-    let file = encode(value)?;
-    let text = toml::to_string_pretty(&file).map_err(|e| format!("序列化 networks 失败: {e}"))?;
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, &text).map_err(|e| format!("写入 {} 失败: {e}", tmp.display()))?;
-    crate::paths::restrict_file(&tmp);
-    std::fs::rename(&tmp, &path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("替换 {} 失败: {e}", path.display())
-    })?;
-    let back = std::fs::read_to_string(&path).unwrap_or_default();
-    if back != text {
-        return Err(format!("networks 写入校验失败（{}）", path.display()));
+    if id.starts_with('.') || id.contains("..") {
+        return Err("实例 id 不能以 . 开头，也不能包含 ..".into());
     }
     Ok(())
 }
 
-/// 读取网络列表（JSON 字符串，前端直接 `JSON.parse`）。
-#[tauri::command]
-pub fn get_networks(app: tauri::AppHandle) -> Result<String, String> {
-    let path = networks_path(&app)?;
-    let Some(text) = read_file(&path)? else {
-        return Ok("[]".to_string());
+#[derive(Debug, Clone)]
+struct Saved {
+    id: String,
+    enabled: bool,
+    text: String,
+}
+
+fn list_in(dir: &Path) -> Result<Vec<Saved>, String> {
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(err) => return Err(format!("读取 {} 失败: {err}", dir.display())),
     };
-    let file: NetworksFile = toml::from_str(&text).map_err(|e| {
-        crate::logger::record("networks", format!("解析 {} 失败: {e}", path.display()));
-        format!("networks.toml 解析失败: {e}")
-    })?;
-    serde_json::to_string(&decode(&file)).map_err(|e| format!("序列化失败: {e}"))
-}
-
-/// 写入网络列表（入参是 JSON 字符串）。
-#[tauri::command]
-pub fn set_networks(app: tauri::AppHandle, networks: String) -> Result<(), String> {
-    let value: Value =
-        serde_json::from_str(&networks).map_err(|e| format!("网络列表不是合法 JSON: {e}"))?;
-    save_value(&app, &value)
-}
-
-/// 网络列表文件路径（诊断用）。
-#[tauri::command]
-pub fn networks_path_cmd(app: tauri::AppHandle) -> Result<String, String> {
-    networks_path(&app).map(|p| p.display().to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn key_case_round_trip() {
-        for key in [
-            "instanceId",
-            "peerUrls",
-            "enableMagicDns",
-            "ipv6PublicAddrAuto",
-            "networkName",
-            "mtu",
-        ] {
-            assert_eq!(to_camel(&to_snake(key)), key, "key={key}");
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        let (id, enabled) = if let Some(id) = name.strip_suffix(DISABLED_SUFFIX) {
+            (id.to_string(), false)
+        } else if let Some(id) = name.strip_suffix(ENABLED_SUFFIX) {
+            (id.to_string(), true)
+        } else {
+            continue;
+        };
+        if id.is_empty() {
+            continue;
+        }
+        match std::fs::read_to_string(entry.path()) {
+            Ok(text) => out.push(Saved { id, enabled, text }),
+            Err(err) => crate::logger::record(
+                "networks.store",
+                format!("读 {} 失败: {err}", entry.path().display()),
+            ),
         }
     }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(out)
+}
 
-    #[test]
-    fn config_round_trip_is_lossless() {
-        let config = serde_json::json!({
-            "instanceId": "1467ec85-9cf8-47bc-8c06-8dc320e9b9c5",
-            "networkName": "exvlan",
-            "networkSecret": "secret",
-            "dhcp": false,
-            "virtualIpv4": "10.254.1.6/27",
-            "peerUrls": ["tcp://a:11010", "udp://a:11010"],
-            "enableMagicDns": true,
-            "mtu": 1380,
-            "listenerUrls": [],
-            "nested": { "someKey": 1, "flag": false }
-        });
-        let list = serde_json::json!([{ "config": config.clone(), "source": "user" }]);
-
-        let file = encode(&list).unwrap();
-        let text = toml::to_string_pretty(&file).unwrap();
-        let back: NetworksFile = toml::from_str(&text).unwrap();
-        let decoded = decode(&back);
-
-        assert_eq!(decoded[0]["config"], config);
-        assert_eq!(decoded[0]["source"], "user");
+/// 原子写：`.tmp` → 校验 → rename，再删掉另一种（启用/禁用）形态。
+fn write_in(dir: &Path, id: &str, text: &str, enabled: bool) -> Result<(), String> {
+    validate_id(id)?;
+    // 与内核一致的最小校验：缺 `network_identity` 的配置内核加载不了。
+    let doc: toml::Value = toml::from_str(text).map_err(|e| format!("配置不是合法 TOML: {e}"))?;
+    let name = doc
+        .get("network_identity")
+        .and_then(|v| v.get("network_name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if name.trim().is_empty() {
+        return Err("缺少 [network_identity] network_name（内核无法加载该实例）".into());
     }
-
-    #[test]
-    fn legacy_entry_without_wrapper_is_accepted() {
-        let config = serde_json::json!({ "networkName": "legacy" });
-        let list = serde_json::json!([config.clone()]);
-        let file = encode(&list).unwrap();
-        let decoded = decode(&file);
-        assert_eq!(decoded[0]["config"], config);
-        assert_eq!(decoded[0]["source"], "user");
+    std::fs::create_dir_all(dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
+    let tmp = dir.join(format!(".{id}.toml.tmp"));
+    std::fs::write(&tmp, text).map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
+    let suffix = if enabled {
+        ENABLED_SUFFIX
+    } else {
+        DISABLED_SUFFIX
+    };
+    let dst = dir.join(format!("{id}{suffix}"));
+    if let Err(err) = std::fs::rename(&tmp, &dst) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("替换 {} 失败: {err}", dst.display()));
     }
+    let other = dir.join(format!(
+        "{id}{}",
+        if enabled {
+            DISABLED_SUFFIX
+        } else {
+            ENABLED_SUFFIX
+        }
+    ));
+    let _ = std::fs::remove_file(other);
+    Ok(())
+}
 
-    #[test]
-    fn null_fields_are_dropped() {
-        let config = serde_json::json!({ "networkName": "x", "optional": null });
-        let list = serde_json::json!([{ "config": config, "source": "user" }]);
-        let file = encode(&list).unwrap();
-        let text = toml::to_string_pretty(&file).unwrap();
-        assert!(!text.contains("optional"));
+fn read_in(dir: &Path, id: &str) -> Result<Saved, String> {
+    for (suffix, enabled) in [(ENABLED_SUFFIX, true), (DISABLED_SUFFIX, false)] {
+        let path = dir.join(format!("{id}{suffix}"));
+        if path.is_file() {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+            return Ok(Saved {
+                id: id.to_string(),
+                enabled,
+                text,
+            });
+        }
     }
+    Err(format!("配置不存在: {id}"))
+}
+
+fn delete_in(dir: &Path, id: &str) -> Result<bool, String> {
+    let mut removed = false;
+    for suffix in [ENABLED_SUFFIX, DISABLED_SUFFIX] {
+        let path = dir.join(format!("{id}{suffix}"));
+        if path.is_file() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("删除 {} 失败: {e}", path.display()))?;
+            removed = true;
+        }
+    }
+    Ok(removed)
+}
+
+/// 与桌面同形：内核 TOML → `NetworkConfig`。
+fn from_toml(text: &str) -> Result<NetworkConfig, String> {
+    let loader = TomlConfigLoader::new_from_str(text).map_err(|e| e.to_string())?;
+    NetworkConfig::new_from_config(&loader).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// 一次性转换（旧 `networks.toml` → `<config>/<id>.toml`）
+// ---------------------------------------------------------------------------
+
+fn migrate_legacy_once(app: &tauri::AppHandle) {
+    let Ok(base) = app_dir(app) else {
+        return;
+    };
+    let marker = base.join(MIGRATED_MARKER);
+    if marker.is_file() {
+        return;
+    }
+    let legacy_path = base.join(LEGACY_FILE);
+    if !legacy_path.is_file() {
+        // 没有旧数据：直接写标记，避免每次启动都 stat 一遍。
+        let _ = std::fs::write(&marker, b"nothing-to-do\n");
+        return;
+    }
+    let dir = base.join(CONFIG_DIR);
+    let text = match std::fs::read_to_string(&legacy_path) {
+        Ok(text) => text,
+        Err(err) => {
+            crate::logger::record(
+                "networks.migrate",
+                format!("读 {} 失败: {err}", legacy_path.display()),
+            );
+            return;
+        }
+    };
+    let configs = match legacy::load_legacy(&text) {
+        Ok(cfgs) => cfgs,
+        Err(err) => {
+            crate::logger::record("networks.migrate", err);
+            return; // 保留源文件，下次启动重试
+        }
+    };
+    let mut converted = 0usize;
+    for cfg in &configs {
+        let Some(id) = cfg.instance_id.clone().filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        let toml_text = match cfg.gen_config() {
+            Ok(toml_cfg) => toml_cfg.dump(),
+            Err(err) => {
+                crate::logger::record("networks.migrate", format!("{id}: gen_config 失败: {err}"));
+                return; // 原子性：一条失败就整体不推进
+            }
+        };
+        if let Err(err) = write_in(&dir, &id, &toml_text, true) {
+            crate::logger::record("networks.migrate", format!("{id}: 写入失败: {err}"));
+            return;
+        }
+        converted += 1;
+    }
+    // 全部成功才删源 + 写标记。
+    if let Err(err) = std::fs::remove_file(&legacy_path) {
+        crate::logger::record(
+            "networks.migrate",
+            format!("删除 {} 失败: {err}", legacy_path.display()),
+        );
+        return;
+    }
+    let _ = std::fs::write(&marker, format!("converted={converted}\n").as_bytes());
+    crate::logger::record(
+        "networks.migrate",
+        format!("legacy networks.toml → {converted} 个配置文件"),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 命令（与桌面同形，前端契约不变）
+// ---------------------------------------------------------------------------
+
+/// 配置目录路径（诊断用）。
+#[tauri::command]
+pub fn networks_path_cmd(app: tauri::AppHandle) -> Result<String, String> {
+    config_dir(&app).map(|p| p.display().to_string())
+}
+
+/// 网络列表（JSON 字符串，前端直接 `JSON.parse`）。
+#[tauri::command]
+pub fn get_networks(app: tauri::AppHandle) -> Result<String, String> {
+    migrate_legacy_once(&app);
+    let dir = config_dir(&app)?;
+    let mut list = Vec::new();
+    for saved in list_in(&dir)? {
+        match from_toml(&saved.text) {
+            Ok(config) => list.push(serde_json::json!({
+                "config": config,
+                "source": "user",
+            })),
+            Err(err) => crate::logger::record(
+                "networks.store",
+                format!("解析 {} 失败，已跳过: {err}", saved.id),
+            ),
+        }
+    }
+    serde_json::to_string(&list).map_err(|e| format!("序列化网络列表失败: {e}"))
+}
+
+/// 写入网络列表：逐条落盘（已存在的保留启用/禁用状态）。
+#[tauri::command]
+pub fn set_networks(app: tauri::AppHandle, networks: String) -> Result<(), String> {
+    migrate_legacy_once(&app);
+    let dir = config_dir(&app)?;
+    let value: serde_json::Value =
+        serde_json::from_str(&networks).map_err(|e| format!("网络列表不是合法 JSON: {e}"))?;
+    let items = value
+        .as_array()
+        .ok_or_else(|| "网络列表必须是数组".to_string())?;
+    for item in items {
+        let config: NetworkConfig = serde_json::from_value(
+            item.get("config")
+                .cloned()
+                .ok_or_else(|| "网络条目缺少 config".to_string())?,
+        )
+        .map_err(|e| format!("网络配置不是合法 NetworkConfig: {e}"))?;
+        let id = config
+            .instance_id
+            .clone()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| "网络配置缺少 instance_id".to_string())?;
+        let text = config
+            .gen_config()
+            .map_err(|e| format!("生成内核配置失败: {e}"))?
+            .dump();
+        let enabled = read_in(&dir, &id).map(|s| s.enabled).unwrap_or(true);
+        write_in(&dir, &id, &text, enabled)?;
+    }
+    Ok(())
+}
+
+/// 删除一条配置（供内部/未来 command 使用）。
+#[allow(dead_code)]
+pub fn delete_network(app: &tauri::AppHandle, id: &str) -> Result<bool, String> {
+    delete_in(&config_dir(app)?, id)
 }
