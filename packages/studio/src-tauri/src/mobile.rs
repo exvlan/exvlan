@@ -164,6 +164,14 @@ impl GUIStorage {
     }
 
     fn set_enabled(&self, app: &AppHandle, inst_id: Uuid, disabled: bool) -> anyhow::Result<()> {
+        // 落到配置目录（`.toml` ↔ `.toml.disabled`）——否则「禁用」只在内存里，
+        // 重启后网络又自己起来了。失败不阻断 RPC，但必须留痕。
+        if let Err(err) = crate::networks::set_enabled(app, &inst_id.to_string(), !disabled) {
+            crate::logger::record(
+                "networks.state",
+                format!("{inst_id}: 写入禁用状态失败: {err}"),
+            );
+        }
         if disabled {
             self.enabled_networks.remove(&inst_id);
         } else {

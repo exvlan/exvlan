@@ -312,6 +312,19 @@ pub fn set_networks(app: tauri::AppHandle, networks: String) -> Result<(), Strin
     Ok(())
 }
 
+/// 切换启用/禁用（禁用 = `<id>.toml.disabled`，内核不加载）。
+///
+/// 移动端的客户端管理器（`src/mobile.rs`）在用户「关闭网络」时会调用这里，
+/// 否则「禁用」只存在于内存里，重启就回来了。
+pub fn set_enabled(app: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+    let dir = config_dir(app)?;
+    let saved = read_in(&dir, id)?;
+    if saved.enabled == enabled {
+        return Ok(());
+    }
+    write_in(&dir, id, &saved.text, enabled)
+}
+
 /// 删除一条配置（供内部/未来 command 使用）。
 #[allow(dead_code)]
 pub fn delete_network(app: &tauri::AppHandle, id: &str) -> Result<bool, String> {
