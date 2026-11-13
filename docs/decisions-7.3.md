@@ -451,37 +451,45 @@ msiexec /i EXVlan.Studio_<ver>_x64_en-US.msi /qn REINSTALL=ALL REINSTALLMODE=vom
 
 用户手动双击安装不受影响（有 UI，可确认重装）。
 
-### 14.10 远端接入（pre.20）：配对方向 = 「对端出码」，gateway 由服务托管
+### 14.10 远端接入（pre.20）：对端出码 + **对端签发** token；gateway 由服务托管
 
-按产品直觉（同 TeamViewer/向日葵）修正 R2 的方向：**识别码/验证码由被管的那一端给出**。
+方向与「远程协助类软件」一致：**谁被连，谁出码、谁签发**。
+控制端（你）永远不签发 token，只拿着对端给的 token 去调对端的 gateway。
 
-| 角色                 | 做什么                                                                              |
-| -------------------- | ----------------------------------------------------------------------------------- |
-| 被管端（target）     | 本机生成 6–8 位一次性配对码（5 分钟有效），显示在 GUI / `exvlan-cli auth pair` 输出 |
-| 控制端（controller） | GUI 输入该码 → 向 target 的 gateway `POST /api/v1/pair/redeem` 换取 scoped token    |
+| 角色                 | 做什么                                                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 被管端（target）     | 本机生成一次性配对码（5 分钟）；**兑换时由对端进程签发 token** 并写进自己的 `gateway-tokens.json`（只存 sha256） |
+| 控制端（controller） | 输入对端给的码 → 调对端的 `POST /api/v1/pair/redeem` → 拿回 token 明文（一次性）→ 之后带 Bearer 调对端           |
+
+**流程**
+
+1. 对端：`exvlan-cli auth pair --role readonly`（或对端 GUI 的「远程协助」按钮）
+   → 本机调用 `POST /api/v1/pair/start`（**仅允许来自回环**）→ 返回 `{code, expires_at}` 并显示给你。
+2. 控制端：GUI/CLI 输入该码 → `POST http://<target>:2016/api/v1/pair/redeem {code, client}`
+   → 对端校验（存在/未过期/未使用/限速/首次绑定来源 IP）→ **由对端 gateway 进程 mint token**（scope 由码的 role 决定）
+   → 返回 `{token, scopes, expires_at}`。
+3. 控制端把该 token 存到本地（`<user>/remotes.json`，0600，按目标区分），后续请求带 `Authorization: Bearer`。
 
 **安全约束**
 
-- 生成配对码必须**在本机**（IPC/CLI，或本机 GUI）——远端无法自己出码，杜绝「远端自我续命」；
-- 兑换：一次性 + 5 分钟 + **首次兑换绑定来源 IP** + 每 IP 5 次/分钟限速；
-- 兑换得到的 token 走既有 `tokens::Store`（只存 sha256、可过期/吊销、带 scope），
-  审计记录 `token_id + client 名 + 来源 IP`。
+- 出码必须发生在对端本机（`pair/start` 仅回环可调，或走 IPC）——远端无法给自己发码；
+- 兑换：一次性 + 5 分钟 + 首次兑换绑定来源 IP + 每 IP 5 次/分钟限速；
+- token 只存 sha256（对端）、可过期/吊销、带 scope；审计记录 `token_id + client + 来源 IP`；
+- 控制端本地保存的是**明文 token**（它必须能用来发请求），文件 0600、可随时在对端吊销。
 
-**对「单写者」的修订**：原决策是「只有 CLI 写 token 文件，gateway 只读」。配对路径需要
-gateway 在兑换时**落一条 token 记录**，因此把规则调整为：
-「token 只能由本机进程签发（CLI 或本机 gateway），远端永远不能给自己发 token」；
-文件仍 0600、仍只存 hash。
+**对「单写者」的修订**：原决策是「只有 CLI 写 token 文件，gateway 只读」。
+配对需要 gateway 在兑换时落一条 token 记录，因此规则改为：
+**token 只能由「对端」的本机进程（CLI 或对端 gateway）签发/写入；控制端永远不签发、不写对端的 token 文件。**
 
-**gateway 的托管**：不再由人工 `exvlan-gateway` 起进程 —— 由 `exvlan-service` 作为子进程
-监管（macOS launchd / Windows SCM / Linux systemd 下由服务 fork），配置来自 `service.toml`：
+**gateway 的托管**：不再由人工起进程 —— 由 `exvlan-service` 作为子进程监管
+（macOS launchd / Windows SCM / Linux systemd 下由服务 fork），配置来自 `service.toml`：
 
 ```toml
 [gateway]
 enabled = true # 默认 true（本机回环）
-bind = "127.0.0.1" # 需要远端接入时改成 mesh 地址
+bind = "127.0.0.1" # 需要被远端接入时改成 mesh 地址
 port = 2016
 token_file = "<data>/gateway-token"
 ```
 
-服务负责：随服务启停、异常重启、`status` 里报告 gateway pid/地址；`/api/v1/system.endpoints.gateway`
-由 gateway 自报（已有）。
+服务负责：随服务启停、异常重启、`status` 里报告 gateway pid/地址。
