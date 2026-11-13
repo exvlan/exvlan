@@ -16,7 +16,8 @@ import {
   remoteUrl,
 } from "~/composables/target";
 import RemoteManager from "~/components/RemoteManager.vue";
-import { gatewaySystem, remotePing } from "~/composables/backend";
+import { gatewayPairStart, gatewaySystem, remotePing } from "~/composables/backend";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 const props = defineProps<{
   runtime: RuntimeKind;
@@ -36,6 +37,13 @@ const toast = useToast();
 // PrimeVue Menu 的实例类型在自动导入里是 any，这里显式标注避免 no-explicit-any 报错。
 const menu = ref<{ toggle: (event: Event) => void } | null>(null);
 const managerVisible = ref(false);
+// 「对端出码」：本机就是被管端时，在这里生成一次性配对码给控制端。
+const pairDialogVisible = ref(false);
+const pairRole = ref<"readonly" | "config" | "admin">("readonly");
+const pairBusy = ref(false);
+const pairCode = ref("");
+const pairExpires = ref(0);
+const pairError = ref("");
 const remotes = ref<RemoteTarget[]>(loadRemotes());
 const testing = ref<string | null>(null);
 
@@ -134,10 +142,54 @@ const items = computed(() => {
           managerVisible.value = true;
         },
       },
+      { separator: true },
+      {
+        label: t("target.generate_code"),
+        icon: "pi pi-key",
+        command: () => {
+          pairCode.value = "";
+          pairError.value = "";
+          pairDialogVisible.value = true;
+        },
+      },
     ],
   });
   return list;
 });
+
+const roleOptions = computed(() => [
+  { label: t("target.role_readonly"), value: "readonly" },
+  { label: t("target.role_config"), value: "config" },
+  { label: t("target.role_admin"), value: "admin" },
+]);
+
+async function generatePairCode() {
+  pairBusy.value = true;
+  pairError.value = "";
+  pairCode.value = "";
+  try {
+    const value = await gatewayPairStart(pairRole.value);
+    pairCode.value = String(value.code ?? "");
+    pairExpires.value = Number(value.expires_in ?? 0);
+    if (!pairCode.value) {
+      pairError.value = JSON.stringify(value).slice(0, 200);
+    }
+  } catch (e) {
+    pairError.value = String(e);
+  } finally {
+    pairBusy.value = false;
+  }
+}
+
+async function copyPairCode() {
+  if (!pairCode.value) return;
+  try {
+    await writeText(pairCode.value);
+    toast.add({ severity: "success", summary: t("settings.copy"), life: 2000 });
+  } catch (e) {
+    toast.add({ severity: "error", summary: String(e), life: 6000 });
+  }
+}
 
 async function testAll() {
   if (remotes.value.length === 0) {
@@ -199,5 +251,43 @@ function onRemotesChanged() {
     </Button>
     <Menu ref="menu" :model="items" popup />
     <RemoteManager v-model:visible="managerVisible" @changed="onRemotesChanged" />
+
+    <!-- 被管端出码：把 6 位码给对方，token 由本机在兑换时签发 -->
+    <Dialog
+      v-model:visible="pairDialogVisible"
+      modal
+      :header="t('target.pair_code_title')"
+      :style="{ width: isMobile ? '100vw' : '420px' }"
+    >
+      <div class="flex flex-col gap-3">
+        <div class="text-sm text-surface-500">{{ t("target.pair_code_desc") }}</div>
+        <Select
+          v-model="pairRole"
+          :options="roleOptions"
+          option-label="label"
+          option-value="value"
+        />
+        <Button
+          :label="t('target.generate')"
+          icon="pi pi-key"
+          :loading="pairBusy"
+          @click="generatePairCode"
+        />
+        <div v-if="pairCode" class="flex flex-col items-center gap-1 py-2">
+          <div class="font-mono text-3xl tracking-[0.3em]">{{ pairCode }}</div>
+          <div class="text-xs text-surface-500">
+            {{ t("target.pair_code_ttl", { seconds: pairExpires }) }}
+          </div>
+          <Button
+            size="small"
+            text
+            icon="pi pi-copy"
+            :label="t('settings.copy')"
+            @click="copyPairCode"
+          />
+        </div>
+        <div v-if="pairError" class="text-sm text-red-500">{{ pairError }}</div>
+      </div>
+    </Dialog>
   </div>
 </template>

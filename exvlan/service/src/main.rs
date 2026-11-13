@@ -445,6 +445,12 @@ struct Request {
     /// `gateway.set` 的增量修改（未给的字段保持不变）
     #[serde(default)]
     gateway: Option<GatewayPatch>,
+    /// `gateway.pair.start` 的角色（readonly|config|admin）
+    #[serde(default)]
+    role: Option<String>,
+    /// `gateway.pair.start` 的配对码有效期（秒）
+    #[serde(default)]
+    ttl: Option<u64>,
 }
 
 /// `gateway.set`：只写给出的字段，其余沿用当前配置。
@@ -944,6 +950,56 @@ fn configured_self_ip(config_dir: &Path) -> Option<String> {
         }
     }
     fallback
+}
+
+/// 与本机 gateway 做一次 JSON 请求（HTTP/1.1，`Connection: close`）。
+///
+/// 服务自身只需要这一个调用（生成配对码），不值得为此引入 HTTP 客户端依赖。
+fn http_json(
+    addr: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    token: Option<&str>,
+) -> anyhow::Result<serde_json::Value> {
+    use std::io::{Read as _, Write as _};
+    let mut stream = std::net::TcpStream::connect(addr)
+        .with_context(|| format!("连接 {addr} 失败（gateway 在跑吗？）"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+
+    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+    if let Some(token) = token {
+        req.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    if let Some(body) = body {
+        req.push_str("Content-Type: application/json\r\n");
+        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    req.push_str("\r\n");
+    if let Some(body) = body {
+        req.push_str(body);
+    }
+    stream.write_all(req.as_bytes()).context("发送请求失败")?;
+
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).context("读取响应失败")?;
+    let text = String::from_utf8_lossy(&raw);
+    let status = text
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .context("无法解析响应状态")?;
+    let body = text
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b.to_string())
+        .unwrap_or_default();
+    let value: serde_json::Value =
+        serde_json::from_str(&body).unwrap_or_else(|_| serde_json::json!({ "raw": body }));
+    if !(200..300).contains(&status) {
+        bail!("gateway 返回 {status}: {value}");
+    }
+    Ok(value)
 }
 
 /// gateway 的 spawn 串行化（watchdog + IPC 可能同时触发）。
@@ -1786,6 +1842,41 @@ impl State {
         Ok(pid)
     }
 
+    /// 本机生成一次性配对码（`POST /api/v1/pair/start`）。
+    ///
+    /// 走本机 gateway：回环直连（无 token）；若 gateway 绑的是 mesh 地址，就带本机
+    /// admin token —— token 是服务自己创建的 0600 文件，用户态读不到，天然是「本机」。
+    fn pair_start(&self, role: &str, ttl: u64) -> anyhow::Result<serde_json::Value> {
+        let cfg = self.gateway_config();
+        if !cfg.enabled {
+            bail!("gateway 已在 service.toml 里关闭，无法生成配对码");
+        }
+        if self.gateway_pid().is_none() {
+            self.ensure_gateway()?;
+        }
+        let addr = match self.gateway_bind().as_str() {
+            // 通配地址：连回环（本机一定有）。
+            "0.0.0.0" => format!("127.0.0.1:{}", cfg.port),
+            "::" => format!("[::1]:{}", cfg.port),
+            other if other.contains(':') => format!("[{other}]:{}", cfg.port),
+            other => format!("{other}:{}", cfg.port),
+        };
+        let token = std::fs::read_to_string(self.gateway_token_file())
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
+        let body = serde_json::json!({ "role": role, "ttl": ttl }).to_string();
+        let value = http_json(
+            &addr,
+            "POST",
+            "/api/v1/pair/start",
+            Some(&body),
+            token.as_deref(),
+        )?;
+        self.log(format!("pair code issued role={role} ttl={ttl}"));
+        Ok(value)
+    }
+
     fn gateway_info(&self) -> GatewayInfo {
         let enabled = self.gateway_config().enabled;
         let pid = self.gateway_pid().unwrap_or(0);
@@ -2051,6 +2142,18 @@ impl State {
                         r
                     }
                     Err(err) => Response::err("gateway_failed", err.to_string()),
+                }
+            }
+            "gateway.pair.start" => {
+                let role = req.role.clone().unwrap_or_else(|| "readonly".to_string());
+                let ttl = req.ttl.unwrap_or(300).clamp(60, 900);
+                match self.pair_start(&role, ttl) {
+                    Ok(value) => {
+                        let mut r = Response::ok();
+                        r.data = Some(value);
+                        r
+                    }
+                    Err(err) => Response::err("pair_failed", err.to_string()),
                 }
             }
             "gateway.restart" => match self.restart_gateway() {

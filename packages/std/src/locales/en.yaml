@@ -809,6 +809,14 @@ target:
   gateway_unreachable: "Cannot reach the gateway at {addr}: {error}"
   remote_rejected: Connected to {addr} but it never replies. Usually the remote kernel RPC whitelist does not include this machine — make sure the remote runs pre.14 or newer (older builds only allow loopback).
   switch_hint: switch from the status bar or tray
+  generate_code: Generate pairing code (this machine is managed)
+  pair_code_title: Pairing code (enter it on the other machine)
+  pair_code_desc: This machine is the managed one. Generate a one-time code and enter it on the other machine. The token is issued here on redemption; valid for 5 minutes, single use.
+  pair_code_ttl: "Valid for {seconds} seconds, single use"
+  generate: Generate
+  role_readonly: Read-only (view/diagnose)
+  role_config: Can change config
+  role_admin: Full access (same as local)
   hint: |-
     Two routes: direct kernel RPC (1995, relies on the peer whitelist) or via gateway
     (2016, Bearer token, read-only). Switching target does NOT stop the local kernel;

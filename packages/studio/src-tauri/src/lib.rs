@@ -5995,6 +5995,7 @@ pub fn run_gui() -> std::process::ExitCode {
             gateway_remote::gateway_doctor,
             gateway_remote::gateway_overview,
             gateway_remote::gateway_instance,
+            gateway_remote::gateway_pair_start,
             runtime_apply,
             remote_ping,
             service_uninstall,

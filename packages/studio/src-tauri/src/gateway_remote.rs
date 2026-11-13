@@ -345,6 +345,16 @@ pub async fn gateway_instance(
     get_json(&entry.host, entry.port, &entry.token, &path).await
 }
 
+/// 本机生成配对码（**被管端**的动作）。
+///
+/// 走服务 IPC：服务托管 gateway，知道它绑在哪，也持有 admin token（0600，用户态读不到）。
+#[tauri::command]
+pub fn gateway_pair_start(role: Option<String>, ttl: Option<u64>) -> Result<Value, String> {
+    let role = role.unwrap_or_else(|| "readonly".to_string());
+    let ttl = ttl.unwrap_or(300);
+    crate::service_client::pair_start(&role, ttl)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DEFAULT_GATEWAY_PORT, base_url, host_for_url, truncate};

@@ -719,7 +719,34 @@ fn auth_cmd(cmd: AuthCmd) -> i32 {
 }
 
 /// 生成一次性配对码（本机出码；远端无法给自己发码）。
+///
+/// 首选服务 IPC：服务托管 gateway 时它可能只绑 mesh 地址，而且 admin token 是
+/// 服务创建的 0600 文件（用户态读不到）。裸核模式（没有服务）再退回直连 HTTP。
 fn auth_pair(role: &str, ttl: u64, gateway: Option<&str>) -> i32 {
+    if gateway.is_none() {
+        match exvlan_service_client::ipc::request(
+            "gateway.pair.start",
+            json!({ "role": role, "ttl": ttl }),
+        ) {
+            Ok(resp) if resp.get("ok").and_then(|v| v.as_bool()) == Some(true) => {
+                let value = resp.get("data").cloned().unwrap_or_else(|| json!({}));
+                return print_pair(&value, ttl);
+            }
+            Ok(resp) => {
+                let message = resp
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("未知错误");
+                eprintln!("服务生成配对码失败: {message}");
+                return 2;
+            }
+            Err(err) => {
+                // 没有服务（裸核模式）：退回直连本机 gateway。
+                eprintln!("（服务不可用：{err}，改试直连 gateway）");
+            }
+        }
+    }
+
     let base = gateway
         .map(|g| {
             let g = g.trim();
@@ -731,7 +758,7 @@ fn auth_pair(role: &str, ttl: u64, gateway: Option<&str>) -> i32 {
         })
         .unwrap_or_else(gateway_base);
     let body = json!({ "role": role, "ttl": ttl }).to_string();
-    match http_request_at("POST", &base, "/api/v1/pair/start", Some(&body), false) {
+    match http_request_at("POST", &base, "/api/v1/pair/start", Some(&body), true) {
         Ok((status, text)) => {
             let value: serde_json::Value =
                 serde_json::from_str(&text).unwrap_or_else(|_| json!({ "raw": text }));
@@ -739,24 +766,7 @@ fn auth_pair(role: &str, ttl: u64, gateway: Option<&str>) -> i32 {
                 eprintln!("生成配对码失败（{status}）: {value}");
                 return 2;
             }
-            let code = value.get("code").and_then(|v| v.as_str()).unwrap_or("");
-            let expires = value
-                .get("expires_in")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(ttl);
-            let scopes = value
-                .get("scopes")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!([]));
-            print_json(&value);
-            if !code.is_empty() {
-                // 给人看的一行：控制端要照着输，别让人去 JSON 里找。
-                eprintln!(
-                    "配对码 {code}（{expires}s 内有效，一次性；权限 {scopes}）\n\
-                     在对端打开 EXVlan → 目标 → 管理远程 → 经 gateway → 配对，输入该码。"
-                );
-            }
-            0
+            print_pair(&value, ttl)
         }
         Err(err) => {
             eprintln!("连接本机 gateway 失败: {err}");
@@ -766,6 +776,26 @@ fn auth_pair(role: &str, ttl: u64, gateway: Option<&str>) -> i32 {
             3
         }
     }
+}
+
+/// 打印配对码：JSON（脚本）+ 一行给人看的提示。
+fn print_pair(value: &serde_json::Value, ttl: u64) -> i32 {
+    let code = value.get("code").and_then(|v| v.as_str()).unwrap_or("");
+    let expires = value
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(ttl);
+    let scopes = value.get("scopes").cloned().unwrap_or_else(|| json!([]));
+    print_json(value);
+    if code.is_empty() {
+        eprintln!("对端没有返回配对码（响应见上）");
+        return 2;
+    }
+    eprintln!(
+        "配对码 {code}（{expires}s 内有效，一次性；权限 {scopes}）\n\
+         在对端打开 EXVlan → 目标 → 管理远程 → 经 gateway → 配对，输入该码。"
+    );
+    0
 }
 
 fn token_cmd(cmd: TokenCmd) -> i32 {

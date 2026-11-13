@@ -809,6 +809,14 @@ target:
   gateway_unreachable: 连不上 {addr} 的 gateway：{error}
   remote_rejected: 已连上 {addr}，但对方没有应答。通常是对端内核的 RPC 白名单未包含本机 —— 请确认对端已升级到 pre.14 及以上（旧版本默认只允许回环）。
   switch_hint: 在状态栏或托盘切换
+  generate_code: 生成配对码（本机被管理）
+  pair_code_title: 配对码（给对方输入）
+  pair_code_desc: 本机就是被管理的那台：先生成一次性码，让对方在他们机器上输入。token 由本机在兑换时签发，5 分钟内有效、一次性。
+  pair_code_ttl: "{seconds} 秒内有效，一次性"
+  generate: 生成
+  role_readonly: 只读（查看/诊断）
+  role_config: 可改配置
+  role_admin: 全权（等同本机管理）
   hint: |-
     两种接法：直连内核（RPC 1995，靠对端白名单）或经 gateway（2016，Bearer token，只读）。
     切换目标**不会**停止本机内核；「远程 + 本机普通模式」可以同时存在。

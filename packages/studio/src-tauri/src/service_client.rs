@@ -91,14 +91,14 @@ pub struct ServiceState {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use imp::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, port_cleanup, port_owner, restart_kernel,
+    is_installed, is_ready, kernel_status, pair_start, port_cleanup, port_owner, restart_kernel,
     set_extra_whitelist, set_mode, state, stop, stop_kernel, update, whitelist_info,
 };
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub use stub::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, port_cleanup, port_owner, restart_kernel,
+    is_installed, is_ready, kernel_status, pair_start, port_cleanup, port_owner, restart_kernel,
     set_extra_whitelist, set_mode, state, stop, stop_kernel, update, whitelist_info,
 };
 
@@ -434,6 +434,15 @@ mod imp {
         Ok(resp.get("data").cloned().unwrap_or_default())
     }
 
+    /// 生成本机一次性配对码（对端出码；服务托管时由服务调本机 gateway）。
+    pub fn pair_start(role: &str, ttl: u64) -> Result<serde_json::Value, String> {
+        let resp = request(
+            "gateway.pair.start",
+            serde_json::json!({ "role": role, "ttl": ttl }),
+        )?;
+        Ok(resp.get("data").cloned().unwrap_or_default())
+    }
+
     /// 谁占着 RPC 端口（诊断用）。
     pub fn port_owner() -> Result<serde_json::Value, String> {
         let resp = request("port.owner", serde_json::json!({}))?;
@@ -559,6 +568,10 @@ mod stub {
     }
     pub fn set_extra_whitelist(_extra: &[String]) -> Result<serde_json::Value, String> {
         Err("当前平台没有特权服务".to_string())
+    }
+    /// 裸核平台没有特权服务托管 gateway：配对码用 `exvlan-cli auth pair` 直连 gateway。
+    pub fn pair_start(_role: &str, _ttl: u64) -> Result<serde_json::Value, String> {
+        Err("当前平台没有特权服务：请用 `exvlan-cli auth pair` 生成配对码".to_string())
     }
     pub fn port_owner() -> Result<serde_json::Value, String> {
         Err("当前平台没有特权服务".to_string())

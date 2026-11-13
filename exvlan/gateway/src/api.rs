@@ -271,14 +271,18 @@ async fn system(State(state): State<AppState>, headers: HeaderMap) -> Response {
 async fn pair_start(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: String,
 ) -> Response {
-    if !peer.ip().is_loopback() {
-        return err(
-            StatusCode::FORBIDDEN,
-            "loopback_only",
-            "配对码只能在被管机器本机生成（请在那台机器上执行 exvlan-cli auth pair）",
-        );
+    // 出码必须发生在被管机器本机：
+    // - 回环来源（`exvlan-cli auth pair` 直连、本机脚本）直接放行；
+    // - 或带**本机管理 token**（`gateway:admin`）—— 服务托管时为 mesh 绑定地址，
+    //   服务/本机 GUI 从 mesh IP 过来也在「本机」范畴；0600 token 天然隔离了远端。
+    if !peer.ip().is_loopback()
+        && let Err(resp) = require_scope(&state, &headers, Some("gateway:admin"))
+    {
+        tracing::warn!(peer = %peer.ip(), "pair/start rejected: 非回环且无 gateway:admin");
+        return resp;
     }
     let req: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
     let role = req

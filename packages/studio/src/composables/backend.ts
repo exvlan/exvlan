@@ -297,6 +297,11 @@ export async function gatewaySystem(targetId: string) {
   return await invoke<Record<string, unknown>>("gateway_system", { targetId });
 }
 
+/** 本机生成配对码（**被管端**动作：出码 + 兑换时签发 token 都在被管端）。 */
+export async function gatewayPairStart(role: string, ttl?: number) {
+  return await invoke<Record<string, unknown>>("gateway_pair_start", { role, ttl });
+}
+
 /** 对端诊断（`/api/v1/doctor`）。 */
 export async function gatewayDoctor(targetId: string) {
   return await invoke<Record<string, unknown>>("gateway_doctor", { targetId });
