@@ -1197,7 +1197,8 @@ impl ConfigLoader for TomlConfig {
     }
 }
 
-/// Transitional name retained while native consumers migrate to [`TomlConfig`].
+/// Transitional name retained **only** for `exvlan-ffi` (that crate is being migrated
+/// separately); every other consumer uses [`TomlConfig`] directly.
 pub type TomlConfigLoader = TomlConfig;
 
 #[cfg(test)]
@@ -1440,7 +1441,7 @@ mod compatibility_tests {
     #[test]
     fn socket_mark_config_file_roundtrip_none_some_and_zero() {
         // Omitting the flag leaves socket_mark unset (None) -> SO_MARK untouched.
-        let cfg = TomlConfigLoader::new_from_str(
+        let cfg = TomlConfig::new_from_str(
             r#"
 [network_identity]
 network_name = "n"
@@ -1451,7 +1452,7 @@ network_secret = "s"
         assert_eq!(cfg.get_flags().socket_mark, None);
 
         // socket_mark = 0 is a legitimate value distinct from "unset".
-        let cfg = TomlConfigLoader::new_from_str(
+        let cfg = TomlConfig::new_from_str(
             r#"
 [network_identity]
 network_name = "n"
@@ -1465,7 +1466,7 @@ socket_mark = 0
         assert_eq!(cfg.get_flags().socket_mark, Some(0));
 
         // A non-zero mark round-trips as Some(v).
-        let cfg = TomlConfigLoader::new_from_str(
+        let cfg = TomlConfig::new_from_str(
             r#"
 [network_identity]
 network_name = "n"
@@ -1491,7 +1492,7 @@ socket_mark = 66
     #[cfg(feature = "config-write")]
     #[test]
     fn dump_preserves_flags_that_differ_from_exvlan_defaults() {
-        let cfg = TomlConfigLoader::default();
+        let cfg = TomlConfig::default();
         let mut flags = gen_default_flags();
         flags.dev_name = "et_test".to_string();
         flags.enable_quic_proxy = true;
@@ -1525,7 +1526,7 @@ socket_mark = 66
         assert!(dumped.contains("data_compress_algo = \"Zstd\""));
         assert!(dumped.contains("socket_mark = 0"));
 
-        let reloaded = TomlConfigLoader::new_from_str(&dumped).unwrap();
+        let reloaded = TomlConfig::new_from_str(&dumped).unwrap();
         let reloaded_flags = reloaded.get_flags();
         assert_eq!(reloaded_flags.dev_name, "et_test");
         assert!(reloaded_flags.enable_quic_proxy);
@@ -1548,7 +1549,7 @@ socket_mark = 66
 
     #[test]
     fn test_stun_servers_config() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         let stun_servers = config.get_stun_servers();
         assert!(stun_servers.is_none());
         assert!(config.get_tcp_stun_servers().is_none());
@@ -1580,7 +1581,7 @@ tcp_stun_servers = [
     "tcp-stun.example.com:3478"
 ]"#;
 
-        let config = TomlConfigLoader::new_from_str(config_str).unwrap();
+        let config = TomlConfig::new_from_str(config_str).unwrap();
         let stun_servers = config.get_stun_servers().unwrap();
         let tcp_stun_servers = config.get_tcp_stun_servers().unwrap();
 
@@ -1593,7 +1594,7 @@ tcp_stun_servers = [
 
     #[test]
     fn test_empty_tcp_stun_servers_toml_parsing() {
-        let config = TomlConfigLoader::new_from_str(
+        let config = TomlConfig::new_from_str(
             r#"
 instance_name = "test"
 tcp_stun_servers = []
@@ -1607,7 +1608,7 @@ tcp_stun_servers = []
     #[cfg(feature = "config-write")]
     #[test]
     fn test_network_config_source_toml_roundtrip() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         assert_eq!(config.get_network_config_source(), ConfigSource::User);
 
         config.set_network_config_source(Some(ConfigSource::Web));
@@ -1616,7 +1617,7 @@ tcp_stun_servers = []
         assert!(dumped.contains("[source]"));
         assert!(dumped.contains("source = \"web\""));
 
-        let loaded = TomlConfigLoader::new_from_str(&dumped).unwrap();
+        let loaded = TomlConfig::new_from_str(&dumped).unwrap();
         assert_eq!(loaded.get_network_config_source(), ConfigSource::Web);
     }
 
@@ -1624,7 +1625,7 @@ tcp_stun_servers = []
     #[test]
     fn test_toml_credential_mode_omits_network_secret() {
         for network_secret in ["", r#"network_secret = """#] {
-            let config = TomlConfigLoader::new_from_str(&format!(
+            let config = TomlConfig::new_from_str(&format!(
                 r#"
 [network_identity]
 network_name = "credential-network"
@@ -1646,7 +1647,7 @@ enabled = true
 
     #[test]
     fn test_toml_secure_mode_without_network_identity_uses_default_secret() {
-        let config = TomlConfigLoader::new_from_str(
+        let config = TomlConfig::new_from_str(
             r#"
 [secure_mode]
 enabled = true
@@ -1662,7 +1663,7 @@ enabled = true
 
     #[test]
     fn test_toml_secure_mode_generates_keypair_when_keys_missing() {
-        let config = TomlConfigLoader::new_from_str(
+        let config = TomlConfig::new_from_str(
             r#"
 [secure_mode]
 enabled = true
@@ -1682,7 +1683,7 @@ enabled = true
     #[test]
     fn test_toml_secure_mode_derives_public_key_from_private_key() {
         let private = x25519_dalek::StaticSecret::random_from_rng(rand::rngs::OsRng);
-        let config = TomlConfigLoader::new_from_str(&format!(
+        let config = TomlConfig::new_from_str(&format!(
             r#"
 [secure_mode]
 enabled = true
@@ -1707,7 +1708,7 @@ local_private_key = "{}"
         let other_public = x25519_dalek::PublicKey::from(
             &x25519_dalek::StaticSecret::random_from_rng(rand::rngs::OsRng),
         );
-        let error = TomlConfigLoader::new_from_str(&format!(
+        let error = TomlConfig::new_from_str(&format!(
             r#"
 [secure_mode]
 enabled = true
@@ -1732,7 +1733,7 @@ local_public_key = "{}"
 
     #[test]
     fn test_toml_secure_mode_disabled_keeps_keys_unset() {
-        let config = TomlConfigLoader::new_from_str(
+        let config = TomlConfig::new_from_str(
             r#"
 [secure_mode]
 enabled = false
@@ -1749,7 +1750,7 @@ enabled = false
     #[cfg(feature = "config-write")]
     #[test]
     fn test_toml_secure_mode_keypair_survives_roundtrip() {
-        let config = TomlConfigLoader::new_from_str(
+        let config = TomlConfig::new_from_str(
             r#"
 [secure_mode]
 enabled = true
@@ -1758,7 +1759,7 @@ enabled = true
         .unwrap();
 
         let dumped = config.dump();
-        let restored = TomlConfigLoader::new_from_str(&dumped).unwrap();
+        let restored = TomlConfig::new_from_str(&dumped).unwrap();
 
         assert_eq!(
             config.get_secure_mode().unwrap(),
@@ -1786,7 +1787,7 @@ protocol = 5
 enabled = true
 "#;
 
-        let config = TomlConfigLoader::new_from_str(config_str).unwrap();
+        let config = TomlConfig::new_from_str(config_str).unwrap();
         let acl = config.get_acl().unwrap();
         let acl_v1 = acl.acl_v1.unwrap();
         let chain = &acl_v1.chains[0];
@@ -1816,7 +1817,7 @@ enabled = true
 group_name = "admin"
 group_secret = "admin-pw"
 "#;
-        let config = TomlConfigLoader::new_from_str(declares_only).unwrap();
+        let config = TomlConfig::new_from_str(declares_only).unwrap();
         let group = config.get_acl().unwrap().acl_v1.unwrap().group.unwrap();
         assert_eq!(group.declares.len(), 1);
         assert!(group.members.is_empty());
@@ -1825,7 +1826,7 @@ group_secret = "admin-pw"
 [acl.acl_v1.group]
 members = ["admin"]
 "#;
-        let config = TomlConfigLoader::new_from_str(members_only).unwrap();
+        let config = TomlConfig::new_from_str(members_only).unwrap();
         let group = config.get_acl().unwrap().acl_v1.unwrap().group.unwrap();
         assert!(group.declares.is_empty());
         assert_eq!(group.members, vec!["admin"]);
@@ -1834,16 +1835,16 @@ members = ["admin"]
     #[cfg(feature = "config-write")]
     #[test]
     fn test_network_config_source_user_is_implicit() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         config.set_network_config_source(Some(ConfigSource::User));
         let dumped = config.dump();
 
         assert!(!dumped.contains("[source]"));
 
-        let loaded = TomlConfigLoader::new_from_str(&dumped).unwrap();
+        let loaded = TomlConfig::new_from_str(&dumped).unwrap();
         assert_eq!(loaded.get_network_config_source(), ConfigSource::User);
 
-        let explicit_user = TomlConfigLoader::new_from_str(
+        let explicit_user = TomlConfig::new_from_str(
             r#"
 [source]
 source = "user"
@@ -1860,7 +1861,7 @@ source = "user"
     #[cfg(feature = "config-write")]
     #[test]
     fn test_ipv6_public_addr_config_roundtrip() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         let prefix: cidr::Ipv6Cidr = "2001:db8:100::/64".parse().unwrap();
 
         config.set_ipv6_public_addr_provider(true);
@@ -1872,7 +1873,7 @@ source = "user"
         assert_eq!(config.get_ipv6_public_addr_prefix(), Some(prefix));
 
         let dumped = config.dump();
-        let loaded = TomlConfigLoader::new_from_str(&dumped).unwrap();
+        let loaded = TomlConfig::new_from_str(&dumped).unwrap();
         assert!(loaded.get_ipv6_public_addr_provider());
         assert!(loaded.get_ipv6_public_addr_auto());
         assert_eq!(loaded.get_ipv6_public_addr_prefix(), Some(prefix));
@@ -1924,7 +1925,7 @@ bind_addr = "0.0.0.0:11011"
 dst_addr = "192.168.94.33:11011"
 proto = "tcp"
 "#;
-        let ret = TomlConfigLoader::new_from_str(config_str);
+        let ret = TomlConfig::new_from_str(config_str);
         if let Err(e) = &ret {
             println!("{}", e);
         } else {

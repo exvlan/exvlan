@@ -716,7 +716,7 @@ mod tests {
 
     use super::PublicIpv6ProviderConfig;
     use crate::common::{
-        config::{ConfigLoader, TomlConfigLoader},
+        config::{ConfigLoader, TomlConfig},
         error::Error,
         global_ctx::GlobalCtx,
     };
@@ -911,7 +911,7 @@ mod tests {
     }
 
     fn test_global_ctx() -> Arc<GlobalCtx> {
-        Arc::new(GlobalCtx::new(TomlConfigLoader::default()))
+        Arc::new(GlobalCtx::new(TomlConfig::default()))
     }
 
     #[tokio::test]

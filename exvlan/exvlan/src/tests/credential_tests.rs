@@ -21,7 +21,7 @@ use crate::{
 };
 use crate::{
     common::{
-        config::{ConfigLoader, NetworkIdentity, PeerConfig, TomlConfigLoader},
+        config::{ConfigLoader, NetworkIdentity, PeerConfig, TomlConfig},
         global_ctx::GlobalCtxEvent,
     },
     instance::test_instance::TestInstance as Instance,
@@ -88,7 +88,7 @@ async fn generate_credential_with_options(
     (generated.credential_id, generated.secret)
 }
 
-fn disable_p2p(config: &TomlConfigLoader) {
+fn disable_p2p(config: &TomlConfig) {
     let mut flags = config.get_flags();
     flags.disable_p2p = true;
     config.set_flags(flags);
@@ -295,8 +295,8 @@ fn build_credential_config(
     ns: Option<&str>,
     ipv4: &str,
     ipv6: &str,
-) -> TomlConfigLoader {
-    let config = TomlConfigLoader::default();
+) -> TomlConfig {
+    let config = TomlConfig::default();
     config.set_inst_name(inst_name.to_owned());
     config.set_netns(ns.map(|s| s.to_owned()));
     config.set_ipv4(Some(ipv4.parse().unwrap()));
@@ -315,7 +315,7 @@ async fn create_credential_config(
     ns: Option<&str>,
     ipv4: &str,
     ipv6: &str,
-) -> TomlConfigLoader {
+) -> TomlConfig {
     let (_cred_id, cred_secret) =
         generate_credential(admin_inst, vec![], false, vec![], Duration::from_secs(3600)).await;
 
@@ -340,7 +340,7 @@ fn create_credential_config_from_secret(
     ns: Option<&str>,
     ipv4: &str,
     ipv6: &str,
-) -> TomlConfigLoader {
+) -> TomlConfig {
     build_credential_config(
         network_name,
         &credential_private_key_from_secret(credential_secret),
@@ -358,19 +358,14 @@ fn create_unknown_credential_config(
     ns: Option<&str>,
     ipv4: &str,
     ipv6: &str,
-) -> TomlConfigLoader {
+) -> TomlConfig {
     let random_private = x25519_dalek::StaticSecret::random_from_rng(rand::rngs::OsRng);
     build_credential_config(network_name, &random_private, inst_name, ns, ipv4, ipv6)
 }
 
 /// Helper: Create admin node config
-fn create_admin_config(
-    inst_name: &str,
-    ns: Option<&str>,
-    ipv4: &str,
-    ipv6: &str,
-) -> TomlConfigLoader {
-    let config = TomlConfigLoader::default();
+fn create_admin_config(inst_name: &str, ns: Option<&str>, ipv4: &str, ipv6: &str) -> TomlConfig {
+    let config = TomlConfig::default();
     config.set_inst_name(inst_name.to_owned());
     config.set_netns(ns.map(|s| s.to_owned()));
     config.set_ipv4(Some(ipv4.parse().unwrap()));
@@ -388,13 +383,8 @@ fn create_admin_config(
     config
 }
 
-fn create_shared_config(
-    inst_name: &str,
-    ns: Option<&str>,
-    ipv4: &str,
-    ipv6: &str,
-) -> TomlConfigLoader {
-    let config = TomlConfigLoader::default();
+fn create_shared_config(inst_name: &str, ns: Option<&str>, ipv4: &str, ipv6: &str) -> TomlConfig {
+    let config = TomlConfig::default();
     config.set_inst_name(inst_name.to_owned());
     config.set_netns(ns.map(|s| s.to_owned()));
     config.set_ipv4(Some(ipv4.parse().unwrap()));
@@ -411,8 +401,8 @@ fn create_shared_config(
     config
 }
 
-fn create_public_server_config() -> TomlConfigLoader {
-    let config = TomlConfigLoader::default();
+fn create_public_server_config() -> TomlConfig {
+    let config = TomlConfig::default();
     config.set_inst_name(PUBLIC_SERVER_NETWORK_NAME.to_string());
     config.set_hostname(Some("public-server".to_string()));
     config.set_netns(Some("ns_adm".to_string()));
@@ -433,8 +423,8 @@ fn create_public_server_config() -> TomlConfigLoader {
     config
 }
 
-fn create_need_p2p_admin_config(listener_scheme: &str) -> TomlConfigLoader {
-    let config = TomlConfigLoader::default();
+fn create_need_p2p_admin_config(listener_scheme: &str) -> TomlConfig {
+    let config = TomlConfig::default();
     config.set_inst_name(NEED_P2P_ADMIN_NETWORK_NAME.to_string());
     config.set_hostname(Some("need-p2p-admin".to_string()));
     config.set_netns(Some("ns_c3".to_string()));
@@ -470,7 +460,7 @@ fn create_public_server_credential_config(
     tcp_listener_port: u16,
     udp_listener_port: u16,
     proxy_cidrs: &[&str],
-) -> TomlConfigLoader {
+) -> TomlConfig {
     let config = create_credential_config_from_secret(
         NEED_P2P_ADMIN_NETWORK_NAME.to_string(),
         credential_secret,
@@ -920,7 +910,7 @@ async fn create_generated_credential_config(
     ns: Option<&str>,
     ipv4: &str,
     ipv6: &str,
-) -> (TomlConfigLoader, String) {
+) -> (TomlConfig, String) {
     let (cred_id, cred_secret) =
         generate_credential(admin_inst, vec![], false, vec![], Duration::from_secs(3600)).await;
     let config = build_credential_config(
@@ -1374,7 +1364,7 @@ async fn prefer_peer_relay_single_admin(#[case] allow_relay: bool) {
             .try_into()
             .unwrap();
         let private = x25519_dalek::StaticSecret::from(privkey_bytes);
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         config.set_inst_name("cred_a".to_string());
         config.set_netns(Some("ns_c1".to_string()));
         config.set_ipv4(Some("10.144.144.2".parse().unwrap()));
@@ -1403,7 +1393,7 @@ async fn prefer_peer_relay_single_admin(#[case] allow_relay: bool) {
             .try_into()
             .unwrap();
         let private = x25519_dalek::StaticSecret::from(privkey_bytes);
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         config.set_inst_name("cred_b".to_string());
         config.set_netns(Some("ns_c2".to_string()));
         config.set_ipv4(Some("10.144.144.3".parse().unwrap()));
@@ -1432,7 +1422,7 @@ async fn prefer_peer_relay_single_admin(#[case] allow_relay: bool) {
             .try_into()
             .unwrap();
         let private = x25519_dalek::StaticSecret::from(privkey_bytes);
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         config.set_inst_name("cred_c".to_string());
         config.set_netns(Some("ns_c3".to_string()));
         config.set_ipv4(Some("10.144.144.4".parse().unwrap()));
@@ -2066,7 +2056,7 @@ async fn credential_revocation_propagates() {
             .unwrap();
         let private = x25519_dalek::StaticSecret::from(privkey_bytes);
 
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         config.set_inst_name("cred".to_string());
         config.set_netns(Some("ns_c1".to_string()));
         config.set_ipv4(Some("10.144.144.2".parse().unwrap()));
@@ -2327,7 +2317,7 @@ async fn credential_unknown_rejected() {
     // Create credential node with random key (not generated by admin)
     let random_private = x25519_dalek::StaticSecret::random_from_rng(rand::rngs::OsRng);
     let cred_config = {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         config.set_inst_name("cred".to_string());
         config.set_netns(Some("ns_c1".to_string()));
         config.set_ipv4(Some("10.144.144.2".parse().unwrap()));

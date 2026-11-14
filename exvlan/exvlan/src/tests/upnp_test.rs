@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
     common::{
-        config::{ConfigLoader, TomlConfigLoader},
+        config::{ConfigLoader, TomlConfig},
         error::Error,
         global_ctx::GlobalCtxEvent,
         netns::NetNS,
@@ -892,8 +892,8 @@ fn create_test_instance_config(
     netns: Option<&str>,
     ipv4: &str,
     ipv6: &str,
-) -> TomlConfigLoader {
-    let config = TomlConfigLoader::default();
+) -> TomlConfig {
+    let config = TomlConfig::default();
     config.set_inst_name(inst_name.to_owned());
     config.set_netns(netns.map(ToOwned::to_owned));
     config.set_ipv4(Some(ipv4.parse().unwrap()));

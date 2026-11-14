@@ -9,7 +9,7 @@ use crate::config::{
     MappedListenerPolicy, normalize_secure_mode_config,
     toml::{
         ConfigLoader, ManagedCredentialConfig, NetworkIdentity, PeerConfig, PortForwardConfig,
-        TomlConfigLoader, VpnPortalClientConfig, VpnPortalConfig, gen_default_flags,
+        TomlConfig, VpnPortalClientConfig, VpnPortalConfig, gen_default_flags,
     },
 };
 
@@ -20,7 +20,7 @@ fn parse_mapped_listener_urls(mapped_listeners: &[String]) -> Result<Vec<url::Ur
 
 pub fn add_proxy_network_to_config(
     proxy_network: &str,
-    cfg: &TomlConfigLoader,
+    cfg: &TomlConfig,
 ) -> Result<(), anyhow::Error> {
     let parts: Vec<&str> = proxy_network.split("->").collect();
     let real_cidr = parts[0]
@@ -80,7 +80,7 @@ pub(crate) fn managed_credential_to_proto(
 }
 
 pub trait NetworkConfigExt {
-    fn gen_config(&self) -> Result<TomlConfigLoader, anyhow::Error>;
+    fn gen_config(&self) -> Result<TomlConfig, anyhow::Error>;
     fn new_from_config(config: impl ConfigLoader) -> Result<NetworkConfig, anyhow::Error>;
 }
 
@@ -241,8 +241,8 @@ fn parse_peer_urls(peer_urls: &[String]) -> Result<Vec<PeerConfig>, anyhow::Erro
 
 impl NetworkConfigExt for NetworkConfig {
     #[allow(deprecated)]
-    fn gen_config(&self) -> Result<TomlConfigLoader, anyhow::Error> {
-        let cfg = TomlConfigLoader::default();
+    fn gen_config(&self) -> Result<TomlConfig, anyhow::Error> {
+        let cfg = TomlConfig::default();
         cfg.set_id(
             self.instance_id
                 .clone()
@@ -639,7 +639,7 @@ impl NetworkConfigExt for NetworkConfig {
     }
 
     fn new_from_config(config: impl ConfigLoader) -> Result<Self, anyhow::Error> {
-        let default_config = TomlConfigLoader::default();
+        let default_config = TomlConfig::default();
 
         let mut result = Self {
             ..Default::default()
@@ -986,7 +986,7 @@ network_secret = "secret"
 default_protocol = "udp"
 disable_p2p = true
 "#;
-        let parsed = TomlConfigLoader::new_from_str(original).unwrap();
+        let parsed = TomlConfig::new_from_str(original).unwrap();
         let mut network_config = NetworkConfig::new_from_config(&parsed).unwrap();
         network_config.network_name = Some("edited-network".to_owned());
         network_config.disable_p2p = Some(false);

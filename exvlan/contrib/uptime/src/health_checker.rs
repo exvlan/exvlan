@@ -7,9 +7,7 @@ use std::{
 use anyhow::Context as _;
 use dashmap::DashMap;
 use exvlan::{
-    common::config::{
-        ConfigFileControl, ConfigLoader, NetworkIdentity, PeerConfig, TomlConfigLoader,
-    },
+    common::config::{ConfigFileControl, ConfigLoader, NetworkIdentity, PeerConfig, TomlConfig},
     instance::factory::{NativeInstanceManager, native_instance_manager},
 };
 use serde::{Deserialize, Serialize};
@@ -267,7 +265,7 @@ pub struct HealthChecker {
     inst_id_map: DashMap<i32, uuid::Uuid>,
     node_tasks: DashMap<i32, AbortOnDropHandle<()>>,
     node_records: Arc<DashMap<i32, HealthyMemRecord>>,
-    node_cfg: Arc<DashMap<i32, TomlConfigLoader>>,
+    node_cfg: Arc<DashMap<i32, TomlConfig>>,
 }
 
 impl HealthChecker {
@@ -375,8 +373,8 @@ impl HealthChecker {
         &self,
         node_info: &shared_nodes::Model,
         inst_id: Option<uuid::Uuid>,
-    ) -> anyhow::Result<TomlConfigLoader> {
-        let cfg = TomlConfigLoader::default();
+    ) -> anyhow::Result<TomlConfig> {
+        let cfg = TomlConfig::default();
         cfg.set_peers(vec![PeerConfig {
             uri: format!(
                 "{}://{}:{}",
@@ -450,7 +448,7 @@ impl HealthChecker {
         &self,
         node_id: i32,
         inst_id: Option<uuid::Uuid>,
-    ) -> anyhow::Result<TomlConfigLoader> {
+    ) -> anyhow::Result<TomlConfig> {
         let node_info = NodeOperations::get_node_by_id(&self.db, node_id)
             .await
             .with_context(|| format!("failed to get node by id: {}", node_id))?

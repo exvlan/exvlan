@@ -17,7 +17,7 @@ use axum::{Extension, Json, Router, extract::State, routing::get};
 use axum_login::tower_sessions::{ExpiredDeletion, SessionManagerLayer};
 use axum_login::{AuthManagerLayerBuilder, AuthUser, login_required};
 use axum_messages::MessagesManagerLayer;
-use exvlan::common::config::{ConfigLoader, NetworkConfig, NetworkConfigExt, TomlConfigLoader};
+use exvlan::common::config::{ConfigLoader, NetworkConfig, NetworkConfigExt, TomlConfig};
 use exvlan::proto::rpc_types;
 use network::NetworkApi;
 use sea_orm::DbErr;
@@ -248,7 +248,7 @@ impl RestfulServer {
     async fn handle_parse_config(
         Json(req): Json<ParseConfigRequest>,
     ) -> Result<Json<ParseConfigResponse>, HttpHandleError> {
-        let config = TomlConfigLoader::new_from_str(&req.toml_config)
+        let config = TomlConfig::new_from_str(&req.toml_config)
             .and_then(|config| NetworkConfig::new_from_config(&config));
         match config {
             Ok(c) => Ok(ParseConfigResponse {

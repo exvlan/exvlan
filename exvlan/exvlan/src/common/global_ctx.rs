@@ -355,13 +355,13 @@ impl GlobalCtx {
 
 #[cfg(test)]
 pub mod tests {
-    use crate::common::config::TomlConfigLoader;
+    use crate::common::config::TomlConfig;
 
     use super::*;
 
     #[tokio::test]
     async fn test_global_ctx() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         let global_ctx = GlobalCtx::new(config);
 
         let mut subscriber = global_ctx.subscribe();
@@ -391,7 +391,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_tun_device_name_tracks_explicit_runtime_state() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         let global_ctx = GlobalCtx::new(config);
 
         assert_eq!(global_ctx.get_tun_device_name(), None);
@@ -421,7 +421,7 @@ pub mod tests {
 
     #[test]
     fn host_hostname_fallback_does_not_materialize_in_toml() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         let global_ctx = GlobalCtx::new(config.clone());
 
         assert!(!global_ctx.get_hostname().is_empty());
@@ -430,7 +430,7 @@ pub mod tests {
 
     #[test]
     fn active_dhcp_ipv4_survives_declarative_config_replacement() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         config.set_dhcp(true);
         let global_ctx = GlobalCtx::new(config.clone());
         let lease = "10.144.144.7/24".parse().unwrap();
@@ -443,7 +443,7 @@ pub mod tests {
 
     #[test]
     fn runtime_state_does_not_rewrite_toml_config() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         let global_ctx = GlobalCtx::new(config.clone());
         let mut runtime_flags = global_ctx.get_flags();
         runtime_flags.enable_exit_node = true;
@@ -465,7 +465,7 @@ pub mod tests {
 
     #[test]
     fn compact_runtime_does_not_advertise_unsupported_mapped_listeners() {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         config.set_mapped_listeners(Some(vec![
             "tcp://127.0.0.1:11010".parse().unwrap(),
             "quic://127.0.0.1:11011".parse().unwrap(),
@@ -484,7 +484,7 @@ pub mod tests {
     pub fn get_mock_global_ctx_with_network(
         network_identy: Option<NetworkIdentity>,
     ) -> ArcGlobalCtx {
-        let config_fs = TomlConfigLoader::default();
+        let config_fs = TomlConfig::default();
         config_fs.set_inst_name(format!("test_{}", config_fs.get_id()));
         config_fs.set_network_identity(network_identy.unwrap_or_default());
 

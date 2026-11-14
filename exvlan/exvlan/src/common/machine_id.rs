@@ -24,21 +24,11 @@ pub fn resolve_machine_id(opts: &MachineIdOptions) -> anyhow::Result<uuid::Uuid>
         return Ok(parse_or_hash_machine_id(explicit_machine_id));
     }
 
+    // 状态文件是唯一身份来源：旧落点（`<data>/exvlan/machine_id`、`<core>/et_machine_id`）
+    // 由 `exvlan-migrate` 的 S3 步骤 COPY 到新落点，运行时不再找第二处。
     let state_file = resolve_machine_id_state_file(opts.state_dir.as_deref())?;
-    let allow_legacy_machine_uid_migration =
-        should_attempt_legacy_machine_uid_migration(&state_file);
     if let Some(machine_id) = read_state_machine_id(&state_file)? {
         return Ok(machine_id);
-    }
-
-    if let Some(machine_id) = read_legacy_machine_id_file() {
-        return persist_machine_id(&state_file, machine_id);
-    }
-
-    if allow_legacy_machine_uid_migration
-        && let Some(machine_id) = resolve_legacy_machine_uid_hash()
-    {
-        return persist_machine_id(&state_file, machine_id);
     }
 
     let machine_id = resolve_new_machine_id().unwrap_or_else(uuid::Uuid::new_v4);
@@ -63,75 +53,7 @@ fn resolve_machine_id_state_file(state_dir: Option<&Path>) -> anyhow::Result<Pat
         Some(dir) => dir.to_path_buf(),
         None => default_machine_id_state_dir()?,
     };
-    let path = state_dir.join("machine_id");
-    migrate_legacy_machine_id(&path);
-    Ok(path)
-}
-
-/// 20712 路径规范化：旧目录的 `machine_id` 仍在时，先搬到新位置。
-///
-/// 必须保留原值，否则节点在网络里会以新的 peer_id 出现。
-fn migrate_legacy_machine_id(new_path: &Path) {
-    if new_path.exists() {
-        return;
-    }
-    let Some(old_path) = legacy_machine_id_file() else {
-        return;
-    };
-    if old_path == new_path || !old_path.is_file() {
-        return;
-    }
-    if let Some(dir) = new_path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let _ = std::fs::copy(&old_path, new_path);
-}
-
-/// 旧版 machine_id 路径（仅 Windows / Linux 发生过改名）。
-#[allow(clippy::needless_return)]
-fn legacy_machine_id_file() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        let local_app_data = non_empty_os_string(env::var_os("LOCALAPPDATA"))?;
-        return Some(
-            PathBuf::from(local_app_data)
-                .join("exvlan")
-                .join("machine_id"),
-        );
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if let Some(path) = non_empty_os_string(env::var_os("XDG_DATA_HOME")) {
-            return Some(PathBuf::from(path).join("exvlan").join("machine_id"));
-        }
-        let home = non_empty_os_string(env::var_os("HOME"))?;
-        return Some(
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("exvlan")
-                .join("machine_id"),
-        );
-    }
-    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "linux")))]
-    {
-        let home = non_empty_os_string(env::var_os("HOME"))?;
-        return Some(
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("exvlan")
-                .join("machine_id"),
-        );
-    }
-    #[cfg(not(any(unix, target_os = "windows")))]
-    {
-        None
-    }
-    #[cfg(target_os = "macos")]
-    {
-        None
-    }
+    Ok(state_dir.join("machine_id"))
 }
 
 fn non_empty_os_string(value: Option<OsString>) -> Option<OsString> {
@@ -202,65 +124,12 @@ fn read_state_machine_id(path: &Path) -> anyhow::Result<Option<uuid::Uuid>> {
     Ok(Some(machine_id))
 }
 
-fn read_legacy_machine_id_file() -> Option<uuid::Uuid> {
-    let path = legacy_machine_id_file_path()?;
-    read_legacy_machine_id_file_at(&path)
-}
-
-fn read_legacy_machine_id_file_at(path: &Path) -> Option<uuid::Uuid> {
-    let contents = match std::fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(err) => {
-            tracing::warn!(
-                path = %path.display(),
-                %err,
-                "ignoring unreadable legacy machine id file"
-            );
-            return None;
-        }
-    };
-
-    match uuid::Uuid::parse_str(contents.trim()) {
-        Ok(machine_id) => Some(machine_id),
-        Err(err) => {
-            tracing::warn!(
-                path = %path.display(),
-                %err,
-                "ignoring invalid legacy machine id file"
-            );
-            None
-        }
-    }
-}
-
-fn legacy_machine_id_file_path() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()
-        .map(|path| path.with_file_name("et_machine_id"))
-}
-
 fn read_optional_file(path: &Path) -> anyhow::Result<Option<String>> {
     match std::fs::read_to_string(path) {
         Ok(contents) => Ok(Some(contents)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
     }
-}
-
-fn should_attempt_legacy_machine_uid_migration(state_file: &Path) -> bool {
-    let Some(state_dir) = state_file.parent() else {
-        return false;
-    };
-
-    let Ok(mut entries) = std::fs::read_dir(state_dir) else {
-        return false;
-    };
-    entries.any(|entry| entry.is_ok())
-}
-
-fn resolve_legacy_machine_uid_hash() -> Option<uuid::Uuid> {
-    machine_uid_seed().map(|seed| digest_uuid_from_str(seed.as_str()))
 }
 
 fn resolve_new_machine_id() -> Option<uuid::Uuid> {
@@ -574,13 +443,6 @@ mod tests {
     }
 
     #[test]
-    fn test_read_legacy_machine_id_file_ignores_read_errors() {
-        let temp_dir = tempfile::tempdir().unwrap();
-
-        assert_eq!(read_legacy_machine_id_file_at(temp_dir.path()), None);
-    }
-
-    #[test]
     fn test_write_uuid_file_atomically_writes_expected_contents() {
         let temp_dir = tempfile::tempdir().unwrap();
         let machine_id = uuid::Uuid::new_v4();
@@ -643,25 +505,5 @@ mod tests {
             std::fs::read_to_string(state_file).unwrap(),
             machine_id.to_string()
         );
-    }
-
-    #[test]
-    fn test_legacy_machine_uid_migration_requires_existing_state_dir_content() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let missing_state_file = temp_dir.path().join("missing").join("machine_id");
-        assert!(!should_attempt_legacy_machine_uid_migration(
-            &missing_state_file
-        ));
-
-        let empty_dir = temp_dir.path().join("empty");
-        std::fs::create_dir_all(&empty_dir).unwrap();
-        assert!(!should_attempt_legacy_machine_uid_migration(
-            &empty_dir.join("machine_id")
-        ));
-
-        std::fs::write(empty_dir.join("config.toml"), "x=1").unwrap();
-        assert!(should_attempt_legacy_machine_uid_migration(
-            &empty_dir.join("machine_id")
-        ));
     }
 }

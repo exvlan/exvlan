@@ -187,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use exvlan::common::config::{ConfigLoader as _, TomlConfigLoader};
+    use exvlan::common::config::{ConfigLoader as _, TomlConfig};
 
     #[test]
     fn parses_minimal_config_argument() {
@@ -240,7 +240,7 @@ mod tests {
 
     #[tokio::test]
     async fn compact_factory_accepts_unsupported_config_without_changing_it() {
-        let config = TomlConfigLoader::new_from_str(
+        let config = TomlConfig::new_from_str(
             r#"
 dhcp = true
 listeners = ["quic://127.0.0.1:11010"]

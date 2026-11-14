@@ -26,7 +26,7 @@ use super::*;
 
 use crate::{
     common::{
-        config::{ConfigLoader, NetworkIdentity, PortForwardConfig, TomlConfigLoader},
+        config::{ConfigLoader, NetworkIdentity, PortForwardConfig, TomlConfig},
         netns::{NetNS, ROOT_NETNS_NAME},
     },
     instance::config::test_runtime_instance_config,
@@ -140,13 +140,8 @@ pub fn prepare_linux_namespaces() {
     add_ns_to_bridge("br_b", "net_f");
 }
 
-pub fn get_inst_config(
-    inst_name: &str,
-    ns: Option<&str>,
-    ipv4: &str,
-    ipv6: &str,
-) -> TomlConfigLoader {
-    let config = TomlConfigLoader::default();
+pub fn get_inst_config(inst_name: &str, ns: Option<&str>, ipv4: &str, ipv6: &str) -> TomlConfig {
+    let config = TomlConfig::default();
     config.set_inst_name(inst_name.to_owned());
     config.set_netns(ns.map(|s| s.to_owned()));
     config.set_ipv4(Some(ipv4.parse().unwrap()));
@@ -182,7 +177,7 @@ async fn init_three_node_with_process_runtime(
     .await
 }
 
-async fn init_three_node_ex_with_inst3<F: Fn(TomlConfigLoader) -> TomlConfigLoader>(
+async fn init_three_node_ex_with_inst3<F: Fn(TomlConfig) -> TomlConfig>(
     proto: &str,
     cfg_cb: F,
     use_public_server: bool,
@@ -283,7 +278,7 @@ async fn init_three_node_ex_with_inst3<F: Fn(TomlConfigLoader) -> TomlConfigLoad
     vec![inst1, inst2, inst3]
 }
 
-pub async fn init_three_node_ex<F: Fn(TomlConfigLoader) -> TomlConfigLoader>(
+pub async fn init_three_node_ex<F: Fn(TomlConfig) -> TomlConfig>(
     proto: &str,
     cfg_cb: F,
     use_public_server: bool,
@@ -300,7 +295,7 @@ pub async fn init_three_node_ex<F: Fn(TomlConfigLoader) -> TomlConfigLoader>(
     .await
 }
 
-async fn init_lazy_p2p_three_node_ex<F: Fn(TomlConfigLoader) -> TomlConfigLoader>(
+async fn init_lazy_p2p_three_node_ex<F: Fn(TomlConfig) -> TomlConfig>(
     proto: &str,
     cfg_cb: F,
 ) -> Vec<Instance> {
@@ -671,7 +666,7 @@ fn get_public_ipv6_config(
     ipv4: &str,
     dev_name: &str,
     inst_id: uuid::Uuid,
-) -> TomlConfigLoader {
+) -> TomlConfig {
     let config = get_inst_config(inst_name, Some(netns), ipv4, "fd00::1/64");
     config.set_id(inst_id);
     config.set_ipv6(None);

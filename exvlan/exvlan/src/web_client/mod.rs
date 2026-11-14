@@ -18,8 +18,8 @@ use crate::{
 };
 use crate::{
     common::{
-        MachineIdOptions, config::TomlConfigLoader, constants::EXVLAN_VERSION,
-        global_ctx::GlobalCtx, resolve_machine_id,
+        MachineIdOptions, config::TomlConfig, constants::EXVLAN_VERSION, global_ctx::GlobalCtx,
+        resolve_machine_id,
     },
     instance::{
         composition::runtime_one_shot_manual_connector,
@@ -136,7 +136,7 @@ pub async fn run_web_client(
         .with_context(|| "failed to resolve machine id for web client")?;
     let endpoint = parse_config_server_endpoint(config_server_url)?;
 
-    let config = TomlConfigLoader::default();
+    let config = TomlConfig::default();
     let global_ctx = Arc::new(GlobalCtx::new(config.clone()));
     let mut flags = global_ctx.get_flags();
     flags.bind_device = false;

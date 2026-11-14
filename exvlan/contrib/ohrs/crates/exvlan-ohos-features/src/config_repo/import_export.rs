@@ -1,6 +1,6 @@
 use crate::config::types::stored_config::{ExportTomlResult, StoredConfigRecord};
 use exvlan::common::config::NetworkConfigExt;
-use exvlan::common::config::{ConfigLoader, TomlConfigLoader};
+use exvlan::common::config::{ConfigLoader, TomlConfig};
 use exvlan::proto::api::manage::NetworkConfig;
 
 pub(super) fn export_config_toml_from_record(
@@ -19,7 +19,7 @@ pub(super) fn import_toml_to_record(
     save_config_record: impl Fn(String, String, String) -> Option<StoredConfigRecord>,
 ) -> Option<StoredConfigRecord> {
     let config =
-        NetworkConfig::new_from_config(TomlConfigLoader::new_from_str(&toml_text).ok()?).ok()?;
+        NetworkConfig::new_from_config(TomlConfig::new_from_str(&toml_text).ok()?).ok()?;
 
     let config_id = config.instance_id.clone()?;
     let name_from_toml = toml_text

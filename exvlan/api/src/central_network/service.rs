@@ -9,7 +9,7 @@ use std::{
 
 use base64::Engine as _;
 use exvlan::{
-    common::config::{ConfigLoader as _, NetworkConfig, TomlConfigLoader},
+    common::config::{ConfigLoader as _, NetworkConfig, TomlConfig},
     proto::api::manage::CollectNetworkInfoResponse,
 };
 use exvlan_core::management::remote_client::{RemoteClientError, RemoteClientManager as _};
@@ -1170,7 +1170,7 @@ fn sync_member_credential_proxy_cidrs(
         .as_ref()
         .map(|config| config.proxy_cidrs.clone())
         .unwrap_or_default();
-    let config = TomlConfigLoader::default();
+    let config = TomlConfig::default();
     for cidr in &proxy_cidrs {
         exvlan_core::config::api_input::add_proxy_network_to_config(cidr, &config)
             .map_err(|error| CentralNetworkServiceError::Invalid(error.to_string()))?;

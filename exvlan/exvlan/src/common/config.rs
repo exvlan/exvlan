@@ -34,10 +34,10 @@ pub fn parse_encryption_algorithm(value: &str) -> Result<EncryptionAlgorithm, St
         .map_err(|_| format!("'{value}' is not a valid encryption algorithm"))
 }
 
-pub fn load_toml_config_from_path(path: &PathBuf) -> Result<TomlConfigLoader, anyhow::Error> {
+pub fn load_toml_config_from_path(path: &PathBuf) -> Result<TomlConfig, anyhow::Error> {
     let config = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file: {}", path.display()))?;
-    TomlConfigLoader::new_from_str_with_source(&path.display().to_string(), &config)
+    TomlConfig::new_from_str_with_source(&path.display().to_string(), &config)
 }
 
 #[cfg(feature = "management-rpc")]
@@ -64,14 +64,14 @@ pub async fn load_config_from_file(
     config_file: &PathBuf,
     config_dir: Option<&PathBuf>,
     disable_env_parsing: bool,
-) -> Result<(TomlConfigLoader, ConfigFileControl), anyhow::Error> {
+) -> Result<(TomlConfig, ConfigFileControl), anyhow::Error> {
     if config_file.as_os_str() == "-" {
         let mut stdin = String::new();
         tokio::io::stdin()
             .read_to_string(&mut stdin)
             .await
             .context("failed to read config from stdin")?;
-        let config = TomlConfigLoader::new_from_str_with_source("stdin", &stdin)?;
+        let config = TomlConfig::new_from_str_with_source("stdin", &stdin)?;
         return Ok((config, ConfigFileControl::STATIC_CONFIG));
     }
 
@@ -91,7 +91,7 @@ pub async fn load_config_from_file(
     }
 
     let source_name = config_file.display().to_string();
-    let config = TomlConfigLoader::new_from_str_with_source(&source_name, &expanded_config_str)?;
+    let config = TomlConfig::new_from_str_with_source(&source_name, &expanded_config_str)?;
     let mut control = config_file_control_from_path(config_file.clone()).await;
 
     if uses_env_vars {

@@ -1,11 +1,11 @@
 use crate::{
-    common::config::{ConfigLoader, TomlConfigLoader},
+    common::config::{ConfigLoader, TomlConfig},
     common::global_ctx::tests::get_mock_global_ctx,
 };
 
 #[tokio::test]
 async fn test_ipv6_config_support() {
-    let config = TomlConfigLoader::default();
+    let config = TomlConfig::default();
 
     // Test IPv6 configuration setting and getting
     let ipv6_cidr = "fd00::1/64".parse().unwrap();

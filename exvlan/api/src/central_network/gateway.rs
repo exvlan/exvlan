@@ -10,7 +10,7 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use base64::Engine as _;
 use exvlan::{
-    common::config::{ConfigLoader as _, NetworkIdentity, TomlConfigLoader},
+    common::config::{ConfigLoader as _, NetworkIdentity, TomlConfig},
     instance::factory::{NativeCoreInstance, create_native_instance},
     tunnel::IpScheme,
 };
@@ -153,7 +153,7 @@ struct NativeGatewayRuntimeFactory;
 
 impl GatewayRuntimeFactory for NativeGatewayRuntimeFactory {
     fn build(&self, spec: &GatewayRuntimeSpec) -> anyhow::Result<Arc<dyn GatewayRuntime>> {
-        let config = TomlConfigLoader::default();
+        let config = TomlConfig::default();
         config.set_inst_name(format!(
             "exvlan-api-gw-{}-{}",
             spec.user_id, spec.network_id

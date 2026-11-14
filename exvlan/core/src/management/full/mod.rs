@@ -146,10 +146,10 @@ where
     H: CoreInstanceHost,
 {
     // 内部工具服务：GUI（尤其移动端）拿不到 core 时，用它做配置格式转换。
-    // 转换逻辑只有这一份（TomlConfigLoader / NetworkConfigExt），避免多端实现漂移。
+    // 转换逻辑只有这一份（TomlConfig / NetworkConfigExt），避免多端实现漂移。
     if service_name == "exvlan.internal.ConfigConvert" {
         use crate::config::api_input::{NetworkConfig, NetworkConfigExt as _};
-        use crate::config::toml::{ConfigLoader as _, TomlConfigLoader};
+        use crate::config::toml::{ConfigLoader as _, TomlConfig};
 
         return match method_name {
             "toml_to_config" => {
@@ -157,7 +157,7 @@ where
                     .get("tomlConfig")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
-                let cfg = TomlConfigLoader::new_from_str(toml_text)?;
+                let cfg = TomlConfig::new_from_str(toml_text)?;
                 let config = NetworkConfig::new_from_config(&cfg)?;
                 serde_json::to_value(config).map_err(|e| anyhow::anyhow!("{e}").into())
             }

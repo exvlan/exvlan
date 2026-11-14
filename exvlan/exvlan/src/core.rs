@@ -4,7 +4,7 @@ use crate::{
         config::{
             ConfigFileControl, ConfigLoader, ConsoleLoggerConfig, EncryptionAlgorithm,
             FileLoggerConfig, LoggingConfigLoader, NetworkIdentity, PeerConfig, PortForwardConfig,
-            TomlConfigLoader, VpnPortalClientConfig, VpnPortalConfig, add_proxy_network_to_config,
+            TomlConfig, VpnPortalClientConfig, VpnPortalConfig, add_proxy_network_to_config,
             load_config_from_file, load_toml_config_from_path, parse_mapped_listener_urls,
         },
         constants::EXVLAN_VERSION,
@@ -965,7 +965,7 @@ impl NetworkOptions {
 
     fn can_merge(
         &self,
-        cfg: &TomlConfigLoader,
+        cfg: &TomlConfig,
         source: ConfigFileSource,
         explicit_config_file_count: usize,
         config_dir_file_count: usize,
@@ -992,7 +992,7 @@ impl NetworkOptions {
         cfg.get_network_identity().network_name == *network_name
     }
 
-    fn merge_into(&self, cfg: &TomlConfigLoader) -> anyhow::Result<()> {
+    fn merge_into(&self, cfg: &TomlConfig) -> anyhow::Result<()> {
         if self.hostname.is_some() {
             cfg.set_hostname(self.hostname.clone());
         }
@@ -1666,7 +1666,7 @@ async fn run_main(cli: Cli) -> anyhow::Result<()> {
     }
 
     if crate_cli_network {
-        let cfg = TomlConfigLoader::default();
+        let cfg = TomlConfig::default();
         cli.network_options
             .merge_into(&cfg)
             .with_context(|| "failed to create config from cli".to_string())?;
@@ -1840,7 +1840,7 @@ async fn validate_config(cli: &Cli) -> anyhow::Result<()> {
                 .read_to_string(&mut stdin)
                 .await
                 .context("failed to read config from stdin")?;
-            TomlConfigLoader::new_from_str_with_source("stdin", stdin.as_str())?;
+            TomlConfig::new_from_str_with_source("stdin", stdin.as_str())?;
         } else {
             load_toml_config_from_path(config_file)?;
         };
@@ -1938,7 +1938,7 @@ mod tests {
 
     #[test]
     fn test_network_options_merge_preserves_credential_identity() {
-        let cfg = TomlConfigLoader::new_from_str(
+        let cfg = TomlConfig::new_from_str(
             r#"
 [network_identity]
 network_name = "credential-network"
@@ -1969,7 +1969,7 @@ enabled = true
     fn secure_mode_cli_flag_preserves_config_file_keypair() {
         use base64::{Engine as _, prelude::BASE64_STANDARD};
         let private = x25519_dalek::StaticSecret::random_from_rng(rand::rngs::OsRng);
-        let cfg = TomlConfigLoader::new_from_str(&format!(
+        let cfg = TomlConfig::new_from_str(&format!(
             r#"
 [secure_mode]
 enabled = true
@@ -1997,7 +1997,7 @@ local_private_key = "{}"
     #[test]
     fn secure_mode_cli_key_replaces_config_file_keypair() {
         use base64::{Engine as _, prelude::BASE64_STANDARD};
-        let cfg = TomlConfigLoader::new_from_str(
+        let cfg = TomlConfig::new_from_str(
             r#"
 [secure_mode]
 enabled = true
@@ -2027,7 +2027,7 @@ enabled = true
 
     #[test]
     fn empty_stun_server_options_clear_existing_config() {
-        let cfg = TomlConfigLoader::new_from_str(
+        let cfg = TomlConfig::new_from_str(
             r#"
 stun_servers = ["udp.example.com:3478"]
 stun_servers_v6 = ["v6.example.com:3478"]
@@ -2052,7 +2052,7 @@ tcp_stun_servers = ["tcp.example.com:3478"]
 
     #[test]
     fn vpn_portal_cli_uses_named_clients_and_preserves_unset_fields() {
-        let cfg = TomlConfigLoader::new_from_str(
+        let cfg = TomlConfig::new_from_str(
             r#"
 [vpn_portal_config]
 wireguard_listen = "127.0.0.1:51820"
@@ -2119,7 +2119,7 @@ virtual_ip = "10.144.144.9/24"
             .to_string();
         assert!(error.contains("legacy VPN portal CIDR"), "{error}");
 
-        let cfg = TomlConfigLoader::default();
+        let cfg = TomlConfig::default();
         let missing_clients = NetworkOptions {
             vpn_portal: Some("wg://0.0.0.0:51820".to_owned()),
             vpn_portal_client_groups: vec!["alice=staff".to_owned()],
@@ -2139,7 +2139,7 @@ virtual_ip = "10.144.144.9/24"
             vpn_portal_client_groups: vec!["bob=staff".to_owned()],
             ..Default::default()
         }
-        .merge_into(&TomlConfigLoader::default())
+        .merge_into(&TomlConfig::default())
         .unwrap_err()
         .to_string();
         assert!(

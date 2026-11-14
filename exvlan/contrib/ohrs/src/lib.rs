@@ -43,7 +43,7 @@ use exvlan::common::config::NetworkConfigExt;
 use exvlan::common::constants::EXVLAN_VERSION;
 use exvlan::common::{
     MachineIdOptions,
-    config::{ConfigLoader, TomlConfigLoader},
+    config::{ConfigLoader, TomlConfig},
 };
 use exvlan::proto::api::manage::NetworkConfig;
 use exvlan::proto::api::manage::NetworkingMethod;
@@ -656,7 +656,7 @@ fn resolve_instance_id_inner(instance_name: &str) -> Option<String> {
 
 fn convert_toml_to_network_config_inner(toml_text: &str) -> Result<String, String> {
     let config = NetworkConfig::new_from_config(
-        TomlConfigLoader::new_from_str(toml_text).map_err(|e| e.to_string())?,
+        TomlConfig::new_from_str(toml_text).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
     serde_json::to_string(&config).map_err(|e| e.to_string())

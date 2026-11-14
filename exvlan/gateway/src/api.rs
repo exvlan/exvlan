@@ -917,17 +917,16 @@ async fn patch_instance(
                 Ok(s) => s,
                 Err(e) => return err(StatusCode::NOT_FOUND, "not_found", e),
             };
-            let loader =
-                match exvlan_core::config::toml::TomlConfigLoader::new_from_str(&saved.text) {
-                    Ok(l) => l,
-                    Err(e) => {
-                        return err(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "config_parse",
-                            e.to_string(),
-                        );
-                    }
-                };
+            let loader = match exvlan_core::config::toml::TomlConfig::new_from_str(&saved.text) {
+                Ok(l) => l,
+                Err(e) => {
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "config_parse",
+                        e.to_string(),
+                    );
+                }
+            };
             let config = match exvlan_rpc::exvlan_proto::api::manage::NetworkConfig::new_from_config(
                 &loader,
             ) {
