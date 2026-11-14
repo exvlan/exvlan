@@ -89,10 +89,21 @@ fn pkexec_command(program: &Path, args: &[OsString], envs: &[OsString]) -> StdCo
 }
 
 /// `sudo -A` 的参数拼装：密码由 `SUDO_ASKPASS` 指向的脚本弹窗输入。
-fn sudo_command(program: &Path, args: &[OsString], askpass: &Path) -> StdCommand {
+///
+/// `env` 前缀与 pkexec 分支保持一致：`sudo` 默认重置环境，`HOME` 会变成 root 的。
+/// 而迁移、服务安装都靠 `HOME`/`XDG_*` 定位用户目录 —— 丢了就会「看不见用户的旧数据」，
+/// 迁移直接报「无需迁移」并退出 1，界面上却表现为永久卡在迁移闸门。
+fn sudo_command(
+    program: &Path,
+    args: &[OsString],
+    askpass: &Path,
+    envs: &[OsString],
+) -> StdCommand {
     let mut command = StdCommand::new("sudo");
     command
         .arg("-A")
+        .arg("env")
+        .args(envs)
         .arg("--")
         .arg(program)
         .args(args)
@@ -107,7 +118,12 @@ fn should_fall_back(code: Option<i32>) -> bool {
     matches!(code, None | Some(126) | Some(127))
 }
 
-fn run_sudo(program: &Path, args: &[OsString], askpass: &Path) -> Result<Output> {
+fn run_sudo(
+    program: &Path,
+    args: &[OsString],
+    askpass: &Path,
+    envs: &[OsString],
+) -> Result<Output> {
     crate::logger::record(
         "elevate",
         format!(
@@ -119,7 +135,7 @@ fn run_sudo(program: &Path, args: &[OsString], askpass: &Path) -> Result<Output>
                 .join(" ")
         ),
     );
-    sudo_command(program, args, askpass)
+    sudo_command(program, args, askpass, envs)
         .output()
         .map_err(|err| anyhow!("无法启动 sudo: {err}"))
 }
@@ -219,7 +235,7 @@ impl Command {
                             ),
                         );
                         match (has_sudo, askpass) {
-                            (true, Some(askpass)) => run_sudo(&program, &args, &askpass),
+                            (true, Some(askpass)) => run_sudo(&program, &args, &askpass, &envs),
                             _ => match other {
                                 Ok(out) => Ok(out),
                                 Err(err) => Err(unavailable(
@@ -233,7 +249,7 @@ impl Command {
                 }
             }
             Tool::SudoAskpass => match askpass {
-                Some(askpass) => run_sudo(&program, &args, &askpass),
+                Some(askpass) => run_sudo(&program, &args, &askpass, &envs),
                 // choose_tool 已保证有脚本；这里不 panic，退回可复制命令。
                 None => Err(unavailable(
                     "未找到 askpass 脚本（resources/tools/exvlan-askpass.sh）",
@@ -273,13 +289,18 @@ mod tests {
         let program = std::env::temp_dir().join("exvlan-service");
         let args = vec![OsString::from("--install"), OsString::from("1000")];
 
-        let command = sudo_command(&program, &args, &askpass);
-        let envs: Vec<(String, Option<OsString>)> = command
+        // sudo 会重置环境：HOME 必须显式带过去，否则子进程按 root 的用户目录找旧数据。
+        let envs = vec![
+            OsString::from("HOME=/home/alice"),
+            OsString::from("DISPLAY=:0"),
+        ];
+        let command = sudo_command(&program, &args, &askpass, &envs);
+        let child_envs: Vec<(String, Option<OsString>)> = command
             .get_envs()
             .map(|(k, v)| (k.to_string_lossy().to_string(), v.map(OsStr::to_os_string)))
             .collect();
         assert_eq!(
-            envs,
+            child_envs,
             vec![("SUDO_ASKPASS".to_string(), Some(askpass.into_os_string()))]
         );
 
@@ -288,9 +309,12 @@ mod tests {
             .map(|a| a.to_string_lossy().to_string())
             .collect();
         assert_eq!(argv[0], "-A");
-        assert_eq!(argv[1], "--");
-        assert_eq!(argv[2], program.display().to_string());
-        assert_eq!(&argv[3..], &["--install".to_string(), "1000".to_string()]);
+        assert_eq!(argv[1], "env");
+        assert_eq!(argv[2], "HOME=/home/alice");
+        assert_eq!(argv[3], "DISPLAY=:0");
+        assert_eq!(argv[4], "--");
+        assert_eq!(argv[5], program.display().to_string());
+        assert_eq!(&argv[6..], &["--install".to_string(), "1000".to_string()]);
     }
 
     #[test]
