@@ -1,0 +1,29 @@
+[Unit]
+Description=EXVlan mirror trigger endpoint (/mirror/trigger)
+Documentation=https://github.com/exvlan/exvlan/blob/develop/docs/mirror-toolchain.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=exvlan-mirror
+EnvironmentFile=/etc/exvlan-kernel-mirror/env
+# 令牌单独放一个 600 文件，不进 EnvironmentFile（那玩意会被 systemctl show 读出来）
+Environment=MIRROR_TRIGGER_TOKEN_FILE=/etc/exvlan-kernel-mirror/trigger-token
+# 定时同步仍由 exvlan-kernel-mirror.timer 负责：这里只接受按需触发
+Environment=MIRROR_TRIGGER_INTERVAL_SEC=0
+Environment=MIRROR_TRIGGER_HOST=127.0.0.1
+Environment=MIRROR_TRIGGER_PORT=8899
+ExecStart=/usr/local/bin/bun /usr/local/lib/exvlan-mirror/trigger-server.ts
+Restart=on-failure
+RestartSec=5
+
+# 同步脚本写 /srv/exvlan/{core,upgrade}；trigger 只写锁文件与状态（PrivateTmp）
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/exvlan/core /srv/exvlan/upgrade
+
+[Install]
+WantedBy=multi-user.target

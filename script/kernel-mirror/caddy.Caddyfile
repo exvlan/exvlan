@@ -1,12 +1,14 @@
 # EXVlan 内核资产托管（dl.exvlan.era-x.cn/core/）
 #
-# 目录约定（由 exvlan-kernel-sync.sh 维护，通道化见 docs/decisions-7.3.md §14.13）：
+# 目录约定（由 script/kernel-mirror/index.ts 维护；通道化见 docs/decisions-7.3.md §14.13，
+# 工具链与 /mirror/trigger 见 docs/mirror-toolchain.md）：
 #   /srv/exvlan/core/<channel>/manifest.json
 #   /srv/exvlan/core/<channel>/<platform>-v<ver>.zip
 #   /srv/exvlan/core/manifest.json                → stable/manifest.json（符号链接）
 #   /srv/exvlan/core/mirror-status.json           （同步状态，channels.*）
 #   /srv/exvlan/upgrade/<channel>/{latest,manifest,magisk_update}.json + 安装包
 #   /srv/exvlan/upgrade/{latest,manifest,magisk_update}.json → stable/…（符号链接）
+#   /mirror/trigger                        （反向代理到 trigger-server.ts，POST 触发 / GET 状态）
 #
 # 说明：
 # - 清单与状态必须实时（客户端据此判断是否有更新），因此 no-cache；
@@ -33,6 +35,25 @@ dl.exvlan.era-x.cn {
 
 		file_server {
 			browse false
+		}
+	}
+
+	# 镜像同步触发端点（docs/mirror-toolchain.md）：
+	#   POST → 立刻同步（Header X-Mirror-Token），GET → 最近一次状态
+	# trigger 服务只监听回环（127.0.0.1:8899），由这里反代出去；Caddy 不缓存。
+	# 注意：`handle` 按声明顺序匹配，必须排在最后那个 `respond 404` 之前。
+	handle /mirror/trigger {
+		request_body {
+			max_size 16KB
+		}
+		reverse_proxy 127.0.0.1:8899 {
+			header_up X-Real-IP {remote_host}
+			# 响应头（no-store / nosniff）由 trigger 服务自己带，这里只抹掉上游 Server
+			header_down -Server
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 30s
+			}
 		}
 	}
 

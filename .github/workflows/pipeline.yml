@@ -598,6 +598,30 @@ jobs:
           VERSION: ${{ needs.changes.outputs.nightly_version }}
         run: bash script/ci/nightly-publish.sh
 
+  # 发版后立刻触发镜像机同步（`/mirror/trigger`，见 docs/mirror-toolchain.md）。
+  # 位置在 release / nightly_release 之后：Release 已发布才可能拉到新资产。
+  # **非阻塞**：脚本内部把失败降级成 `::warning::` 并 exit 0（镜像机还有 15 min 定时同步
+  # 兜底），所以镜像端点没上线/夜间维护也不会把发版刷红。
+  mirror_sync:
+    name: Trigger Mirror Sync
+    needs: [release, nightly_release]
+    if: >-
+      always() && !cancelled() &&
+      (needs.release.result == 'success' || needs.nightly_release.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # 只需要一个脚本：不拉全仓（发版作业本身已经下过资产，别浪费次数）
+          sparse-checkout: script/ci/mirror-trigger.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Trigger mirror sync
+        env:
+          MIRROR_TRIGGER_URL: ${{ vars.MIRROR_TRIGGER_URL }}
+          MIRROR_TRIGGER_TOKEN: ${{ secrets.MIRROR_TRIGGER_TOKEN }}
+        run: bash script/ci/mirror-trigger.sh
+
   # 无人值守运维通知：发版 / 失败自动推送到飞书群。
   # nightly（cron 或 dispatch 勾选）走下面的 nightly_notify，只报失败，不在这里重复推成功。
   notify:

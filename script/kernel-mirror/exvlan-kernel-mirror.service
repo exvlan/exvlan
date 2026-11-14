@@ -8,7 +8,8 @@ Wants=network-online.target
 Type=oneshot
 User=exvlan-mirror
 EnvironmentFile=/etc/exvlan-kernel-mirror/env
-ExecStart=/usr/local/bin/exvlan-kernel-sync
+# 同步实现是 TypeScript（bun）；旧 shell 入口已 legacy，见 docs/mirror-toolchain.md
+ExecStart=/usr/bin/env bun /usr/local/lib/exvlan-mirror/index.ts
 # 同步脚本只写 /srv/exvlan/core、/srv/exvlan/upgrade 与临时目录
 PrivateTmp=yes
 NoNewPrivileges=yes
