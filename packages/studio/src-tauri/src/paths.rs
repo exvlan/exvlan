@@ -153,41 +153,12 @@ pub fn elevate_log() -> PathBuf {
     tmp_dir().join("elevate.log")
 }
 
-/// 旧版本（≤ 7.2）布局：**只用于一次性清理**，不读取、不拷贝、不恢复。
+/// 旧版本（≤ 7.2）布局：**清单在 `exvlan_control::paths::stale_paths()`**。
 ///
-/// 7.3 路径 v3 硬切后这些路径不再被任何代码使用；保留这份清单是为了覆盖
-/// 「降级回 7.2 再升回来」时旧目录/旧服务被重新创建的情况。7.4 再删除。
+/// 这里只做转发：GUI（装完服务后的清理）、`exvlan-migrate`、`doctor` 必须引用
+/// 同一份清单，各写一遍就会漂（S6 的教训）。7.4 再删除整个清单。
 pub fn stale_paths() -> Vec<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        let mut out = vec![
-            PathBuf::from("/Library/Application Support/exvlan"),
-            PathBuf::from("/Library/Logs/exvlan"),
-            PathBuf::from("/Library/LaunchDaemons/exvlan-studio.plist"),
-            PathBuf::from("/Library/LaunchDaemons/exvlan-studio.plist.pre-7.2"),
-            PathBuf::from("/var/log/era.exvlan.studio.helper.log"),
-        ];
-        if let Some(home) = std::env::var_os("HOME") {
-            out.push(
-                PathBuf::from(home)
-                    .join("Library/Application Support/era.exvlan.studio/ui-state.json"),
-            );
-        }
-        out
-    }
-    #[cfg(target_os = "windows")]
-    {
-        vec![PathBuf::from(r"C:\ProgramData\exvlan")]
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        vec![
-            PathBuf::from("/var/lib/exvlan"),
-            PathBuf::from("/opt/exvlan"),
-            PathBuf::from("/var/log/exvlan"),
-            PathBuf::from("/etc/systemd/system/exvlan-studio.service"),
-        ]
-    }
+    exvlan_control::paths::stale_paths()
 }
 
 /// 收紧文件权限（Unix）：密钥类文件（prefs / networks / 提权日志）用 0600。

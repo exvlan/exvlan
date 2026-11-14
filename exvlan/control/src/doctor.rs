@@ -301,14 +301,14 @@ fn service_status() -> ServiceStatus {
     let Ok(resp) = ipc::call(&Request::Status) else {
         return ServiceStatus::default();
     };
-    let Some(Payload::Status { kernel, gateway, .. }) = &resp.data else {
+    let Some(Payload::Status {
+        kernel, gateway, ..
+    }) = &resp.data
+    else {
         return ServiceStatus::default();
     };
     ServiceStatus {
-        kernel_pid: kernel
-            .as_ref()
-            .map(|k| k.pid)
-            .filter(|pid| *pid != 0),
+        kernel_pid: kernel.as_ref().map(|k| k.pid).filter(|pid| *pid != 0),
         gateway_addr: gateway
             .as_ref()
             .map(|g| g.addr.trim().to_string())
@@ -382,9 +382,8 @@ fn same_exe(raw: &str, expected: &std::path::Path) -> bool {
     if raw.is_empty() {
         return false;
     }
-    let canon = |path: &std::path::Path| {
-        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-    };
+    let canon =
+        |path: &std::path::Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     canon(std::path::Path::new(raw)) == canon(expected)
 }
 
@@ -636,34 +635,28 @@ fn webkit_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
 
 fn migrate_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
     let marker = user.data.join("migrate.done");
-    let legacy = [
-        user.data.join("networks.toml"),
-        user.data.join("service.json"),
-        user.data.join("config.d"),
-        user.data.join("ui-state.json"),
-    ];
-    let present: Vec<String> = legacy
-        .iter()
-        .filter(|p| p.exists())
-        .map(|p| p.display().to_string())
-        .collect();
-    if present.is_empty() {
-        out.push(Finding {
-            id: "migrate.legacy",
-            level: "ok",
-            summary: "没有旧版本遗留数据".into(),
-            evidence: json!({"marker": marker.display().to_string()}),
-            fixable: false,
-        });
-    } else {
+    // 与 GUI 迁移闸门、`exvlan-migrate` 共用同一份检测（各写一遍必然漂）。
+    let legacy = crate::legacy::detect(user, &paths::paths());
+    if legacy.pending() {
         out.push(Finding {
             id: "migrate.legacy",
             level: "error",
             summary: format!(
                 "检测到旧版本数据（{} 项）→ 请先运行 exvlan-migrate",
-                present.len()
+                legacy.items.len()
             ),
-            evidence: json!({"paths": present, "marker": marker.display().to_string()}),
+            evidence: json!({
+                "items": legacy.item_labels(),
+                "marker": marker.display().to_string(),
+            }),
+            fixable: false,
+        });
+    } else {
+        out.push(Finding {
+            id: "migrate.legacy",
+            level: "ok",
+            summary: "没有旧版本遗留数据".into(),
+            evidence: json!({"marker": marker.display().to_string()}),
             fixable: false,
         });
     }

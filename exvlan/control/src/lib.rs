@@ -6,7 +6,8 @@
 //! - [`ipc`]：特权服务 IPC 传输（unix socket / Windows 命名管道），行式 JSON；
 //! - [`backend`]：探测当前是 `core`（裸核，无服务）还是 `service`（有特权服务）；
 //! - [`config`]：网络配置（内核 `config-dir/*.toml`）唯一写者入口；
-//! - [`paths`]：三平台统一的目录/二进制/凭据位置。
+//! - [`paths`]：三平台统一的目录/二进制/凭据位置；
+//! - [`legacy`]：旧版本（≤ 7.2）遗留数据的**唯一**检测来源（迁移闸门 / doctor / exvlan-migrate）。
 //!
 //! 使用方：GUI（`packages/studio/src-tauri`）、`exvlan-cli`、`exvlan-gateway`。
 //! 编排逻辑（装服务 / 起停内核 / 策略 / 升级回滚）**不在这里** —— 那是
@@ -19,6 +20,7 @@ pub mod config;
 pub mod doctor;
 pub mod identity;
 pub mod ipc;
+pub mod legacy;
 pub mod paths;
 pub mod protocol;
 pub mod tokens;

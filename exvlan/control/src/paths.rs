@@ -161,6 +161,168 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// 旧版本（≤ 7.2）布局：**只用于一次性清理**，不读取、不拷贝、不恢复。
+///
+/// 7.3 路径 v3 硬切后这些路径不再被任何代码使用；保留这份清单是为了覆盖
+/// 「降级回 7.2 再升回来」时旧目录/旧服务被重新创建的情况。7.4 再删除。
+///
+/// 这里是**唯一**一份清单（GUI 的 `cleanup_stale_paths`、`exvlan-migrate`、
+/// `doctor` 都引用它）；用户侧的文件（`ui-state.json` / `networks.toml`）不在此列 ——
+/// 它们由迁移步骤按「先写出目标、再删源」的规则单独处理，不能在这被无条件删掉。
+pub fn stale_paths() -> Vec<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        vec![
+            PathBuf::from("/Library/Application Support/exvlan"),
+            PathBuf::from("/Library/Logs/exvlan"),
+            PathBuf::from("/Library/LaunchDaemons/exvlan-studio.plist"),
+            PathBuf::from("/Library/LaunchDaemons/exvlan-studio.plist.pre-7.2"),
+            PathBuf::from("/var/log/era.exvlan.studio.helper.log"),
+        ]
+    }
+    #[cfg(target_os = "windows")]
+    {
+        vec![PathBuf::from(r"C:\ProgramData\exvlan")]
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        vec![
+            PathBuf::from("/var/lib/exvlan"),
+            PathBuf::from("/opt/exvlan"),
+            PathBuf::from("/var/log/exvlan"),
+            PathBuf::from("/etc/systemd/system/exvlan-studio.service"),
+        ]
+    }
+}
+
+/// 内核 `machine_id` 的落点目录（与内核 `machine_id.rs` 的
+/// `default_machine_id_state_dir()` **必须一致**；不一致会让老用户变成「新设备」：
+/// peer_id 变化 → 设备登记 / 已配对 token 全部对不上）。
+///
+/// 三端与 `user_paths().data` 的关系并不相同，别想当然：
+/// - macOS：`~/Library/Application Support/<APP_ID>`（与 data 同目录）
+/// - Windows：`%LOCALAPPDATA%\<APP_ID>`（data 在 `%APPDATA%`）
+/// - Linux：`$XDG_DATA_HOME/<APP_ID>`（data 在 `$XDG_STATE_HOME`）
+pub fn machine_id_state_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        home_dir().map(|home| {
+            home.join("Library")
+                .join("Application Support")
+                .join(APP_ID)
+        })
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .map(|dir| dir.join(APP_ID))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        data_root().map(|dir| dir.join(APP_ID))
+    }
+}
+
+/// `$XDG_DATA_HOME`（缺省 `~/.local/share`）：Linux 用户数据根。
+#[cfg(all(unix, not(target_os = "macos")))]
+fn data_root() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
+    home_dir().map(|home| home.join(".local").join("share"))
+}
+
+/// 7.1 及更早的 `machine_id` 落点（目录名从 `exvlan` 改成 `<APP_ID>` 之前）。
+///
+/// 顺序即优先级：先 `exvlan/`，再内核二进制旁的 `et_machine_id`。
+/// 只用于「新路径不存在时 COPY 过去」，**不删除**源文件。
+pub fn legacy_machine_id_sources(core: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = home_dir() {
+            out.push(
+                home.join("Library")
+                    .join("Application Support")
+                    .join("exvlan")
+                    .join("machine_id"),
+            );
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(dir) = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()) {
+            out.push(PathBuf::from(dir).join("exvlan").join("machine_id"));
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(dir) = data_root() {
+            out.push(dir.join("exvlan").join("machine_id"));
+        }
+        // 以 root 且没有 `HOME` 跑过的内核把状态目录落到 `/var/lib/<id>` /
+        // `/var/lib/exvlan`（`default_linux_machine_id_state_dir` 的兜底分支）。
+        // 这两处都在 `stale_paths()` 的删除清单里，必须**先**把身份取出来。
+        out.push(PathBuf::from("/var/lib").join("exvlan").join("machine_id"));
+        out.push(PathBuf::from("/var/lib").join(APP_ID).join("machine_id"));
+    }
+    // 内核 `settings` 老版本把 machine_id 写在可执行文件旁（`et_machine_id`）。
+    out.push(core.join("et_machine_id"));
+    out
+}
+
+/// 旧 macOS 守护进程 label（当前 label 是 [`PRIVILEGED_SERVICE_LABEL`]，不在列表里）。
+///
+/// 与 `exvlan/service/src/main.rs::cleanup_legacy_macos()` 同一份清单。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const LEGACY_LAUNCHD_LABELS: &[&str] = &[
+    "era.exvlan.studio",
+    "era.exvlan.studio.helper",
+    "com.exvlan.studio",
+    "com.exvlan.studio.helper",
+    "exvlan-studio",
+];
+
+/// 旧 Windows SCM 服务名（与 `cleanup_legacy_windows()` 同一份）。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const LEGACY_SCM_SERVICES: &[&str] = &["era.exvlan.studio", "exvlan-studio"];
+
+/// 旧 Windows 计划任务（与 `cleanup_legacy_windows()` 同一份）。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const LEGACY_SCHEDULED_TASKS: &[&str] = &["era.exvlan.studio", "ExvlanKernelSupervisor"];
+
+/// macOS LaunchDaemons / LaunchAgents 目录（旧 plist 落点）。
+#[cfg(target_os = "macos")]
+pub fn launchd_dirs() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/Library/LaunchDaemons"),
+        PathBuf::from("/Library/LaunchAgents"),
+    ]
+}
+
+/// macOS 旧 helper 二进制（pre.12 遗留）。
+#[cfg(target_os = "macos")]
+pub fn legacy_helper_bins() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/Library/PrivilegedHelperTools/era.exvlan.studio.helper"),
+        PathBuf::from("/Library/PrivilegedHelperTools/com.exvlan.studio.helper"),
+    ]
+}
+
+/// macOS 旧 helper 的运行时 socket（权限曾为 0666）。
+#[cfg(target_os = "macos")]
+pub fn legacy_helper_socket() -> PathBuf {
+    PathBuf::from("/var/run").join(APP_ID).join("helper.sock")
+}
+
+/// Windows 计划任务的 XML 落点（探测用；注册表里的服务项探测走 `sc query`）。
+#[cfg(target_os = "windows")]
+pub fn scheduled_tasks_dir() -> PathBuf {
+    PathBuf::from(r"C:\Windows\System32\Tasks")
+}
+
 /// 服务 IPC 的 socket / 命名管道地址。
 pub fn service_ipc_addr() -> PathBuf {
     #[cfg(target_os = "windows")]

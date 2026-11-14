@@ -2,10 +2,14 @@
 //!
 //! 运行时**不做**迁移/兼容：检测到旧数据就阻塞启动，由用户确认后调用随包的
 //! `exvlan-migrate`（它自己会备份/转换/清理/写标记）。下一版移除随包与自动执行。
-
-use std::path::PathBuf;
+//!
+//! 检测口径**只有一份**：[`exvlan_control::legacy::detect`]。这里以前自己抄了一份
+//! 文件清单，漏掉系统目录 `service.json` / `[app].mode` / 旧 machine_id / 旧服务定义 /
+//! `stale_paths` —— 结果是「只有系统目录脏」的机器 `pending=false`，永不提示，
+//! 而运行时也不再兼容读取 → 服务配置静默回落默认值。
 
 use serde::Serialize;
+use std::path::PathBuf;
 use tauri::Manager as _;
 
 #[derive(Debug, Clone, Serialize)]
@@ -20,24 +24,11 @@ pub struct MigrateStatus {
     pub done: bool,
 }
 
-/// 旧版本遗留数据（用户侧 + 内核侧的 `.prev`）。
+/// 旧版本遗留数据：与 `exvlan-migrate` 共用同一份检测（`exvlan_control::legacy`）。
 pub fn legacy_items() -> Vec<String> {
     let user = exvlan_control::paths::user_paths();
     let p = exvlan_control::paths::paths();
-    let mut out = Vec::new();
-    let mut push = |path: PathBuf| {
-        if path.exists() {
-            out.push(path.display().to_string());
-        }
-    };
-    push(user.data.join("networks.toml"));
-    push(user.data.join("service.json"));
-    push(user.data.join("config.d"));
-    push(user.data.join("ui-state.json"));
-    push(user.data.join("ui-state.json.bak"));
-    push(p.core.join("exvlan.prev"));
-    push(p.core.join("exvlan.exe.prev"));
-    out
+    exvlan_control::legacy::detect(&user, &p).item_labels()
 }
 
 /// 随包迁移工具（Tauri 会保留 resources 里的相对路径，两种形态都试）。
