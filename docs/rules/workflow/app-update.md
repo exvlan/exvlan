@@ -73,7 +73,8 @@ upgrade::app::install_installer()   → DMG/MSI 交给系统；Android 走 FileP
 | 安装包（dmg/msi/exe/apk/app.tar.gz）与 `.sig` | 带版本/内容不可变 | 1 年 immutable |
 | `Exvlan-Magisk-*.zip` | Magisk 模块包 | 1 年 immutable |
 
-同步：`script/kernel-mirror/exvlan-kernel-sync.sh`（systemd timer，15 min）。
+同步：`script/kernel-mirror/index.ts`（bun；容器内由 `/mirror/trigger` 服务承担定时 + 按需触发，
+见 [`docs/mirror-toolchain.md`](../../mirror-toolchain.md)）。旧 `exvlan-kernel-sync.sh` 已标 legacy。
 它先落安装包与签名，最后落清单——客户端不会看到指向缺失文件的清单。
 环境变量 `UPGRADE_DEST` 可改目录（默认 `/srv/exvlan/upgrade`）。
 

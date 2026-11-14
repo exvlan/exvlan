@@ -90,7 +90,8 @@ release.yml 汇总 core-*/kernel.json + 计算 <platform>-<ver>.zip 的 sha256
 
 - 端点：`https://dl.exvlan.era-x.cn/core/manifest.json`（可配置，`EXVLAN_KERNEL_BASE_URL` 优先）
 - `sha256` 针对 **zip 本体**；解压后取 `assets[platform].entry` 安装
-- 镜像侧由 `script/kernel-mirror/` 同步（合并最近 KEEP 版 `versions[]`，供回滚）
+- 镜像侧由 `script/kernel-mirror/index.ts`（bun）同步（合并最近 KEEP 版 `versions[]`，供回滚）；
+  发版后 `pipeline.yml` 的 `mirror_sync` 会 `POST /mirror/trigger` 立刻同步（120s 轮询，失败只告警）
 - 落盘：macOS `/Library/Application Support/exvlan/core/exvlan`；Windows `C:\ProgramData\exvlan\core\exvlan.exe`；Linux `/opt/exvlan/core/exvlan`
 
 ### 升级/回滚

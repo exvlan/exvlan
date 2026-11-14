@@ -7,7 +7,8 @@ HTTPS 端点拉取 `manifest.json` 与对应平台的内核包，因此需要一
 > 引入镜像端点的原因。
 
 > **应用更新与 Magisk 更新也走同一台镜像机**（`/upgrade/`），
-> 部署/升级步骤见 [`mirror-deploy.md`](./mirror-deploy.md)。
+> 部署/升级步骤见 [`mirror-deploy.md`](./mirror-deploy.md)；同步实现（Bun 单一真源）与
+> `/mirror/trigger` 见 [`docs/mirror-toolchain.md`](../../mirror-toolchain.md)。
 
 ## 拓扑
 
@@ -82,9 +83,12 @@ EOF
 sudo chmod 640 /etc/exvlan-kernel-mirror/env
 sudo chown root:exvlan-mirror /etc/exvlan-kernel-mirror/env
 
-sudo install -m 755 script/kernel-mirror/exvlan-kernel-sync.sh /usr/local/bin/exvlan-kernel-sync
-sudo install -m 755 script/kernel-mirror/merge_manifests.py /usr/local/bin/merge_manifests.py
-sudo install -m 755 script/kernel-mirror/filter_manifest_platforms.py /usr/local/bin/filter_manifest_platforms.py
+# Bun 单一真源：装入口 + src/*（旧 .sh/.py 已 legacy，不再装）
+sudo install -d /usr/local/lib/exvlan-mirror/src
+sudo install -m 755 script/kernel-mirror/index.ts        /usr/local/lib/exvlan-mirror/index.ts
+sudo install -m 755 script/kernel-mirror/trigger-server.ts /usr/local/lib/exvlan-mirror/trigger-server.ts
+sudo install -m 644 script/kernel-mirror/src/*.ts        /usr/local/lib/exvlan-mirror/src/
+sudo ln -sfn /usr/local/lib/exvlan-mirror/index.ts /usr/local/bin/exvlan-kernel-sync
 sudo install -m 644 script/kernel-mirror/exvlan-kernel-mirror.service /etc/systemd/system/
 sudo install -m 644 script/kernel-mirror/exvlan-kernel-mirror.timer   /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -120,7 +124,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://dl.exvlan.era-x.cn/core/       
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
-| GUI 提示「更新源尚未同步」 | 发版后镜像还没拉 | 等下一个 timer，或 `systemctl start exvlan-kernel-mirror.service` |
+| GUI 提示「更新源尚未同步」 | 发版后镜像还没拉 | 等下一个 timer，或 `systemctl start exvlan-kernel-mirror.service`；有 trigger 服务时 `POST /mirror/trigger` 立刻同步 |
 | manifest 里引用的 zip 404 | 同步被中断在「落 zip / 落 manifest」之间 | 重跑同步（脚本先落 zip 后落 manifest，重跑即修复） |
 | 同步报 401/404 | PAT 过期或权限不足 | 重新签发 fine-grained PAT（Contents: Read-only） |
 | 磁盘持续增长 | `KEEP` 太大 | 调整 `KEEP`（默认 5 版）后重跑，脚本会清理未引用文件 |

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ⚠️ legacy：已由 index.ts 取代，保留一个周期（下一个 minor 删除）。
+#     新入口：script/kernel-mirror/index.ts（bun）；设计说明：docs/mirror-toolchain.md
+
 """把合并后的内核 manifest 裁剪到「镜像实际托管」的平台。
 
 背景：Release 自带的 manifest.json 包含全部 14 个平台，而镜像脚本只下载

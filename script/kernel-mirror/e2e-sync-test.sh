@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# ⚠️ legacy：已由 index.ts 取代，保留一个周期（下一个 minor 删除）。
+#     新入口：script/kernel-mirror/index.ts（bun）；设计说明：docs/mirror-toolchain.md
+#     新回归测试：bun test script/kernel-mirror（test/e2e-sync.test.ts，62 条断言逐条对应）
+
 # 离线端到端：假 `gh` + 假 Release，验证镜像同步的两条硬规则不回归。
 #
 # 覆盖（对应 docs/decisions-7.3.md §14.13 的补充口径）：

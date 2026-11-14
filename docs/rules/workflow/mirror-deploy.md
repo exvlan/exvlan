@@ -3,6 +3,10 @@
 > 本文档是**可独立执行**的部署说明：镜像机维护者按顺序复制命令即可完成
 > 「首次部署」或「从旧版同步脚本升级」。所有文件都在本仓库 `script/kernel-mirror/`。
 >
+> 同步实现是 **Bun 单一真源**（`index.ts` + `src/**`），另有 `/mirror/trigger` 触发服务：
+> 设计、API、`deploy.yaml`/Caddy 的精确 diff 见 [`docs/mirror-toolchain.md`](../../mirror-toolchain.md)。
+> 旧的 `exvlan-kernel-sync.sh` / `*.py` 已标 legacy，保留一个周期。
+>
 > 仓库为 **private**，因此镜像机需要一个只读 token（fine-grained，`Contents: Read`）。
 
 ## 0. 目标布局
@@ -52,16 +56,45 @@ sudo chmod 600 /etc/exvlan-kernel-mirror/env
 或直接在镜像机上 `git clone`/`curl` 内部源）：
 
 ```bash
+# 前置：bun（同步与 trigger 都是 TS）
+curl -fsSL https://bun.sh/install | bash                      # 默认装到 ~/.bun/bin/bun
+sudo install -m 755 ~/.bun/bin/bun /usr/local/bin/bun         # systemd 默认 PATH（/usr/local/bin）能找到
+/usr/local/bin/bun --version
+
 # 在镜像机上，假设仓库已在 /tmp/exvlan
-sudo install -m 755 /tmp/exvlan/script/kernel-mirror/exvlan-kernel-sync.sh /usr/local/bin/exvlan-kernel-sync
-sudo install -m 755 /tmp/exvlan/script/kernel-mirror/merge_manifests.py /usr/local/bin/merge_manifests.py
-sudo install -m 755 /tmp/exvlan/script/kernel-mirror/filter_manifest_platforms.py /usr/local/bin/filter_manifest_platforms.py
+sudo install -d /usr/local/lib/exvlan-mirror/src
+sudo install -m 755 /tmp/exvlan/script/kernel-mirror/index.ts         /usr/local/lib/exvlan-mirror/index.ts
+sudo install -m 755 /tmp/exvlan/script/kernel-mirror/trigger-server.ts /usr/local/lib/exvlan-mirror/trigger-server.ts
+sudo install -m 644 /tmp/exvlan/script/kernel-mirror/src/*.ts         /usr/local/lib/exvlan-mirror/src/
+sudo ln -sfn /usr/local/lib/exvlan-mirror/index.ts /usr/local/bin/exvlan-kernel-sync
 sudo install -m 644 /tmp/exvlan/script/kernel-mirror/exvlan-kernel-mirror.service /etc/systemd/system/
 sudo install -m 644 /tmp/exvlan/script/kernel-mirror/exvlan-kernel-mirror.timer   /etc/systemd/system/
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now exvlan-kernel-mirror.timer
 ```
+
+### 2.1 触发服务（`/mirror/trigger`，可选但推荐）
+
+发版流水线会在 release 成功后 `POST /mirror/trigger` 立刻同步，省掉「等一个 15 min 周期」。
+令牌单独放 600 文件（不要写进 `env` / 仓库）：
+
+```bash
+sudo sh -c 'umask 077; head -c 32 /dev/urandom | base64 | tr -d "\n/" > /etc/exvlan-kernel-mirror/trigger-token'
+sudo chown root:exvlan-mirror /etc/exvlan-kernel-mirror/trigger-token
+
+sudo install -m 644 /tmp/exvlan/script/kernel-mirror/exvlan-kernel-mirror-trigger.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now exvlan-kernel-mirror-trigger.service
+
+# 自检（本机回环，绕过 Caddy）
+curl -fsS http://127.0.0.1:8899/healthz | jq
+curl -fsS -H "X-Mirror-Token: $(sudo cat /etc/exvlan-kernel-mirror/trigger-token)" \
+  http://127.0.0.1:8899/mirror/trigger | jq '.running,.result,.round'
+```
+
+Caddy 侧只加一段反代（精确 diff 见 `docs/mirror-toolchain.md` §5.2），然后
+`gh variable set MIRROR_TRIGGER_URL` + `gh secret set MIRROR_TRIGGER_TOKEN` 即可。
 
 `exvlan-kernel-mirror.service` 必须允许写两个目录：
 
@@ -128,10 +161,10 @@ curl -s -o /dev/null -w '%{http_code}\n' https://dl.exvlan.era-x.cn/upgrade/    
 ## 6. 回滚
 
 ```bash
-# 停定时同步
-sudo systemctl disable --now exvlan-kernel-mirror.timer
+# 停定时同步与触发服务
+sudo systemctl disable --now exvlan-kernel-mirror.timer exvlan-kernel-mirror-trigger.service
 
-# 还原上一版脚本（若你保留了备份）
+# 还原上一版（Bun 之前是 shell 入口；若你保留了备份）
 sudo cp /root/exvlan-kernel-sync.bak /usr/local/bin/exvlan-kernel-sync
 
 # Caddy 还原站点文件后 reload
@@ -145,6 +178,9 @@ sudo systemctl reload caddy
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | `gh: Not Found (HTTP 404)` | token 无权限 / 仓库名不对 / token 过期 | 检查 `/etc/exvlan-kernel-mirror/env` 的 `GH_TOKEN`、`REPO` |
+| `/mirror/trigger` 502 | trigger 服务没起 / 端口不对 | `systemctl status exvlan-kernel-mirror-trigger`、`journalctl -u`；确认真在 `127.0.0.1:8899` |
+| `/mirror/trigger` 401 | 令牌不一致 | 宿主 `trigger-token` 与 GitHub secret `MIRROR_TRIGGER_TOKEN` 必须一致 |
+| bun: command not found（unit 起不来） | bun 不在 systemd PATH | 装到 `/usr/local/bin/bun`，或改 unit 的 `ExecStart` 用绝对路径 |
 | `/upgrade/latest.json` 404，但 `/core/manifest.json` 正常 | 脚本是旧版（没有 `/upgrade` 逻辑）或 Caddy 未加 `/upgrade/*` 段 | 按第 2、3 节更新 |
 | `magisk_update.json` 的 `zipUrl` 404 | 该 release 未产出 Magisk 包，或 zip 未同步 | 看 `journalctl` 里 `应用更新资产` 计数；确认 release 内有 `Exvlan-Magisk-*.zip` |
 | 客户端更新提示「签名校验失败」 | 公钥与私钥不匹配（换过密钥） | 必须用 `tauri.conf.json` 里那把公钥对应的私钥重新发版 |

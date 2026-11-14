@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ⚠️ legacy：已由 index.ts 取代，保留一个周期（下一个 minor 删除）。
+#     新入口：script/kernel-mirror/index.ts（bun）；设计说明：docs/mirror-toolchain.md
+
 """写 `mirror-status.json`：按通道汇报镜像状态。
 
 通道化后镜像有多个子目录，监控需要知道每条线各自的最新版本与占用：

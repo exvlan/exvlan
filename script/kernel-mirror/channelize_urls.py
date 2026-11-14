@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ⚠️ legacy：已由 index.ts 取代，保留一个周期（下一个 minor 删除）。
+#     新入口：script/kernel-mirror/index.ts（bun）；设计说明：docs/mirror-toolchain.md
+
 """把清单里的绝对 URL 改写到**通道目录**。
 
 `upgrade-latest.json`（镜像为 `<channel>/latest.json`）与 `magisk_update.json`

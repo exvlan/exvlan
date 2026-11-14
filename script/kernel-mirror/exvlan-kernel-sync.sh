@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# ⚠️ legacy：已由 index.ts 取代，保留一个周期（下一个 minor 删除）。
+#     新入口：script/kernel-mirror/index.ts（bun）；设计说明：docs/mirror-toolchain.md
+
 # 从 GitHub Release 拉取 GUI 需要的资产，按**通道**发布到静态目录（供 Caddy 托管）。
 #
 # 通道布局（docs/decisions-7.3.md §14.13）：

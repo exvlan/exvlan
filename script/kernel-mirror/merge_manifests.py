@@ -1,3 +1,6 @@
+# ⚠️ legacy：已由 index.ts 取代，保留一个周期（下一个 minor 删除）。
+#     新入口：script/kernel-mirror/index.ts（bun）；设计说明：docs/mirror-toolchain.md
+
 """合并多个内核/应用 manifest 的 `versions[]`，产出单个清单。
 
 用法：merge_manifests.py [--keep N] [--since TAG] <manifest1:manifest2:...> <输出.json>
