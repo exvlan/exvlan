@@ -5063,17 +5063,27 @@ async fn linux_ensure(app: &AppHandle, opts: &service::ServiceOptions) -> Result
 }
 
 /// 保证「特权服务已装 + 服务二进制最新 + 内核最新」，返回是否做了动作。
+///
+/// 三条互斥路径（对应现场 B3/B4）：
+/// - 未安装 → 安装（唯一该提权装一次的地方）；
+/// - 已装 + 版本落后 → 走服务自更新，失败才回退提权安装；
+/// - 已装 + 版本最新但 **IPC 不通** → 只重启服务（`repair`），**不重装**。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn ensure_service_and_kernel(app: &AppHandle) -> Result<String, String> {
+    use crate::service_client::ServiceHealth;
+
     let want = crate::BUILD_VERSION;
 
-    let installed = crate::service_client::is_installed();
+    // 一次 `state()` 同时拿到「装了没（含注册项）/ 就绪没」，三处判据不会打架。
+    let state = crate::service_client::state();
+    let installed = state.health != ServiceHealth::NotInstalled;
+    let ready = state.ready;
     let need_service_version =
         installed && crate::service_client::installed_version().as_deref() != Some(want);
     let need_kernel =
         !kernel::is_installed() || kernel::installed_version().as_deref() != Some(want);
 
-    if installed && !need_service_version && !need_kernel {
+    if installed && ready && !need_service_version && !need_kernel {
         return Ok("current".to_string());
     }
 
@@ -5101,6 +5111,16 @@ fn ensure_service_and_kernel(app: &AppHandle) -> Result<String, String> {
                 acted = true;
             }
         }
+    } else if !ready {
+        // 装是装了、版本也对，但 IPC 不通（服务停了 / 崩过 / 升级窗口里被 SCM 放弃）。
+        // **只重启，不重装**：重装会在服务运行时覆盖 bin\exvlan-service.exe
+        // → os error 32 → 误报「安装失败」（dev.1 现场 B3）。
+        logger::record("service.repair", "已安装但未就绪 → 重启服务（不重装）");
+        if let Err(err) = crate::service_client::repair() {
+            logger::record("service.repair", format!("重启失败: {err}"));
+            return Err(err);
+        }
+        acted = true;
     }
 
     if need_kernel {
@@ -5141,7 +5161,16 @@ fn ensure_service_and_kernel(app: &AppHandle) -> Result<String, String> {
 
     if need_kernel || !crate::service_client::is_ready() {
         // 换完内核后确认内核真的起来了（否则用户表现为「已连接却不通」）。
-        crate::service_client::ensure_kernel()?;
+        // 失败时不要只抛一句原始错误：带上可操作提示（日志路径 / sc|systemctl / 强制重装）。
+        crate::service_client::ensure_kernel().map_err(|err| {
+            logger::record("service.ensure_kernel", format!("失败: {err}"));
+            format!(
+                "{err}\n\n服务本体状态：{}\n服务二进制：{}\n日志：{}",
+                crate::service_client::state().status,
+                crate::service_client::installed_service_bin().display(),
+                crate::paths::service_log().display()
+            )
+        })?;
     }
 
     Ok(if acted {
@@ -5212,6 +5241,7 @@ fn service_state() -> crate::service_client::ServiceState {
     crate::service_client::ServiceState {
         installed: false,
         ready: true,
+        health: crate::service_client::ServiceHealth::InstalledRunning,
         mode: "ffi".to_string(),
         kernel_pid: 0,
         status: "unsupported".to_string(),
@@ -5224,20 +5254,43 @@ async fn service_install(_app: AppHandle) -> Result<String, String> {
     Ok("unsupported".to_string())
 }
 
-/// 手动重试安装特权服务（会弹一次系统授权）。成功后返回 installed。
+/// 手动重试特权服务（会弹一次系统授权）：**按三态分流**。
+///
+/// - `InstalledRunning`：什么都不做（界面按钮重复点不该重启服务）。
+/// - `InstalledNotReady`：只重启服务（`repair`），不覆盖二进制。
+/// - `NotInstalled`：才真正走安装。
+///
+/// 之前这里无条件 `install`：服务明明在跑、只是管道一时连不上，也会去覆盖
+/// `bin\exvlan-service.exe` → os error 32 → 误报「安装失败」（dev.1 现场 B3/B4）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn service_install(app: AppHandle) -> Result<String, String> {
-    logger::record("service.install", "manual retry from UI");
-    let app2 = app.clone();
-    tokio::task::spawn_blocking(move || crate::service_client::install(&app2))
-        .await
-        .map_err(|e| format!("安装任务失败: {e}"))??;
-    let state = crate::service_client::state();
-    if state.ready {
-        Ok("installed".to_string())
-    } else {
-        Err(state.status)
+    use crate::service_client::ServiceHealth;
+    let health = crate::service_client::state().health;
+    logger::record(
+        "service.install",
+        format!("manual retry from UI (health={health:?})"),
+    );
+    match health {
+        ServiceHealth::InstalledRunning => Ok("current".to_string()),
+        ServiceHealth::InstalledNotReady => {
+            tokio::task::spawn_blocking(crate::service_client::repair)
+                .await
+                .map_err(|e| format!("修复任务失败: {e}"))??;
+            Ok("repaired".to_string())
+        }
+        ServiceHealth::NotInstalled => {
+            let app2 = app.clone();
+            tokio::task::spawn_blocking(move || crate::service_client::install(&app2))
+                .await
+                .map_err(|e| format!("安装任务失败: {e}"))??;
+            let state = crate::service_client::state();
+            if state.ready {
+                Ok("installed".to_string())
+            } else {
+                Err(state.status)
+            }
+        }
     }
 }
 

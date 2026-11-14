@@ -27,6 +27,9 @@ bash script/ci/check-paths.sh        # 绝对路径字面量只允许在 paths.r
 
 ## 1.5 安装后验收（pre.17 起）
 
+> Windows 大版本升级（ProductCode 变化）涉及 MSI 停服务/拉起服务的时序，
+> 相关根因、方案与手工验证清单见 [`windows-service-upgrade.md`](./windows-service-upgrade.md)。
+
 ```bash
 # 装完包、启动过一次 App（完成迁移闸门）后执行
 sh script/lab/pre17-acceptance.sh          # 或 EXVLAN_CLI=/path/to/exvlan-cli

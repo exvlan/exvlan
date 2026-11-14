@@ -148,7 +148,9 @@ async function refreshServiceState() {
     serviceStatusText.value = st.status || "";
     if (!st.ready && !serviceAutoRetried) {
       serviceAutoRetried = true;
-      void logDiagStep("service_auto_retry", st.status.slice(0, 120));
+      // 三态分流（后端 `service_install` 也按同一判据分流）：
+      // 只有真的没装才重装；装了但管道不通只重启，避免覆盖运行中的服务 exe。
+      void logDiagStep("service_auto_retry", `${st.health}: ${st.status.slice(0, 120)}`);
       void onRetryService(true);
     }
   } catch {

@@ -15,7 +15,11 @@
         "type": "embedBootstrapper"
       },
       "wix": {
-        "version": "26.104.20713.50013"
+        "version": "26.104.20713.50013",
+        "upgradeCode": "42C08A88-9ABD-5406-B191-2A8543B12B98",
+        "fragmentPaths": [
+          "wix/service-lifecycle.wxs"
+        ]
       }
     }
   }

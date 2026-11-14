@@ -397,10 +397,18 @@ export async function shareErrorLog(frontend?: string) {
   return await invoke<string>("share_error_log", { frontend: frontend ?? null });
 }
 
-/** 特权服务当前状态（`exvlan-service`；移动端恒为 ready）。 */
+/** 特权服务当前状态（`exvlan-service`；移动端恒为 ready）。
+ *
+ * `health` 是三态判据（后端 `ServiceHealth`）：
+ * - `not-installed`：二进制不在 → 才该「安装」；
+ * - `installed-not-ready`：装了但 IPC 不通 → 只「重启」，不要重装
+ *   （重装会在服务运行时覆盖 exe → os error 32）；
+ * - `installed-running`：健康。
+ */
 export interface ServiceState {
   installed: boolean;
   ready: boolean;
+  health: "not-installed" | "installed-not-ready" | "installed-running";
   mode: string;
   kernel_pid: number;
   status: string;

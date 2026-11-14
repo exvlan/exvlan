@@ -83,28 +83,97 @@ pub fn version_file_path(bin: &std::path::Path) -> PathBuf {
     PathBuf::from(raw)
 }
 
+/// 服务的三态。
+///
+/// 只靠 `installed` / `ready` 两个布尔判断是不够的 —— dev.1 现场就是这么误判的：
+/// 服务在跑、只是管道一时连不上，前端把它当成「未安装」去重装，
+/// 于是撞上「覆盖运行中的 exe」(os error 32) 并弹出 UAC。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceHealth {
+    /// 没装好：二进制不在，**或**系统里没有注册项（卸载后重装、手工 `sc delete` 过）
+    /// → **只有这一态**才应该走「安装」（`install` 会把注册补回来）。
+    NotInstalled,
+    /// 装了但 IPC 不通（服务停了 / 崩过 / 升级窗口内）→ 应当**重启**，不要重装。
+    InstalledNotReady,
+    /// IPC 可用 → 健康。
+    InstalledRunning,
+}
+
 /// 服务当前状态（供界面判断是否要显示横幅 / 诊断包）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ServiceState {
     pub installed: bool,
     pub ready: bool,
+    pub health: ServiceHealth,
     pub mode: String,
     pub kernel_pid: u32,
     pub status: String,
 }
 
+/// 服务是否已在系统里注册。
+///
+/// Windows 上二进制与注册项是**两份状态**：MSI 卸载会 `sc delete`（本次改动）而
+/// ProgramData 里的二进制保留 → 「二进制在、注册项没了」。这种机器必须走
+/// `install` 重新注册，不能走 `repair`（`--restart` 对不存在的服务只会报错）。
+#[cfg(target_os = "windows")]
+fn service_registered() -> bool {
+    !matches!(
+        crate::service::status(),
+        Ok(exvlan_rpc::service_manager::ServiceStatus::NotInstalled)
+    )
+}
+
+/// 其它平台由 `is_installed()` 的判据覆盖（macOS 看 plist，Linux 看二进制）。
+#[cfg(not(target_os = "windows"))]
+fn service_registered() -> bool {
+    true
+}
+
+fn health_of(installed: bool, registered: bool, ready: bool) -> ServiceHealth {
+    if !installed || !registered {
+        ServiceHealth::NotInstalled
+    } else if ready {
+        ServiceHealth::InstalledRunning
+    } else {
+        ServiceHealth::InstalledNotReady
+    }
+}
+
+/// 「装了但 IPC 不通」时给用户的可操作提示（不要只说「未就绪」）。
+fn not_ready_hint() -> String {
+    // 用 cfg! 而非 #[cfg] 属性：这个函数在移动端也会被编译，
+    // 缺一个绑定就会在 android/ios 上编译失败。
+    let inspect = if cfg!(target_os = "windows") {
+        format!("sc query {SERVICE_LABEL}")
+    } else if cfg!(target_os = "macos") {
+        format!("launchctl print system/{SERVICE_LABEL}")
+    } else {
+        format!("systemctl status {SERVICE_LABEL}")
+    };
+    format!(
+        "服务已注册，但 IPC 仍连不上（内核可能还在冷启动）。\n\
+         · 查看状态：{inspect}\n\
+         · 服务日志：{}\n\
+         · 也可以先退出界面等 30 秒再打开；仍不行时用「设置 → 特权服务 → 重试」或「强制重装」。",
+        crate::paths::service_log().display()
+    )
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub use imp::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, pair_start, port_cleanup, port_owner, restart_kernel,
-    set_extra_whitelist, set_mode, state, stop, stop_kernel, update, whitelist_info,
+    is_installed, is_ready, kernel_status, pair_start, port_cleanup, port_owner, repair,
+    restart_kernel, set_extra_whitelist, set_mode, state, stop, stop_kernel, update,
+    whitelist_info,
 };
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub use stub::{
     apply_bundled, ensure_kernel, ensure_normal, ensure_service, install, installed_version,
-    is_installed, is_ready, kernel_status, pair_start, port_cleanup, port_owner, restart_kernel,
-    set_extra_whitelist, set_mode, state, stop, stop_kernel, update, whitelist_info,
+    is_installed, is_ready, kernel_status, pair_start, port_cleanup, port_owner, repair,
+    restart_kernel, set_extra_whitelist, set_mode, state, stop, stop_kernel, update,
+    whitelist_info,
 };
 
 // ---------------------------------------------------------------------------
@@ -262,11 +331,14 @@ mod imp {
 
     pub fn state() -> ServiceState {
         let installed = is_installed();
+        // 「注册项是否在」只在 Windows 有意义（MSI 卸载会 sc delete 而保留二进制）。
+        let registered = installed && service_registered();
         match call(&Request::Status) {
             Ok(resp) => match resp.data {
                 Some(Payload::Status { mode, kernel, .. }) => ServiceState {
                     installed,
                     ready: true,
+                    health: health_of(installed, registered, true),
                     mode: mode.as_str().to_string(),
                     kernel_pid: kernel.map(|k| k.pid).unwrap_or(0),
                     status: "ok".to_string(),
@@ -274,6 +346,7 @@ mod imp {
                 _ => ServiceState {
                     installed,
                     ready: true,
+                    health: health_of(installed, registered, true),
                     mode: "unknown".to_string(),
                     kernel_pid: 0,
                     status: "服务没有返回 status 负载".to_string(),
@@ -282,11 +355,36 @@ mod imp {
             Err(err) => ServiceState {
                 installed,
                 ready: false,
+                health: health_of(installed, registered, false),
                 mode: "unknown".to_string(),
                 kernel_pid: 0,
                 status: err,
             },
         }
+    }
+
+    /// 「装了但没就绪」的修复：**只重启服务**，绝不覆盖二进制。
+    ///
+    /// 与 `install` 的分工：安装只在 `NotInstalled` 时用。升级窗口/服务崩过之后
+    /// 服务本体还在，重装既没必要，还会在服务运行时覆盖 `bin\exvlan-service.exe`
+    /// → 「另一个程序正在使用此文件 (os error 32)」→ 界面误报安装失败（dev.1 现场）。
+    pub fn repair() -> Result<(), String> {
+        if !is_installed() || !service_registered() {
+            return Err(format!(
+                "服务未安装或注册项已丢失（{}），请重新安装（会重新注册）而不是重启",
+                installed_service_bin().display()
+            ));
+        }
+        crate::logger::record("service.repair", "restart 已注册服务（不覆盖二进制）");
+        crate::run_elevated(&["--exvlan-service-ctl", "restart"])?;
+        // 服务重启会重新拉起内核/gateway；内核冷启动最长等 10s RPC，给 30s 余量。
+        for _ in 0..150 {
+            if is_ready() {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        Err(not_ready_hint())
     }
 
     /// 首次安装（提权一次）：跑随包 `exvlan-service --install <uid>`。
@@ -315,14 +413,14 @@ mod imp {
             &sid,
             &tools,
         ])?;
-        // 安装脚本内部已等 socket 就绪，这里再兜一次（避免 launchd 抖动）。
-        for _ in 0..25 {
+        // 安装脚本内部已等过就绪，这里再兜一次；冷启动 + 内核拉起给 30s。
+        for _ in 0..150 {
             if is_ready() {
                 return Ok(());
             }
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
-        Err("服务已安装但 IPC 未就绪（见诊断包 service 段）".to_string())
+        Err(not_ready_hint())
     }
 
     /// Linux：提权跑随包 `exvlan-service --install <uid> [--tools-dir <dir>]`，
@@ -651,10 +749,14 @@ mod stub {
         ServiceState {
             installed: false,
             ready: true,
+            health: ServiceHealth::NotInstalled,
             mode: "service".to_string(),
             kernel_pid: 0,
             status: "unsupported".to_string(),
         }
+    }
+    pub fn repair() -> Result<(), String> {
+        Err("当前平台没有特权服务".to_string())
     }
     pub fn install(_app: &tauri::AppHandle) -> Result<(), String> {
         Ok(())

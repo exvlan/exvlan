@@ -175,6 +175,14 @@ fn write_version_file(p: &Paths) -> std::io::Result<()> {
     Ok(())
 }
 
+/// 磁盘上已安装服务的版本（版本文件由服务启动时写入）；缺失返回 `None`。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn installed_service_version(p: &Paths) -> Option<String> {
+    let text = std::fs::read_to_string(version_path(&p.service_bin)).ok()?;
+    let trimmed = text.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 /// `rename` + 轮询重试。
 ///
 /// Windows 上刚停掉的内核可能还握着 exe 句柄（进程退出 → 句柄释放是异步的），
@@ -3294,22 +3302,10 @@ fn restart_service() -> anyhow::Result<()> {
 
 #[cfg(target_os = "windows")]
 fn restart_service() -> anyhow::Result<()> {
-    let _ = hidden("sc").args(["stop", SERVICE_LABEL]).output();
-    for _ in 0..150 {
-        let out = hidden("sc").args(["query", SERVICE_LABEL]).output()?;
-        if String::from_utf8_lossy(&out.stdout).contains("STOPPED") {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(200));
+    if !stop_service_blocking(Duration::from_secs(30)) {
+        bail!("服务未能停止（`sc query {SERVICE_LABEL}` 看状态）");
     }
-    let out = hidden("sc").args(["start", SERVICE_LABEL]).output()?;
-    if !out.status.success() {
-        bail!(
-            "sc start 失败: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
-    Ok(())
+    start_service_scm()
 }
 
 #[cfg(target_os = "linux")]
@@ -3384,6 +3380,10 @@ fn boot(state: &Arc<State>) {
     // 不必等下一次 install/update；也顺带修复「版本文件丢失」的情况。
     let _ = write_version_file(&state.paths);
 
+    // 升级收尾：清掉上轮更新留下的 staging 残留（见函数注释里的白名单）。
+    #[cfg(target_os = "windows")]
+    cleanup_stale_staging(&state.paths);
+
     #[cfg(target_os = "macos")]
     {
         // 历史脏数据：早期版本以 root 跑过 WebView，`~/Library/WebKit/era.exvlan.studio`
@@ -3414,6 +3414,58 @@ fn boot(state: &Arc<State>) {
     }
     // 无论成功失败，boot 到这里就算走完：看门狗据此区分「卡住」与「失败」。
     BOOT_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// 清理升级过程留下的 staging 残留（B7）。
+///
+/// 只删**这几个确切名字**，并且要求修改时间超过 10 分钟 —— 避免把「正在进行」
+/// 的替换暂存删掉（`--replace-updater` 会先 sleep 1.2s 再动手）：
+///
+/// - `bin/exvlan-service.exe.new`：`--replace-updater` 的暂存
+/// - `core/exvlan.exe.new`：换内核的暂存
+/// - `core/tools.new/`：随包工具（cli/gateway）暂存目录
+/// - `core/v.txt`：pre.19 以前的版本残留（当前代码只读写 `core/version`）
+///
+/// **不碰** `config/`、`logs/`、`*.prev`（回滚备份）、token 等任何数据。
+#[cfg(target_os = "windows")]
+fn cleanup_stale_staging(p: &Paths) {
+    /// 比这更「新」的残留不动（可能正被更新流程使用）。
+    const MIN_AGE: Duration = Duration::from_secs(600);
+
+    let is_fresh = |path: &Path| -> bool {
+        std::fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|mtime| mtime.elapsed().ok())
+            .map(|age| age < MIN_AGE)
+            .unwrap_or(false)
+    };
+
+    let mut service_new = p.service_bin.as_os_str().to_os_string();
+    service_new.push(".new");
+    let mut kernel_new = p.kernel.as_os_str().to_os_string();
+    kernel_new.push(".new");
+
+    let candidates = [
+        PathBuf::from(service_new),
+        PathBuf::from(kernel_new),
+        p.core.join("tools.new"),
+        p.core.join("v.txt"),
+    ];
+
+    for path in candidates {
+        if !path.exists() || is_fresh(&path) {
+            continue;
+        }
+        let removed = if path.is_dir() {
+            std::fs::remove_dir_all(&path).is_ok()
+        } else {
+            std::fs::remove_file(&path).is_ok()
+        };
+        if removed {
+            log_line(p, &format!("staging cleanup: 删除残留 {}", path.display()));
+        }
+    }
 }
 
 /// macOS：把 `~/Library/WebKit[/era.exvlan.studio]` 的属主修回用户。
@@ -4583,8 +4635,29 @@ fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
         std::fs::create_dir_all(dir).ok();
     }
 
+    // 0) 幂等：目标版本已一致 + 服务在运行 → 直接成功，**不覆盖**。
+    //
+    // 现场证据（dev.1，09:29:00Z）：GUI 首启自愈与「重试安装」都会走到这里，
+    // 服务其实好好的，却因为「覆盖运行中的 exe」失败被报成「安装失败」
+    // （`cli --install failed: 复制服务二进制失败 … os error 32`，
+    // `[elevate] exit code: 1`），用户看到的是假故障。
+    if src != p.service_bin
+        && service_is_running()
+        && installed_service_version(p).as_deref() == Some(BUILD_VERSION)
+    {
+        log_line(p, "install: 版本已一致且服务在运行，跳过覆盖（幂等）");
+        return Ok(());
+    }
+
     // 1) 服务可能正在跑：直接覆盖 exe 会报「另一个程序正在使用此文件」(os error 32)。
-    stop_service_blocking();
+    if !stop_service_blocking(Duration::from_secs(30)) {
+        // 停不下来就别硬覆盖：给出可操作的错误，而不是让 copy 抛 os error 32。
+        bail!(
+            "服务仍在运行，未覆盖 {}；请先 `sc stop {}`（或重启机器）后重试",
+            p.service_bin.display(),
+            SERVICE_LABEL
+        );
+    }
     cleanup_legacy_windows();
 
     // 2) 复制（带重试：SCM/杀软释放文件句柄需要一点时间）
@@ -4648,20 +4721,87 @@ fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
     bail!("服务已启动但命名管道未就绪（见 service.log）")
 }
 
-/// `sc stop` 并等到 STOPPED（或本来就没装）。
+/// 停服务并**等到 SCM 报告 STOPPED**（最多 `timeout`），返回「现在没有在跑」。
+///
+/// 之前这里用 `sc query` 的**文本**判断（`text.contains("STOPPED")`）：真机是中文
+/// Windows，状态名跟着系统语言走 → 判断永远不成立，于是服务仍在运行时就去覆盖
+/// `bin\exvlan-service.exe`，撞出「另一个程序正在使用此文件 (os error 32)」。
+/// 改用 SCM API（`windows-service` crate），与系统语言无关。
 #[cfg(target_os = "windows")]
-fn stop_service_blocking() {
-    let _ = hidden("sc").args(["stop", SERVICE_LABEL]).output();
-    for _ in 0..100 {
-        let Ok(out) = hidden("sc").args(["query", SERVICE_LABEL]).output() else {
-            return;
-        };
-        let text = String::from_utf8_lossy(&out.stdout);
-        if text.contains("STOPPED") || text.contains("1060") {
-            return;
+fn stop_service_blocking(timeout: Duration) -> bool {
+    use windows_service::service::{ServiceAccess, ServiceState};
+    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    let stopped = |service: &windows_service::service::Service| {
+        matches!(
+            service.query_status().map(|status| status.current_state),
+            Ok(ServiceState::Stopped)
+        )
+    };
+
+    // SCM 打不开 / 服务不存在（1060）→ 当作「没在跑」，后续注册步骤会处理。
+    let Ok(manager) = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+    else {
+        return true;
+    };
+    let Ok(service) = manager.open_service(
+        SERVICE_LABEL,
+        ServiceAccess::STOP | ServiceAccess::QUERY_STATUS,
+    ) else {
+        return true;
+    };
+    if stopped(&service) {
+        return true;
+    }
+    let _ = service.stop();
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if stopped(&service) {
+            return true;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
+    false
+}
+
+/// 服务当前是否 RUNNING（SCM 判定；未安装/打不开 SCM 都算 false）。
+#[cfg(target_os = "windows")]
+fn service_is_running() -> bool {
+    use windows_service::service::{ServiceAccess, ServiceState};
+    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    let Ok(manager) = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+    else {
+        return false;
+    };
+    let Ok(service) = manager.open_service(SERVICE_LABEL, ServiceAccess::QUERY_STATUS) else {
+        return false;
+    };
+    matches!(
+        service.query_status().map(|status| status.current_state),
+        Ok(ServiceState::Running)
+    )
+}
+
+/// 启动已注册的服务（幂等：已在运行视为成功）。
+#[cfg(target_os = "windows")]
+fn start_service_scm() -> anyhow::Result<()> {
+    use windows_service::service::ServiceAccess;
+    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+    let service = manager.open_service(
+        SERVICE_LABEL,
+        ServiceAccess::START | ServiceAccess::QUERY_STATUS,
+    )?;
+    if let Err(err) = service.start(&[] as &[&std::ffi::OsStr]) {
+        // 1056（已在运行）之类放行；真失败要看管道是否可用再说。
+        if wait_pipe(Duration::from_secs(3)) {
+            return Ok(());
+        }
+        bail!("sc start 失败: {err}");
+    }
+    Ok(())
 }
 
 /// 复制二进制，遇到「文件被占用」时退避重试。
@@ -4725,15 +4865,9 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>, tools: Option<&str>) -> any
     // 给主服务时间把 IPC 响应写完再动手。
     std::thread::sleep(Duration::from_millis(1200));
 
-    // 1) 停服务（运行中的 exe 被文件锁占用）
-    let _ = hidden("sc").args(["stop", SERVICE_LABEL]).output();
-    for _ in 0..150 {
-        let out = hidden("sc").args(["query", SERVICE_LABEL]).output()?;
-        let text = String::from_utf8_lossy(&out.stdout);
-        if text.contains("STOPPED") {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(200));
+    // 1) 停服务（运行中的 exe 被文件锁占用）。SCM API 判定，避免本地化文本误判。
+    if !stop_service_blocking(Duration::from_secs(30)) {
+        log_line(p, "replace-updater: 服务未能停止，继续尝试替换");
     }
 
     // 2) 备份 → 替换
@@ -4742,7 +4876,7 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>, tools: Option<&str>) -> any
         let _ = std::fs::copy(&p.service_bin, &backup);
     }
     if let Err(err) = std::fs::copy(new_exe, &p.service_bin) {
-        let _ = hidden("sc").args(["start", SERVICE_LABEL]).output();
+        let _ = start_service_scm();
         return Err(anyhow::anyhow!("替换服务二进制失败: {err}"));
     }
     // 不在这里写 `service.version`：本进程是**旧**二进制，写进去的是旧版本；
@@ -4758,12 +4892,13 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>, tools: Option<&str>) -> any
     }
 
     // 3) 拉起；失败回滚
-    let start = hidden("sc").args(["start", SERVICE_LABEL]).output()?;
-    if !start.status.success() {
+    if let Err(err) = start_service_scm() {
         let _ = std::fs::copy(&backup, &p.service_bin);
-        let _ = hidden("sc").args(["start", SERVICE_LABEL]).output();
-        bail!("替换后启动失败，已回滚");
+        let _ = start_service_scm();
+        bail!("替换后启动失败，已回滚: {err}");
     }
+    // 4) 暂存文件收尾（B7）：替换已成功，`.new` 不再需要。
+    let _ = std::fs::remove_file(new_exe);
     Ok(())
 }
 
@@ -4834,12 +4969,10 @@ fn uninstall(p: &Paths) -> anyhow::Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = hidden("sc")
-            .args(["stop", "era.exvlan.studio.service"])
-            .output();
-        let _ = hidden("sc")
-            .args(["delete", "era.exvlan.studio.service"])
-            .output();
+        // 停（等 SCM 确认）→ 注销注册。**只删 SCM 项**：二进制与 ProgramData 下的
+        // 配置/日志/内核/token 一律保留（彻底清理不属于 uninstall 的职责）。
+        let _ = stop_service_blocking(Duration::from_secs(30));
+        let _ = hidden("sc").args(["delete", SERVICE_LABEL]).output();
         return Ok(());
     }
     #[cfg(target_os = "linux")]
