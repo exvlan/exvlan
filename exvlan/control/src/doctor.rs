@@ -633,11 +633,22 @@ fn webkit_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
     }
 }
 
+/// 是否需要迁移：**与 GUI 闸门同一判据**（`pending = !done && !items.is_empty()`）。
+///
+/// 只 items 非空就判「要迁移」在真机上会永远为真：服务每次更新内核都会把旧
+/// `core/*.prev` 留成回滚备份，而它正好在 `legacy::detect` 的遗留清单里 ——
+/// 迁移完成后 doctor 仍然报红（dev.1 真机实测）。
+fn migrate_pending(done: bool, legacy: &crate::legacy::Legacy) -> bool {
+    !done && legacy.pending()
+}
+
 fn migrate_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
     let marker = user.data.join("migrate.done");
+    let done_marker = user.data.join(crate::legacy::MIGRATE_DONE_MARKER);
+    let done = done_marker.is_file();
     // 与 GUI 迁移闸门、`exvlan-migrate` 共用同一份检测（各写一遍必然漂）。
     let legacy = crate::legacy::detect(user, &paths::paths());
-    if legacy.pending() {
+    if migrate_pending(done, &legacy) {
         out.push(Finding {
             id: "migrate.legacy",
             level: "error",
@@ -648,6 +659,7 @@ fn migrate_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
             evidence: json!({
                 "items": legacy.item_labels(),
                 "marker": marker.display().to_string(),
+                "done_marker": done_marker.display().to_string(),
             }),
             fixable: false,
         });
@@ -655,8 +667,17 @@ fn migrate_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
         out.push(Finding {
             id: "migrate.legacy",
             level: "ok",
-            summary: "没有旧版本遗留数据".into(),
-            evidence: json!({"marker": marker.display().to_string()}),
+            summary: if done {
+                "迁移已完成（migrate.done.v3 存在）".into()
+            } else {
+                "没有旧版本遗留数据".into()
+            },
+            evidence: json!({
+                "marker": marker.display().to_string(),
+                "done_marker": done_marker.display().to_string(),
+                "done": done,
+                "items": legacy.item_labels(),
+            }),
             fixable: false,
         });
     }
@@ -736,6 +757,28 @@ mod tests {
             kernel_pid: pid,
             gateway_addr: gateway.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn migrate_done_marker_wins_over_regenerated_prev_kernel() {
+        // 真机场景：迁移成功写 v3 marker，之后服务更新内核又生成 `core/*.prev`。
+        // doctor 不能因此永久报「检测到旧版本数据」。
+        let mut legacy = crate::legacy::Legacy::default();
+        legacy.prev_kernels.push(PathBuf::from("/tmp/exvlan.prev"));
+        legacy.items.push(crate::legacy::Item {
+            kind: crate::legacy::Kind::KernelPrev,
+            target: "/tmp/exvlan.prev".to_string(),
+            hint: "旧内核备份，删除".to_string(),
+        });
+        assert!(migrate_pending(false, &legacy), "未迁移 + 有遗留 → 要报");
+        assert!(
+            !migrate_pending(true, &legacy),
+            "已迁移（v3 marker）→ 不该再报"
+        );
+        assert!(
+            !migrate_pending(false, &crate::legacy::Legacy::default()),
+            "没有遗留项 → 不报"
+        );
     }
 
     #[test]

@@ -15,16 +15,16 @@
 
 ## 1. 现场证据（dev.1 真机）
 
-| 编号 | 现象 | 证据 |
-| --- | --- | --- |
-| M1 | `msiexec REINSTALL=ALL` 跨 ProductCode **静默空转**（返回 0，实际没装） | 手工复现 |
-| M2 | 直接 `/i` 新 MSI：`RemoveExistingProducts` 崩 **1601**，Restart Manager 报 **351** | 手工复现；RM 列出的占用方是 `C:\Program Files\EXVlan Studio` 下的进程/文件（**主要是 GUI 自身**，见 R9；内核/gateway/服务本体在 ProgramData） |
-| B1 | 升级窗口内服务崩溃 → **SCM 放弃**（无 panic / WER） | `System` 日志 `09:23:58Z id=7034 The Exvlan Service service terminated unexpectedly. It has done this 3 time(s).`；`service.log` 09:19:49 kernel spawned → 09:20:15 `kernel not ready: rpc 超时 10s` + `kernel.restart failed: … (os error 32)` → 09:20:15–09:24:12 近 4 分钟无进程日志 |
-| B2 | 首启自愈**静默失败** | 09:20:41Z 提权 `--install-exvlan-service` 未产出 `[service.reinstall] done`（同时刻 `[service.update] bad_request: staging`、`[service.apply] … (os error 2)`）——此刻 `resources/` 正被 MSI 改写 |
-| B3 | `--install` 在服务运行中覆盖自身 exe → **os error 32** | 09:29:00Z `[service] cli --install failed: 复制服务二进制失败("…\bin\exvlan-service.exe"): 另一个程序正在使用此文件 (os error 32)`；`[elevate] exit code: 1` → UI 误报「安装失败」，而服务其实在跑 |
-| B4 | 状态语义把「管道不通」当成「未安装」 | `[fe:diag] service_auto_retry 连接服务管道失败: os error 2` → 触发重装 |
-| B7 | staging 残留 | `bin\exvlan-service.exe.new`(11/13)、`core\exvlan.exe.new`(11/14)、`core\v.txt` 仍是 `26.410.20712-pre.19+e27ee2` |
-| S1 | 服务注册从未被 MSI 删除 | `sc query` = `RUNNING` / `AUTO_START` / `BINARY_PATH_NAME=C:\ProgramData\era.exvlan.studio\bin\exvlan-service.exe --daemon` |
+| 编号 | 现象                                                                               | 证据                                                                                                                                                                                                                                                                                    |
+| ---- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M1   | `msiexec REINSTALL=ALL` 跨 ProductCode **静默空转**（返回 0，实际没装）            | 手工复现                                                                                                                                                                                                                                                                                |
+| M2   | 直接 `/i` 新 MSI：`RemoveExistingProducts` 崩 **1601**，Restart Manager 报 **351** | 手工复现；RM 列出的占用方是 `C:\Program Files\EXVlan Studio` 下的进程/文件（**主要是 GUI 自身**，见 R9；内核/gateway/服务本体在 ProgramData）                                                                                                                                           |
+| B1   | 升级窗口内服务崩溃 → **SCM 放弃**（无 panic / WER）                                | `System` 日志 `09:23:58Z id=7034 The Exvlan Service service terminated unexpectedly. It has done this 3 time(s).`；`service.log` 09:19:49 kernel spawned → 09:20:15 `kernel not ready: rpc 超时 10s` + `kernel.restart failed: … (os error 32)` → 09:20:15–09:24:12 近 4 分钟无进程日志 |
+| B2   | 首启自愈**静默失败**                                                               | 09:20:41Z 提权 `--install-exvlan-service` 未产出 `[service.reinstall] done`（同时刻 `[service.update] bad_request: staging`、`[service.apply] … (os error 2)`）——此刻 `resources/` 正被 MSI 改写                                                                                        |
+| B3   | `--install` 在服务运行中覆盖自身 exe → **os error 32**                             | 09:29:00Z `[service] cli --install failed: 复制服务二进制失败("…\bin\exvlan-service.exe"): 另一个程序正在使用此文件 (os error 32)`；`[elevate] exit code: 1` → UI 误报「安装失败」，而服务其实在跑                                                                                      |
+| B4   | 状态语义把「管道不通」当成「未安装」                                               | `[fe:diag] service_auto_retry 连接服务管道失败: os error 2` → 触发重装                                                                                                                                                                                                                  |
+| B7   | staging 残留                                                                       | `bin\exvlan-service.exe.new`(11/13)、`core\exvlan.exe.new`(11/14)、`core\v.txt` 仍是 `26.410.20712-pre.19+e27ee2`                                                                                                                                                                       |
+| S1   | 服务注册从未被 MSI 删除                                                            | `sc query` = `RUNNING` / `AUTO_START` / `BINARY_PATH_NAME=C:\ProgramData\era.exvlan.studio\bin\exvlan-service.exe --daemon`                                                                                                                                                             |
 
 ## 2. 根因链条（file:line，基于 dev.1 = `33ed7f4c`）
 
@@ -63,7 +63,7 @@
      `installed && 版本一致 && 内核一致` 时**直接返回 `current`**，无视 `ready`；
    - `lib.rs:5230-5241`：`service_install` 命令**无条件**调用 `install`；
    - `pages/index.vue:145-155`：`!ready` → 自动 `onRetryService(true)` → 重装。
-   ⇒ 服务其实是 RUNNING，却先被覆盖 exe（B3）再被误报失败（B2）。
+     ⇒ 服务其实是 RUNNING，却先被覆盖 exe（B3）再被误报失败（B2）。
 
 5. **状态判据只看 SCM**
    `exvlan/rpc/src/service_manager/mod.rs:548`：只有 SCM 返回 `0x424`
@@ -103,12 +103,12 @@
 `-ExecutionPolicy Bypass`——`-Command` 内联脚本不受执行策略限制，去掉这一串能少
 一个 EDR 高危特征）：
 
-| 动作 | Execute | 时序 | 条件 | 作用 |
-| --- | --- | --- | --- | --- |
-| `ExvlanStopServiceForUpgrade` | immediate | `Before="InstallValidate"` | 恒真 | `Stop-Service` 等 STOPPED（≤30s）；**确认已停/不存在之后**才 `Stop-Process` 清孤儿 `exvlan.exe` / `exvlan-gateway.exe` |
-| `ExvlanStartServiceAfterInstall` | immediate | `After="InstallFinalize"` | `NOT REMOVE` | 把服务拉回 RUNNING（覆盖 B1 的「升级窗口内被 SCM 放弃」）；服务不存在则静默跳过 |
-| `ExvlanStartServiceOnRollback` | rollback | `After="InstallInitialize"` | `NOT REMOVE` | 安装脚本中途失败回滚时把服务拉回来 |
-| `ExvlanRemoveServiceOnUninstall` | immediate | `Before="RemoveFiles"` | `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE` | 真卸载才停 + `sc delete`（只删 SCM 项） |
+| 动作                             | Execute   | 时序                        | 条件                                        | 作用                                                                                                                   |
+| -------------------------------- | --------- | --------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `ExvlanStopServiceForUpgrade`    | immediate | `Before="InstallValidate"`  | 恒真                                        | `Stop-Service` 等 STOPPED（≤30s）；**确认已停/不存在之后**才 `Stop-Process` 清孤儿 `exvlan.exe` / `exvlan-gateway.exe` |
+| `ExvlanStartServiceAfterInstall` | immediate | `After="InstallFinalize"`   | `NOT REMOVE`                                | 把服务拉回 RUNNING（覆盖 B1 的「升级窗口内被 SCM 放弃」）；服务不存在则静默跳过                                        |
+| `ExvlanStartServiceOnRollback`   | rollback  | `After="InstallInitialize"` | `NOT REMOVE`                                | 安装脚本中途失败回滚时把服务拉回来                                                                                     |
+| `ExvlanRemoveServiceOnUninstall` | immediate | `Before="RemoveFiles"`      | `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE` | 真卸载才停 + `sc delete`（只删 SCM 项）                                                                                |
 
 **为什么 immediate 动作不写 `Impersonate`**：`msidbCustomActionTypeNoImpersonate`
 必须与 `msidbCustomActionTypeInScript`（deferred/rollback/commit）同时出现才有意义，
@@ -142,15 +142,15 @@
 
 `exvlan/service/src/main.rs`：
 
-| 位置 | 改动 |
-| --- | --- |
-| `install()`（Windows） | 停不下来时**明确报错**（`服务仍在运行，未覆盖 …；请先 sc stop`），不再让 `copy` 抛裸 os error 32 |
-| `stop_service_blocking(timeout)` | 改为 SCM API（`windows-service`）轮询 `ServiceState::Stopped`，**与系统语言无关**（原实现匹配 `"STOPPED"` 文本） |
-| `start_service_scm()` | 新增；同样走 SCM API |
-| `restart_service()` / `replace_updater()`（Windows） | 改用上面两个函数（去掉 `sc query` 文本匹配）；`replace_updater` 回滚分支的两次 `start_service_scm()` 结果都写日志 |
-| `cleanup_stale_staging()` | 新增，`boot()` 时调用：删除 `bin\exvlan-service.exe.new`、`core\exvlan.exe.new`、`core\tools.new\`、`core\v.txt`（B7），**要求 mtime > 10 分钟**（避免删掉正在进行的替换）；不碰 `config/`、`logs/`、`*.prev`、token |
-| `replace_updater()`（Windows） | 替换成功后删除 `.new` 暂存 |
-| `uninstall()`（Windows） | `stop_service_blocking` + `sc delete`；按**退出码**区分（0 成功 / 1060 幂等 / 其它记日志并返回错误）；**只删 SCM 项**，不删二进制、不删数据 |
+| 位置                                                 | 改动                                                                                                                                                                                                                 |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `install()`（Windows）                               | 停不下来时**明确报错**（`服务仍在运行，未覆盖 …；请先 sc stop`），不再让 `copy` 抛裸 os error 32                                                                                                                     |
+| `stop_service_blocking(timeout)`                     | 改为 SCM API（`windows-service`）轮询 `ServiceState::Stopped`，**与系统语言无关**（原实现匹配 `"STOPPED"` 文本）                                                                                                     |
+| `start_service_scm()`                                | 新增；同样走 SCM API                                                                                                                                                                                                 |
+| `restart_service()` / `replace_updater()`（Windows） | 改用上面两个函数（去掉 `sc query` 文本匹配）；`replace_updater` 回滚分支的两次 `start_service_scm()` 结果都写日志                                                                                                    |
+| `cleanup_stale_staging()`                            | 新增，`boot()` 时调用：删除 `bin\exvlan-service.exe.new`、`core\exvlan.exe.new`、`core\tools.new\`、`core\v.txt`（B7），**要求 mtime > 10 分钟**（避免删掉正在进行的替换）；不碰 `config/`、`logs/`、`*.prev`、token |
+| `replace_updater()`（Windows）                       | 替换成功后删除 `.new` 暂存                                                                                                                                                                                           |
+| `uninstall()`（Windows）                             | `stop_service_blocking` + `sc delete`；按**退出码**区分（0 成功 / 1060 幂等 / 其它记日志并返回错误）；**只删 SCM 项**，不删二进制、不删数据                                                                          |
 
 **不做「版本一致就跳过覆盖」的短路（R11）**：一度加过，但正常自愈路径进不到那里
 （未安装时服务本来就没在跑，版本不一致时也该覆盖），它唯一能命中的场景恰恰是
@@ -185,11 +185,11 @@
 
 ### 3.4 方案 B（备选 / 后续）
 
-| 场景 | 做法 | 覆盖面 |
-| --- | --- | --- |
-| **自动更新走的是 NSIS 而不是 MSI** | `bundle.windows.nsis.installerHooks` + `!macro NSIS_HOOK_PREINSTALL`（同样先停服务） | **已实施**（dev.2，见 §3.5）：`script/gen_upgrade_manifests.py` 里官方 updater 的 Windows 规则匹配 `*_x64_*setup.exe`（NSIS），MSI 只服务手工/企业部署 |
-| MSI 若仍报 351 | 追加 `<ServiceControl Id="…" Name="era.exvlan.studio.service" Stop="both" Wait="yes" Remove="uninstall"/>`（需要挂在一个 Component 上，即 `componentGroupRefs`/`componentRefs`） | MSI 原生停服务（SYSTEM 上下文），但 `StopServices` 排在 `RemoveExistingProducts`（`afterInstallInitialize` = 1501）**之后**，对升级窗口来得太晚，所以只作兜底 |
-| 让 GUI 在 RM 关它之前自己收尾 | Tauri `RunEvent::ExitRequested` 里 `service_client::stop()` | 只对**新版本**有用；老版本 GUI 没有这段代码，救不了当前这批用户 |
+| 场景                               | 做法                                                                                                                                                                             | 覆盖面                                                                                                                                                        |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **自动更新走的是 NSIS 而不是 MSI** | `bundle.windows.nsis.installerHooks` + `!macro NSIS_HOOK_PREINSTALL`（同样先停服务）                                                                                             | **已实施**（dev.2，见 §3.5）：`script/gen_upgrade_manifests.py` 里官方 updater 的 Windows 规则匹配 `*_x64_*setup.exe`（NSIS），MSI 只服务手工/企业部署        |
+| MSI 若仍报 351                     | 追加 `<ServiceControl Id="…" Name="era.exvlan.studio.service" Stop="both" Wait="yes" Remove="uninstall"/>`（需要挂在一个 Component 上，即 `componentGroupRefs`/`componentRefs`） | MSI 原生停服务（SYSTEM 上下文），但 `StopServices` 排在 `RemoveExistingProducts`（`afterInstallInitialize` = 1501）**之后**，对升级窗口来得太晚，所以只作兜底 |
+| 让 GUI 在 RM 关它之前自己收尾      | Tauri `RunEvent::ExitRequested` 里 `service_client::stop()`                                                                                                                      | 只对**新版本**有用；老版本 GUI 没有这段代码，救不了当前这批用户                                                                                               |
 
 ### 3.5 NSIS（自动更新主路径）：停服务、装完拉起（已实施）
 
@@ -214,14 +214,14 @@ MSI 里那四条自定义动作对自动更新**一行都不生效** —— 也�
 `nsis/installer.nsi`，对照 tag `tauri-v2.12.2` 与 `tauri-v2.12.4` 钩子结构完全一致；
 不是凭记忆）：
 
-| 项 | 值 | 依据 |
-| --- | --- | --- |
-| 配置字段 | `bundle.windows.nsis.installerHooks`（serde 别名 `installer-hooks`），类型 = 单个 `.nsh` 路径 | `tauri-utils/src/config.rs` `NsisConfig::installer_hooks` |
-| 可用宏 | `NSIS_HOOK_PREINSTALL` / `NSIS_HOOK_POSTINSTALL` / `NSIS_HOOK_PREUNINSTALL` / `NSIS_HOOK_POSTUNINSTALL` | 同上 doc comment；官方文档「Customizing the NSIS Installer → Extending the Installer」 |
-| 路径解析 | 相对 **`src-tauri/`**：tauri-cli 打包前 `set_current_dir(dirs.tauri)`（`tauri-cli/src/bundle.rs`），bundler 再 `dunce::canonicalize(installer_hooks)`；与 `wix.fragmentPaths` 同一套 | 同左 |
-| 插入位置 | 钩子文件在 `installer.nsi` 顶部被 `!include`；`NSIS_HOOK_PREINSTALL` 是 `Section Install` 的**第一条**语句（早于 `File` 复制与注册表写入），`NSIS_HOOK_POSTINSTALL` 是 `Section Install` 的**最后一条**（晚于文件/注册表/快捷方式） | tauri-bundler `nsis/installer.nsi` 的 `Section Install` |
-| 「NOT REMOVE」 | NSIS 的卸载是另一支（`Section Uninstall`），安装钩子只在安装/升级时展开，**位置天然表达 NOT REMOVE**，不需要额外条件 | 同上 |
-| 执行身份 | `perMachine` → `RequestExecutionLevel admin` → 钩子以**提权后的管理员令牌**执行（UAC 同意；仍是当前登录账号，不是 SYSTEM）。`MSI` 侧 `Execute="rollback"` 那种 in-script 动作才是 SYSTEM | `installer.nsi` 顶部 `!if "${INSTALLMODE}" == "perMachine" … RequestExecutionLevel admin` |
+| 项             | 值                                                                                                                                                                                                                                  | 依据                                                                                      |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 配置字段       | `bundle.windows.nsis.installerHooks`（serde 别名 `installer-hooks`），类型 = 单个 `.nsh` 路径                                                                                                                                       | `tauri-utils/src/config.rs` `NsisConfig::installer_hooks`                                 |
+| 可用宏         | `NSIS_HOOK_PREINSTALL` / `NSIS_HOOK_POSTINSTALL` / `NSIS_HOOK_PREUNINSTALL` / `NSIS_HOOK_POSTUNINSTALL`                                                                                                                             | 同上 doc comment；官方文档「Customizing the NSIS Installer → Extending the Installer」    |
+| 路径解析       | 相对 **`src-tauri/`**：tauri-cli 打包前 `set_current_dir(dirs.tauri)`（`tauri-cli/src/bundle.rs`），bundler 再 `dunce::canonicalize(installer_hooks)`；与 `wix.fragmentPaths` 同一套                                                | 同左                                                                                      |
+| 插入位置       | 钩子文件在 `installer.nsi` 顶部被 `!include`；`NSIS_HOOK_PREINSTALL` 是 `Section Install` 的**第一条**语句（早于 `File` 复制与注册表写入），`NSIS_HOOK_POSTINSTALL` 是 `Section Install` 的**最后一条**（晚于文件/注册表/快捷方式） | tauri-bundler `nsis/installer.nsi` 的 `Section Install`                                   |
+| 「NOT REMOVE」 | NSIS 的卸载是另一支（`Section Uninstall`），安装钩子只在安装/升级时展开，**位置天然表达 NOT REMOVE**，不需要额外条件                                                                                                                | 同上                                                                                      |
+| 执行身份       | `perMachine` → `RequestExecutionLevel admin` → 钩子以**提权后的管理员令牌**执行（UAC 同意；仍是当前登录账号，不是 SYSTEM）。`MSI` 侧 `Execute="rollback"` 那种 in-script 动作才是 SYSTEM                                            | `installer.nsi` 顶部 `!if "${INSTALLMODE}" == "perMachine" … RequestExecutionLevel admin` |
 
 **为什么顺带把 `installMode` 改成 `perMachine`**（本次唯一的行为变更，务必知情）：
 
@@ -238,10 +238,10 @@ MSI 里那四条自定义动作对自动更新**一行都不生效** —— 也�
 
 钩子做什么（**与 MSI 逐条对齐**，故意不做的事写在注释里）：
 
-| 钩子 | 作用 | 失败策略 |
-| --- | --- | --- |
-| `NSIS_HOOK_PREINSTALL` | `Stop-Service … -Force` 并 `WaitForStatus('Stopped','00:00:30')`；**只有确认服务已 Stopped 或本来不存在**（`$stopped` 为真）才 `Stop-Process exvlan, exvlan-gateway` 收孤儿 | `exit 0`，只把 `stopped=` 与退出码写进日志；停不掉 = 回到旧行为 |
-| `NSIS_HOOK_POSTINSTALL` | 服务存在且不是 `Running` → `Start-Service` + `WaitForStatus('Running','00:00:30')` | 同上，`before=` / `started=` 进日志；服务不存在（从没启动过 GUI、或刚从 MSI 迁移）就静默跳过 |
+| 钩子                    | 作用                                                                                                                                                                        | 失败策略                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `NSIS_HOOK_PREINSTALL`  | `Stop-Service … -Force` 并 `WaitForStatus('Stopped','00:00:30')`；**只有确认服务已 Stopped 或本来不存在**（`$stopped` 为真）才 `Stop-Process exvlan, exvlan-gateway` 收孤儿 | `exit 0`，只把 `stopped=` 与退出码写进日志；停不掉 = 回到旧行为                              |
+| `NSIS_HOOK_POSTINSTALL` | 服务存在且不是 `Running` → `Start-Service` + `WaitForStatus('Running','00:00:30')`                                                                                          | 同上，`before=` / `started=` 进日志；服务不存在（从没启动过 GUI、或刚从 MSI 迁移）就静默跳过 |
 
 **为什么孤儿清理要判断 `$stopped`**：与 MSI 侧同一条坑。服务活着时看门狗
 （`service spawn_gateway_watchdog`）每 5s 把 gateway 拉回来，1–6s 内会重建，等于在
@@ -261,17 +261,17 @@ over-the-shoulder 提权（填的是另一个管理员账号）时 TEMP 落在�
 
 **与 MSI 的语义对照**
 
-| 语义 | MSI（`wix/service-lifecycle.wxs`） | NSIS（`nsis/service-lifecycle.nsh`） |
-| --- | --- | --- |
-| 停服务 + 等 STOPPED ≤30s | `ExvlanStopServiceForUpgrade`，`Before="InstallValidate"` | `NSIS_HOOK_PREINSTALL`，`Section Install` 第一条 |
-| 孤儿清理前置条件 | 仅当 `$stopped`（已停 or 不存在） | 同（同一段 PowerShell） |
-| 装完拉起 | `ExvlanStartServiceAfterInstall`，`After="InstallFinalize"`，`NOT REMOVE` | `NSIS_HOOK_POSTINSTALL`，`Section Install` 末尾 |
-| 失败容忍 | 全部 `Return="ignore"` | 全部 `exit 0`（NSIS 侧根本不看退出码，只 `DetailPrint`） |
-| 创建服务 | 不创建（无 `ServiceInstall`） | 不创建 |
-| 数据目录 | 不触碰 `C:\ProgramData\era.exvlan.studio` | 同（只有 `Get-Service`/`Stop-Service`/`Start-Service`/`Get-Process`/`Stop-Process`） |
-| 卸载注销 SCM | `ExvlanRemoveServiceOnUninstall`（`REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`）→ `sc delete` | **刻意不做**（见 R12） |
-| 回滚拉起 | `ExvlanStartServiceOnRollback`（`Execute="rollback"`） | 没有对应物：NSIS 装到一半失败时服务仍停着，靠下次开机（`AUTO_START`）或 GUI 首启 `repair` 恢复（R16） |
-| 执行身份 | 服务端序列 = SYSTEM；rollback 动作 `Impersonate="no"` | 提权管理员令牌（perMachine + UAC） |
+| 语义                     | MSI（`wix/service-lifecycle.wxs`）                                                           | NSIS（`nsis/service-lifecycle.nsh`）                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 停服务 + 等 STOPPED ≤30s | `ExvlanStopServiceForUpgrade`，`Before="InstallValidate"`                                    | `NSIS_HOOK_PREINSTALL`，`Section Install` 第一条                                                      |
+| 孤儿清理前置条件         | 仅当 `$stopped`（已停 or 不存在）                                                            | 同（同一段 PowerShell）                                                                               |
+| 装完拉起                 | `ExvlanStartServiceAfterInstall`，`After="InstallFinalize"`，`NOT REMOVE`                    | `NSIS_HOOK_POSTINSTALL`，`Section Install` 末尾                                                       |
+| 失败容忍                 | 全部 `Return="ignore"`                                                                       | 全部 `exit 0`（NSIS 侧根本不看退出码，只 `DetailPrint`）                                              |
+| 创建服务                 | 不创建（无 `ServiceInstall`）                                                                | 不创建                                                                                                |
+| 数据目录                 | 不触碰 `C:\ProgramData\era.exvlan.studio`                                                    | 同（只有 `Get-Service`/`Stop-Service`/`Start-Service`/`Get-Process`/`Stop-Process`）                  |
+| 卸载注销 SCM             | `ExvlanRemoveServiceOnUninstall`（`REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`）→ `sc delete` | **刻意不做**（见 R12）                                                                                |
+| 回滚拉起                 | `ExvlanStartServiceOnRollback`（`Execute="rollback"`）                                       | 没有对应物：NSIS 装到一半失败时服务仍停着，靠下次开机（`AUTO_START`）或 GUI 首启 `repair` 恢复（R16） |
+| 执行身份                 | 服务端序列 = SYSTEM；rollback 动作 `Impersonate="no"`                                        | 提权管理员令牌（perMachine + UAC）                                                                    |
 
 **`/UPDATE` 与「MSI → NSIS 迁移」的实际时序**（读 `installer.nsi` 得到，不是推测）：
 
@@ -294,7 +294,6 @@ over-the-shoulder 提权（填的是另一个管理员账号）时 TEMP 落在�
 `installerHooks`/`installMode` 都不参与命名，installer 名仍是
 `{productName}_{version}_{arch}-setup.exe`（tauri-bundler `nsis/mod.rs`
 `package_base_name`），`^.*_x64.*setup\.exe$` 照样命中；`.sig` 也没变。
-
 
 ## 4. 数据安全红线（已核对的代码路径）
 
@@ -402,15 +401,15 @@ cargo check --target x86_64-pc-windows-msvc   # 通过（整包交叉编译会�
    换成桩（`Stop-Process` 用 `[Parameter(ValueFromPipeline)]` + `process{}` 对齐真实
    空管道语义），跑 9 个场景，逐条比对实际调用序列：
 
-   | 场景 | 期望 | 实测 |
-   | --- | --- | --- |
-   | 服务不存在 | 只清孤儿（`Get-Process`） | ✅ |
-   | 服务已停止 | 只清孤儿，不重复 `Stop-Service` | ✅ |
-   | 服务运行 → 按时停下 | `Stop-Service` + 清孤儿 | ✅ |
-   | 服务运行 → 30s 超时 | **只 `Stop-Service`，不清孤儿** | ✅ |
+   | 场景                          | 期望                              | 实测   |
+   | ----------------------------- | --------------------------------- | ------ |
+   | 服务不存在                    | 只清孤儿（`Get-Process`）         | ✅     |
+   | 服务已停止                    | 只清孤儿，不重复 `Stop-Service`   | ✅     |
+   | 服务运行 → 按时停下           | `Stop-Service` + 清孤儿           | ✅     |
+   | 服务运行 → 30s 超时           | **只 `Stop-Service`，不清孤儿**   | ✅     |
    | start：未安装 / 已在跑 / 已停 | 无动作 / 无动作 / `Start-Service` | ✅✅✅ |
-   | rollback start：已停 | `Start-Service` | ✅ |
-   | remove：服务不存在 | 不调用 `sc.exe` | ✅ |
+   | rollback start：已停          | `Start-Service`                   | ✅     |
+   | remove：服务不存在            | 不调用 `sc.exe`                   | ✅     |
 
 **未做**：WiX `candle`/`light` 编译、MSI 安装/升级实跑（均为 Windows 专属）。
 
@@ -441,15 +440,15 @@ bash packages/studio/src-tauri/nsis/verify.sh
 3. **PowerShell 层**：`[Parser]::ParseInput` 语法 + 桩（`Get-Service`/`Stop-Service`/
    `Start-Service`/`Get-Process`/`Stop-Process` 全换成记录调用序列的假实现）跑 7 个场景：
 
-| 场景 | 期望调用序列 | 实测 |
-| --- | --- | --- |
-| preinstall / 服务不存在 | `Get-Service` → 清孤儿（`Get-Process` + 2×`Stop-Process`），不 `Stop-Service` | ✅ `stopped=True` |
-| preinstall / 服务已停 | 同上（不重复 `Stop-Service`） | ✅ `stopped=True` |
-| preinstall / 服务运行 → 按时停 | `Stop-Service` + `WaitForStatus:Stopped` → 清孤儿 | ✅ `stopped=True` |
-| preinstall / 服务运行 → 30s 超时 | **只 `Stop-Service` + wait，不清孤儿** | ✅ `stopped=False` |
-| postinstall / 服务不存在 | 只 `Get-Service`，不 `Start-Service` | ✅ `before=absent started=False` |
-| postinstall / 已在跑 | 只 `Get-Service`（幂等） | ✅ `before=Running started=False` |
-| postinstall / 已停 | `Start-Service` + `WaitForStatus:Running` | ✅ `before=Stopped started=True` |
+| 场景                             | 期望调用序列                                                                  | 实测                              |
+| -------------------------------- | ----------------------------------------------------------------------------- | --------------------------------- |
+| preinstall / 服务不存在          | `Get-Service` → 清孤儿（`Get-Process` + 2×`Stop-Process`），不 `Stop-Service` | ✅ `stopped=True`                 |
+| preinstall / 服务已停            | 同上（不重复 `Stop-Service`）                                                 | ✅ `stopped=True`                 |
+| preinstall / 服务运行 → 按时停   | `Stop-Service` + `WaitForStatus:Stopped` → 清孤儿                             | ✅ `stopped=True`                 |
+| preinstall / 服务运行 → 30s 超时 | **只 `Stop-Service` + wait，不清孤儿**                                        | ✅ `stopped=False`                |
+| postinstall / 服务不存在         | 只 `Get-Service`，不 `Start-Service`                                          | ✅ `before=absent started=False`  |
+| postinstall / 已在跑             | 只 `Get-Service`（幂等）                                                      | ✅ `before=Running started=False` |
+| postinstall / 已停               | `Start-Service` + `WaitForStatus:Running`                                     | ✅ `before=Stopped started=True`  |
 
 7 个场景进程退出码都是 0（`exit 0` 生效，且 `finally` 仍能写出结果），说明
 「停不掉/起不来也不阻塞安装」这条成立。
@@ -457,7 +456,6 @@ bash packages/studio/src-tauri/nsis/verify.sh
 **未做**：`tauri build` 打真包（需要 Windows runner + NSIS 3.11 + WebView2 下载）、
 `setup.exe` 实跑。「`!include` 位置 / 宏展开点 / 路径解析」是按 tauri-v2.12.2 的
 `installer.nsi` 与 `tauri-cli/src/bundle.rs:149` 反查确认的，验证清单 I0 在构建机复核。
-
 
 ## 7. Windows 手工验证清单
 
@@ -474,28 +472,28 @@ sc.exe query era.exvlan.studio.service      # 期望 RUNNING
 
 ### A. 产物自检（构建机上，不用装）
 
-| # | 步骤 | 期望 |
-| --- | --- | --- |
-| A1 | 看 `tauri build` 日志里 `candle` 的输入列表 | 出现 `…\src-tauri\wix\service-lifecycle.wxs`；没有 `file not found` |
-| A2 | `dark.exe -x out EXVlan_Studio_x64_en-US.msi` 后看 `out\CustomAction.wxs` | 有 `ExvlanStopServiceForUpgrade` / `ExvlanStartServiceAfterInstall` / `ExvlanStartServiceOnRollback` / `ExvlanRemoveServiceOnUninstall` 四条；命令首 token 是 `[SystemFolder]WindowsPowerShell\v1.0\powershell.exe`，且**不含** `-ExecutionPolicy Bypass`；immediate 三条**不带** `Impersonate`，rollback 那条带 `Impersonate="no"` |
-| A3 | 同上 `out\Property.wxs` | `UpgradeCode` = `42C08A88-9ABD-5406-B191-2A8543B12B98`，与**上一版已发布 MSI** 一致（不一致会导致并存安装） |
-| A4 | `out\InstallExecuteSequence.wxs` | 四条动作的 Sequence：停 < 100（InstallValidate）；rollback 启在 InstallInitialize 之后；启 > InstallFinalize；注销在 RemoveFiles 之前 |
-| A5 | `out\CustomAction.wxs` 里 Type 列 | 三条是 `34`（Directory + command line），rollback 那条是 `34` + in-script/no-impersonate 位（`dark.exe` 显示为 `34` + `Execute=rollback`）；若看到 `Impersonate` 位出现在 immediate 三条上，说明打包配置回退到了旧版 |
+| #   | 步骤                                                                      | 期望                                                                                                                                                                                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1  | 看 `tauri build` 日志里 `candle` 的输入列表                               | 出现 `…\src-tauri\wix\service-lifecycle.wxs`；没有 `file not found`                                                                                                                                                                                                                                                                 |
+| A2  | `dark.exe -x out EXVlan_Studio_x64_en-US.msi` 后看 `out\CustomAction.wxs` | 有 `ExvlanStopServiceForUpgrade` / `ExvlanStartServiceAfterInstall` / `ExvlanStartServiceOnRollback` / `ExvlanRemoveServiceOnUninstall` 四条；命令首 token 是 `[SystemFolder]WindowsPowerShell\v1.0\powershell.exe`，且**不含** `-ExecutionPolicy Bypass`；immediate 三条**不带** `Impersonate`，rollback 那条带 `Impersonate="no"` |
+| A3  | 同上 `out\Property.wxs`                                                   | `UpgradeCode` = `42C08A88-9ABD-5406-B191-2A8543B12B98`，与**上一版已发布 MSI** 一致（不一致会导致并存安装）                                                                                                                                                                                                                         |
+| A4  | `out\InstallExecuteSequence.wxs`                                          | 四条动作的 Sequence：停 < 100（InstallValidate）；rollback 启在 InstallInitialize 之后；启 > InstallFinalize；注销在 RemoveFiles 之前                                                                                                                                                                                               |
+| A5  | `out\CustomAction.wxs` 里 Type 列                                         | 三条是 `34`（Directory + command line），rollback 那条是 `34` + in-script/no-impersonate 位（`dark.exe` 显示为 `34` + `Execute=rollback`）；若看到 `Impersonate` 位出现在 immediate 三条上，说明打包配置回退到了旧版                                                                                                                |
 
 ### B. 升级实测（主场景：dev.1 → dev.2）
 
-| # | 步骤 | 期望 |
-| --- | --- | --- |
-| B0 | **先退出 GUI**（托盘 → 退出），确认 `Get-Process 'EXVlan Studio'` 为空 | 这是 R9 的前提：GUI 自身占着 Program Files，运行中装 MSI 会弹「文件正在使用」 |
-| B1 | `msiexec /i "EXVlan_Studio_26.410.20713-dev.2_x64_en-US.msi" /l*v $env:TEMP\upgrade.log /passive` | 退出码 `0`；**没有** `1601`；日志里**没有** Restart Manager `351` 提示 |
-| B2 | 日志里搜 `exvlan: pre-upgrade stop done` | 说明停服务动作执行了 |
-| B3 | 日志里搜 `exvlan: service start requested` | 说明装完拉起动作执行了 |
-| B4 | `sc.exe query era.exvlan.studio.service` = `RUNNING` | 不需要重启机器 |
-| B5 | 启动 GUI：**不弹 UAC**、顶部无「服务未就绪」横幅；`error.log` 里没有 `service.repair` / `service.install`（说明 health = installed-running） |
-| B6 | 步骤 0 的数据快照 `Get-FileHash` 与 `before.csv` **逐条一致** |
-| B7 | `Get-ChildItem C:\ProgramData\era.exvlan.studio\bin\*.new, C:\ProgramData\era.exvlan.studio\core\*.new, C:\ProgramData\era.exvlan.studio\core\v.txt` → 空（或只剩 mtime < 10 分钟的） |
-| B8 | **Cancel 用例（R10）**：再跑一次 `/i`，在「准备安装」页点 Cancel，然后 `sc query` | 服务可能停在 STOPPED（回滚动作不覆盖 UI 取消）；**下次开机或启动 GUI 必须自行恢复**：GUI 应在 `error.log` 打出 `service.repair` 并把服务拉起 |
-| B9 | B8 之后按 F1 的判据复核 | 不允许出现 `cli --install failed … os error 32` |
+| #   | 步骤                                                                                                                                                                                  | 期望                                                                                                                                         |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| B0  | **先退出 GUI**（托盘 → 退出），确认 `Get-Process 'EXVlan Studio'` 为空                                                                                                                | 这是 R9 的前提：GUI 自身占着 Program Files，运行中装 MSI 会弹「文件正在使用」                                                                |
+| B1  | `msiexec /i "EXVlan_Studio_26.410.20713-dev.2_x64_en-US.msi" /l*v $env:TEMP\upgrade.log /passive`                                                                                     | 退出码 `0`；**没有** `1601`；日志里**没有** Restart Manager `351` 提示                                                                       |
+| B2  | 日志里搜 `exvlan: pre-upgrade stop done`                                                                                                                                              | 说明停服务动作执行了                                                                                                                         |
+| B3  | 日志里搜 `exvlan: service start requested`                                                                                                                                            | 说明装完拉起动作执行了                                                                                                                       |
+| B4  | `sc.exe query era.exvlan.studio.service` = `RUNNING`                                                                                                                                  | 不需要重启机器                                                                                                                               |
+| B5  | 启动 GUI：**不弹 UAC**、顶部无「服务未就绪」横幅；`error.log` 里没有 `service.repair` / `service.install`（说明 health = installed-running）                                          |
+| B6  | 步骤 0 的数据快照 `Get-FileHash` 与 `before.csv` **逐条一致**                                                                                                                         |
+| B7  | `Get-ChildItem C:\ProgramData\era.exvlan.studio\bin\*.new, C:\ProgramData\era.exvlan.studio\core\*.new, C:\ProgramData\era.exvlan.studio\core\v.txt` → 空（或只剩 mtime < 10 分钟的） |
+| B8  | **Cancel 用例（R10）**：再跑一次 `/i`，在「准备安装」页点 Cancel，然后 `sc query`                                                                                                     | 服务可能停在 STOPPED（回滚动作不覆盖 UI 取消）；**下次开机或启动 GUI 必须自行恢复**：GUI 应在 `error.log` 打出 `service.repair` 并把服务拉起 |
+| B9  | B8 之后按 F1 的判据复核                                                                                                                                                               | 不允许出现 `cli --install failed … os error 32`                                                                                              |
 
 **回滚**：`msiexec /x <新 ProductCode>` → `msiexec /i <旧 MSI> /passive`；
 数据不动。服务若不在：`Set-Location C:\ProgramData\era.exvlan.studio\bin; .\exvlan-service.exe --uninstall`
@@ -531,13 +529,13 @@ Test-Path C:\ProgramData\era.exvlan.studio\bin\exvlan-service.exe  # 期望 True
 
 ### F. GUI 自愈（B3/B4 回归）
 
-| 场景 | 步骤 | 期望 |
-| --- | --- | --- |
-| F1 服务在跑、管道先断 | `sc.exe stop era.exvlan.studio.service` → 启动 GUI | `error.log` 出现 `service.repair`，**没有** `cli --install failed … os error 32`；服务回到 RUNNING；无「安装失败」提示 |
-| F2 真未安装 | `sc.exe delete era.exvlan.studio.service` + 删 `bin\exvlan-service.exe` → 启动 GUI | 走一次安装（一次 UAC），`health` 变 `installed-running` |
-| F3 界面重试按钮幂等 | 服务正常时点「重试」 | 立即成功、服务**不重启**（`sc query` 的 PID 不变） |
-| F4 注销但二进制在 | `sc.exe delete era.exvlan.studio.service`（**不删** `bin\exvlan-service.exe`）→ 启动 GUI | `health` 判为 `not-installed` → 重新注册（一次 UAC），`sc query` = RUNNING；**不是** `repair` 失败 |
-| F5 强制重装真的重装（R11） | 设置里点「强制重装」 | 服务被停→覆盖→重启，`sc query` 的 PID **变化**；`service.log` 有本轮 install 记录（不再出现「什么都没做就返回成功」） |
+| 场景                       | 步骤                                                                                     | 期望                                                                                                                   |
+| -------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| F1 服务在跑、管道先断      | `sc.exe stop era.exvlan.studio.service` → 启动 GUI                                       | `error.log` 出现 `service.repair`，**没有** `cli --install failed … os error 32`；服务回到 RUNNING；无「安装失败」提示 |
+| F2 真未安装                | `sc.exe delete era.exvlan.studio.service` + 删 `bin\exvlan-service.exe` → 启动 GUI       | 走一次安装（一次 UAC），`health` 变 `installed-running`                                                                |
+| F3 界面重试按钮幂等        | 服务正常时点「重试」                                                                     | 立即成功、服务**不重启**（`sc query` 的 PID 不变）                                                                     |
+| F4 注销但二进制在          | `sc.exe delete era.exvlan.studio.service`（**不删** `bin\exvlan-service.exe`）→ 启动 GUI | `health` 判为 `not-installed` → 重新注册（一次 UAC），`sc query` = RUNNING；**不是** `repair` 失败                     |
+| F5 强制重装真的重装（R11） | 设置里点「强制重装」                                                                     | 服务被停→覆盖→重启，`sc query` 的 PID **变化**；`service.log` 有本轮 install 记录（不再出现「什么都没做就返回成功」）  |
 
 ### G. B7 残留清理
 
@@ -563,15 +561,55 @@ Test-Path $f    # 期望 False
 > 这条路径**不能**用 MSI 的步骤代替：自动更新下载的是 `*_x64_*setup.exe`。
 > 全程管理员 PowerShell；`$setup` 指新版 `EXVlan Studio_<ver>_x64-setup.exe`。
 
-| # | 步骤 | 期望 |
-| --- | --- | --- |
-| I0 | 构建机上：`tauri build` 日志里搜 `installerHooks`/`service-lifecycle.nsh`；或 `7z l` 看 `bundle\nsis\*.exe` 旁边 `bundle\nsis-updater\…-setup.exe.sig` 仍在 | makensis 没报 `!include … file not found`；产物名仍是 `…_x64-setup.exe`（`gen_upgrade_manifests.py` 不用改） |
-| I1 | `(Get-Item "$setup").VersionInfo` / 直接看 `$setup` 的 manifest：`RequestedExecutionLevel` = `requireAdministrator` | 说明 `installMode=perMachine` 生效（`asInvoker`/`highestAvailable` = 配置没吃到，钩子会空转，见 R13） |
-| I2 | 记录基线：`sc.exe query era.exvlan.studio.service`（RUNNING）+ `Get-Item <bin>\exvlan-service.exe` 的 PID；`Get-ChildItem -Recurse C:\ProgramData\era.exvlan.studio\config,C:\ProgramData\era.exvlan.studio\logs \| Get-FileHash \| Export-Csv $env:TEMP\before.csv` | 服务 RUNNING |
-| I3 | **NSIS→NSIS 覆盖安装**（已是 per-user/perMachine NSIS 的机器）：`& $setup /P`（passive，有进度条不说话）→ 接受 UAC | 安装成功；`sc.exe query` = RUNNING 且 **PID 变化**；`%TEMP%\exvlan-nsis-hooks.log` 出现 `[preinstall] … elevated=True stopped=True` 与 `[postinstall] before=Stopped started=True` |
-| I4 | `Get-FileHash` 与 `before.csv` 逐条比对 | 完全一致（数据红线） |
-| I5 | **Cancel 用例**（R16）：再跑一次 `$setup`，在文件复制阶段点 Cancel → 稍等 → `sc query` | 服务可能停在 STOPPED（NSIS 无回滚动作）；**启动 GUI 必须自愈**：`error.log` 出现 `service.repair`，`sc query` 回 RUNNING，且**没有** `os error 32` |
-| I6 | **自动更新实跑**：GUI 里「检查更新 → 下载并安装」（走官方 updater，`/UPDATE`） | 一次 UAC；`sc query` = RUNNING、PID 变化；`%TEMP%\exvlan-nsis-hooks.log` 有本轮两行；重开 GUI 后无「服务未就绪」横幅、`error.log` 无 `service.install` |
-| I7 | **从 MSI 迁移**（dev.1 MSI 机器上跑 NSIS setup）：`& $setup /P` | 会先弹 msiexec 的 UAC 卸掉 MSI（`$WixMode`）；装完后 `sc query` 可能是 **1060**（MSI 卸载动作 `sc delete` 过，见 §3.5 时序）；**启动 GUI 后**自动重新注册（一次 UAC）→ RUNNING。这是预期路径，不是缺陷 |
-| I8 | **真卸载**（不删数据）：`& "$env:PROGRAMFILES\EXVlan Studio\uninstall.exe"`（或「应用和功能」） | 文件删掉；`sc.exe query era.exvlan.studio.service` **仍是 RUNNING**（R12：NSIS 故意不 `sc delete`）；`Test-Path C:\ProgramData\era.exvlan.studio\{config,logs,bin\exvlan-service.exe}` 全 `True` |
-| I9 | **老 per-user 残留清理**（R13）：升级后 `Get-ChildItem "$env:LOCALAPPDATA\EXVlan Studio"` 非空 ⇒ 手工 `& "$env:LOCALAPPDATA\EXVlan Studio\uninstall.exe" /S` 清掉旧副本 | 「应用和功能」里只剩一条 `EXVlan Studio`；`%LOCALAPPDATA%\EXVlan Studio` 消失 |
+| #   | 步骤                                                                                                                                                                                                                                                                 | 期望                                                                                                                                                                                                   |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| I0  | 构建机上：`tauri build` 日志里搜 `installerHooks`/`service-lifecycle.nsh`；或 `7z l` 看 `bundle\nsis\*.exe` 旁边 `bundle\nsis-updater\…-setup.exe.sig` 仍在                                                                                                          | makensis 没报 `!include … file not found`；产物名仍是 `…_x64-setup.exe`（`gen_upgrade_manifests.py` 不用改）                                                                                           |
+| I1  | `(Get-Item "$setup").VersionInfo` / 直接看 `$setup` 的 manifest：`RequestedExecutionLevel` = `requireAdministrator`                                                                                                                                                  | 说明 `installMode=perMachine` 生效（`asInvoker`/`highestAvailable` = 配置没吃到，钩子会空转，见 R13）                                                                                                  |
+| I2  | 记录基线：`sc.exe query era.exvlan.studio.service`（RUNNING）+ `Get-Item <bin>\exvlan-service.exe` 的 PID；`Get-ChildItem -Recurse C:\ProgramData\era.exvlan.studio\config,C:\ProgramData\era.exvlan.studio\logs \| Get-FileHash \| Export-Csv $env:TEMP\before.csv` | 服务 RUNNING                                                                                                                                                                                           |
+| I3  | **NSIS→NSIS 覆盖安装**（已是 per-user/perMachine NSIS 的机器）：`& $setup /P`（passive，有进度条不说话）→ 接受 UAC                                                                                                                                                   | 安装成功；`sc.exe query` = RUNNING 且 **PID 变化**；`%TEMP%\exvlan-nsis-hooks.log` 出现 `[preinstall] … elevated=True stopped=True` 与 `[postinstall] before=Stopped started=True`                     |
+| I4  | `Get-FileHash` 与 `before.csv` 逐条比对                                                                                                                                                                                                                              | 完全一致（数据红线）                                                                                                                                                                                   |
+| I5  | **Cancel 用例**（R16）：再跑一次 `$setup`，在文件复制阶段点 Cancel → 稍等 → `sc query`                                                                                                                                                                               | 服务可能停在 STOPPED（NSIS 无回滚动作）；**启动 GUI 必须自愈**：`error.log` 出现 `service.repair`，`sc query` 回 RUNNING，且**没有** `os error 32`                                                     |
+| I6  | **自动更新实跑**：GUI 里「检查更新 → 下载并安装」（走官方 updater，`/UPDATE`）                                                                                                                                                                                       | 一次 UAC；`sc query` = RUNNING、PID 变化；`%TEMP%\exvlan-nsis-hooks.log` 有本轮两行；重开 GUI 后无「服务未就绪」横幅、`error.log` 无 `service.install`                                                 |
+| I7  | **从 MSI 迁移**（dev.1 MSI 机器上跑 NSIS setup）：`& $setup /P`                                                                                                                                                                                                      | 会先弹 msiexec 的 UAC 卸掉 MSI（`$WixMode`）；装完后 `sc query` 可能是 **1060**（MSI 卸载动作 `sc delete` 过，见 §3.5 时序）；**启动 GUI 后**自动重新注册（一次 UAC）→ RUNNING。这是预期路径，不是缺陷 |
+| I8  | **真卸载**（不删数据）：`& "$env:PROGRAMFILES\EXVlan Studio\uninstall.exe"`（或「应用和功能」）                                                                                                                                                                      | 文件删掉；`sc.exe query era.exvlan.studio.service` **仍是 RUNNING**（R12：NSIS 故意不 `sc delete`）；`Test-Path C:\ProgramData\era.exvlan.studio\{config,logs,bin\exvlan-service.exe}` 全 `True`       |
+| I9  | **老 per-user 残留清理**（R13）：升级后 `Get-ChildItem "$env:LOCALAPPDATA\EXVlan Studio"` 非空 ⇒ 手工 `& "$env:LOCALAPPDATA\EXVlan Studio\uninstall.exe" /S` 清掉旧副本                                                                                              | 「应用和功能」里只剩一条 `EXVlan Studio`；`%LOCALAPPDATA%\EXVlan Studio` 消失                                                                                                                          |
+
+## 8. dev.1 重发真机实测（2026-11-14，Windows 11 26200 / `muke@10.254.1.22`）
+
+产物：`EXVlan Studio_26.410.20715_x64_en-US.msi` + `..._x64-setup.exe`（commit `6a339d8e`）。
+方法：SSH（提权令牌）执行 msiexec / setup.exe；GUI 走「交互式计划任务」在 session 1 拉起，
+界面用 `CopyFromScreen` 截图取证；迁移用随包 `exvlan-migrate` 的 dry-run 先预判、再在 GUI 闸门里真跑。
+
+### 8.1 通过的项
+
+| 项                                | 实测                                                                                                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MSI 覆盖安装（GUI 已退出，§7 B0） | `msiexec_exit=0`；应用文件 `26.410.20715`；`C:\ProgramData\...\config` 逐文件哈希不变                                                                                           |
+| MSI 版本号                        | 卸载项 `26.104.20715.50015`；`UpgradeCode` = `{42C08A88-9ABD-5406-B191-2A8543B12B98}`（与历史一致）                                                                             |
+| **NSIS 钩子（自动更新主路径）**   | `%TEMP%\exvlan-nsis-hooks.log`：`[preinstall] user=muke elevated=True stopped=True` → `[postinstall] before=Stopped started=True`；服务进程 `StartTime` 刷新为 postinstall 时刻 |
+| NSIS `perMachine`                 | `setup.exe` manifest = `requestedExecutionLevel level="requireAdministrator"`                                                                                                   |
+| 升级后自更新                      | GUI 启动后 `core/version` 与 `bin/exvlan-service.exe.version` 都变 `26.410.20715+6a339d`                                                                                        |
+| 迁移闸门                          | 升级后首次启动弹全屏闸门（`migrate.done.v3` 不存在 + `core\exvlan.exe.prev`），迁移前无法进入主界面                                                                             |
+| 迁移成功路径                      | 备份 `exvlan-migrate-backup-1794669304`（含 `prefs.toml`/`exvlan.exe.prev`/报告）；`removed=[core\exvlan.exe.prev]`、`incomplete=[]`、marker v3 写入；闸门放行                  |
+| 数据保留                          | `prefs.toml`：`lang=cn`、`log_level=debug`、`runtime=service`、`target=local`、3 条 remotes 全在（端口归一为 `1995`）；`core\v.txt` 已清                                        |
+
+### 8.2 新发现（未修复，或本次修复）
+
+- **R14（MSI 片段实际没进包）**：MSI 的 `CustomAction` 表里**没有任何** `Exvlan*`，
+  `InstallExecuteSequence` 也没有对应行 —— `wix.fragmentPaths` 只对
+  `componentGroupRefs/componentRefs/featureGroupRefs/featureRefs/mergeRefs` 生效，
+  Tauri 没有 `customActionRefs`；片段里的 `CustomAction` 没有被任何元素引用，
+  WiX `light` 直接丢弃。**结论：§7 的 B2/B3 不成立，方案 A 目前等于「MSI 只装文件」。**
+  实测 MSI 升级本身是成功的（前提是 GUI 先退出，§7 B0），所以不影响发版；
+  要做服务生命周期只能换 `wix.template` 自制 `main.wxs`，或放弃 MSI 侧钩子。
+- **R15（随包 CLI 缺 DLL）**：`resources\tools\exvlan-cli.exe` 直接运行报
+  `0xC0000135`（缺 `Packet.dll`）；把 `src-tauri\Packet.dll` 放进同目录即可。
+  GUI 不直接执行它（只作为拷进 `core/` 的源，那里有 `Packet.dll`/`wintun.dll`），
+  影响仅限「用户手工跑 tools 里的 CLI」；`exvlan-migrate.exe` 不受影响。
+- **R16（doctor 假红，已修）**：`doctor` 的 `migrate.legacy` 以前只看
+  `legacy.pending()`，不看 `migrate.done.v3`；而 `core/*.prev` 是服务每次更新内核
+  都会**重新生成**的回滚备份 → 迁移完成后 doctor 永久 `✗`、退出码 2。
+  已改为与闸门同一判据 `!done && !items.is_empty()`，并补单测。
+- **遗留（非缺陷，未处理）**：`%LOCALAPPDATA%\EXVlan Studio` 是一整份 pre-perMachine
+  的 per-user 应用副本（含 `uninstall.exe`），迁移的 `stale_paths` 不覆盖它；
+  按 §7 I9 手工卸载即可。
