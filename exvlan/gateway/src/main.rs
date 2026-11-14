@@ -32,6 +32,62 @@ fn env_or(name: &str, default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
+/// 绑定重试次数：Windows 开机后 mesh 虚拟地址（如 `10.254.1.22`）通常比
+/// 服务晚几秒才就绪，首次绑定会拿到 `WSAEADDRNOTAVAIL`（10049）。
+const BIND_RETRY_ATTEMPTS: u32 = 5;
+/// 重试间隔：5 次 × 2s ≈ 8s 的内部等待窗口。
+///
+/// 与 supervisor 的关系是**顺序**而非叠加：watchdog 每 5s 只看进程是否存活，
+/// 存活就不动；本进程退出后它才 sleep 退避再来拉起。所以两边不会同时等待。
+const BIND_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// 只有「地址还不可用」才值得等（网卡/虚拟 IP 未就绪）。
+///
+/// 端口被占（`AddrInUse` / WSAEADDRINUSE）与权限不足（`PermissionDenied` /
+/// WSAEACCES）是真冲突，重试只会拖慢失败；交给 supervisor 与调用方快速看到错误。
+fn is_transient_bind_error(err: &std::io::Error) -> bool {
+    if err.kind() == std::io::ErrorKind::AddrNotAvailable {
+        return true;
+    }
+    // 兜底：老工具链 / 特定平台未把错误码映射到 AddrNotAvailable 时按原始码判定。
+    #[cfg(windows)]
+    if err.raw_os_error() == Some(10049) {
+        return true;
+    }
+    false
+}
+
+/// 带短退避的绑定：仅对「地址不可用」重试，其余错误立即上抛（保留原始 io 错误）。
+async fn bind_with_retry(addr: SocketAddr) -> anyhow::Result<TcpListener> {
+    let mut attempt: u32 = 1;
+    loop {
+        match TcpListener::bind(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(err) => {
+                let transient = is_transient_bind_error(&err);
+                if !transient || attempt >= BIND_RETRY_ATTEMPTS {
+                    let ctx = if transient {
+                        format!(
+                            "绑定 {addr} 失败：地址仍不可用（已重试 {} 次，约 {}s）",
+                            attempt - 1,
+                            u64::from(attempt - 1) * BIND_RETRY_DELAY.as_secs()
+                        )
+                    } else {
+                        format!("绑定 {addr} 失败（不可重试：{}）", err.kind())
+                    };
+                    return Err(err).context(ctx);
+                }
+                tracing::warn!(
+                    "bind {addr} 失败（第 {attempt}/{BIND_RETRY_ATTEMPTS} 次，地址暂不可用，{}s 后重试）: {err}",
+                    BIND_RETRY_DELAY.as_secs()
+                );
+                tokio::time::sleep(BIND_RETRY_DELAY).await;
+                attempt += 1;
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -62,6 +118,12 @@ async fn main() -> anyhow::Result<()> {
         "token store: {}",
         exvlan_control::tokens::Store::path().display()
     );
+
+    let app: Router = api::router(cfg.clone(), token);
+    let addr: SocketAddr = format!("{}:{}", cfg.bind, cfg.port)
+        .parse()
+        .context("非法监听地址")?;
+    let listener = bind_with_retry(addr).await?;
     tracing::info!(
         "gateway listening on {}:{} (token file: {})",
         cfg.bind,
@@ -69,11 +131,6 @@ async fn main() -> anyhow::Result<()> {
         cfg.token_file.display()
     );
 
-    let app: Router = api::router(cfg.clone(), token);
-    let addr: SocketAddr = format!("{}:{}", cfg.bind, cfg.port)
-        .parse()
-        .context("非法监听地址")?;
-    let listener = TcpListener::bind(addr).await.context("绑定端口失败")?;
     // 需要 ConnectInfo（配对码兑换要按来源 IP 限速 + 绑定）。
     axum::serve(
         listener,
@@ -140,5 +197,46 @@ async fn parent_exit() {
             // 父进程本就不会写数据；写了也忽略。
             Ok(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn retries_only_when_address_is_not_available() {
+        // WSAEADDRNOTAVAIL / EADDRNOTAVAIL：网卡或虚拟 IP 还没就绪。
+        assert!(is_transient_bind_error(&Error::from(
+            ErrorKind::AddrNotAvailable
+        )));
+        #[cfg(windows)]
+        assert!(is_transient_bind_error(&Error::from_raw_os_error(10049)));
+    }
+
+    #[test]
+    fn hard_conflicts_fail_fast() {
+        assert!(!is_transient_bind_error(&Error::from(ErrorKind::AddrInUse)));
+        assert!(!is_transient_bind_error(&Error::from(
+            ErrorKind::PermissionDenied
+        )));
+        assert!(!is_transient_bind_error(&Error::from(
+            ErrorKind::InvalidInput
+        )));
+        #[cfg(windows)]
+        {
+            assert!(!is_transient_bind_error(&Error::from_raw_os_error(10048)));
+            assert!(!is_transient_bind_error(&Error::from_raw_os_error(10013)));
+        }
+    }
+
+    #[test]
+    fn retry_window_stays_below_supervisor_cadence() {
+        // supervisor 每 5s 探一次、退出后才按 1→2→5→10s 退避；内部窗口封顶在最大退避量级，
+        // 保证「内部重试先跑完、退出后才轮到 supervisor」，不会两边同时等待。
+        let window = BIND_RETRY_DELAY * (BIND_RETRY_ATTEMPTS - 1);
+        assert!(window <= std::time::Duration::from_secs(10));
+        assert!(window > std::time::Duration::from_secs(0));
     }
 }
