@@ -20,6 +20,10 @@
         "fragmentPaths": [
           "wix/service-lifecycle.wxs"
         ]
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "nsis/service-lifecycle.nsh"
       }
     }
   }
