@@ -3061,17 +3061,12 @@ mod manager {
     ///
     /// 读侧对未知值统一按 `user` 处理（见 `From<String>`）：旧运行时把缺失来源
     /// 写成 `"legacy"`，那批值没有可保留的语义，落到中立默认即可。
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     #[serde(rename_all = "snake_case", from = "String")]
     pub(super) enum PersistedConfigSource {
+        #[default]
         User,
         Web,
-    }
-
-    impl Default for PersistedConfigSource {
-        fn default() -> Self {
-            Self::User
-        }
     }
 
     impl From<String> for PersistedConfigSource {

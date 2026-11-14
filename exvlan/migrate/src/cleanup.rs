@@ -153,7 +153,12 @@ mod tests {
         let networks = dir.join("networks.toml");
         std::fs::write(&ui, "{}").unwrap();
         std::fs::write(&networks, "").unwrap();
-        let step = remove_sources(&[networks.clone()], &[ui.clone()], false, false);
+        let step = remove_sources(
+            std::slice::from_ref(&networks),
+            std::slice::from_ref(&ui),
+            false,
+            false,
+        );
         assert_eq!(step.status, Status::Ok);
         assert!(ui.is_file(), "prefs 没写成功就不能删 ui-state.json");
         assert!(!networks.exists());
@@ -165,7 +170,7 @@ mod tests {
         let dir = temp("del-ui");
         let ui = dir.join("ui-state.json");
         std::fs::write(&ui, "{}").unwrap();
-        let step = remove_sources(&[], &[ui.clone()], true, false);
+        let step = remove_sources(&[], std::slice::from_ref(&ui), true, false);
         assert_eq!(step.status, Status::Ok);
         assert!(!ui.exists());
         let _ = std::fs::remove_dir_all(&dir);
@@ -176,7 +181,7 @@ mod tests {
         let dir = temp("dry");
         let ui = dir.join("ui-state.json");
         std::fs::write(&ui, "{}").unwrap();
-        let step = remove_sources(&[], &[ui.clone()], true, true);
+        let step = remove_sources(&[], std::slice::from_ref(&ui), true, true);
         assert_eq!(step.status, Status::Planned);
         assert!(ui.is_file());
         let _ = std::fs::remove_dir_all(&dir);
