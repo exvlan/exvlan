@@ -194,6 +194,7 @@ fn migrate_legacy_once(app: &tauri::AppHandle) {
     let (Ok(root), Ok(dir)) = (app_dir(app), config_dir(app)) else {
         return;
     };
+    let (root, dir) = (root.to_string_lossy(), dir.to_string_lossy());
     match crate::ffi::migrate_networks_once(&root, &dir) {
         Ok(value) => {
             // `nothing_to_do` 是常态（绝大多数机器没有旧文件），不刷日志。
