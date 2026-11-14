@@ -26,11 +26,17 @@ on:
         type: boolean
         default: false
         required: false
+      nightly:
+        description: "跑一次 nightly 链路（等价 21:00 UTC 定时）"
+        type: boolean
+        default: false
+        required: false
 
   # schedule 是唯一「没有 push 也会跑」的入口，两条 cron 各管一件事：
   #   · 每周一 03:00 UTC：只跑依赖审计（新 advisory 与代码无关，不能等 push 才发现）；
   #   · 每天 21:00 UTC（= 北京 05:00）：nightly 构建，产出可自更新的预览包。
   # 两者的门控靠 `changes` 作业的 `nightly` 布尔区分（见 jobs.changes）。
+  # nightly 也能手动触发：workflow_dispatch 勾选 `nightly`（等价 21:00 UTC 那条 cron）。
   schedule:
     - cron: "0 3 * * 1"
     - cron: "0 21 * * *"
@@ -57,12 +63,16 @@ defaults:
 
 jobs:
   # 统一编排入口：所有组件都经此依赖链调用，组件工作流不再各自触发。
-  # 门控策略：
+  # 门控策略（`nightly` = 21:00 UTC 的 cron **或** dispatch 勾选 `nightly`，两者完全等价）：
   #   - feature push / PR(develop,main)：仅 tests + core（轻量）；audit 按依赖路径门控（PR 全量）
   #   - develop/main push：core 链必跑；go/js/nix/ohos 按路径门控；audit 按依赖路径门控
-  #   - tag v* / workflow_dispatch：全量（旁路绕过路径门控）+ release(tag) + audit（全量）
+  #   - tag v*：全量（旁路绕过路径门控）+ release(tag) + audit（全量）
+  #   - workflow_dispatch(nightly=false)：全量，同 tag（除 release）
+  #   - workflow_dispatch(nightly=true)：只跑 nightly 链，等价 21:00 UTC cron
   #   - schedule(nightly, 21:00 UTC)：只跑 nightly 链（core 6 平台 → studio/mobile → nightly release）
   #   - schedule(每周一审计, 03:00 UTC)：只跑 audit + upstream_watch
+  # 下游一律用 `needs.changes.outputs.nightly` 判断；只有 `tests` / `nightly_notify`
+  # 因为不 `needs: changes`（要尽早启动 / 要在 changes 失败时也能报警）而直接读 `inputs.nightly`。
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
@@ -77,14 +87,25 @@ jobs:
       nightly_version: ${{ steps.gate.outputs.nightly_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # nightly 门控布尔：唯一入口。`github.event.schedule` 只在 schedule 事件里存在，
-      # 其它事件为空串 → false；下游一律用 `needs.changes.outputs.nightly` 判断。
+      # nightly 门控布尔：唯一入口。两个入口等价：
+      #   · `github.event.schedule == '0 21 * * *'`（只在 schedule 事件里存在，其它事件为空串）；
+      #   · `workflow_dispatch` 勾选 `nightly`（布尔输入，经 env 传进 shell 后是 "true"/"false"，
+      #     这里兼容 "1"/"yes"/"on" 这类手工/API 传参）。
       # 版本串也在这里算一次（跨年守卫会直接失败），全 run 共用一份，避免各作业各算一份。
       - name: Resolve nightly gate and version
         id: gate
+        env:
+          NIGHTLY_INPUT: ${{ inputs.nightly }}
         run: |
           set -euo pipefail
+          is_nightly=false
+          case "${NIGHTLY_INPUT:-false}" in
+            [Tt][Rr][Uu][Ee]|1|[Yy][Ee][Ss]|[Oo][Nn]) is_nightly=true ;;
+          esac
           if [[ "${{ github.event_name }}" == "schedule" && "${{ github.event.schedule }}" == "0 21 * * *" ]]; then
+            is_nightly=true
+          fi
+          if [[ "$is_nightly" == "true" ]]; then
             echo "nightly=true" >>"$GITHUB_OUTPUT"
             version=$(bash script/ci/nightly-version.sh)
             echo "nightly_version=${version}" >>"$GITHUB_OUTPUT"
@@ -143,7 +164,13 @@ jobs:
 
   tests:
     name: Core Tests
-    if: github.event_name != 'schedule'
+    # nightly（21:00 cron 与手动 dispatch nightly=true）不跑测试：两者链路完全等价。
+    # 这里直接读 `inputs.nightly`（不 `needs: changes`，避免测试被 changes 拖慢/连带失败）；
+    # `contains(fromJSON(...))` 同时兼容布尔 true 与字符串 "true"/"1"。
+    if: >-
+      github.event_name != 'schedule' &&
+      !(github.event_name == 'workflow_dispatch' &&
+        contains(fromJSON('["true", true, "1", 1]'), inputs.nightly))
     uses: ./.github/workflows/test.yml
     secrets: inherit
 
@@ -153,11 +180,33 @@ jobs:
   web_dist:
     name: Build Web Console
     needs: changes
-    # nightly（schedule）也要 web-dist：内核 `--features=embed` 会把它编进二进制。
-    if: github.event_name != 'schedule' || needs.changes.outputs.nightly == 'true'
+    # nightly（cron 或 dispatch 勾选）也要 web-dist：内核 `--features=embed` 会把它编进二进制。
+    if: needs.changes.outputs.nightly == 'true' || github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Bun 统一安装入口（当前没有任何步骤依赖它）：后续把 `script/ci` 的 Python 脚本、
+      # 镜像/清单重写迁到 Bun/TS 时，把这两步复制到需要的作业即可。
+      # 硬约束：`continue-on-error` 不可去掉 —— 安装失败只能让「将来用 bun 的步骤」不可用，
+      # 不能把现有构建打红（web_dist 是 core/release 的前置，红了会拖死整条链）。
+      # 缓存两层：setup-bun 自缓存可执行文件；下面再缓存包安装目录 `~/.bun/install/cache`。
+      - name: Setup Bun (optional)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        continue-on-error: true
+        with:
+          bun-version: latest
+
+      - name: Cache Bun install cache (optional)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        continue-on-error: true
+        with:
+          path: ~/.bun/install/cache
+          # 目前仓库里还没有 bun.lock（仍是 pnpm）；key 里带上 package.json，
+          # 等切到 bun 后 hash 会自动跟随 lockfile。
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/bun.lockb', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
 
       - name: Prepare pnpm environment
         uses: ./.github/actions/prepare-pnpm
@@ -183,6 +232,7 @@ jobs:
     needs: [changes, web_dist]
     if: >-
       github.event_name != 'pull_request' && github.event_name != 'schedule' &&
+      needs.changes.outputs.nightly != 'true' &&
       needs.web_dist.result == 'success' &&
       (github.ref_type == 'tag' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
@@ -216,6 +266,7 @@ jobs:
     needs: [changes, web_dist]
     if: >-
       github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+      needs.changes.outputs.nightly != 'true' &&
       github.ref_name != 'feature' &&
       (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' ||
        needs.changes.outputs.core == 'true')
@@ -235,10 +286,10 @@ jobs:
     needs: [changes, web_dist]
     # tag / dispatch 必须全量（release 要用全部内核资产）；develop/main push
     # 只在真的改了内核相关路径时才建这 12 个 target。
-    # nightly（schedule）只建镜像托管的 6 个平台：桌面 GUI 只用到其中的
+    # nightly（cron 或 dispatch 勾选）只建镜像托管的 6 个平台：桌面 GUI 只用到其中的
     # mac x86_64/aarch64 与 win x86_64，其余 3 个 Linux/arm 平台给内核镜像用。
     if: >-
-      (github.event_name == 'schedule' && needs.changes.outputs.nightly == 'true') ||
+      needs.changes.outputs.nightly == 'true' ||
       (github.event_name != 'schedule' &&
        (github.event_name == 'pull_request' || github.ref_type == 'tag' ||
         github.event_name == 'workflow_dispatch' ||
@@ -246,23 +297,24 @@ jobs:
     uses: ./.github/workflows/core.yml
     with:
       targets: >-
-        ${{ github.event_name == 'schedule'
+        ${{ needs.changes.outputs.nightly == 'true'
             && '["x86_64-apple-darwin","aarch64-apple-darwin","x86_64-pc-windows-msvc","aarch64-pc-windows-msvc","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl"]'
             || (github.ref_name == 'feature'
                 && '["x86_64-unknown-linux-musl"]'
                 || '["x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","riscv64gc-unknown-linux-musl","loongarch64-unknown-linux-musl","armv7-unknown-linux-musleabihf","armv7-unknown-linux-musleabi","arm-unknown-linux-musleabihf","arm-unknown-linux-musleabi","x86_64-unknown-freebsd","aarch64-apple-darwin","i686-pc-windows-msvc","aarch64-pc-windows-msvc"]') }}
-      build_magisk: ${{ github.event_name != 'schedule' && github.ref_name != 'feature' }}
+      build_magisk: ${{ needs.changes.outputs.nightly != 'true' && github.ref_name != 'feature' }}
       # nightly 用独立 variant：避免与 core_desktop / 同 ref 的其它调用互相取消
-      variant: ${{ github.event_name == 'schedule' && 'nightly' || 'main' }}
+      variant: ${{ needs.changes.outputs.nightly == 'true' && 'nightly' || 'main' }}
       build_version: ${{ needs.changes.outputs.nightly_version }}
     secrets: inherit
 
-  # 旁路组件：develop/main push 按路径门控；tag/dispatch 全量；feature/PR 跳过。
+  # 旁路组件：develop/main push 按路径门控；tag/dispatch 全量；feature/PR 跳过；nightly 跳过。
   go:
     name: Go Tests
     needs: changes
     if: >-
       github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      needs.changes.outputs.nightly != 'true' &&
       (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true')
     uses: ./.github/workflows/go.yml
     secrets: inherit
@@ -272,6 +324,7 @@ jobs:
     needs: changes
     if: >-
       github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      needs.changes.outputs.nightly != 'true' &&
       (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.js == 'true')
     uses: ./.github/workflows/js.yml
     secrets: inherit
@@ -281,11 +334,12 @@ jobs:
     needs: changes
     if: >-
       github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      needs.changes.outputs.nightly != 'true' &&
       (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.nix == 'true')
     uses: ./.github/workflows/nix.yml
     secrets: inherit
 
-  # 依赖审计门禁：tag/dispatch 全量；PR 全量；push 按 manifest/lock 路径门控（含 feature——上游同步落在 feature）。
+  # 依赖审计门禁：tag 全量；非 nightly 的 dispatch 全量；PR 全量；push 按 manifest/lock 路径门控（含 feature）。
   # schedule 只在每周一审计那条 cron 上跑，nightly 那条不跑（省额度、也避免审计红把 nightly 拖下水）。
   audit:
     name: Dependency Audit
@@ -294,7 +348,7 @@ jobs:
       github.event_name == 'pull_request' ||
       (github.event_name == 'schedule' && needs.changes.outputs.nightly != 'true') ||
       github.ref_type == 'tag' ||
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && needs.changes.outputs.nightly != 'true') ||
       needs.changes.outputs.deps == 'true'
     uses: ./.github/workflows/audit.yml
     secrets: inherit
@@ -346,6 +400,7 @@ jobs:
     needs: [core, changes]
     if: >-
       github.event_name != 'pull_request' && github.ref_name != 'feature' &&
+      needs.changes.outputs.nightly != 'true' &&
       (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.ohos == 'true')
     uses: ./.github/workflows/ohos.yml
     with:
@@ -364,19 +419,19 @@ jobs:
       always() &&
       github.ref_name != 'feature' &&
       (
-        (github.event_name == 'schedule' &&
-         needs.changes.outputs.nightly == 'true' && needs.core.result == 'success') ||
-        (github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+        (needs.changes.outputs.nightly == 'true' && needs.core.result == 'success') ||
+        (needs.changes.outputs.nightly != 'true' && github.event_name != 'schedule' &&
+         github.event_name != 'pull_request' &&
          (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped'))
       )
     uses: ./.github/workflows/studio.yml
     with:
       # nightly 只出「最小自更新集」：macOS x86_64 + aarch64、Windows x86_64。
       # 正式发版仍传 all（产物集不变）。
-      targets: ${{ github.event_name == 'schedule' && '["x86_64-apple-darwin","aarch64-apple-darwin","x86_64-pc-windows-msvc"]' || 'all' }}
+      targets: ${{ needs.changes.outputs.nightly == 'true' && '["x86_64-apple-darwin","aarch64-apple-darwin","x86_64-pc-windows-msvc"]' || 'all' }}
       # core_desktop 被路径门控跳过时，studio 从最近一次成功的 pipeline 运行
       # 取桌面内核产物（内核没变，没必要重建）。nightly 的内核就在本 run 里。
-      kernel_from_previous: ${{ github.event_name != 'schedule' && needs.core_desktop.result == 'skipped' && 'true' || 'false' }}
+      kernel_from_previous: ${{ needs.changes.outputs.nightly != 'true' && needs.core_desktop.result == 'skipped' && 'true' || 'false' }}
       build_version: ${{ needs.changes.outputs.nightly_version }}
     secrets: inherit
 
@@ -392,14 +447,15 @@ jobs:
       github.ref_name != 'feature' &&
       needs.mobile_kernel.result == 'success' &&
       (
-        (github.event_name == 'schedule' && needs.changes.outputs.nightly == 'true') ||
-        (github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+        needs.changes.outputs.nightly == 'true' ||
+        (needs.changes.outputs.nightly != 'true' && github.event_name != 'schedule' &&
+         github.event_name != 'pull_request' &&
          (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped'))
       )
     uses: ./.github/workflows/mobile.yml
     with:
       # nightly 只出 arm64 APK（最小自更新集），正式发版仍是 split-per-abi 全量。
-      targets: ${{ github.event_name == 'schedule' && '["aarch64-linux-android"]' || 'all' }}
+      targets: ${{ needs.changes.outputs.nightly == 'true' && '["aarch64-linux-android"]' || 'all' }}
       build_version: ${{ needs.changes.outputs.nightly_version }}
     secrets: inherit
 
@@ -409,19 +465,21 @@ jobs:
     name: Mobile Kernel Libs
     needs: changes
     if: >-
-      (github.event_name == 'schedule' && needs.changes.outputs.nightly == 'true') ||
-      (github.event_name != 'schedule' && github.event_name != 'pull_request' &&
-       github.ref_name != 'feature')
+      needs.changes.outputs.nightly == 'true' ||
+      (needs.changes.outputs.nightly != 'true' && github.event_name != 'schedule' &&
+       github.event_name != 'pull_request' && github.ref_name != 'feature')
     uses: ./.github/workflows/mobile-kernel.yml
     with:
-      abis: ${{ github.event_name == 'schedule' && '["arm64-v8a"]' || 'all' }}
+      abis: ${{ needs.changes.outputs.nightly == 'true' && '["arm64-v8a"]' || 'all' }}
     secrets: inherit
 
   docker:
     name: Builder & Publish Docker Image
-    needs: core
+    # `changes` 只用于 nightly 门控（原本经 core 间接依赖，列出后时序不变）。
+    needs: [changes, core]
     if: >-
       github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+      needs.changes.outputs.nightly != 'true' &&
       github.ref_name != 'feature' && needs.core.result == 'success'
     uses: ./.github/workflows/docker.yml
     with:
@@ -540,11 +598,15 @@ jobs:
           VERSION: ${{ needs.changes.outputs.nightly_version }}
         run: bash script/ci/nightly-publish.sh
 
-  # 无人值守运维通知：发版 / 失败自动推送到飞书群
+  # 无人值守运维通知：发版 / 失败自动推送到飞书群。
+  # nightly（cron 或 dispatch 勾选）走下面的 nightly_notify，只报失败，不在这里重复推成功。
   notify:
     name: Notify (Feishu)
-    if: always() && github.event_name != 'schedule'
-    needs: [tests, core, studio, mobile]
+    if: >-
+      always() && github.event_name != 'schedule' &&
+      needs.changes.outputs.nightly != 'true'
+    # `changes` 只用于 nightly 门控（原本经 core 间接依赖，时序不变）。
+    needs: [changes, tests, core, studio, mobile]
     runs-on: ubuntu-latest
     steps:
       - name: Post result to Feishu
@@ -586,12 +648,16 @@ jobs:
   # nightly 失败告警：**只在失败时**推送（成功不打扰）。
   # 门控用 inline 表达式而不是 `needs.changes.outputs.nightly`：`changes` 自己失败
   # （例如跨年守卫）时它的 outputs 是空的，反而会把这个告警也吞掉。
+  # dispatch 手工触发时同理直接读 `inputs.nightly`（兼容布尔 true 与字符串 "true"/"1"）。
   nightly_notify:
     name: Nightly Failure (Feishu)
     if: >-
       failure() &&
-      github.event_name == 'schedule' &&
-      github.event.schedule == '0 21 * * *'
+      (
+        (github.event_name == 'schedule' && github.event.schedule == '0 21 * * *') ||
+        (github.event_name == 'workflow_dispatch' &&
+         contains(fromJSON('["true", true, "1", 1]'), inputs.nightly))
+      )
     needs: [changes, web_dist, core, studio, mobile, mobile_kernel, nightly_release]
     runs-on: ubuntu-latest
     steps:

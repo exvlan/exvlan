@@ -62,6 +62,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Bun 统一安装入口（当前没有任何步骤依赖它）：后续把 `script/ci` 的守卫脚本
+      # 从 Python 迁到 Bun/TS 时，直接在这些步骤里用 `bun run …`。
+      # 硬约束：`continue-on-error` 不可去掉 —— 安装失败只能让「将来用 bun 的步骤」
+      # 不可用，不能让现有 lint/测试变红。缓存：可执行文件（setup-bun 自带）
+      # + 包安装目录 `~/.bun/install/cache`。
+      - name: Setup Bun (optional)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        continue-on-error: true
+        with:
+          bun-version: latest
+
+      - name: Cache Bun install cache (optional)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        continue-on-error: true
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/bun.lockb', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       # 路径守卫：绝对路径字面量只允许出现在 paths.rs（见 docs/paths.md）
       - name: Check path literals
         run: bash script/ci/check-paths.sh
