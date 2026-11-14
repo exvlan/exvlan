@@ -3080,6 +3080,7 @@ dependencies = [
  "async-trait",
  "exvlan",
  "exvlan-core",
+ "exvlan-migrate",
  "exvlan-proto",
  "exvlan-rpc",
  "log",

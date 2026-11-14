@@ -53,6 +53,12 @@ unsafe extern "C" {
     fn is_config_server_client_connected() -> c_int;
     fn get_error_msg(out: *mut *const c_char);
     fn free_string(s: *const c_char);
+    // 一次性迁移（旧 `config/networks.toml` → `<config>/<id>.toml`）：
+    // 逻辑在 `exvlan-migrate` 的 lib 里，返回本库分配的 JSON（用 `free_string` 释放）。
+    fn exvlan_migrate_networks_once(
+        app_config_dir: *const c_char,
+        config_dir: *const c_char,
+    ) -> *mut c_char;
 }
 
 /// 读取上一次 FFI 调用的错误信息（同线程）。
@@ -75,6 +81,38 @@ fn to_cstring(s: &str) -> Result<CString, String> {
 
 fn check(rc: c_int) -> Result<(), String> {
     if rc == 0 { Ok(()) } else { Err(last_error()) }
+}
+
+/// 一次性迁移：旧 `<config_dir>/networks.toml` → `<config_dir>/<id>.toml`。
+///
+/// 迁移本体在 `exvlan-migrate` 的 lib 里（`mobile` 模块）：一次性、失败保留源、
+/// 幂等（「先算后写、失败回滚」）。这里只解析它返回的 JSON；失败信息取
+/// `error` 字段（FFI 层已把 panic 折成同样的形状）。
+pub fn migrate_networks_once(
+    app_config_dir: &str,
+    config_dir: &str,
+) -> Result<serde_json::Value, String> {
+    let app = to_cstring(app_config_dir)?;
+    let config = to_cstring(config_dir)?;
+    unsafe {
+        let out = exvlan_migrate_networks_once(app.as_ptr(), config.as_ptr());
+        if out.is_null() {
+            return Err("迁移入口返回空指针".to_string());
+        }
+        let text = CStr::from_ptr(out).to_string_lossy().into_owned();
+        free_string(out);
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|err| format!("迁移结果不是 JSON（{err}）: {text}"))?;
+        if value.get("ok").and_then(|ok| ok.as_bool()) == Some(true) {
+            Ok(value)
+        } else {
+            Err(value
+                .get("error")
+                .and_then(|error| error.as_str())
+                .unwrap_or("迁移失败")
+                .to_string())
+        }
+    }
 }
 
 /// 启动一个网络实例（`cfg_str` 为 TOML 配置）。

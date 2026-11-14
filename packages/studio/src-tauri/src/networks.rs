@@ -5,9 +5,6 @@
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop;
-/// 旧 `networks.toml` 解析（只给移动端一次性转换用；桌面不需要但保持可单测）。
-#[allow(dead_code)]
-mod legacy;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod mobile;
 

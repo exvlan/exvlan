@@ -30,6 +30,10 @@
 //! Shared FFI helper APIs:
 //! - `get_error_msg`: copy the last FFI or config-server callback error message.
 //! - `free_string`: release strings allocated by this library.
+//!
+//! One-shot migration API (mobile / Android first launch):
+//! - `exvlan_migrate_networks_once`: convert the legacy `networks.toml` once and
+//!   return a JSON report (`{ok, report|error}`). See `migrate` module.
 
 mod config_server;
 mod data_plane;
@@ -37,6 +41,7 @@ mod error;
 mod event_api;
 mod instance_api;
 mod json_rpc;
+mod migrate;
 mod state;
 mod strings;
 mod types;

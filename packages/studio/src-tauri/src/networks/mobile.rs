@@ -2,8 +2,10 @@
 //!
 //! - 文件：`<app_config_dir>/config/<id>.toml`；禁用 = `<id>.toml.disabled`
 //! - 弹核（FFI）只是执行者：启动时读目录 → 逐条 `run_network_instance(toml)`
-//! - 旧 `networks.toml` 只在**首次升级**时做一次性转换（见 `migrate_legacy_once`），
-//!   与桌面迁移闸门同一语义：失败保留源文件、不写标记、下次重试。
+//! - 旧 `config/networks.toml` 只在**首次升级**时做一次性转换：转换逻辑**不在
+//!   这里**，而是 `exvlan-migrate` 的 lib（经 `exvlan_ffi` 的
+//!   `exvlan_migrate_networks_once` 暴露），语义与桌面迁移一致：失败保留源文件、
+//!   不写标记、下次重试（见 `docs/migrate-7.3.md` §7）。
 
 #![allow(dead_code)]
 
@@ -11,15 +13,9 @@ use std::path::{Path, PathBuf};
 
 use exvlan_rpc::exvlan_proto::api::manage::NetworkConfig;
 
-use super::legacy;
-
 const CONFIG_DIR: &str = "config";
 const ENABLED_SUFFIX: &str = ".toml";
 const DISABLED_SUFFIX: &str = ".toml.disabled";
-/// 旧文件（一次性转换后删除）。
-const LEGACY_FILE: &str = "networks.toml";
-/// 转换完成标记（**原子性锚点**：只有全部成功才写）。
-const MIGRATED_MARKER: &str = "networks-migrated";
 
 fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager as _;
@@ -185,72 +181,40 @@ fn to_toml(cfg: &NetworkConfig) -> Result<String, String> {
 }
 
 // ---------------------------------------------------------------------------
-// 一次性转换（旧 `networks.toml` → `<config>/<id>.toml`）
+// 一次性转换（旧 `config/networks.toml` → `<config>/<id>.toml`）
 // ---------------------------------------------------------------------------
 
+/// 旧 `config/networks.toml` 的一次性转换。
+///
+/// 实现**不在运行时**：转换逻辑在 `exvlan-migrate` 的 lib（`mobile` 模块），
+/// 经 Android 的 `libexvlan_ffi.so` 暴露成 `exvlan_migrate_networks_once`。
+/// 这里只把两个目录传过去 + 记日志（失败保留源、下次调用重试）。
+#[cfg(target_os = "android")]
 fn migrate_legacy_once(app: &tauri::AppHandle) {
-    let Ok(dir) = config_dir(app) else {
+    let (Ok(root), Ok(dir)) = (app_dir(app), config_dir(app)) else {
         return;
     };
-    // 旧移动端把列表写在 `<app_config_dir>/config/networks.toml`
-    // （与新的 `<id>.toml` **同一个目录**）——不是 app 根目录。
-    let legacy_path = dir.join(LEGACY_FILE);
-    if !legacy_path.is_file() {
-        // 没有旧数据：不写标记（以后出现 Legacy 文件时仍能被处理）。
-        return;
-    }
-    let text = match std::fs::read_to_string(&legacy_path) {
-        Ok(text) => text,
-        Err(err) => {
-            crate::logger::record(
-                "networks.migrate",
-                format!("读 {} 失败: {err}", legacy_path.display()),
-            );
-            return;
-        }
-    };
-    let configs = match legacy::load_legacy(&text) {
-        Ok(cfgs) => cfgs,
-        Err(err) => {
-            crate::logger::record("networks.migrate", err);
-            return; // 保留源文件，下次启动重试
-        }
-    };
-    let mut converted = 0usize;
-    for cfg in &configs {
-        let Some(id) = cfg.instance_id.clone().filter(|id| !id.is_empty()) else {
-            continue;
-        };
-        let toml_text = match to_toml(cfg) {
-            Ok(text) => text,
-            Err(err) => {
-                crate::logger::record("networks.migrate", format!("{id}: 生成内核配置失败: {err}"));
-                return; // 原子性：一条失败就整体不推进（源文件保留）
+    match crate::ffi::migrate_networks_once(&root, &dir) {
+        Ok(value) => {
+            // `nothing_to_do` 是常态（绝大多数机器没有旧文件），不刷日志。
+            let status = value
+                .get("report")
+                .and_then(|report| report.get("status"))
+                .and_then(|status| status.as_str())
+                .unwrap_or_default();
+            if status != "nothing_to_do" {
+                crate::logger::record("networks.migrate", value.to_string());
             }
-        };
-        if let Err(err) = write_in(&dir, &id, &toml_text, true) {
-            crate::logger::record("networks.migrate", format!("{id}: 写入失败: {err}"));
-            return;
         }
-        converted += 1;
+        // 失败 = 源文件已保留（下一次 get/set 调用会重试）。
+        Err(err) => crate::logger::record("networks.migrate", err),
     }
-    // 全部成功才删源 + 写标记（标记只用于观测，不作为下次的闸门）。
-    if let Err(err) = std::fs::remove_file(&legacy_path) {
-        crate::logger::record(
-            "networks.migrate",
-            format!("删除 {} 失败: {err}", legacy_path.display()),
-        );
-        return;
-    }
-    let _ = std::fs::write(
-        app_dir(app).unwrap_or(dir.clone()).join(MIGRATED_MARKER),
-        format!("converted={converted}\n").as_bytes(),
-    );
-    crate::logger::record(
-        "networks.migrate",
-        format!("legacy networks.toml → {converted} 个配置文件"),
-    );
 }
+
+/// iOS 没有随包的内核 FFI（无发货产物，CI 只做 `cargo check`）：不迁移，
+/// 旧 `networks.toml` 原样保留。
+#[cfg(not(target_os = "android"))]
+fn migrate_legacy_once(_app: &tauri::AppHandle) {}
 
 // ---------------------------------------------------------------------------
 // 命令（与桌面同形，前端契约不变）
