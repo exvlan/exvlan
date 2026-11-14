@@ -76,12 +76,18 @@ jobs:
         # 同一个 run 里可能调用本工作流两次（core / core_desktop）。
         # fkirc 的 cancel_others 会把「同内容更新的一次」当成重复并取消，
         # 与上面的 concurrency 是两处独立误伤 —— desktop 那次直接跳过它。
-        if: inputs.variant == 'all'
+        if: inputs.variant == 'all' && github.event_name != 'schedule'
         uses: fkirc/skip-duplicate-actions@b974a9395958c231af965b70070979a577efa578 # v5
         with:
           concurrent_skipping: "same_content_newer"
           skip_after_successful_duplicate: "true"
-          cancel_others: "true"
+          # 只在 PR 上取消同分支的旧运行：
+          #   · push 的去重已由 pipeline 的 concurrency（group=workflow-sha，
+          #     cancel-in-progress）覆盖，同 sha 的分支/tag 两轮只会留一轮；
+          #   · cancel_others=true 在 push 上会连带取消「同分支上仍在跑的
+          #     nightly / workflow_dispatch」——2026-11-14 的 nightly 跑了两小时
+          #     后被随后的 develop push 取消，就是这个原因。
+          cancel_others: ${{ github.event_name == 'pull_request' }}
           paths: ${{ env.RELEVANT_PATHS }}
 
       - id: path_filter

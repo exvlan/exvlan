@@ -44,7 +44,8 @@ jobs:
         with:
           concurrent_skipping: "same_content_newer"
           skip_after_successful_duplicate: "true"
-          cancel_others: "true"
+          # 同 core.yml：只在 PR 上取消旧运行（避免打掉同分支的 nightly）。
+          cancel_others: ${{ github.event_name == 'pull_request' }}
           paths: '["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/**", "exvlan/**", "exvlan/core/**", "exvlan/proto/**", "exvlan/contrib/ohrs/**", ".github/workflows/ohos.yml", ".github/actions/**"]'
 
   ohos:

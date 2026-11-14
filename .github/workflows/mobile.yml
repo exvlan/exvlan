@@ -57,7 +57,9 @@ jobs:
         with:
           concurrent_skipping: "same_content_newer"
           skip_after_successful_duplicate: "true"
-          cancel_others: "true"
+          # 同 core.yml：只在 PR 上取消旧运行。push 的去重交给 pipeline 的
+          # concurrency；cancel_others=true 会连带取消同分支仍在跑的 nightly。
+          cancel_others: ${{ github.event_name == 'pull_request' }}
           paths: ${{ env.RELEVANT_PATHS }}
 
       - id: path_filter
