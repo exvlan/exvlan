@@ -609,18 +609,24 @@ port = 2016
                                         ← stable 的**符号链接**（老客户端零迁移）
 ```
 
-| 项           | 决定                                                                                                                                                                                        |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 保留         | stable 5 / rc·beta·dev 各 3 / nightly **1**（每轮整目录替换）                                                                                                                               |
-| `SINCE_TAG`  | **只约束 stable**；其余通道按 `KEEP_<CHANNEL>` 从最新往前取                                                                                                                                 |
-| 空通道       | **不创建目录/清单**；客户端对单通道 404 只跳过（已实现）                                                                                                                                    |
-| 别名         | 符号链接指向 `stable/`，发布时原子替换链接（不复制文件，避免两份不一致）                                                                                                                    |
-| 磁盘         | `MAX_BYTES` 提到 **8 GiB**（当前 1.07 GB）                                                                                                                                                  |
-| 对外         | 通道目录**公开可达**；Caddy `@manifest` 扩为 `/core/*/manifest.json`、`/upgrade/*/{manifest,latest}.json`（无缓存）                                                                         |
-| 脚本真源     | 仓库 `script/kernel-mirror/*` 为唯一真源；发布机容器启动时用已挂载的 gh 凭据从**最新 stable tag** 拉取（`MIRROR_REF` 可临时覆盖），拉不到则保留现有脚本并告警                               |
-| 状态文件     | `mirror-status.json` 增 `channels.{stable,rc,beta,dev,nightly}`                                                                                                                             |
-| legacy       | `-pre.*` / `preview-*` 不镜像（已在 §14.12 清理）                                                                                                                                           |
-| nightly 版本 | 构建时把 base 的 patch **+1**（develop 20713 → `26.410.20714-nightly.1115`），保证 nightly 永远高于 stable，避免被推到 stable 后卡住                                                        |
-| nightly 上线 | **随 dev.1 一起上线**（代码 + 调度都在 dev.1），但首次夜间构建在 dev.1 发布后手动触发一次验证，不阻塞发版                                                                                   |
-| nightly 实现 | `pipeline.yml` 第二条 cron（21:00 UTC）+ `changes` 的 `nightly` 布尔门控；版本串 `script/ci/nightly-version.sh`（跨年硬失败），打包/烟测/发布 `script/ci/nightly-{assets,smoke,publish}.sh` |
-| nightly 签名 | studio 只签它打包的桌面平台（mac x86_64/aarch64、win x86_64）。nightly 的 linux-*/windows-arm64 由发布作业用同一把 `TAURI_SIGNING_PRIVATE_KEY` 补签（签名与平台无关），缺签名直接失败       |
+| 项           | 决定                                                                                                                                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 保留         | stable 5 / rc·beta·dev 各 3 / nightly **1**（每轮整目录替换）                                                                                                                                     |
+| `SINCE_TAG`  | **只约束 stable**；其余通道按 `KEEP_<CHANNEL>` 从最新往前取                                                                                                                                       |
+| 空通道       | **不创建目录/清单**；客户端对单通道 404 只跳过（已实现）                                                                                                                                          |
+| 别名         | 符号链接指向 `stable/`，发布时原子替换链接（不复制文件，避免两份不一致）                                                                                                                          |
+| 磁盘         | `MAX_BYTES`（**8 GiB**，当前 1.07 GB）按「core+app 窗口预算」生效：超限时从**最旧**版本收缩 core/app 窗口，并随清单一起收缩（不留「清单引用但文件已删」）                                         |
+| 对外         | 通道目录**公开可达**；Caddy `@manifest` 扩为 `/core/*/manifest.json`、`/upgrade/*/{manifest,latest}.json`（无缓存）                                                                               |
+| 清单推进     | `latest.json` / `magisk_update.json` 取「该通道最新的、且清单可用的 tag」；本轮指纹命中未重下的最新版直接复用目标目录里已发布的清单 → 只补下旧 tag 也不会降级/粘住                                |
+| 资产归属     | 未版本化资产（`app-*-release.apk` / `*.msi` / `*-setup.exe` / `*.app.tar.gz`）跨版本同名，**只由通道最新 tag 发布**，旧 tag 同名资产不落盘（否则最旧后写赢 → 客户端 sha256 校验失败）             |
+| 脚本真源     | 仓库 `script/kernel-mirror/*` 为唯一真源；发布机容器启动时用已挂载的 gh 凭据从**最新 stable tag** 拉取（`MIRROR_REF` 可临时覆盖），拉不到则保留现有脚本并告警                                     |
+| 状态文件     | `mirror-status.json` 增 `channels.{stable,rc,beta,dev,nightly}`；同时向 `<EXVLAN_DIST>/mirror-status.json` 写一份**旧 schema 兼容**文件（看门狗不动）；`core/<zip>` 缺失时补 `stable/` 的符号链接 |
+| legacy       | `-pre.*` / `preview-*` 不镜像（已在 §14.12 清理）                                                                                                                                                 |
+| nightly 版本 | 构建时把 base 的 patch **+1**（develop 20713 → `26.410.20714-nightly.1115`），保证 nightly 永远高于 stable，避免被推到 stable 后卡住                                                              |
+| nightly 上线 | **随 dev.1 一起上线**（代码 + 调度都在 dev.1），但首次夜间构建在 dev.1 发布后手动触发一次验证，不阻塞发版                                                                                         |
+| nightly 实现 | `pipeline.yml` 第二条 cron（21:00 UTC）+ `changes` 的 `nightly` 布尔门控；版本串 `script/ci/nightly-version.sh`（跨年硬失败），打包/烟测/发布 `script/ci/nightly-{assets,smoke,publish}.sh`       |
+| nightly 签名 | studio 只签它打包的桌面平台（mac x86_64/aarch64、win x86_64）。nightly 的 linux-*/windows-arm64 由发布作业用同一把 `TAURI_SIGNING_PRIVATE_KEY` 补签（签名与平台无关），缺签名直接失败             |
+
+回归 e2e：`script/kernel-mirror/e2e-sync-test.sh`（假 `gh` + 假 Release，离线跑）。覆盖
+「只重下旧 tag 不降级 / 不粘住」「未版本化资产不被旧 tag 覆盖、清单 sha256 全 MATCH」
+「FORCE 全量重下」「MAX_BYTES 预算收缩」「旧 schema 兼容状态 + `core/<zip>` 符号链接」。

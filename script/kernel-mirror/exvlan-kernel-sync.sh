@@ -22,6 +22,20 @@
 # - 别名是**符号链接**，指向 stable，不复制文件（避免两份不一致）。
 # - 需要 GH_TOKEN（fine-grained：Contents = Read-only），仅当仓库为 private 时必需。
 #
+# 增量同步的三条硬规则（写在这里，改代码前先读）：
+# - **最新版只前进不后退**：`latest.json` / `magisk_update.json` 取「该通道最新的、
+#   且清单可用的 tag」；本轮因指纹命中没重下的版本，复用目标目录里已有的清单
+#   （按 tag 版本比较，不看目录 mtime）。只补下旧 tag 时不会把 latest 降级。
+# - **未版本化资产归最新 tag**：`app-*-release.apk` / `*.msi` / `*-setup.exe` /
+#   `*.app.tar.gz` 这类名字不带版本号、跨版本重复；只允许通道最新 tag 提供，
+#   旧 tag 的同名资产不发布（否则最旧的后写赢 → 客户端 sha256 校验失败）。
+# - **MAX_BYTES 是窗口预算**：超限时从**最旧**版本开始收缩 core/app 窗口，
+#   合并出的清单同步收缩（不留「清单引用但文件已删」的不一致状态）。
+#
+# 状态文件（两份）：
+#   <DEST>/mirror-status.json          新 schema（按通道汇总）
+#   <DEST 的上一级>/mirror-status.json 旧 schema 兼容文件（发布机看门狗读它）
+#
 # 用法：
 #   GH_TOKEN=xxx ./exvlan-kernel-sync.sh
 #   ./exvlan-kernel-sync.sh --dry-run --tags-file /tmp/tags   # 只打印计划，不下载/不写盘
@@ -50,7 +64,10 @@ usage() {
   REPO=exvlan/exvlan                  Release 所在仓库
   DEST=/srv/exvlan/core               内核镜像根目录（其下按通道建子目录）
   UPGRADE_DEST=/srv/exvlan/upgrade    应用更新镜像根目录（其下按通道建子目录）
-  MIRROR_STATUS=$DEST/mirror-status.json  状态文件（保留既有顶层字段）
+  MIRROR_STATUS=$DEST/mirror-status.json  状态文件（新 schema，按通道）
+  MIRROR_STATUS_COMPAT=${DEST%/core}/mirror-status.json
+                                      旧 schema 兼容状态（发布机看门狗读它）
+  MAX_BYTES=8589934592                core+app 合计预算；超限从最旧版本开始收缩窗口（0 = 不限）
   KEEP_CORE_STABLE=5  KEEP_APP_STABLE=5   stable 通道保留的版本数
   KEEP_RC=3  KEEP_BETA=3  KEEP_DEV=3      预览通道保留的版本数（nightly 固定 1）
   SINCE_TAG=                          只同步 >= 该 tag 的 stable 版本（其余通道不受影响）
@@ -84,9 +101,14 @@ KEEP_RC="${KEEP_RC:-3}"
 KEEP_BETA="${KEEP_BETA:-3}"
 KEEP_DEV="${KEEP_DEV:-3}"
 SINCE_TAG="${SINCE_TAG:-}"
+# core + app 合计预算：超限时从最旧版本开始收缩窗口（0 = 不限）。
+# 历史上的 MAX_BYTES 只是写在文档里、脚本从未读取；现在真正生效。
+MAX_BYTES="${MAX_BYTES:-8589934592}"
 
 # 状态文件放在 DEST 里，这样 systemd unit 的 ReadWritePaths 只需覆盖 core/upgrade
 MIRROR_STATUS="${MIRROR_STATUS:-$DEST/mirror-status.json}"
+# 部署兼容：发布机看门狗读的是 <EXVLAN_DIST>/mirror-status.json（core 的上一级）与旧 schema
+MIRROR_STATUS_COMPAT="${MIRROR_STATUS_COMPAT:-$(dirname "$DEST")/mirror-status.json}"
 
 # 组装 gh release download 的 --pattern 参数
 patterns=()
@@ -107,6 +129,9 @@ patterns+=(-p 'Exvlan-Magisk-*.zip' -p 'magisk_update.json')
 
 # 内核 zip 的资产名形如 `<platform>-v26.410.20711.zip`
 PLATFORM_ZIP_RE="^($(printf '%s' "$PLATFORMS" | tr ' ' '|'))-.*[.]zip$"
+# upgrade 目录收的资产（与 publish_app 的 case 保持同步；预算估算用）
+# 用 [.] 而不是 `\.`：这个正则要经 awk -v 传入，`\.` 会被 awk 当成转义并告警
+UPGRADE_ASSET_RE='([.]dmg$|[.]msi$|-setup[.]exe$|app-.*-release.*[.]apk$|[.]app[.]tar[.]gz$|[.]sig$|^Exvlan-Magisk-.*[.]zip$)'
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -220,8 +245,56 @@ build_channel_lists() {
 }
 
 # ---------------------------------------------------------------------------
-# 3) 按通道选 tag（保留策略 + SINCE_TAG 只约束 stable）
+# 3) 按通道选 tag（保留策略 + SINCE_TAG 只约束 stable + MAX_BYTES 预算）
 # ---------------------------------------------------------------------------
+# 单 tag 的预计占用（PLATFORMS 内核 zip + upgrade 资产）；没有资产元数据（--tags-file
+# 模式）时返回 1，调用方据此放弃预算裁剪。
+tag_bytes() {
+  local tag="$1" f="$work/assets.$tag"
+  [ -s "$f" ] || return 1
+  awk -F'\t' -v re="$PLATFORM_ZIP_RE" -v up="$UPGRADE_ASSET_RE" \
+    '($1 ~ re || $1 ~ up) { s += $2 } END { print s + 0 }' "$f"
+}
+
+# MAX_BYTES 窗口预算：core+app 合计超限时，从**最旧**版本开始收缩（清单同步收缩，
+# 不留「清单还引用、文件已删」的不一致状态）。只裁到每边剩 1 个版本为止。
+budget_trim() {
+  local ch="$1" list="$work/budget.tags" total tag b dropped=0 core_n app_n
+  [ "${MAX_BYTES:-0}" -gt 0 ] || return 0
+  while :; do
+    cat "$work/core.$ch" "$work/app.$ch" 2>/dev/null | awk 'NF' | sort -u > "$list"
+    [ -s "$list" ] || return 0
+    total=0
+    while read -r tag; do
+      [ -n "$tag" ] || continue
+      b="$(tag_bytes "$tag")" || return 0
+      total=$((total + b))
+    done < "$list"
+    if [ "$total" -le "$MAX_BYTES" ]; then
+      if [ "$dropped" -gt 0 ]; then
+        info "$ch：MAX_BYTES=$MAX_BYTES 预算裁剪后保留 core $(count_lines "$work/core.$ch") / app $(count_lines "$work/app.$ch") 个版本（约 $total 字节）"
+      fi
+      return 0
+    fi
+    core_n="$(count_lines "$work/core.$ch")"
+    app_n="$(count_lines "$work/app.$ch")"
+    if [ "$core_n" -le 1 ] && [ "$app_n" -le 1 ]; then
+      warn "$ch：单个版本就超过 MAX_BYTES=$MAX_BYTES（约 $total 字节），不再裁剪"
+      return 0
+    fi
+    if [ "$core_n" -ge "$app_n" ] && [ "$core_n" -gt 1 ]; then
+      info "$ch：超出 MAX_BYTES=$MAX_BYTES，从最旧版本收缩 core 窗口：$(tail -n 1 "$work/core.$ch")"
+      head -n -1 "$work/core.$ch" > "$work/.trim.tmp"
+      mv -f "$work/.trim.tmp" "$work/core.$ch"
+    else
+      info "$ch：超出 MAX_BYTES=$MAX_BYTES，从最旧版本收缩 app 窗口：$(tail -n 1 "$work/app.$ch")"
+      head -n -1 "$work/app.$ch" > "$work/.trim.tmp"
+      mv -f "$work/.trim.tmp" "$work/app.$ch"
+    fi
+    dropped=$((dropped + 1))
+  done
+}
+
 select_tags() {
   local ch="$1"
   local src="$work/tags.$ch"
@@ -251,6 +324,9 @@ select_tags() {
 
   printf '%s\n' "${tags[@]}" | head -n "$keep_core" > "$work/core.$ch"
   printf '%s\n' "${tags[@]}" | head -n "$keep_app" > "$work/app.$ch"
+
+  # MAX_BYTES 预算：超限时把窗口从最旧端收缩（清单随后按裁过的窗口合并）
+  budget_trim "$ch"
 
   # 下载集合 = core 保留 ∪ app 保留（同一 tag 只下载一次）
   cat "$work/core.$ch" > "$work/dl.$ch"
@@ -393,6 +469,73 @@ json_url_names() {
     | sed -E 's#.*/([^/"]+)"$#\1#' || true
 }
 
+# 清单的顶层 `"version"`（updater 清单是 `26.410.20711`，内核清单是 `v26.410.20711`）
+json_version() {
+  sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$1" 2>/dev/null \
+    | head -n 1 || true
+}
+
+# 该 tag 的版本号是否就是 $2（nightly 是固定 tag，无法从清单 version 反推 → 有清单即算匹配）
+tag_matches_version() {
+  local tag="$1" ver="$2"
+  [ -n "$ver" ] || return 1
+  case "$tag" in
+    nightly) return 0 ;;
+  esac
+  [ "${tag#v}" = "$ver" ]
+}
+
+# tag 的版本是否 >= $2（固定 tag nightly 一旦下载就是更新，不看版本串）
+tag_not_older_than() {
+  local tag="$1" ver="$2"
+  [ -n "$ver" ] || return 0
+  case "$tag" in
+    nightly) return 0 ;;
+  esac
+  version_ge "${tag#v}" "$ver"
+}
+
+# 选「该通道最新的、且清单可用的 tag」——增量同步下不能只从「本轮下载过的 tag」里挑，
+# 否则只补下旧 tag 时 latest/magisk 会被降级并一直粘住。
+#   $1=通道 $2=通道 tag 列表（新→旧） $3=清单文件名 $4=目标目录里已发布的同名清单
+#   输出 `<tag>\t<rel|existing>`：rel = 本轮下载的，existing = 已发布内容就是它（不动）
+pick_manifest_tag() {
+  local ch="$1" list="$2" name="$3" published="$4"
+  local tag rel pubver=""
+  [ -s "$list" ] || return 1
+  if [ -f "$published" ]; then pubver="$(json_version "$published")"; fi
+  while read -r tag; do
+    [ -n "$tag" ] || continue
+    rel="$work/rel/$ch/$tag"
+    if [ -f "$rel/$name" ]; then
+      if tag_not_older_than "$tag" "$pubver"; then
+        printf '%s\t%s\n' "$tag" rel
+        return 0
+      fi
+      warn "app/$ch：$tag 的 $name 比已发布的 $pubver 旧，忽略（不降级）"
+      continue
+    fi
+    if tag_matches_version "$tag" "$pubver"; then
+      # 最新版这轮因指纹命中没重下：目标目录里已有的清单就是它的内容
+      printf '%s\t%s\n' "$tag" existing
+      return 0
+    fi
+  done < "$list"
+  return 1
+}
+
+# 资产名里是否带该 tag 的版本号 → 0 = 带（各版本名字天然不同，谁都能发布）
+# 不带版本号的名字（app-*-release.apk / *.msi / *-setup.exe / *.app.tar.gz）跨版本重复，
+# 只允许通道最新 tag 发布，旧 tag 同名资产不得覆盖（最旧后写赢会让清单 sha256 对不上）。
+name_scoped_to_tag() {
+  local name="$1" tag="$2" ver="${tag#v}"
+  [ -n "$ver" ] || return 1
+  case "$name" in
+    *"$ver"*) return 0 ;;
+  esac
+  return 1
+}
+
 # nightly：整目录替换（保留策略固定 1 份）
 wipe_dir_files() {
   local dir="$1"
@@ -453,6 +596,29 @@ link_alias() {
   ln -sfn "$target" "$tmp"
   mv -fT "$tmp" "$dest"
   info "别名：$dest → $target"
+}
+
+# 老布局兼容：老客户端缓存过的旧清单、以及发布机看门狗（按 `core/<file>` 校验
+# 清单引用的 zip 是否存在）都按 `DEST/<zip>` 找内核包，而文件现在在 `DEST/stable/`。
+# 为缺失的名字补**相对符号链接**：不复制、不占空间，也不动根上已有的真实旧文件。
+link_legacy_core_files() {
+  local manifest="$1" dest="$2" name count=0
+  [ -f "$manifest" ] || return 0
+  if [ "$DRY_RUN" = 1 ]; then
+    info "旧布局兼容（dry-run）：$dest 根上缺失的内核 zip 会补符号链接 → stable/"
+    return 0
+  fi
+  while read -r name; do
+    [ -n "$name" ] || continue
+    case "$name" in */*) continue ;; esac
+    [ -f "$dest/stable/$name" ] || continue
+    [ -e "$dest/$name" ] && continue
+    ln -sfn "stable/$name" "$dest/$name" && count=$((count + 1))
+  done < <(manifest_files "$manifest")
+  if [ "$count" -gt 0 ]; then
+    info "旧布局兼容：$dest 根上补了 $count 个指向 stable/ 的符号链接"
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -557,13 +723,16 @@ publish_app() {
   local ch="$1"
   local dir="$UPGRADE_DEST/$ch"
   local stage="$UPGRADE_DEST/.staging-app.$ch"
-  local tag rel manifests="" latest_tag="" magisk_tag="" keep
+  local tag rel manifests="" latest_tag="" latest_src="" magisk_tag="" magisk_src="" keep
+  local newest_tag="" pick=""
   local since_args=()
-  local copied=0 missing=0 f asset name
+  local copied=0 skipped=0 missing=0 f asset name
   keep="$(keep_count_app "$ch")"
   if [ "$ch" = stable ] && [ -n "$SINCE_TAG" ]; then
     since_args=(--since "$SINCE_TAG")
   fi
+  # 通道最新 tag：未版本化资产只由它提供（app.$ch 已按版本倒序）
+  newest_tag="$(head -n 1 "$work/app.$ch" 2>/dev/null || true)"
 
   rm -rf "$stage"
   install -d "$stage"
@@ -575,14 +744,18 @@ publish_app() {
     [ -d "$rel" ] || continue
     [ -f "$rel/upgrade-manifest.json" ] || continue
     manifests="${manifests}${manifests:+:}$rel/upgrade-manifest.json"
-    if [ -z "$latest_tag" ] && [ -f "$rel/upgrade-latest.json" ]; then latest_tag="$tag"; fi
-    if [ -z "$magisk_tag" ] && [ -f "$rel/magisk_update.json" ]; then magisk_tag="$tag"; fi
     for f in "$rel"/*; do
       [ -e "$f" ] || continue
       asset="$(basename "$f")"
       case "$asset" in
         *.json) continue ;;
         *.dmg|*.msi|*-setup.exe|app-*-release*.apk|*.app.tar.gz|*.sig|Exvlan-Magisk-*.zip)
+          # 未版本化资产跨版本同名：旧 tag 的副本会覆盖最新版字节（客户端 sha256 校验失败）
+          if [ "$tag" != "$newest_tag" ] && ! name_scoped_to_tag "$asset" "$tag"; then
+            info "app/$ch：跳过 $tag 的未版本化资产 $asset（只从最新 tag ${newest_tag:-?} 发布）"
+            skipped=$((skipped + 1))
+            continue
+          fi
           cp -f "$f" "$stage/"
           copied=$((copied + 1))
           ;;
@@ -606,17 +779,31 @@ publish_app() {
   python3 "$SCRIPT_DIR/merge_manifests.py" --keep "$keep" "${since_args[@]}" \
     "$manifests" "$stage/manifest.json"
 
-  # 官方 updater 清单与 Magisk 清单取「最新且有该文件」的版本；
+  # 官方 updater 清单与 Magisk 清单取「该通道最新的、且清单可用的 tag」：
+  # 本轮下载到的直接落盘；本轮因指纹命中没重下的最新版，目标目录里的清单就是它，
+  # 保持不动（只补下旧 tag 时不会把 latest 降级，也不会粘在旧版本上）。
   # URL 改写成**本通道**目录（绝对地址是 tauri updater 的硬要求）。
-  if [ -n "$latest_tag" ]; then
-    cp -f "$work/rel/$ch/$latest_tag/upgrade-latest.json" "$stage/latest.json"
-    python3 "$SCRIPT_DIR/channelize_urls.py" "$stage/latest.json" "$ch"
+  if pick="$(pick_manifest_tag "$ch" "$work/tags.$ch" upgrade-latest.json "$dir/latest.json")"; then
+    latest_tag="${pick%%$'\t'*}"
+    latest_src="${pick##*$'\t'}"
+    if [ "$latest_src" = rel ]; then
+      cp -f "$work/rel/$ch/$latest_tag/upgrade-latest.json" "$stage/latest.json"
+      python3 "$SCRIPT_DIR/channelize_urls.py" "$stage/latest.json" "$ch"
+    else
+      info "app/$ch：latest.json 已是 $latest_tag 的内容（本轮未重下最新版），保持不动"
+    fi
   else
-    warn "app/$ch：没有 upgrade-latest.json，官方 updater 清单保持旧内容"
+    warn "app/$ch：找不到可用的 upgrade-latest.json，官方 updater 清单保持旧内容"
   fi
-  if [ -n "$magisk_tag" ]; then
-    cp -f "$work/rel/$ch/$magisk_tag/magisk_update.json" "$stage/magisk_update.json"
-    python3 "$SCRIPT_DIR/channelize_urls.py" "$stage/magisk_update.json" "$ch"
+  if pick="$(pick_manifest_tag "$ch" "$work/tags.$ch" magisk_update.json "$dir/magisk_update.json")"; then
+    magisk_tag="${pick%%$'\t'*}"
+    magisk_src="${pick##*$'\t'}"
+    if [ "$magisk_src" = rel ]; then
+      cp -f "$work/rel/$ch/$magisk_tag/magisk_update.json" "$stage/magisk_update.json"
+      python3 "$SCRIPT_DIR/channelize_urls.py" "$stage/magisk_update.json" "$ch"
+    else
+      info "app/$ch：magisk_update.json 已是 $magisk_tag 的内容（本轮未重下最新版），保持不动"
+    fi
   fi
 
   while read -r name; do
@@ -663,7 +850,9 @@ publish_app() {
     mv -f "$f" "$dir/"
   done
   rm -rf "$stage"
-  info "app/$ch：已发布 $copied 个资产 + 清单 → $dir"
+  local skip_note=""
+  [ "$skipped" -gt 0 ] && skip_note="（跳过 $skipped 个旧 tag 同名未版本化资产）"
+  info "app/$ch：已发布 $copied 个资产 + 清单 → $dir$skip_note"
   prune_dir "$dir" "$dir/manifest.json" app
   return 0
 }
@@ -705,6 +894,25 @@ build_status_input() {
   done
 }
 
+# 写两份状态：$MIRROR_STATUS（新 schema，按通道）+ $MIRROR_STATUS_COMPAT（旧 schema）。
+# 发布机看门狗读旧的，并且用**文件 mtime** 判「同步停滞」——所以正常轮次也必须写，
+# 早退路径（没有可同步的 release）同样要写，否则 2 小时后误报。
+write_status_files() {  # $1=result(ok|waiting|error) $2=detail（空 = 按通道自动生成）
+  local result="$1" detail="$2"
+  touch "$work/status.tsv"
+  python3 "$SCRIPT_DIR/mirror_status.py" \
+    --path "$MIRROR_STATUS" \
+    --compat-path "$MIRROR_STATUS_COMPAT" \
+    --channels-file "$work/status.tsv" \
+    --repo "$REPO" \
+    --dest "$DEST" \
+    --upgrade-dest "$UPGRADE_DEST" \
+    --result "$result" \
+    --detail "$detail" \
+    --since-tag "$SINCE_TAG" \
+    --max-bytes "$MAX_BYTES"
+}
+
 # ---------------------------------------------------------------------------
 # 10) dry-run：只打印计划
 # ---------------------------------------------------------------------------
@@ -717,6 +925,7 @@ print_plan() {
     info "跳过（legacy / 非通道 tag）：$legacy"
   fi
   info "保留策略：stable core=$KEEP_CORE_STABLE app=$KEEP_APP_STABLE；rc=$KEEP_RC beta=$KEEP_BETA dev=$KEEP_DEV；nightly=1"
+  info "MAX_BYTES=$MAX_BYTES（core+app 合计预算，超限从最旧版本收缩窗口；0 = 不限）"
   [ -n "$SINCE_TAG" ] && info "SINCE_TAG=$SINCE_TAG（只约束 stable）"
 
   for ch in $CHANNELS; do
@@ -746,6 +955,8 @@ print_plan() {
   info "别名：$UPGRADE_DEST/latest.json → stable/latest.json"
   info "别名：$UPGRADE_DEST/magisk_update.json → stable/magisk_update.json"
   info "状态文件：$MIRROR_STATUS（channels.{stable,rc,beta,dev,nightly}）"
+  info "状态文件：$MIRROR_STATUS_COMPAT（旧 schema 兼容，发布机看门狗读它）"
+  info "旧布局兼容：缺失的 $DEST/<zip> 会补符号链接 → stable/"
   info "dry-run 结束：共 $total 个通道-版本待同步"
 }
 
@@ -769,6 +980,8 @@ for ch in $CHANNELS; do
 done
 if [ "$total_tags" -eq 0 ]; then
   info "没有可同步的 release，退出"
+  # 仍然刷新状态文件：否则看门狗按 mtime 判「同步停滞」
+  write_status_files waiting "没有满足 SINCE_TAG=${SINCE_TAG:-（不限）} 的 release，等待下一轮"
   exit 0
 fi
 
@@ -777,6 +990,7 @@ download_channels
 
 declare -A CORE_OK=()
 declare -A APP_OK=()
+failed=()
 rc=0
 for ch in $CHANNELS; do
   rc=0
@@ -784,14 +998,14 @@ for ch in $CHANNELS; do
   case "$rc" in
     0) CORE_OK["$ch"]=1 ;;
     2) info "core/$ch：无新内容，跳过" ;;
-    *) warn "core/$ch 发布未完成（保留旧内容）" ;;
+    *) warn "core/$ch 发布未完成（保留旧内容）"; failed+=("core/$ch") ;;
   esac
   rc=0
   publish_app "$ch" || rc=$?
   case "$rc" in
     0) APP_OK["$ch"]=1 ;;
     2) info "app/$ch：无新内容，跳过" ;;
-    *) warn "app/$ch 发布未完成（保留旧内容）" ;;
+    *) warn "app/$ch 发布未完成（保留旧内容）"; failed+=("app/$ch") ;;
   esac
 done
 
@@ -810,13 +1024,17 @@ link_alias stable/manifest.json "$UPGRADE_DEST/manifest.json"
 link_alias stable/latest.json "$UPGRADE_DEST/latest.json"
 link_alias stable/magisk_update.json "$UPGRADE_DEST/magisk_update.json"
 
+# 老布局 / 看门狗兼容：$DEST/<zip> 必须能解析到实际文件（现放在 stable/ 下）
+link_legacy_core_files "$DEST/stable/manifest.json" "$DEST"
+
 build_status_input
-python3 "$SCRIPT_DIR/mirror_status.py" \
-  --path "$MIRROR_STATUS" \
-  --channels-file "$work/status.tsv" \
-  --repo "$REPO" \
-  --dest "$DEST" \
-  --upgrade-dest "$UPGRADE_DEST"
+if [ "${#failed[@]}" -gt 0 ]; then
+  # 通道半发布/下载失败只影响该通道（旧内容保持），按「等待」上报：
+  # 看门狗只在等待超过 24h 时才升级告警，不会把发布窗口刷成红灯。
+  write_status_files waiting "通道发布未完成（已保持旧内容）：${failed[*]}"
+else
+  write_status_files ok ""
+fi
 
 # 旧布局遗留在 DEST 根上的 zip 不删：老客户端缓存过的旧清单还指向它们。
 legacy_root="$(find "$DEST" -maxdepth 1 -type f -name '*.zip' | wc -l | tr -d ' ')"
