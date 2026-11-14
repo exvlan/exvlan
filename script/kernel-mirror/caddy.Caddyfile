@@ -1,15 +1,17 @@
 # EXVlan 内核资产托管（dl.exvlan.era-x.cn/core/）
 #
-# 目录约定（由 exvlan-kernel-sync.sh 维护）：
-#   /srv/exvlan/core/manifest.json
-#   /srv/exvlan/core/<platform>-v<version>.zip
-#   /srv/exvlan/upgrade/latest.json     （官方 updater）
-#   /srv/exvlan/upgrade/manifest.json   （自建回退）
-#   /srv/exvlan/upgrade/<安装包 + .sig>
+# 目录约定（由 exvlan-kernel-sync.sh 维护，通道化见 docs/decisions-7.3.md §14.13）：
+#   /srv/exvlan/core/<channel>/manifest.json
+#   /srv/exvlan/core/<channel>/<platform>-v<ver>.zip
+#   /srv/exvlan/core/manifest.json                → stable/manifest.json（符号链接）
+#   /srv/exvlan/core/mirror-status.json           （同步状态，channels.*）
+#   /srv/exvlan/upgrade/<channel>/{latest,manifest,magisk_update}.json + 安装包
+#   /srv/exvlan/upgrade/{latest,manifest,magisk_update}.json → stable/…（符号链接）
 #
 # 说明：
-# - manifest.json 必须实时（客户端据此判断是否有新内核），因此 no-cache。
-# - zip 文件名带版本号 → 内容不可变，可长期缓存。
+# - 清单与状态必须实时（客户端据此判断是否有更新），因此 no-cache；
+#   通道目录与根别名都要覆盖（根上是指向 stable 的符号链接）。
+# - zip / 安装包文件名带版本号 → 内容不可变，可长期缓存。
 # - 关闭目录浏览，未匹配路径一律 404，避免误暴露服务器上的其它文件。
 
 dl.exvlan.era-x.cn {
@@ -18,7 +20,7 @@ dl.exvlan.era-x.cn {
 	root * /srv/exvlan
 
 	handle /core/* {
-		@manifest path /core/manifest.json
+		@manifest path /core/manifest.json /core/*/manifest.json /core/mirror-status.json
 		header @manifest Cache-Control "no-cache, must-revalidate"
 
 		@assets path_regexp \.zip$
@@ -35,7 +37,7 @@ dl.exvlan.era-x.cn {
 	}
 
 	handle /upgrade/* {
-		@manifest path /upgrade/manifest.json /upgrade/latest.json /upgrade/magisk_update.json
+		@manifest path /upgrade/manifest.json /upgrade/latest.json /upgrade/magisk_update.json /upgrade/*/manifest.json /upgrade/*/latest.json /upgrade/*/magisk_update.json
 		header @manifest Cache-Control "no-cache, must-revalidate"
 
 		@assets path_regexp \.(dmg|msi|exe|apk|gz|zip)$
