@@ -3,7 +3,7 @@
 > 铁律见 [`docs/decisions-7.3.md`](./decisions-7.3.md) §14.15：
 > **运行时代码不保留任何「为了读旧形状」的逻辑**；历史残留一律由本工具一次性处理。
 > **执行顺序硬约束**：先让 migrate 覆盖某个旧形状，**再**删运行时的兼容读取。
-> 本轮（dev.2）只做「覆盖」，**不删**任何运行时兼容代码。
+> 本工具覆盖 S0–S8 后，dev.2 的第二批已**删掉**运行时兼容代码（清单与逐项对应见 §6）。
 
 ## 1. 契约
 
@@ -81,8 +81,8 @@
 
 ### S1 `app_mode` 拆分
 
-规则在 `exvlan/control/src/legacy/app_mode.rs`，与前端 `target.ts`
-（`migrateLegacyMode()` / `parseAddress()`）**逐字一致**：
+规则在 `exvlan/control/src/legacy/app_mode.rs`（前端同名实现在 dev.2 已删；删除前两者
+**逐字一致**，`remotes` 的合成 id 必须与它算出来的一致）：
 
 | 旧 `mode`               | `[misc].runtime`                      | `[misc].target`           | `[misc].remotes`        |
 | ----------------------- | ------------------------------------- | ------------------------- | ----------------------- |
@@ -127,8 +127,8 @@
 
 ### S4 旧服务定义清理
 
-清单来源与 `exvlan/service/src/main.rs::cleanup_legacy_macos()` / `cleanup_legacy_windows()`
-一致，常量落在 `exvlan/control/src/paths.rs`：
+清单的原始来源是 `exvlan/service/src/main.rs::cleanup_legacy_macos()` / `cleanup_legacy_windows()`
+（这两处运行时实现在 dev.2 已删），现收敛为 `exvlan/control/src/paths.rs` 里的常量：
 
 | 平台    | 清理对象                                                                                                                                                                                                        |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -192,10 +192,10 @@ dry-run 会走完整条检测 + 计划：`prefs` / `app_mode` / `service_toml` /
 - 报告额外一条 `service_toml_aliases`：归一成功时明确写「可安全删除运行时别名」，
   失败/跳过时写「**不要**删别名」。
 
-> **残余风险（下一轮删别名前必须处理）**：`migrate.done` 存在时闸门不再触发，
-> 所以「migrate 跑过之后又有更早的 pre.17 构建写入 `mode = …`」的机器不会再被自动覆盖。
-> 建议在删别名的版本里把 marker 版本升到 `migrate.done.v3`（或让闸门对
-> `service_toml` 一项忽略 `done`），确保这类机器至少再跑一次。
+> **残余风险（已按本轮要求删除别名，风险转为「依赖 marker v3」）**：`migrate.done` 存在时
+> 闸门不再触发，所以「migrate 跑过之后又有更早的 pre.17 构建写入 `mode = …`」的机器
+> 不会再被自动覆盖。运行时别名已删（见 §6），因此**真正安全的前提**是把 marker 版本升到
+> `migrate.done.v3`（或让闸门对 `service_toml` 一项忽略 `done`），确保这类机器至少再跑一次。
 
 ## 5. 回滚语义
 
@@ -205,19 +205,26 @@ dry-run 会走完整条检测 + 计划：`prefs` / `app_mode` / `service_toml` /
 - **系统目录**的 `service.toml` / `service.json` 只做了转发与归一，回滚不还原（`service.toml`
   归一前后 serde 语义相同；`service.json` 原件在备份目录里）。
 
-## 6. 下一轮（删运行时兼容）的前置条件与清单
+## 6. 删运行时兼容：前置条件、清单与 dev.2 落地状态
 
 前置：本版 migrate 已随包分发并在目标机器上跑过（`migrate.done` 存在，或人工 `--yes`）。
-**删之前逐项确认**：
+**没有跑过 migrate 的机器**由 GUI 迁移闸门（`migrate/desktop.rs`，`BUNDLE_MIGRATE=1`）拦住，
+必须先迁移才能进界面 —— 这是「删掉兜底读取」不丢数据的唯一保障。
 
-| 运行时兼容项                                                    | 位置                                                                   | migrate 覆盖步骤    | 删的前置                                                    |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------- | ----------------------------------------------------------- |
-| `prefs.rs::migrate_legacy` / `load_or_migrate` 的整段旧数据导入 | `packages/studio/src-tauri/src/prefs.rs:209-263`                       | S0                  | 真机确认 prefs 步骤 `ok`（macOS/Windows 各 1 台老数据机器） |
-| `app_mode` 旧 JSON 读取                                         | `prefs.rs::map_key("app_mode")` + `target.ts::migrateLegacyMode`       | S1                  | 确认 `[misc].runtime/target/remotes` 已落地                 |
-| 旧 `machine_id` 搬家逻辑                                        | `exvlan/exvlan/src/common/machine_id.rs:74-88,205-241`                 | S3（不含 uid 哈希） | 真机确认目标文件存在且 `peer_id` 未变                       |
-| `stale_paths` 清单本身                                          | `exvlan/control/src/paths.rs`                                          | S5                  | 7.4 再删（保留一个版本用于降级回收）                        |
-| 旧服务定义清理                                                  | `service/src/main.rs::cleanup_legacy_*`、`lib.rs::stop_legacy_service` | S4                  | 确认两平台真机清理成功                                      |
-| `service.toml` serde 别名                                       | `service/src/main.rs:270-283, 309-311`                                 | S8                  | **先处理残余风险（marker 升 v3）**，再删                    |
+| 运行时兼容项                                                    | 原始位置                                                                        | migrate 覆盖步骤           | 删的前置                                                    | dev.2 状态                                                   |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
+| `prefs.rs::migrate_legacy` / `load_or_migrate` 的整段旧数据导入 | `packages/studio/src-tauri/src/prefs.rs:209-263`                                | S0                         | 真机确认 prefs 步骤 `ok`（macOS/Windows 各 1 台老数据机器） | **已删**（收敛为 `load()`）                                  |
+| `app_mode` 旧 JSON 读取                                         | `prefs.rs::map_key("app_mode")` + `target.ts::migrateLegacyMode`                | S1                         | 确认 `[misc].runtime/target/remotes` 已落地                 | **已删**（含 `parseAddress` 与前端目录兜底）                 |
+| 旧 `machine_id` 搬家逻辑                                        | `exvlan/exvlan/src/common/machine_id.rs:74-88,205-241`                          | S3（不含 uid 哈希）        | 真机确认目标文件存在且 `peer_id` 未变                       | **已删**（uid 哈希一支按 S3 一并删）                         |
+| GUI 侧 `stale_paths()` 转发 + 装完服务后的清理                  | `packages/studio/src-tauri/src/paths.rs:156-162`、`lib.rs::cleanup_stale_paths` | S5                         | 7.4 再删（保留一个版本用于降级回收）                        | **已删**（`exvlan/control/src/paths.rs` 清单保留，7.4 再删） |
+| 旧服务定义清理                                                  | `service/src/main.rs::cleanup_legacy_*`、`lib.rs::stop_legacy_service`          | S4                         | 确认两平台真机清理成功                                      | **已删**                                                     |
+| `service.toml` serde 别名                                       | `service/src/main.rs:270-283, 309-311`                                          | S8                         | **先处理残余风险（marker 升 v3）**，再删                    | **已删，但依赖 marker v3**（见下）                           |
+| 配置来源旧词汇                                                  | `PersistedConfigSource::Legacy` + `webhook` 别名（`lib.rs` / `mobile.rs`）      | 无（数据本身无意义）       | —                                                           | **已删**（未知值按 `user`）                                  |
+| 移动端旧 `networks.toml` 解析                                   | `packages/studio/src-tauri/src/networks/legacy.rs`                              | 待接（Android 版 migrate） | 移动端迁移入口落地后                                        | **保留**（仍有调用方 `networks/mobile.rs`）                  |
+
+> **`service.toml` 别名的残余风险（S8）**：见 §4 的同名提示 —— 运行时别名已按本轮要求删除，
+> **真正安全的前提是 marker 升到 `migrate.done.v3`**。marker v3 合入前，被更早构建写脏
+> `mode = …` 的机器会静默回落到默认 `resident`。
 
 ## 7. 移动端复用评估（只评估，本轮不拆 crate）
 
