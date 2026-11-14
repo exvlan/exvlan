@@ -982,6 +982,25 @@ migrate:
   no_tool_hint: 本安装包未随带迁移工具。请在终端运行 `exvlan-migrate --yes`（或用安装包附带的独立工具），完成后点「重新检测」。
   recheck: 重新检测
   recheck_pending: 仍然检测到旧数据；请确认迁移工具已成功执行（可查看 migrate.log）。
+  last_error: 上次失败原因
+  retry: 重试迁移
+  expand: 展开
+  collapse: 收起
+  guide_title: 排障信息（路径与命令可直接复制）
+  log_file: 迁移日志
+  backup_dir: 备份目录
+  report_file: 迁移报告
+  data_dir: 数据目录
+  command: 手动执行
+  command_hint: 在终端粘贴执行（需要管理员权限：unix 用 sudo，Windows 请在「以管理员身份运行」的终端里）
+  tool_dir: 工具位置
+  no_backup: 尚未生成备份（迁移还没走到备份这一步）
+  show_log: 查看最近日志
+  copy_info: 复制排障信息
+  copy_diagnostics: 复制诊断
+  share_diagnostics: 分享诊断包
+  open_dir: 打开目录
+  copied: 已复制
 
 port_conflict:
   title: RPC 端口 {port} 被占用

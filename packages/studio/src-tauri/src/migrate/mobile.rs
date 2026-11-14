@@ -9,6 +9,8 @@ pub struct MigrateStatus {
     pub items: Vec<String>,
     pub tool: Option<String>,
     pub done: bool,
+    /// 桌面端的失败指引；移动端永不 pending，因此没有可指引的内容。
+    pub guide: Option<super::MigrateGuide>,
 }
 
 #[tauri::command]
@@ -18,6 +20,7 @@ pub fn migrate_status() -> MigrateStatus {
         items: Vec::new(),
         tool: None,
         done: true,
+        guide: None,
     }
 }
 

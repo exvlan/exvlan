@@ -408,18 +408,112 @@ async function onApplyWhitelist() {
     whitelistApplying.value = false;
   }
 }
+/**
+ * 迁移失败指引：路径/命令**全部由后端给出**（三平台布局不同，前端不拼路径）。
+ * 与 `packages/studio/src-tauri/src/migrate.rs::MigrateGuide` 一一对应。
+ */
+type MigrateGuide = {
+  data_dir: string;
+  log_file: string;
+  backup_dir: string | null;
+  report_file: string | null;
+  tool_dir: string | null;
+  command: string | null;
+  log_tail: string;
+};
+
 type MigrateStatus = {
   pending: boolean;
   items: string[];
   tool: string | null;
   done: boolean;
+  /** 老后端没有这个字段；移动端为 null */
+  guide?: MigrateGuide | null;
 };
 
 /** 迁移闸门：非空时全屏阻塞，直到迁移完成 */
 const migrateGate = ref<MigrateStatus | null>(null);
 const migrateRunning = ref(false);
 const migrateChecking = ref(false);
+/** 上一次 `migrate_run` 的原始错误（原样展示 + 进诊断） */
+const migrateError = ref("");
+const migrateErrorOpen = ref(false);
+const migrateLogOpen = ref(false);
 let migrateResolve: (() => void) | null = null;
+
+const migrateGuide = computed(() => migrateGate.value?.guide ?? null);
+/** 错误超过三行才值得折叠（单行短错误直接全显示）。 */
+const migrateErrorLong = computed(() => migrateError.value.split("\n").length > 3);
+/** 失败过就变「重试」（同一个命令，幂等可重复跑）。 */
+const migrateActionLabel = computed(() =>
+  migrateRunning.value
+    ? t("migrate.running")
+    : migrateError.value
+      ? t("migrate.retry")
+      : t("migrate.run"),
+);
+
+/** 一次性把失败现场（错误 + 路径 + 命令 + 日志尾部）复制出去。 */
+const migrateInfoText = computed(() => {
+  const g = migrateGuide.value;
+  const lines = [`error: ${migrateError.value || "-"}`];
+  if (g) {
+    lines.push(`data_dir: ${g.data_dir}`);
+    lines.push(`log_file: ${g.log_file}`);
+    lines.push(`backup_dir: ${g.backup_dir ?? "-"}`);
+    lines.push(`report_file: ${g.report_file ?? "-"}`);
+    if (g.command) lines.push(`command: ${g.command}`);
+    if (g.tool_dir) lines.push(`tool_dir: ${g.tool_dir}`);
+    if (g.log_tail.trim()) lines.push(`--- migrate.log (tail) ---\n${g.log_tail.trim()}`);
+  }
+  return lines.join("\n");
+});
+
+async function copyMigrateInfo() {
+  try {
+    await writeText(migrateInfoText.value);
+    toast.add({ severity: "success", summary: t("migrate.copied"), life: 2000 });
+  } catch (e: unknown) {
+    toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 8000 });
+  }
+}
+
+/** 打开备份目录（没有备份就退到数据目录）——路径来自后端。 */
+async function openMigrateDir() {
+  const g = migrateGuide.value;
+  const dir = g?.backup_dir || g?.data_dir;
+  if (!dir) return;
+  try {
+    await open(dir);
+  } catch (e: unknown) {
+    toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 8000 });
+  }
+}
+
+async function readMigrateStatus(): Promise<MigrateStatus | null> {
+  try {
+    return await invoke<MigrateStatus>("migrate_status");
+  } catch (e: unknown) {
+    // 状态查询失败也要留痕（否则闸门静默消失，旧数据被新版本当默认值读）。
+    console.warn("migrate_status failed", e);
+    void reportFrontendError("fe:migrate-status", String(e));
+    return null;
+  }
+}
+
+/** 应用一次状态查询结果；返回 true 表示已放行（不再 pending）。 */
+function applyMigrateStatus(ms: MigrateStatus | null): boolean {
+  if (!ms) return false;
+  if (!ms.pending) {
+    migrateGate.value = null;
+    migrateError.value = "";
+    migrateResolve?.();
+    migrateResolve = null;
+    return true;
+  }
+  migrateGate.value = ms;
+  return false;
+}
 
 /**
  * 安装包里没有 `exvlan-migrate`（下一版起默认如此）：用户自己跑独立工具后，
@@ -428,22 +522,16 @@ let migrateResolve: (() => void) | null = null;
 async function onMigrateRecheck() {
   migrateChecking.value = true;
   try {
-    const ms = await invoke<MigrateStatus>("migrate_status");
-    if (!ms.pending) {
-      migrateGate.value = null;
-      migrateResolve?.();
-      migrateResolve = null;
-      return;
+    const released = applyMigrateStatus(await readMigrateStatus());
+    if (released) return;
+    if (migrateGate.value) {
+      toast.add({
+        severity: "warn",
+        summary: t("migrate.title"),
+        detail: t("migrate.recheck_pending"),
+        life: 8000,
+      });
     }
-    migrateGate.value = ms;
-    toast.add({
-      severity: "warn",
-      summary: t("migrate.title"),
-      detail: t("migrate.recheck_pending"),
-      life: 8000,
-    });
-  } catch (e: unknown) {
-    toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 10000 });
   } finally {
     migrateChecking.value = false;
   }
@@ -451,6 +539,8 @@ async function onMigrateRecheck() {
 
 async function onMigrateRun() {
   migrateRunning.value = true;
+  migrateError.value = "";
+  migrateLogOpen.value = false;
   try {
     await invoke<Record<string, unknown>>("migrate_run");
     toast.add({
@@ -463,8 +553,18 @@ async function onMigrateRun() {
     migrateResolve?.();
     migrateResolve = null;
   } catch (e: unknown) {
-    toast.add({ severity: "error", summary: t("error"), detail: String(e), life: 15000 });
-    void reportFrontendError("fe:migrate", String(e));
+    const text = String(e);
+    migrateError.value = text;
+    // toast 只放第一行，完整现场（含多行 stderr）在闸门里展开看。
+    toast.add({
+      severity: "error",
+      summary: t("error"),
+      detail: text.split("\n")[0] || text,
+      life: 15000,
+    });
+    void reportFrontendError("fe:migrate", text);
+    // 失败后刷新状态：这一跑可能已建了备份目录/写了日志，指引要跟着更新。
+    applyMigrateStatus(await readMigrateStatus());
   } finally {
     migrateRunning.value = false;
   }
@@ -977,7 +1077,7 @@ onMounted(async () => {
 
   // 一次性迁移闸门（pre.17）：检测到旧数据就阻塞启动，等用户确认后跑随包工具。
   // 运行时不做任何迁移/兼容，迁移完成后才继续后面的初始化。
-  const ms = await invoke<MigrateStatus>("migrate_status").catch(() => null);
+  const ms = await readMigrateStatus();
   if (ms?.pending) {
     migrateGate.value = ms;
     await new Promise<void>((resolve) => {
@@ -1591,12 +1691,16 @@ const configServerConnectionStatus = computed(() => {
       @changed-language="refreshTrayMenu"
     />
 
-    <!-- 一次性迁移（pre.17）：阻塞启动，完成后自动继续 -->
+    <!-- 一次性迁移（pre.17）：阻塞启动，完成后自动继续。
+         不允许跳过：工具跑不起来时给出错误原文 + 备份/日志/报告路径 + 可复制命令 +
+         诊断导出，用户自己排障后重试。路径全部来自后端（`migrate_status.guide`）。 -->
     <div
       v-if="migrateGate"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
     >
-      <div class="w-full max-w-xl rounded-lg bg-surface-0 p-6 shadow-xl dark:bg-surface-900">
+      <div
+        class="max-h-[92vh] w-full max-w-xl overflow-auto rounded-lg bg-surface-0 p-6 shadow-xl dark:bg-surface-900"
+      >
         <div class="mb-3 text-lg font-semibold">{{ t("migrate.title") }}</div>
         <p class="mb-3 text-sm text-surface-600 dark:text-surface-300">
           {{ t("migrate.hint") }}
@@ -1614,6 +1718,108 @@ const configServerConnectionStatus = computed(() => {
         >
           <li v-for="item in migrateGate.items" :key="item" class="break-all">{{ item }}</li>
         </ul>
+
+        <!-- 失败现场：原始错误原样展示（长文本折叠，短错误直接全显示） -->
+        <div
+          v-if="migrateError"
+          class="mb-3 rounded border border-red-300 bg-red-50 p-3 text-xs text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100"
+        >
+          <div class="mb-1 flex items-center gap-2 font-medium">
+            <i class="pi pi-exclamation-triangle" />
+            <span class="flex-1">{{ t("migrate.last_error") }}</span>
+            <Button
+              v-if="migrateErrorLong"
+              size="small"
+              text
+              :label="migrateErrorOpen ? t('migrate.collapse') : t('migrate.expand')"
+              @click="migrateErrorOpen = !migrateErrorOpen"
+            />
+          </div>
+          <pre
+            class="whitespace-pre-wrap break-all font-mono leading-5"
+            :class="
+              migrateErrorLong && !migrateErrorOpen ? 'max-h-16 overflow-hidden' : 'overflow-auto'
+            "
+          >{{ migrateError }}</pre>
+        </div>
+
+        <!-- 排障信息：路径与命令都由后端给（前端不拼路径） -->
+        <div v-if="migrateGuide" class="mb-4 rounded bg-surface-100 p-3 text-xs dark:bg-surface-800">
+          <div class="mb-2 font-medium">{{ t("migrate.guide_title") }}</div>
+          <dl class="space-y-1">
+            <div class="flex gap-2">
+              <dt class="shrink-0 text-surface-500">{{ t("migrate.log_file") }}</dt>
+              <dd class="break-all font-mono">{{ migrateGuide.log_file }}</dd>
+            </div>
+            <div class="flex gap-2">
+              <dt class="shrink-0 text-surface-500">{{ t("migrate.backup_dir") }}</dt>
+              <dd class="break-all font-mono">
+                {{ migrateGuide.backup_dir || t("migrate.no_backup") }}
+              </dd>
+            </div>
+            <div v-if="migrateGuide.report_file" class="flex gap-2">
+              <dt class="shrink-0 text-surface-500">{{ t("migrate.report_file") }}</dt>
+              <dd class="break-all font-mono">{{ migrateGuide.report_file }}</dd>
+            </div>
+            <div class="flex gap-2">
+              <dt class="shrink-0 text-surface-500">{{ t("migrate.data_dir") }}</dt>
+              <dd class="break-all font-mono">{{ migrateGuide.data_dir }}</dd>
+            </div>
+            <div v-if="migrateGuide.command" class="flex gap-2">
+              <dt class="shrink-0 text-surface-500">{{ t("migrate.command") }}</dt>
+              <dd class="break-all font-mono">{{ migrateGuide.command }}</dd>
+            </div>
+            <div v-else-if="migrateGuide.tool_dir" class="flex gap-2">
+              <dt class="shrink-0 text-surface-500">{{ t("migrate.tool_dir") }}</dt>
+              <dd class="break-all font-mono">{{ migrateGuide.tool_dir }}</dd>
+            </div>
+          </dl>
+          <p v-if="migrateGuide.command" class="mt-1 text-surface-500">
+            {{ t("migrate.command_hint") }}
+          </p>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              size="small"
+              icon="pi pi-copy"
+              :label="t('migrate.copy_info')"
+              @click="copyMigrateInfo"
+            />
+            <Button
+              size="small"
+              text
+              icon="pi pi-file-export"
+              :label="t('migrate.copy_diagnostics')"
+              @click="onCopyDiagnostics"
+            />
+            <Button
+              size="small"
+              text
+              icon="pi pi-share-alt"
+              :label="t('migrate.share_diagnostics')"
+              @click="onShareErrorLog"
+            />
+            <Button
+              v-if="migrateGuide.backup_dir || migrateGuide.data_dir"
+              size="small"
+              text
+              icon="pi pi-folder-open"
+              :label="t('migrate.open_dir')"
+              @click="openMigrateDir"
+            />
+            <Button
+              v-if="migrateGuide.log_tail"
+              size="small"
+              text
+              :label="migrateLogOpen ? t('migrate.collapse') : t('migrate.show_log')"
+              @click="migrateLogOpen = !migrateLogOpen"
+            />
+          </div>
+          <pre
+            v-if="migrateLogOpen && migrateGuide.log_tail"
+            class="mt-2 max-h-48 overflow-auto rounded bg-surface-200/60 p-2 font-mono leading-5 dark:bg-surface-900/60"
+          >{{ migrateGuide.log_tail }}</pre>
+        </div>
+
         <div class="flex items-center justify-end gap-2">
           <Button
             :label="t('migrate.exit')"
@@ -1624,7 +1830,7 @@ const configServerConnectionStatus = computed(() => {
           />
           <Button
             v-if="migrateGate.tool"
-            :label="migrateRunning ? t('migrate.running') : t('migrate.run')"
+            :label="migrateActionLabel"
             :loading="migrateRunning"
             @click="onMigrateRun"
           />

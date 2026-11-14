@@ -984,6 +984,25 @@ migrate:
   no_tool_hint: This build does not bundle the migration tool. Run `exvlan-migrate --yes` in a terminal (or the standalone tool), then click Re-check.
   recheck: Re-check
   recheck_pending: Legacy data is still present. Make sure the migration tool finished successfully (see migrate.log).
+  last_error: Last failure
+  retry: Retry migration
+  expand: Expand
+  collapse: Collapse
+  guide_title: Troubleshooting (paths and command are copyable)
+  log_file: Migration log
+  backup_dir: Backup directory
+  report_file: Migration report
+  data_dir: Data directory
+  command: Run manually
+  command_hint: "Paste into a terminal (needs admin rights: sudo on unix, an Administrator terminal on Windows)"
+  tool_dir: Tool location
+  no_backup: No backup yet (migration stopped before backing up)
+  show_log: Show recent log
+  copy_info: Copy troubleshooting info
+  copy_diagnostics: Copy diagnostics
+  share_diagnostics: Share diagnostics
+  open_dir: Open directory
+  copied: Copied
 
 port_conflict:
   title: RPC port {port} is in use
