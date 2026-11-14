@@ -28,10 +28,9 @@ function onSaveConfigs(event: Event<StoredGuiConfig[]>) {
     source: normalizeConfigSource(source),
   }));
   // 桌面端已经不再发这个事件（配置目录才是权威）；移动端仍用它把内存存储
-  // 落到 `networks.toml`。写失败时退回 localStorage 并上报。
+  // 落到 `networks.toml`。写失败只上报，不回退第二份存储（§14.5）。
   void setNetworks(JSON.stringify(list)).catch((e) => {
-    console.warn("setNetworks failed, fallback to localStorage", e);
-    localStorage.setItem("networkList", JSON.stringify(list));
+    console.warn("setNetworks failed", e);
     void reportFrontendError("fe:networks", `setNetworks failed: ${String(e)}`).catch(() => {});
   });
 }

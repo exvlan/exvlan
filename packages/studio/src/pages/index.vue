@@ -45,6 +45,7 @@ import {
   remoteAddress,
   remoteMode,
   remoteUrl,
+  saveRemotes,
   saveRuntime,
   saveTargetId,
 } from "~/composables/target";
@@ -226,23 +227,23 @@ async function copyConflictHint() {
   }
 }
 
-/** 补齐 service 模式缺失的默认值（历史版本可能只存了 mode 字段）。 */
+/**
+ * 补齐 service 模式缺失的默认值。
+ *
+ * 目录与端口**只从新路径推导**：任何「保存过的 config_dir / file_log_dir /
+ * rpc_portal」都是 pre.12 残留（旧目录会让用户回到即将被删除的位置）。
+ */
 async function normalizeMode(mode: Mode): Promise<Mode> {
   if (mode.mode !== "service") {
     return mode;
   }
-  const svc = mode as unknown as Record<string, any>;
-  const saved = loadMode() as unknown as Record<string, any>;
   const defaults = await serviceDefaultDirs();
-  const configDir = svc.config_dir || saved.config_dir || defaults.config_dir;
-  const logDir = svc.file_log_dir || saved.file_log_dir || defaults.file_log_dir;
   return {
     ...mode,
-    config_dir: configDir,
-    file_log_dir: logDir,
+    config_dir: defaults.config_dir,
+    file_log_dir: defaults.file_log_dir,
     file_log_level: "info",
-    // 端口：服务与普通模式都只用 1995（可在 service.toml 配置）；任何"保存过的
-    // 自定义端口"都是 pre.12 的残留，照它连会连到没人监听的地址。
+    // 端口：服务与普通模式都只用 1995（可在 service.toml 配置）。
     rpc_portal: LOCAL_RPC_PORTAL,
   } as Mode;
 }
@@ -896,14 +897,6 @@ async function ensureLocalKernel(mode: Mode) {
   const platform = type();
   if (platform === "android" || platform === "ios") return;
 
-  // daemon 参数与模式无关：优先取当前 mode 上的字段（service 模式有），
-  // 否则回退到已保存的 app_mode 里的同名字段，最后才用默认值。
-  const saved = loadMode() as {
-    config_dir?: string;
-    rpc_portal?: string;
-    file_log_level?: string;
-    file_log_dir?: string;
-  };
   // 默认目录必须是系统路径：守护进程以 root 运行，写用户目录会把属主改成 root，
   // 之后 GUI 连 error.log / ui-state.json 都写不进去（20709 实测）。
   // 普通模式只装内核（不装系统服务）：这是唯一一次提权，之后内核以用户身份跑。
@@ -918,10 +911,10 @@ async function ensureLocalKernel(mode: Mode) {
 
   const defaults = await serviceDefaultDirs();
   const merged = {
-    config_dir: (mode as any).config_dir || saved.config_dir || defaults.config_dir,
-    rpc_portal: (mode as any).rpc_portal || saved.rpc_portal || "127.0.0.1:1995",
-    file_log_level: (mode as any).file_log_level || saved.file_log_level || "info",
-    file_log_dir: (mode as any).file_log_dir || saved.file_log_dir || defaults.file_log_dir,
+    config_dir: (mode as any).config_dir || defaults.config_dir,
+    rpc_portal: (mode as any).rpc_portal || LOCAL_RPC_PORTAL,
+    file_log_level: (mode as any).file_log_level || "info",
+    file_log_dir: (mode as any).file_log_dir || defaults.file_log_dir,
     config_server: (mode as { config_server_url?: string }).config_server_url,
   };
   await ensureKernelServiceGuarded(merged);
@@ -974,7 +967,8 @@ async function onAppUpdateNow() {
 }
 
 function onAppUpdateLater() {
-  localStorage.setItem("upgrade_ignored_version", appUpdateVersion.value);
+  // 「稍后」只关对话框：跳过版本由后端按通道记录（`skipUpdateVersion`），
+  // 前端不再写第二份 `upgrade_ignored_version`（没有读取点）。
   appUpdateDialogVisible.value = false;
 }
 
@@ -989,6 +983,9 @@ onMounted(async () => {
     await new Promise<void>((resolve) => {
       migrateResolve = resolve;
     });
+    // UI 状态在 `main.ts` 里已经回填过一次（那时还没迁移）。这里**再回填一次**，
+    // 否则本会话读到的是迁移前的旧值（runtime/target/remotes 都只在 prefs.toml 里）。
+    await hydrateUiState();
   }
 
   // 提权被拒绝过就不再自动弹 UAC（见 ensureKernelServiceGuarded）
@@ -1008,24 +1005,22 @@ onMounted(async () => {
 
   cleanupFns.push(await listenGlobalEvents());
 
-  // 运行方式 × 目标 是新的权威模型；旧 app_mode 仅在没有 runtime 时用于迁移。
+  // 运行方式 × 目标 是唯一权威模型（prefs.toml 的 runtime / target / remotes）。
   runtimeKind.value = loadRuntime();
   targetId.value = loadTargetId();
-  // 首次从 app_mode 迁移时把结果写回 prefs.toml，避免两个来源长期漂移。
+  // 回写一次，保证迁移出来的值真的落进 prefs.toml：`loadRemotes()` 的结果
+  // 以前只活在本次会话的 localStorage 里（迁移工具写了 prefs，前端没同步回去）。
   void saveRuntime(runtimeKind.value).catch(() => {});
   void saveTargetId(targetId.value).catch(() => {});
-  const hadAppMode = localStorage.getItem("app_mode") !== null;
-  const savedMode = loadMode();
-  // 本机运行方式由 runtimeKind 决定（app_mode 里的 remote 已在 target 迁移中处理）。
-  const derivedMode = (
-    savedMode.mode === "service" || savedMode.mode === "normal"
-      ? { ...savedMode, mode: runtimeKind.value === "off" ? "service" : runtimeKind.value }
-      : { mode: runtimeKind.value === "off" ? "service" : runtimeKind.value }
-  ) as Mode;
+  const remotes = loadRemotes();
+  if (remotes.length > 0) {
+    void saveRemotes(remotes).catch(() => {});
+  }
+  // 本机运行方式只由 runtimeKind 决定；`app_mode` 只剩现役设置 `config_server_url`。
+  const runtimeMode: RuntimeKind = runtimeKind.value === "off" ? "service" : runtimeKind.value;
+  const derivedMode = { ...loadMode(), mode: runtimeMode } as Mode;
   currentMode.value = await normalizeMode(derivedMode);
-  // 运行方式是唯一权威（prefs 的 runtime）：`app_mode` 只读不写，仅用于旧数据迁移。
-  const modeSource = hadAppMode ? "persisted" : "default";
-  void reportBootState(currentMode.value.mode, loadLastNetworkInstanceId(), null, modeSource);
+  void reportBootState(currentMode.value.mode, loadLastNetworkInstanceId(), null, "runtime");
 
   // 首次安装/升级后会自动装好内核并（重新）注册系统服务；失败不阻塞进入界面。
   // service 模式由 initWithMode 内部统一处理，避免同一次启动弹两次授权。

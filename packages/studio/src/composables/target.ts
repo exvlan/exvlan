@@ -49,15 +49,11 @@ export function defaultRuntime(): RuntimeKind {
   return "service";
 }
 
-/** 运行方式；缺失时从旧的 `app_mode` 迁移。 */
+/** 运行方式（`prefs.toml` 的 `runtime`，唯一权威）。 */
 export function loadRuntime(): RuntimeKind {
   const raw = localStorage.getItem(KEY_RUNTIME);
   if (raw === "service" || raw === "normal" || raw === "off") {
     return raw;
-  }
-  const legacy = migrateLegacyMode();
-  if (legacy) {
-    return legacy.runtime;
   }
   return defaultRuntime();
 }
@@ -69,8 +65,7 @@ export async function saveRuntime(runtime: RuntimeKind): Promise<void> {
 export function loadRemotes(): RemoteTarget[] {
   const raw = localStorage.getItem(KEY_REMOTES);
   if (!raw) {
-    const legacy = migrateLegacyMode();
-    return legacy?.remotes ?? [];
+    return [];
   }
   try {
     const list = JSON.parse(raw);
@@ -106,10 +101,6 @@ export function loadTargetId(): string {
   const raw = localStorage.getItem(KEY_TARGET);
   if (raw) {
     return raw;
-  }
-  const legacy = migrateLegacyMode();
-  if (legacy?.target) {
-    return legacy.target;
   }
   return LOCAL_TARGET;
 }
@@ -196,67 +187,4 @@ export function parseRemoteHost(
     return { error: "port" };
   }
   return { host: parts.slice(0, -1).join(":") };
-}
-
-/** 解析 `host:port` / `tcp://host:port` / 纯 host。 */
-export function parseAddress(input: string): { host: string; port: number } | null {
-  let text = input.trim();
-  if (!text) return null;
-  text = text.replace(/^tcp:\/\//i, "").replace(/\/.*$/, "");
-  // [::1]:1995
-  const v6 = text.match(/^\[([^\]]+)\](?::(\d+))?$/);
-  if (v6) {
-    return { host: v6[1], port: v6[2] ? Number(v6[2]) : DEFAULT_RPC_PORT };
-  }
-  const parts = text.split(":");
-  if (parts.length === 1) {
-    return { host: parts[0], port: DEFAULT_RPC_PORT };
-  }
-  const port = Number(parts[parts.length - 1]);
-  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
-    return null;
-  }
-  return { host: parts.slice(0, -1).join(":"), port };
-}
-
-interface LegacyMode {
-  mode?: string;
-  remote_rpc_address?: string;
-}
-
-/** 7.2 → 7.3：`app_mode` 拆成 runtime + target。 */
-function migrateLegacyMode(): {
-  runtime: RuntimeKind;
-  target?: string;
-  remotes?: RemoteTarget[];
-} | null {
-  const raw = localStorage.getItem("app_mode");
-  if (!raw) return null;
-  let mode: LegacyMode;
-  try {
-    mode = JSON.parse(raw) as LegacyMode;
-  } catch {
-    return null;
-  }
-  if (mode.mode === "service") {
-    return { runtime: "service" };
-  }
-  if (mode.mode === "normal") {
-    return { runtime: "normal" };
-  }
-  if (mode.mode === "remote") {
-    const addr = parseAddress(mode.remote_rpc_address ?? "");
-    if (!addr) {
-      // 地址无效：保留「本机服务模式」，不让用户启动后无处可连。
-      return { runtime: "service" };
-    }
-    const remote: RemoteTarget = {
-      id: `rm-legacy-${addr.host}-${addr.port}`,
-      name: `${addr.host}:${addr.port}`,
-      host: addr.host,
-      port: addr.port,
-    };
-    return { runtime: "service", target: remote.id, remotes: [remote] };
-  }
-  return null;
 }

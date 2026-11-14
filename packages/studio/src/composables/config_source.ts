@@ -1,13 +1,6 @@
-export type ConfigSource = 'user' | 'web' | 'legacy'
+/** 配置来源：与内核/协议同一份词汇（`user` / `web`）。 */
+export type ConfigSource = "user" | "web";
 
 export function normalizeConfigSource(source: unknown): ConfigSource {
-  if (source === 'user' || source === 'web' || source === 'legacy') {
-    return source
-  }
-
-  if (source === 'webhook') {
-    return 'web'
-  }
-
-  return 'legacy'
+  return source === "web" ? "web" : "user";
 }

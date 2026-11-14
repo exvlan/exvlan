@@ -27,26 +27,20 @@ function parseStoredConfigs(raw: string | null): StoredGuiConfig[] {
   }
 
   return parsed.flatMap((entry): StoredGuiConfig[] => {
-    if (entry && typeof entry === "object" && "config" in entry) {
-      const { config, source } = entry as {
-        config?: NetworkConfig;
-        source?: unknown;
-      };
-      if (!config) {
-        return [];
-      }
-      return [
-        {
-          config: NetworkTypes.normalizeNetworkConfig(config),
-          source: normalizeConfigSource(source),
-        },
-      ];
+    if (!entry || typeof entry !== "object" || !("config" in entry)) {
+      return [];
     }
-
+    const { config, source } = entry as {
+      config?: NetworkConfig;
+      source?: unknown;
+    };
+    if (!config) {
+      return [];
+    }
     return [
       {
-        config: NetworkTypes.normalizeNetworkConfig(entry as NetworkConfig),
-        source: "legacy",
+        config: NetworkTypes.normalizeNetworkConfig(config),
+        source: normalizeConfigSource(source),
       },
     ];
   });

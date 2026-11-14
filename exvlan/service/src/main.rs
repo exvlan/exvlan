@@ -270,14 +270,14 @@ fn paths() -> Paths {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
     /// 常驻（旧名 `service`）
-    #[serde(rename = "resident", alias = "service", alias = "Service")]
+    #[serde(rename = "resident")]
     #[default]
     Service,
     /// 随客户端（旧名 `normal`）
-    #[serde(rename = "session", alias = "normal", alias = "Normal")]
+    #[serde(rename = "session")]
     Normal,
     /// 停止（旧名 `off`）
-    #[serde(rename = "stopped", alias = "off", alias = "Off")]
+    #[serde(rename = "stopped")]
     Off,
 }
 
@@ -306,8 +306,12 @@ impl From<ProtoMode> for Mode {
 pub struct ServiceConfig {
     #[serde(default)]
     pub owner_uid: u32,
-    /// 生命周期策略。pre.17 起字段名为 `policy`；`mode` 作为旧名兼容读取。
-    #[serde(default, alias = "mode")]
+    /// 生命周期策略（`resident` / `session` / `stopped`）。
+    ///
+    /// 旧字段名 `mode` 与旧取值（`service` / `normal` / `off`）由 `exvlan-migrate`
+    /// 归一（S8）；运行时不再接受别名 —— 残留旧配置会落到默认 `resident`，
+    /// 这正是「迁移闸门必须先跑」的原因（见 `docs/migrate-7.3.md`）。
+    #[serde(default)]
     pub policy: Mode,
     /// 用户额外允许访问 RPC 的网段（逃生口，例如 WSL 的 172.x）。
     /// 默认空：实际白名单由 `<config-dir>/*.toml` 里的虚拟网段自动推导。
@@ -4512,11 +4516,6 @@ fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
     std::fs::set_permissions(&p.service_bin, std::fs::Permissions::from_mode(0o755))?;
     chown_root(&p.service_bin);
 
-    // 旧模型（内核直跑 launchd / 旧 helper）与新版抢同一端口与 TUN，必须先清掉。
-    // 注意：列表里**不能**包含当前的 SERVICE_LABEL，否则会删掉刚写好、
-    // 或者（更糟）正在用的 plist（pre.12 的 bootstrap EIO 就是这个原因）。
-    cleanup_legacy_macos();
-
     let body = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -4583,38 +4582,6 @@ fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
     bail!("服务已加载但 socket 未就绪")
 }
 
-/// 清理旧模型留下的守护进程（幂等）。当前 SERVICE_LABEL 绝不在列表里。
-#[cfg(target_os = "macos")]
-fn cleanup_legacy_macos() {
-    const LEGACY_LABELS: &[&str] = &[
-        "era.exvlan.studio",
-        "era.exvlan.studio.helper",
-        "com.exvlan.studio",
-        "com.exvlan.studio.helper",
-        "exvlan-studio",
-    ];
-    for label in LEGACY_LABELS {
-        if *label == SERVICE_LABEL {
-            continue;
-        }
-        let _ = Command::new("/bin/launchctl")
-            .args(["bootout", &format!("system/{label}")])
-            .output();
-        for dir in ["/Library/LaunchDaemons", "/Library/LaunchAgents"] {
-            let _ = std::fs::remove_file(format!("{dir}/{label}.plist"));
-        }
-    }
-    // 旧 helper 的运行时 socket（pre.12 遗留，权限还是 0666）
-    let _ = std::fs::remove_file(Path::new("/var/run").join(APP_ID).join("helper.sock"));
-    // 旧 helper 二进制
-    for stale in [
-        "/Library/PrivilegedHelperTools/era.exvlan.studio.helper",
-        "/Library/PrivilegedHelperTools/com.exvlan.studio.helper",
-    ] {
-        let _ = std::fs::remove_file(stale);
-    }
-}
-
 #[cfg(target_os = "windows")]
 fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
     use windows_service::service::{
@@ -4640,8 +4607,6 @@ fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
             SERVICE_LABEL
         );
     }
-    cleanup_legacy_windows();
-
     // 2) 复制（带重试：SCM/杀软释放文件句柄需要一点时间）
     if src != p.service_bin {
         copy_with_retry(&src, &p.service_bin)?;
@@ -4799,25 +4764,6 @@ fn wait_pipe(timeout: Duration) -> bool {
         std::thread::sleep(Duration::from_millis(200));
     }
     false
-}
-
-/// 清理旧模型留下的守护进程/计划任务（幂等）。当前服务名绝不在列表里。
-#[cfg(target_os = "windows")]
-fn cleanup_legacy_windows() {
-    // 旧「内核直跑」服务
-    for stale in ["era.exvlan.studio", "exvlan-studio"] {
-        if stale == SERVICE_LABEL {
-            continue;
-        }
-        let _ = hidden("sc").args(["stop", stale]).output();
-        let _ = hidden("sc").args(["delete", stale]).output();
-    }
-    // 旧「普通模式高权限启动器」计划任务
-    for task in ["era.exvlan.studio", "ExvlanKernelSupervisor"] {
-        let _ = hidden("schtasks")
-            .args(["/Delete", "/TN", task, "/F"])
-            .output();
-    }
 }
 
 #[cfg(target_os = "windows")]
@@ -5147,7 +5093,7 @@ mod whitelist_tests {
 
     #[test]
     fn gateway_defaults_are_enabled_on_2016() {
-        let cfg: ServiceConfig = toml::from_str("policy = \"service\"\n").expect("parse");
+        let cfg: ServiceConfig = toml::from_str("policy = \"resident\"\n").expect("parse");
         assert!(cfg.gateway.enabled, "默认应托管 gateway");
         assert_eq!(cfg.gateway.port, 2016);
         assert!(cfg.gateway.bind.is_none(), "默认自动取 mesh 地址");
@@ -5155,7 +5101,7 @@ mod whitelist_tests {
 
     #[test]
     fn gateway_config_reads_section() {
-        let text = "policy = \"service\"\n\n[gateway]\nenabled = false\nbind = \"0.0.0.0\"\nport = 12016\n";
+        let text = "policy = \"resident\"\n\n[gateway]\nenabled = false\nbind = \"0.0.0.0\"\nport = 12016\n";
         let cfg: ServiceConfig = toml::from_str(text).expect("parse");
         assert!(!cfg.gateway.enabled);
         assert_eq!(cfg.gateway.bind.as_deref(), Some("0.0.0.0"));
@@ -5274,18 +5220,13 @@ mod whitelist_tests {
     }
 
     #[test]
-    fn service_config_toml_accepts_new_and_legacy_names() {
+    fn service_config_toml_uses_canonical_names() {
         let cfg: ServiceConfig = toml::from_str(
             "owner_uid = 501\npolicy = \"session\"\nrpc_extra_whitelist = [\"10.254.66.0/24\"]\n",
         )
         .expect("parse new");
         assert_eq!(cfg.policy, Mode::Normal);
         assert_eq!(cfg.owner_uid, 501);
-
-        // 旧 service.json 的取值（Service/Normal/Off）与旧字段名 `mode` 仍可读
-        let legacy: ServiceConfig =
-            toml::from_str("owner_uid = 7\nmode = \"Normal\"\n").expect("parse legacy");
-        assert_eq!(legacy.policy, Mode::Normal);
 
         // 写回用规范词汇（resident/session/stopped）
         let text = toml::to_string_pretty(&cfg).expect("dump");
