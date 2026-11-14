@@ -59,8 +59,10 @@ fn tool_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
         "exvlan-migrate"
     };
     vec![
-        dir.join("tools").join(name),
+        // `tauri.conf.json` 的 `bundle.resources` 是 `resources/tools/*`，装到包里
+        // 保留相对路径 → `<资源目录>/resources/tools`（与 `bundled_service` 同构）。
         dir.join("resources").join("tools").join(name),
+        dir.join("tools").join(name),
         dir.join(name),
     ]
 }
@@ -72,8 +74,18 @@ fn tool_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 
 /// 工具「应该」在的目录：即使二进制缺失也要给，用户才知道去哪找/放。
 fn tool_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
-    tool_candidates(app)
-        .first()
+    existing_tool_dir(&tool_candidates(app))
+}
+
+/// 从候选位置里挑出要告诉用户的目录。
+///
+/// 优先「父目录真的存在」的那个：工具被安全软件删掉时，用户至少能看到真实路径，
+/// 而不是一个包里根本不存在的 `tools/`。候选顺序本身已按打包布局排好。
+fn existing_tool_dir(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .find(|p| p.parent().is_some_and(Path::is_dir))
+        .or_else(|| candidates.first())
         .and_then(|p| p.parent())
         .map(Path::to_path_buf)
 }
@@ -115,13 +127,18 @@ fn tail_text(path: &Path, max_bytes: u64) -> String {
 }
 
 /// 可直接粘贴执行的命令：与 GUI 实际调用参数一致（提权 + 备份属主交回桌面用户）。
+///
+/// unix 必须用 `env HOME="$HOME"` 包一层：`sudo` 会把 `HOME` 换成 root 的，
+/// 而 `exvlan_control::paths::user_paths()` 全靠 `HOME`/`XDG_*` 定位 —— 不保留
+/// 就会去 root 的目录里找旧数据，直接「没有旧版本数据，无需迁移」：
+/// 用户以为跑过了，闸门却仍然 pending。
 fn cli_command(tool: &Path, uid: u32) -> String {
     let exe = format!("\"{}\"", tool.display());
     if cfg!(windows) {
         // Windows 没有 sudo：提示在「以管理员身份运行」的终端里执行。
         format!("{exe} --yes")
     } else {
-        format!("sudo {exe} --yes --owner-uid {uid}")
+        format!("sudo env HOME=\"$HOME\" {exe} --yes --owner-uid {uid}")
     }
 }
 
@@ -195,6 +212,23 @@ fn stderr_tail(stderr: &str, lines: usize) -> String {
         .join("\n")
 }
 
+/// 失败原因：优先 stderr；拿不到就退回工具自己写的 `migrate.log` 尾部。
+///
+/// macOS/Windows 的提权通道**不转发子进程的 stdout/stderr**
+/// （`elevate::macos` 只读回 stdout 管道，`elevate::windows` 的 `Output` 恒为空），
+/// 只靠 stderr 会让主错误框在真机上变成空的 —— 那时现场只剩磁盘上的 `migrate.log`。
+fn failure_reason(stderr: &str, log_path: &Path, lines: usize) -> String {
+    let from_stderr = stderr_tail(stderr, lines);
+    if !from_stderr.is_empty() {
+        return from_stderr;
+    }
+    let from_log = stderr_tail(&tail_text(log_path, LOG_TAIL_BYTES), lines);
+    if from_log.is_empty() {
+        return String::new();
+    }
+    format!("（提权通道没有子进程输出，以下取自 migrate.log）\n{from_log}")
+}
+
 /// 执行随包迁移工具（提权一次），返回它打印的 JSON 报告。
 #[tauri::command]
 pub async fn migrate_run(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
@@ -241,13 +275,24 @@ async fn run(app: &tauri::AppHandle) -> Result<serde_json::Value, String> {
                 .unwrap_or_else(|_| serde_json::json!({"ok": out.status.success()}))
         };
         if !out.status.success() {
-            // 原样给最后几行 stderr（一步一条，能直接看出卡在哪），别只留最后一行。
-            let tail = stderr_tail(&String::from_utf8_lossy(&out.stderr), 20);
-            return Err(format!(
-                "迁移失败（退出码 {:?}）：\n{}\n日志：{log_hint}",
-                out.status.code(),
-                tail
-            ));
+            // 原样给最后几行（一步一条，能直接看出卡在哪），别只留最后一行。
+            // 提权通道拿不到 stderr 时退回 `migrate.log`，否则主错误框是空的。
+            let reason = failure_reason(
+                &String::from_utf8_lossy(&out.stderr),
+                Path::new(&log_hint),
+                20,
+            );
+            return Err(if reason.is_empty() {
+                format!(
+                    "迁移失败（退出码 {:?}）\n日志：{log_hint}",
+                    out.status.code()
+                )
+            } else {
+                format!(
+                    "迁移失败（退出码 {:?}）：\n{reason}\n日志：{log_hint}",
+                    out.status.code()
+                )
+            });
         }
         Ok(value)
     })
@@ -325,7 +370,55 @@ mod tests {
         } else {
             assert!(cmd.contains("sudo "), "{cmd}");
             assert!(cmd.contains("--owner-uid 1000"), "{cmd}");
+            // `sudo` 会把 HOME 换成 root 的 → 不显式保留就会去 root 的数据目录
+            // 找旧数据（检测为空 → 用户以为迁移过了，闸门却仍 pending）。
+            assert!(cmd.contains("env HOME=\"$HOME\""), "{cmd}");
         }
+    }
+
+    /// 工具缺失时要指到**包里真实存在**的目录（`resources/tools`），
+    /// 而不是候选清单里那个不存在的 `tools/`。
+    #[test]
+    fn existing_tool_dir_prefers_a_directory_that_exists() {
+        let root = temp("tool-dir");
+        let resources_tools = root.join("resources").join("tools");
+        std::fs::create_dir_all(&resources_tools).unwrap();
+        let candidates = vec![
+            resources_tools.join("exvlan-migrate"),
+            root.join("tools").join("exvlan-migrate"),
+            root.join("exvlan-migrate"),
+        ];
+        // 二进制被删（候选都不存在），但 `resources/tools` 目录还在 → 报它。
+        let picked = existing_tool_dir(&candidates).expect("应给出目录");
+        assert_eq!(picked, resources_tools);
+        // 连目录都没了：退回第一个候选的父目录，绝不返回 None（用户要知道去哪找）。
+        let gone = existing_tool_dir(&[root.join("nowhere").join("exvlan-migrate")]);
+        assert_eq!(gone, Some(root.join("nowhere")));
+        assert_eq!(existing_tool_dir(&[]), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 提权通道拿不到 stderr（macOS/Windows 的真实情况）时，`migrate.log` 顶上；
+    /// 两边都没有就返回空串（调用方只显示退出码 + 日志路径，不伪造原因）。
+    #[test]
+    fn failure_reason_falls_back_to_migrate_log_when_stderr_is_lost() {
+        let root = temp("reason");
+        let log = root.join(LOG_NAME);
+        std::fs::write(
+            &log,
+            "unix:1 [migrate] INFO  step prefs: ok\nunix:2 [migrate] ERROR step convert: 权限不足\n",
+        )
+        .unwrap();
+
+        // stderr 有内容 → 原样用它（不提 migrate.log）。
+        assert_eq!(failure_reason("boom\ndetail", &log, 20), "boom\ndetail");
+        // stderr 为空 → 从日志取，并说明来源，别让用户以为是别的东西。
+        let from_log = failure_reason("", &log, 20);
+        assert!(from_log.contains("migrate.log"), "{from_log}");
+        assert!(from_log.contains("权限不足"), "{from_log}");
+        // 日志也读不到 → 空串，由调用方只给退出码。
+        assert!(failure_reason("", &root.join("missing.log"), 20).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// 报告文件只在真的存在时才给出（别让用户去点一个不存在的路径）。
