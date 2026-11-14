@@ -105,8 +105,6 @@ declare global {
   const normalizeConfigSource: typeof import("./composables/config_source").normalizeConfigSource;
   const onActivated: typeof import("vue").onActivated;
   const onBeforeMount: typeof import("vue").onBeforeMount;
-  const onBeforeRouteLeave: (typeof import("vue-router"))["onBeforeRouteLeave"];
-  const onBeforeRouteUpdate: (typeof import("vue-router"))["onBeforeRouteUpdate"];
   const onBeforeUnmount: typeof import("vue").onBeforeUnmount;
   const onBeforeUpdate: typeof import("vue").onBeforeUpdate;
   const onDeactivated: typeof import("vue").onDeactivated;
@@ -145,10 +143,9 @@ declare global {
   const resolveComponent: typeof import("vue").resolveComponent;
   const runNetworkInstance: typeof import("./composables/backend").runNetworkInstance;
   const runtimeApply: typeof import("./composables/backend").runtimeApply;
+  const saveConfigServerUrl: typeof import("./composables/mode").saveConfigServerUrl;
   const saveLastNetworkInstanceId: typeof import("./composables/config").saveLastNetworkInstanceId;
   const saveLastNetworkInstanceIdNow: typeof import("./composables/config").saveLastNetworkInstanceIdNow;
-  const saveMode: typeof import("./composables/mode").saveMode;
-  const saveModeNow: typeof import("./composables/mode").saveModeNow;
   const saveNetworkConfig: typeof import("./composables/backend").saveNetworkConfig;
   const saveRemotes: typeof import("./composables/target").saveRemotes;
   const saveRuntime: typeof import("./composables/target").saveRuntime;
@@ -201,8 +198,6 @@ declare global {
   const useId: typeof import("vue").useId;
   const useLink: typeof import("vue-router/auto").useLink;
   const useModel: typeof import("vue").useModel;
-  const useRoute: (typeof import("vue-router"))["useRoute"];
-  const useRouter: (typeof import("vue-router"))["useRouter"];
   const useSlots: typeof import("vue").useSlots;
   const useTemplateRef: typeof import("vue").useTemplateRef;
   const useTray: typeof import("./composables/tray").useTray;
@@ -507,14 +502,15 @@ declare module "vue" {
       (typeof import("./composables/backend"))["runNetworkInstance"]
     >;
     readonly runtimeApply: UnwrapRef<(typeof import("./composables/backend"))["runtimeApply"]>;
+    readonly saveConfigServerUrl: UnwrapRef<
+      (typeof import("./composables/mode"))["saveConfigServerUrl"]
+    >;
     readonly saveLastNetworkInstanceId: UnwrapRef<
       (typeof import("./composables/config"))["saveLastNetworkInstanceId"]
     >;
     readonly saveLastNetworkInstanceIdNow: UnwrapRef<
       (typeof import("./composables/config"))["saveLastNetworkInstanceIdNow"]
     >;
-    readonly saveMode: UnwrapRef<(typeof import("./composables/mode"))["saveMode"]>;
-    readonly saveModeNow: UnwrapRef<(typeof import("./composables/mode"))["saveModeNow"]>;
     readonly saveNetworkConfig: UnwrapRef<
       (typeof import("./composables/backend"))["saveNetworkConfig"]
     >;

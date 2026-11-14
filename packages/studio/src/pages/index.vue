@@ -33,7 +33,7 @@ import {
 import { buildFrontendState } from "~/composables/diagnostics";
 
 import { useToast, useConfirm } from "openvue";
-import { loadMode, WebClientConfig, type Mode } from "~/composables/mode";
+import { loadMode, saveConfigServerUrl, WebClientConfig, type Mode } from "~/composables/mode";
 import {
   DEFAULT_RPC_PORT,
   LOCAL_TARGET,
@@ -1252,11 +1252,14 @@ async function onConfigServerSave(event?: MouseEvent) {
       });
     });
   }
-  console.log("Saving config server url", (editingMode.value as WebClientConfig).config_server_url);
+  const url = (editingMode.value as WebClientConfig).config_server_url;
+  console.log("Saving config server url", url);
   currentMode.value = {
     ...currentMode.value,
-    config_server_url: (editingMode.value as WebClientConfig).config_server_url,
+    config_server_url: url,
   } as Mode;
+  // 先落盘再重连：`[app].mode` 是这条设置的唯一持久化位置（S1 只保留它）。
+  await saveConfigServerUrl(url);
   await initWithMode(currentMode.value);
   configServerDialogVisible.value = false;
 }

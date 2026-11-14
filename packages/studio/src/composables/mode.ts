@@ -21,14 +21,25 @@ export interface ServiceMode extends WebClientConfig {
   installed_core_version?: string;
 }
 
-export function saveMode(mode: Mode) {
-  localStorage.setItem("app_mode", JSON.stringify(mode));
-}
-
-/** 关键路径：写完立即落盘并等待后端确认（退出/切模式时用）。 */
-export async function saveModeNow(mode: Mode) {
+/**
+ * 写回 `[app].mode`（S1 之后的形状：**只留现役设置** `config_server_url`）。
+ *
+ * - 运行方式由 `prefs.toml` 的 `runtime` 决定，不写在这里；
+ * - `config_dir` / `rpc_portal` / `file_log_dir` / `file_log_level` 已由新路径推导，
+ *   写回去只会污染 prefs（S1 判定为 pre.12 残留，运行时不再读）；
+ * - `url` 为空 = **清除整个键**（与 `exvlan-migrate` 的 `keep: None` 同义）。
+ *
+ * 用「写穿 + 等待」：配置服务器地址必须在切模式/退出前真的落盘，
+ * 否则下次启动 `loadMode()` 又读回旧值（历史 bug：改完只在内存里生效）。
+ */
+export async function saveConfigServerUrl(url?: string): Promise<void> {
   const { persistUiStateNow } = await import("./persist");
-  await persistUiStateNow("app_mode", JSON.stringify(mode));
+  const trimmed = (url ?? "").trim();
+  if (!trimmed) {
+    await persistUiStateNow("app_mode", null);
+    return;
+  }
+  await persistUiStateNow("app_mode", JSON.stringify({ config_server_url: trimmed }));
 }
 
 export function loadMode(): Mode {
