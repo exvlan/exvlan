@@ -13,7 +13,7 @@
 # 同名覆盖会让客户端长期拿到上一轮的包（见 script/kernel-mirror/caddy.Caddyfile）。
 #
 # 输入（env）：
-#   VERSION   nightly 版本串，如 26.410.20713-nightly.1115（必填）
+#   VERSION   nightly 版本串，如 26.410.20715-nightly.1115（必填）
 #   ASSETS    下载产物根目录（默认 release_assets）
 #   OUT       输出目录（默认 zipped_assets）
 

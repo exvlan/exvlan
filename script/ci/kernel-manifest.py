@@ -19,7 +19,7 @@ nightly 只是它的**子集**（6 个镜像平台，不带 magisk/dmg/msi）。
 
 用法：
     python3 script/ci/kernel-manifest.py --assets-dir zipped_assets \\
-        --version 26.410.20713-nightly.1115 --channel nightly
+        --version 26.410.20715-nightly.1115 --channel nightly
 """
 
 from __future__ import annotations

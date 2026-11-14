@@ -2807,7 +2807,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2928,7 +2928,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-android-jni"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "android_logger",
  "exvlan",
@@ -2941,7 +2941,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-api"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -2994,7 +2994,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-control"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "libc",
  "serde",
@@ -3007,7 +3007,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-core"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "aes-gcm 0.11.1",
  "anyhow",
@@ -3075,7 +3075,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-ffi"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "async-trait",
  "exvlan",
@@ -3093,7 +3093,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-gateway"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "anyhow",
  "axum",
@@ -3111,7 +3111,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-ios"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "exvlan-core",
  "exvlan-ffi",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-migrate"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "anyhow",
  "exvlan-control",
@@ -3138,7 +3138,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-mini"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "anyhow",
  "exvlan",
@@ -3147,7 +3147,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-proto"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3181,7 +3181,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-rpc"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3207,7 +3207,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-service"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -3227,7 +3227,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-studio"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3270,7 +3270,7 @@ dependencies = [
 
 [[package]]
 name = "exvlan-uptime"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9802,7 +9802,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-vpnservice"
-version = "26.410.20713"
+version = "26.410.20715"
 dependencies = [
  "serde",
  "tauri",

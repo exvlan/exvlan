@@ -56,3 +56,7 @@ archive/
 .trae/
 target
 .secrets
+
+# Python 缓存（不要提交编译产物）
+__pycache__/
+*.pyc

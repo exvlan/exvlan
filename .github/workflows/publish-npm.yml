@@ -9,7 +9,7 @@ on:
         default: "latest"
         required: false
       version:
-        description: "发布版本串（v26.410.20713 / v26.410.20713-dev.1）；省略时取 github.ref_name"
+        description: "发布版本串（v26.410.20715 / v26.410.20715-dev.1）；省略时取 github.ref_name"
         type: string
         default: ""
         required: false
@@ -21,12 +21,12 @@ on:
         default: "latest"
         required: false
       version:
-        description: "发布版本串（v26.410.20713 / v26.410.20713-dev.1）；省略时取 github.ref_name"
+        description: "发布版本串（v26.410.20715 / v26.410.20715-dev.1）；省略时取 github.ref_name"
         type: string
         default: ""
         required: false
       unpublish_version:
-        description: "【危险】只删除该版本的 4 个 SDK 包（如 26.410.20713），不构建不发布；留空 = 正常构建并发布"
+        description: "【危险】只删除该版本的 4 个 SDK 包（如 26.410.20715），不构建不发布；留空 = 正常构建并发布"
         type: string
         default: ""
         required: false
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # 版本串与 dist-tag 都从 tag 推导（tag 是唯一真源）：
-      # registry 的版本号没有「通道」维度，用无后缀的 26.410.20713 发 dev 构建，
+      # registry 的版本号没有「通道」维度，用无后缀的 26.410.20715 发 dev 构建，
       # 会把 dev 版当成正式版写进 registry 并顶掉 `latest`（曾经真的发生过）。
       # 因此预发布必须让 sdk 版本自带后缀（…-dev.1），`latest` 只由无后缀正式版改写。
       - name: Resolve version / dist-tag
@@ -63,7 +63,7 @@ jobs:
           # unpublish 模式：只删指定版本，不推导发布信息、不构建。
           if [[ -n "$UNPUBLISH_VERSION" ]]; then
             if [[ ! "$UNPUBLISH_VERSION" =~ $semver_re ]]; then
-              echo "::error::unpublish_version 必须形如 26.410.20713（收到 '${UNPUBLISH_VERSION}'），拒绝执行"
+              echo "::error::unpublish_version 必须形如 26.410.20715（收到 '${UNPUBLISH_VERSION}'），拒绝执行"
               exit 1
             fi
             echo "mode=unpublish" >> "$GITHUB_OUTPUT"
@@ -76,7 +76,7 @@ jobs:
           raw="${INPUT_VERSION:-$REF_NAME}"
           version="${raw#v}"
           if [[ ! "$version" =~ $semver_re ]]; then
-            echo "::error::无法从 '${raw}' 推导版本：应形如 v26.410.20713 或 v26.410.20713-dev.1"
+            echo "::error::无法从 '${raw}' 推导版本：应形如 v26.410.20715 或 v26.410.20715-dev.1"
             echo "::error::非 tag 触发（dispatch 到分支）必须显式传 version 输入，不能拿基线版本顶正式版"
             exit 1
           fi

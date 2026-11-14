@@ -1,5 +1,5 @@
 {
-  "version": "26.410.20713",
+  "version": "26.410.20715",
   "bundle": {
     "externalBin": [],
     "resources": [
@@ -15,11 +15,9 @@
         "type": "embedBootstrapper"
       },
       "wix": {
-        "version": "26.104.20713.50013",
+        "version": "26.104.20715.50015",
         "upgradeCode": "42C08A88-9ABD-5406-B191-2A8543B12B98",
-        "fragmentPaths": [
-          "wix/service-lifecycle.wxs"
-        ]
+        "fragmentPaths": ["wix/service-lifecycle.wxs"]
       },
       "nsis": {
         "installMode": "perMachine",

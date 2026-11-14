@@ -29,8 +29,8 @@
 #     与应用基线无关。
 #
 # 用法：
-#   bash script/ci/set-version.sh 26.410.20713            # 写入
-#   bash script/ci/set-version.sh 26.410.20713 --dry-run  # 只打印计划
+#   bash script/ci/set-version.sh 26.410.20715            # 写入
+#   bash script/ci/set-version.sh 26.410.20715 --dry-run  # 只打印计划
 #
 # 不负责的事：不提交、不打 tag、不改 `docs/`。跑完请自身到：
 #   cargo check --workspace && bash script/ci/check-paths.sh ...

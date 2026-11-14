@@ -5707,7 +5707,7 @@ mod install_tests {
             "nightly",
             "v26.410",
             "26.410.20720-pre.9",
-            "26.410.20713+abc123",
+            "26.410.20715+abc123",
         ] {
             assert!(is_safe_segment(good), "{good} 应被接受");
         }

@@ -25,9 +25,9 @@
 MSI 会按升级处理；UpgradeCode 未变，不会变成并存。
 
 用法：
-    python3 script/ci/msi-version.py 26.410.20713
+    python3 script/ci/msi-version.py 26.410.20715
     → 26.104.20713.50013
-    python3 script/ci/msi-version.py 26.410.20713-rc.1
+    python3 script/ci/msi-version.py 26.410.20715-rc.1
     → 26.104.20713.40001
 """
 

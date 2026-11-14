@@ -304,7 +304,7 @@ mod imp {
             .output()
             .ok()?;
         let text = String::from_utf8_lossy(&out.stdout);
-        // 形如 "exvlan-service 26.410.20713-pre.13+abcd"
+        // 形如 "exvlan-service 26.410.20715-pre.13+abcd"
         text.split_whitespace().nth(1).map(str::to_owned)
     }
 

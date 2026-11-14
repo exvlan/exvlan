@@ -461,7 +461,7 @@ fn version_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
 
 /// 版本比较**忽略构建元数据**（`+<sha6>`）：同一标准版本的不同构建不算不一致。
 ///
-/// `26.410.20713-dev.1+bd16ae` 与 `26.410.20713-dev.1` 是同一版；
+/// `26.410.20715-dev.1+bd16ae` 与 `26.410.20715-dev.1` 是同一版；
 /// 不这样处理时，每次安装都会报一条假的 `version.mismatch`。
 pub fn same_version(a: &str, b: &str) -> bool {
     version_core(a) == version_core(b)
@@ -742,27 +742,27 @@ mod tests {
     fn version_compare_ignores_build_metadata() {
         // dev.1 真机验证：`+bd16ae` 被当成不一致 → 假的 version.mismatch。
         assert!(same_version(
-            "26.410.20713-dev.1+bd16ae",
-            "26.410.20713-dev.1"
+            "26.410.20715-dev.1+bd16ae",
+            "26.410.20715-dev.1"
         ));
         assert!(same_version(
-            "26.410.20713-dev.1",
-            "26.410.20713-dev.1+bd16ae"
+            "26.410.20715-dev.1",
+            "26.410.20715-dev.1+bd16ae"
         ));
-        assert!(same_version("26.410.20713+aaa", "26.410.20713+bbb"));
-        assert!(!same_version("26.410.20713-dev.1", "26.410.20713-dev.2"));
-        assert!(!same_version("26.410.20713", "26.411.20713"));
+        assert!(same_version("26.410.20715+aaa", "26.410.20715+bbb"));
+        assert!(!same_version("26.410.20715-dev.1", "26.410.20715-dev.2"));
+        assert!(!same_version("26.410.20715", "26.411.20713"));
     }
 
     #[test]
     fn channel_inferred_from_version_string() {
-        assert_eq!(channel_from_version("26.410.20713"), "stable");
-        assert_eq!(channel_from_version("26.410.20713+bd16ae"), "stable");
-        assert_eq!(channel_from_version("26.410.20713-dev.1"), "dev");
-        assert_eq!(channel_from_version("26.410.20713-dev.1+bd16ae"), "dev");
-        assert_eq!(channel_from_version("26.410.20713-beta.2"), "beta");
-        assert_eq!(channel_from_version("26.410.20713-rc.3"), "rc");
-        assert_eq!(channel_from_version("26.410.20713-nightly.0425"), "nightly");
+        assert_eq!(channel_from_version("26.410.20715"), "stable");
+        assert_eq!(channel_from_version("26.410.20715+bd16ae"), "stable");
+        assert_eq!(channel_from_version("26.410.20715-dev.1"), "dev");
+        assert_eq!(channel_from_version("26.410.20715-dev.1+bd16ae"), "dev");
+        assert_eq!(channel_from_version("26.410.20715-beta.2"), "beta");
+        assert_eq!(channel_from_version("26.410.20715-rc.3"), "rc");
+        assert_eq!(channel_from_version("26.410.20715-nightly.0425"), "nightly");
     }
 
     #[test]
