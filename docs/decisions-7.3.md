@@ -635,3 +635,27 @@ port = 2016
 回归 e2e：`script/kernel-mirror/e2e-sync-test.sh`（假 `gh` + 假 Release，离线跑）。覆盖
 「只重下旧 tag 不降级 / 不粘住」「未版本化资产不被旧 tag 覆盖、清单 sha256 全 MATCH」
 「FORCE 全量重下」「MAX_BYTES 预算收缩」「旧 schema 兼容状态 + `core/<zip>` 符号链接」。
+
+### 14.14 dev.2 决策（真机取证驱动的缺陷修复）
+
+dev.1 发布后在 Windows / macOS / Android 三端真机取证，以下几点据此定稿。**先记被证伪的假设**，
+避免后续再按错误前提改代码。
+
+| 被证伪的假设                                                       | 反证                                                                                                                                                     |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 「Windows 大版本升级丢服务 = 旧 MSI 卸载时注销了服务」             | System 日志当天 `7045`（服务已安装）**0 条**，注册自 11-11 起连续；`7034 … terminated unexpectedly. It has done this 3 time(s)` 证明崩溃时服务**仍存在** |
+| 「`app_mode.rpc_portal = 15999` 会让客户端连死端口」               | `index.vue` 归一化时强制 `rpc_portal: LOCAL_RPC_PORTAL`（1995），存储里的旧值从不参与连接                                                                |
+| 「去掉自身包排除后 App 全部流量过 tun、实例断连即整个应用断网」    | `getRoutesForVpn()` 只下发 mesh 网段 / peer 虚拟 IP / 自定义 routes / magic DNS，**没有默认路由**；App 普通联网不经 tun                                  |
+| 「R2 修复点在 `contrib/android-jni/…/EraXVlanVpnService.t.kt:64`」 | 该模板无 gradle 工程、不产 `android_library_path` 元数据，**不进 APK**；生效的是 `tauri-plugin-vpnservice → TauriVpnService.kt`                          |
+
+| 决策         | 内容                                                                                                                                                                                                                                                                  |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android R2   | 不把自家包放进 `disallowedApplications`（`mobile_vpn.ts`）；`*.t.kt` 死模板不动（路径映射上游 `easytier-android-jni`，改它只增合并摩擦）                                                                                                                              |
+| 全局代理     | **明确禁止** 用户 routes 里的 `0.0.0.0/0`、`::/0`：Android VPN 侧拒绝启用并给可操作提示。理由：内核出站 socket 无 `protect()` 通道，会自环黑洞；`bind_device` 在 Android 非 root 不可用。**仅限 Android VPN 路由构建**——桌面端 `0.0.0.0/0` 是合法用法，不得在校验层拦 |
+| Windows 服务 | MSI 加 `wix/service-lifecycle.wxs`：`Before=InstallValidate` 停服务+清孤儿内核/gateway，`After=InstallFinalize` 拉起，`Before=RemoveFiles`（`REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`）只 `sc delete`；全部 `Return="ignore"`                                       |
+| 服务端       | `install()` 幂等短路（版本一致且 SCM RUNNING 不覆盖，消灭 `os error 32`）；停服务改用 SCM API 而非匹配本地化文本 `STOPPED`；`cleanup_stale_staging()` 白名单清理 `*.new`/陈旧 `v.txt`（`mtime>10min`，不碰 `*.prev`/config/logs/token）                               |
+| GUI 自愈     | 三态 `not-installed` / `installed-not-ready` / `installed-running`；「管道不通」**不等于**未安装；`repair()` 只重启不覆盖二进制                                                                                                                                       |
+| 自动更新     | 自动更新走 **NSIS**（`gen_upgrade_manifests.py` 只匹配 `*_x64_*setup.exe`），MSI 修复对主路径无效 → dev.2 必须补 `bundle.windows.nsis.installerHooks`（PREINSTALL 停、POSTINSTALL 拉起）                                                                              |
+| gateway 启动 | 首启绑 mesh IP 报 `10049`（网卡未就绪）→ gateway 内部短退避重试（仅 `EADDRNOTAVAIL` 类错误），`EADDRINUSE`/`EACCES` 立即失败保留结构化错误；重试窗口须明显短于 supervisor 退避，不得互相打转                                                                          |
+| 发布节奏     | dev.2 的提交**攒批**后一次 push，只跑一轮全量 pipeline（私仓 Actions 额度）                                                                                                                                                                                           |
+| 设计稿口径   | 不为「实例断连导致 App 断网」加提示（前提不成立，见上表）                                                                                                                                                                                                             |
