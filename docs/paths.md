@@ -1,7 +1,11 @@
 # 路径规范（v3）
 
-> 单一真源：`packages/studio/src-tauri/src/paths.rs`。
-> **除该文件外，任何 Rust 源码不得出现绝对路径字面量**（CI 守卫 `script/ci/check-paths.sh`）。
+> 单一真源有两个（由 CI 守卫 `script/ci/check-paths.sh` 登记）：
+>
+> - **用户/系统路径**：`packages/studio/src-tauri/src/paths.rs`（GUI 侧）、`exvlan/control/src/paths.rs`（CLI / 服务 / gateway / migrate 共用）；
+> - 两者必须保持一致（目录名、二进制名、服务 label）。
+>
+> **除这两个文件（及服务端 `exvlan/service/src/main.rs` 的 `paths()`）外，任何 Rust 源码不得出现绝对路径字面量。**
 
 ## 原则
 
@@ -68,3 +72,7 @@ cacheDir/   diagnostics/ · tmp/
 
 见 `docs/decisions-7.3.md`：7.3 首次启动一次性重装系统组件，并保留一个幂等的「发现即删」扫描
 （旧 `exvlan` 目录 / 旧 `exvlan-studio.plist`），7.4 再彻底删除。
+
+旧路径清单（`stale_paths()`）、旧服务定义常量、`machine_id` 落点都只有一份，在
+`exvlan/control/src/paths.rs`：GUI、`exvlan-migrate`、`doctor` 全部引用它（各写一遍必然漂）。
+迁移步骤与决策见 `docs/migrate-7.3.md`。

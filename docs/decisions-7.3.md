@@ -648,17 +648,17 @@ dev.1 发布后在 Windows / macOS / Android 三端真机取证，以下几点�
 | 「去掉自身包排除后 App 全部流量过 tun、实例断连即整个应用断网」    | `getRoutesForVpn()` 只下发 mesh 网段 / peer 虚拟 IP / 自定义 routes / magic DNS，**没有默认路由**；App 普通联网不经 tun                                  |
 | 「R2 修复点在 `contrib/android-jni/…/EraXVlanVpnService.t.kt:64`」 | 该模板无 gradle 工程、不产 `android_library_path` 元数据，**不进 APK**；生效的是 `tauri-plugin-vpnservice → TauriVpnService.kt`                          |
 
-| 决策         | 内容                                                                                                                                                                                                                                                                  |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Android R2   | 不把自家包放进 `disallowedApplications`（`mobile_vpn.ts`）；`*.t.kt` 死模板不动（路径映射上游 `easytier-android-jni`，改它只增合并摩擦）                                                                                                                              |
-| 全局代理     | **明确禁止** 用户 routes 里的 `0.0.0.0/0`、`::/0`：Android VPN 侧拒绝启用并给可操作提示。理由：内核出站 socket 无 `protect()` 通道，会自环黑洞；`bind_device` 在 Android 非 root 不可用。**仅限 Android VPN 路由构建**——桌面端 `0.0.0.0/0` 是合法用法，不得在校验层拦 |
-| Windows 服务 | MSI 加 `wix/service-lifecycle.wxs`：`Before=InstallValidate` 停服务+清孤儿内核/gateway，`After=InstallFinalize` 拉起，`Before=RemoveFiles`（`REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`）只 `sc delete`；全部 `Return="ignore"`                                       |
-| 服务端       | `install()` 幂等短路（版本一致且 SCM RUNNING 不覆盖，消灭 `os error 32`）；停服务改用 SCM API 而非匹配本地化文本 `STOPPED`；`cleanup_stale_staging()` 白名单清理 `*.new`/陈旧 `v.txt`（`mtime>10min`，不碰 `*.prev`/config/logs/token）                               |
-| GUI 自愈     | 三态 `not-installed` / `installed-not-ready` / `installed-running`；「管道不通」**不等于**未安装；`repair()` 只重启不覆盖二进制                                                                                                                                       |
+| 决策         | 内容                                                                                                                                                                                                                                                                                                             |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android R2   | 不把自家包放进 `disallowedApplications`（`mobile_vpn.ts`）；`*.t.kt` 死模板不动（路径映射上游 `easytier-android-jni`，改它只增合并摩擦）                                                                                                                                                                         |
+| 全局代理     | **明确禁止** 用户 routes 里的 `0.0.0.0/0`、`::/0`：Android VPN 侧拒绝启用并给可操作提示。理由：内核出站 socket 无 `protect()` 通道，会自环黑洞；`bind_device` 在 Android 非 root 不可用。**仅限 Android VPN 路由构建**——桌面端 `0.0.0.0/0` 是合法用法，不得在校验层拦                                            |
+| Windows 服务 | MSI 加 `wix/service-lifecycle.wxs`：`Before=InstallValidate` 停服务+清孤儿内核/gateway，`After=InstallFinalize` 拉起，`Before=RemoveFiles`（`REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`）只 `sc delete`；全部 `Return="ignore"`                                                                                  |
+| 服务端       | `install()` 幂等短路（版本一致且 SCM RUNNING 不覆盖，消灭 `os error 32`）；停服务改用 SCM API 而非匹配本地化文本 `STOPPED`；`cleanup_stale_staging()` 白名单清理 `*.new`/陈旧 `v.txt`（`mtime>10min`，不碰 `*.prev`/config/logs/token）                                                                          |
+| GUI 自愈     | 三态 `not-installed` / `installed-not-ready` / `installed-running`；「管道不通」**不等于**未安装；`repair()` 只重启不覆盖二进制                                                                                                                                                                                  |
 | 自动更新     | 自动更新走 **NSIS**（`gen_upgrade_manifests.py` 只匹配 `*_x64_*setup.exe`），MSI 修复对主路径无效 → dev.2 必须补 `bundle.windows.nsis.installerHooks`（PREINSTALL 停、POSTINSTALL 拉起）。**已实施**：`nsis/service-lifecycle.nsh` + `nsis.installMode=perMachine`（钩子要提权才能操作 SCM；两者拆开就是假修复） |
-| gateway 启动 | 首启绑 mesh IP 报 `10049`（网卡未就绪）→ gateway 内部短退避重试（仅 `EADDRNOTAVAIL` 类错误），`EADDRINUSE`/`EACCES` 立即失败保留结构化错误；重试窗口须明显短于 supervisor 退避，不得互相打转                                                                          |
-| 发布节奏     | dev.2 的提交**攒批**后一次 push，只跑一轮全量 pipeline（私仓 Actions 额度）                                                                                                                                                                                           |
-| 设计稿口径   | 不为「实例断连导致 App 断网」加提示（前提不成立，见上表）                                                                                                                                                                                                             |
+| gateway 启动 | 首启绑 mesh IP 报 `10049`（网卡未就绪）→ gateway 内部短退避重试（仅 `EADDRNOTAVAIL` 类错误），`EADDRINUSE`/`EACCES` 立即失败保留结构化错误；重试窗口须明显短于 supervisor 退避，不得互相打转                                                                                                                     |
+| 发布节奏     | dev.2 的提交**攒批**后一次 push，只跑一轮全量 pipeline（私仓 Actions 额度）                                                                                                                                                                                                                                      |
+| 设计稿口径   | 不为「实例断连导致 App 断网」加提示（前提不成立，见上表）                                                                                                                                                                                                                                                        |
 
 ### 14.15 历史残留一律归 `exvlan-migrate`（铁律）
 
@@ -695,10 +695,14 @@ dev.1 发布后在 Windows / macOS / Android 三端真机取证，以下几点�
 
 **落地口径（dev.2）**
 
-| 项                    | 结论                                                                                                                                                       |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BUNDLE_MIGRATE`      | **保持 `1`**：dev.2 仍随包分发 `exvlan-migrate`、GUI 仍弹迁移闸门。从任意旧版本直跳 dev.2 的用户仍有人兜住旧数据；退役推迟到 dev.3                         |
-| 移动端接入            | 把 `exvlan/migrate` 拆成 **lib + bin**，lib 经**现有 `exvlan_ffi`** 暴露入口（不新增构建产物、不做 tauri plugin），App 首启调用一次                        |
-| 死模板                | `exvlan/contrib/android-jni/kotlin/**.t.kt` **保留**，在 `README.md` 顶部加醒目警示（不进 APK + 勿照抄「排除自身包」）；路径映射上游，删除只会增加合并摩擦 |
-| `service.toml` 旧字段 | 先由 migrate 把 `mode` → `policy`、`service                                                                                                                | normal | off`→`resident | session | stopped`归一，**再**删运行时 serde 别名（否则老配置会静默回落`resident`） |
-| 推送节奏              | **一个 dev.2，分两批 push**：①已合修复 + NSIS 钩子；②migrate 扩容 + Android 版 + 删全部兼容。仍只打一个 tag，但出红时能二分到「修复」还是「迁移重构」      |
+| 项                    | 结论                                                                                                                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BUNDLE_MIGRATE`      | **保持 `1`**：dev.2 仍随包分发 `exvlan-migrate`、GUI 仍弹迁移闸门。从任意旧版本直跳 dev.2 的用户仍有人兜住旧数据；退役推迟到 dev.3                                       |
+| 移动端接入            | 把 `exvlan/migrate` 拆成 **lib + bin**，lib 经**现有 `exvlan_ffi`** 暴露入口（不新增构建产物、不做 tauri plugin），App 首启调用一次                                      |
+| 死模板                | `exvlan/contrib/android-jni/kotlin/**.t.kt` **保留**，在 `README.md` 顶部加醒目警示（不进 APK + 勿照抄「排除自身包」）；路径映射上游，删除只会增加合并摩擦               |
+| `service.toml` 旧字段 | 先由 migrate 把 `mode` → `policy`、`service`/`normal`/`off` → `resident`/`session`/`stopped` 归一，**再**删运行时 serde 别名（否则老配置会静默回落 `resident`）          |
+| 推送节奏              | **一个 dev.2，分两批 push**：①已合修复 + NSIS 钩子（已推 `a1ec85eb`）；②migrate 扩容 + Android 版 + 删全部兼容。仍只打一个 tag，但出红时能二分到「修复」还是「迁移重构」 |
+
+> **dev.2 状态**：S0–S8（prefs / app_mode 拆分 / machine_id / 旧路径 / 旧服务定义 / `service.toml` 旧字段）
+> **均已由 `exvlan-migrate` 覆盖**。步骤、失败语义与「下一轮可删的运行时兼容清单」见
+> [`docs/migrate-7.3.md`](./migrate-7.3.md)。运行时兼容代码**本轮未删**（按 §14.15 的顺序约束）。
