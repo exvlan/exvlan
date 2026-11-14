@@ -27,9 +27,13 @@ on:
         default: false
         required: false
 
-  # 每周一 03:00 UTC：只跑依赖审计（无 push 也能发现新 advisory）。
+  # schedule 是唯一「没有 push 也会跑」的入口，两条 cron 各管一件事：
+  #   · 每周一 03:00 UTC：只跑依赖审计（新 advisory 与代码无关，不能等 push 才发现）；
+  #   · 每天 21:00 UTC（= 北京 05:00）：nightly 构建，产出可自更新的预览包。
+  # 两者的门控靠 `changes` 作业的 `nightly` 布尔区分（见 jobs.changes）。
   schedule:
     - cron: "0 3 * * 1"
+    - cron: "0 21 * * *"
 
 permissions:
   contents: write
@@ -57,6 +61,8 @@ jobs:
   #   - feature push / PR(develop,main)：仅 tests + core（轻量）；audit 按依赖路径门控（PR 全量）
   #   - develop/main push：core 链必跑；go/js/nix/ohos 按路径门控；audit 按依赖路径门控
   #   - tag v* / workflow_dispatch：全量（旁路绕过路径门控）+ release(tag) + audit（全量）
+  #   - schedule(nightly, 21:00 UTC)：只跑 nightly 链（core 6 平台 → studio/mobile → nightly release）
+  #   - schedule(每周一审计, 03:00 UTC)：只跑 audit + upstream_watch
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
@@ -67,8 +73,25 @@ jobs:
       ohos: ${{ steps.filter.outputs.ohos }}
       deps: ${{ steps.filter.outputs.deps }}
       core: ${{ steps.filter.outputs.core }}
+      nightly: ${{ steps.gate.outputs.nightly }}
+      nightly_version: ${{ steps.gate.outputs.nightly_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # nightly 门控布尔：唯一入口。`github.event.schedule` 只在 schedule 事件里存在，
+      # 其它事件为空串 → false；下游一律用 `needs.changes.outputs.nightly` 判断。
+      # 版本串也在这里算一次（跨年守卫会直接失败），全 run 共用一份，避免各作业各算一份。
+      - name: Resolve nightly gate and version
+        id: gate
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "schedule" && "${{ github.event.schedule }}" == "0 21 * * *" ]]; then
+            echo "nightly=true" >>"$GITHUB_OUTPUT"
+            version=$(bash script/ci/nightly-version.sh)
+            echo "nightly_version=${version}" >>"$GITHUB_OUTPUT"
+            echo "nightly version: ${version}"
+          else
+            echo "nightly=false" >>"$GITHUB_OUTPUT"
+          fi
       - id: filter
         if: github.event_name == 'push' && github.ref_type != 'tag'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
@@ -129,7 +152,9 @@ jobs:
   # （历史上 pnpm 的 wasm-pack → binaryen 下载失败过多次，直接打挂发版）。
   web_dist:
     name: Build Web Console
-    if: github.event_name != 'schedule'
+    needs: changes
+    # nightly（schedule）也要 web-dist：内核 `--features=embed` 会把它编进二进制。
+    if: github.event_name != 'schedule' || needs.changes.outputs.nightly == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -210,16 +235,26 @@ jobs:
     needs: [changes, web_dist]
     # tag / dispatch 必须全量（release 要用全部内核资产）；develop/main push
     # 只在真的改了内核相关路径时才建这 12 个 target。
+    # nightly（schedule）只建镜像托管的 6 个平台：桌面 GUI 只用到其中的
+    # mac x86_64/aarch64 与 win x86_64，其余 3 个 Linux/arm 平台给内核镜像用。
     if: >-
-      github.event_name != 'schedule' &&
-      (github.event_name == 'pull_request' || github.ref_type == 'tag' ||
-       github.event_name == 'workflow_dispatch' ||
-       needs.changes.outputs.core == 'true')
+      (github.event_name == 'schedule' && needs.changes.outputs.nightly == 'true') ||
+      (github.event_name != 'schedule' &&
+       (github.event_name == 'pull_request' || github.ref_type == 'tag' ||
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.core == 'true'))
     uses: ./.github/workflows/core.yml
     with:
-      targets: ${{ github.ref_name == 'feature' && '["x86_64-unknown-linux-musl"]' || '["x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","riscv64gc-unknown-linux-musl","loongarch64-unknown-linux-musl","armv7-unknown-linux-musleabihf","armv7-unknown-linux-musleabi","arm-unknown-linux-musleabihf","arm-unknown-linux-musleabi","x86_64-unknown-freebsd","aarch64-apple-darwin","i686-pc-windows-msvc","aarch64-pc-windows-msvc"]' }}
-      build_magisk: ${{ github.ref_name != 'feature' }}
-      variant: main
+      targets: >-
+        ${{ github.event_name == 'schedule'
+            && '["x86_64-apple-darwin","aarch64-apple-darwin","x86_64-pc-windows-msvc","aarch64-pc-windows-msvc","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl"]'
+            || (github.ref_name == 'feature'
+                && '["x86_64-unknown-linux-musl"]'
+                || '["x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","riscv64gc-unknown-linux-musl","loongarch64-unknown-linux-musl","armv7-unknown-linux-musleabihf","armv7-unknown-linux-musleabi","arm-unknown-linux-musleabihf","arm-unknown-linux-musleabi","x86_64-unknown-freebsd","aarch64-apple-darwin","i686-pc-windows-msvc","aarch64-pc-windows-msvc"]') }}
+      build_magisk: ${{ github.event_name != 'schedule' && github.ref_name != 'feature' }}
+      # nightly 用独立 variant：避免与 core_desktop / 同 ref 的其它调用互相取消
+      variant: ${{ github.event_name == 'schedule' && 'nightly' || 'main' }}
+      build_version: ${{ needs.changes.outputs.nightly_version }}
     secrets: inherit
 
   # 旁路组件：develop/main push 按路径门控；tag/dispatch 全量；feature/PR 跳过。
@@ -251,22 +286,23 @@ jobs:
     secrets: inherit
 
   # 依赖审计门禁：tag/dispatch 全量；PR 全量；push 按 manifest/lock 路径门控（含 feature——上游同步落在 feature）。
+  # schedule 只在每周一审计那条 cron 上跑，nightly 那条不跑（省额度、也避免审计红把 nightly 拖下水）。
   audit:
     name: Dependency Audit
     needs: changes
     if: >-
       github.event_name == 'pull_request' ||
-      github.event_name == 'schedule' ||
+      (github.event_name == 'schedule' && needs.changes.outputs.nightly != 'true') ||
       github.ref_type == 'tag' ||
       github.event_name == 'workflow_dispatch' ||
       needs.changes.outputs.deps == 'true'
     uses: ./.github/workflows/audit.yml
     secrets: inherit
 
-  # 上游监控（仅 schedule）：对比 EasyTier/EasyTier 最新 release 与本地已同步的 v2.* tag。
+  # 上游监控（仅每周一那条 schedule）：对比 EasyTier/EasyTier 最新 release 与本地已同步的 v2.* tag。
   upstream_watch:
     name: Upstream Watch
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' && github.event.schedule != '0 21 * * *'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -318,21 +354,30 @@ jobs:
 
   studio:
     name: Build Studio GUI
-    # 只等桌面内核（GUI 矩阵只下载 core-macos-*/core-windows-*）
-    needs: core_desktop
+    # 正常路径只等桌面内核（GUI 矩阵只下载 core-macos-*/core-windows-*）；
+    # nightly 的内核来自 `core`（6 平台里含桌面两个），因此两处都要在 needs 里。
+    needs: [changes, core_desktop, core]
     # `always()` 是必须的：`core_desktop` 被路径门控**跳过**时，GitHub 默认会把
     # 依赖它的作业一并跳过 —— 那样「只改 GUI」的提交永远不会编译 GUI，
     # 直到打 tag 才第一次发现编译错误。
     if: >-
       always() &&
-      github.event_name != 'schedule' && github.event_name != 'pull_request' &&
       github.ref_name != 'feature' &&
-      (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped')
+      (
+        (github.event_name == 'schedule' &&
+         needs.changes.outputs.nightly == 'true' && needs.core.result == 'success') ||
+        (github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+         (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped'))
+      )
     uses: ./.github/workflows/studio.yml
     with:
+      # nightly 只出「最小自更新集」：macOS x86_64 + aarch64、Windows x86_64。
+      # 正式发版仍传 all（产物集不变）。
+      targets: ${{ github.event_name == 'schedule' && '["x86_64-apple-darwin","aarch64-apple-darwin","x86_64-pc-windows-msvc"]' || 'all' }}
       # core_desktop 被路径门控跳过时，studio 从最近一次成功的 pipeline 运行
-      # 取桌面内核产物（内核没变，没必要重建）。
-      kernel_from_previous: ${{ needs.core_desktop.result == 'skipped' && 'true' || 'false' }}
+      # 取桌面内核产物（内核没变，没必要重建）。nightly 的内核就在本 run 里。
+      kernel_from_previous: ${{ github.event_name != 'schedule' && needs.core_desktop.result == 'skipped' && 'true' || 'false' }}
+      build_version: ${{ needs.changes.outputs.nightly_version }}
     secrets: inherit
 
   mobile:
@@ -340,26 +385,36 @@ jobs:
     # 移动端只用 mobile-kernel-* 产物，不需要等内核作业。
     # 但**必须**等 `mobile_kernel` 产出：加 `always()` 后本作业会在 pipeline 一开始
     # 就启动，与 mobile-kernel 并行 → 下载 artifact 时它还不在（实测直接失败）。
-    needs: [core_desktop, mobile_kernel]
+    needs: [changes, core_desktop, mobile_kernel]
     # 同上：`always()` 让移动端在「内核路径门控跳过」的提交上照样编译。
     if: >-
       always() &&
-      github.event_name != 'schedule' && github.event_name != 'pull_request' &&
       github.ref_name != 'feature' &&
-      (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped')
+      needs.mobile_kernel.result == 'success' &&
+      (
+        (github.event_name == 'schedule' && needs.changes.outputs.nightly == 'true') ||
+        (github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+         (needs.core_desktop.result == 'success' || needs.core_desktop.result == 'skipped'))
+      )
     uses: ./.github/workflows/mobile.yml
+    with:
+      # nightly 只出 arm64 APK（最小自更新集），正式发版仍是 split-per-abi 全量。
+      targets: ${{ github.event_name == 'schedule' && '["aarch64-linux-android"]' || 'all' }}
+      build_version: ${{ needs.changes.outputs.nightly_version }}
     secrets: inherit
 
   # 移动端预编译内核库（P6）：与 core 同期产出 per-ABI 的 libexvlan_ffi.so，
   # 供 mobile 直接打包，从而不再在移动作业里重编内核。
   mobile_kernel:
     name: Mobile Kernel Libs
+    needs: changes
     if: >-
-      github.event_name != 'schedule' && github.event_name != 'pull_request' &&
-      github.ref_name != 'feature'
+      (github.event_name == 'schedule' && needs.changes.outputs.nightly == 'true') ||
+      (github.event_name != 'schedule' && github.event_name != 'pull_request' &&
+       github.ref_name != 'feature')
     uses: ./.github/workflows/mobile-kernel.yml
     with:
-      abis: "all"
+      abis: ${{ github.event_name == 'schedule' && '["arm64-v8a"]' || 'all' }}
     secrets: inherit
 
   docker:
@@ -414,6 +469,77 @@ jobs:
       is_alpha: false
     secrets: inherit
 
+  # nightly：固定 tag `nightly` + 同一个 release 原地覆盖（docs/decisions-7.3.md §14.13）。
+  # 只发「最小可自更新集」：内核 6 个镜像平台（含 minisign）、macOS x86_64/aarch64 与
+  # Windows x86_64 的 updater 包、Android arm64 APK，以及应用/内核清单。
+  # 不做 SignPath 签名与 Apple 公证（正式发版才做）。
+  nightly_release:
+    name: Nightly Publish
+    needs: [changes, core, studio, mobile]
+    # 上游任一环节没成功就不发：宁可保留上一轮 nightly，也不发半套包。
+    if: >-
+      always() &&
+      needs.changes.outputs.nightly == 'true' &&
+      needs.core.result == 'success' &&
+      needs.studio.result == 'success' &&
+      needs.mobile.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # body 要最近 10 条 commit；`git tag -f` 也要完整仓库
+          fetch-depth: 0
+
+      # 产物与 release.yml 同名同结构：core-<platform> / kernel-sig-<platform> /
+      # studio-<name> / mobile-<arch>，pattern 精确拉取（排除 buildx 的 *.dockerbuild）。
+      - name: Download core artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: release_assets
+          pattern: core-*
+
+      - name: Download kernel signature artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: release_assets
+          pattern: kernel-sig-*
+
+      - name: Download studio artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: release_assets
+          pattern: studio-*
+
+      - name: Download mobile artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: release_assets
+          pattern: mobile-*
+
+      - name: Sign kernels (minisign)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: bash script/ci/nightly-sign-kernels.sh
+
+      - name: Package nightly assets
+        env:
+          VERSION: ${{ needs.changes.outputs.nightly_version }}
+        run: bash script/ci/nightly-assets.sh
+
+      # 发布前烟测：解压 linux 内核包验签名/sha256/`--version`。失败就停在这里，
+      # 上一轮 nightly 原样保留（释放步骤在后面）。
+      - name: Smoke test kernel package
+        env:
+          VERSION: ${{ needs.changes.outputs.nightly_version }}
+        run: bash script/ci/nightly-smoke.sh
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.changes.outputs.nightly_version }}
+        run: bash script/ci/nightly-publish.sh
+
   # 无人值守运维通知：发版 / 失败自动推送到飞书群
   notify:
     name: Notify (Feishu)
@@ -456,3 +582,58 @@ jobs:
           )
           body=$(python3 -c 'import json,os,sys; print(json.dumps({"msg_type":"text","content":{"text":sys.argv[1]}}))' "$text")
           curl -sS -X POST -H 'Content-Type: application/json' -d "$body" "$WEBHOOK" -o /dev/null -w 'feishu=%{http_code}\n'
+
+  # nightly 失败告警：**只在失败时**推送（成功不打扰）。
+  # 门控用 inline 表达式而不是 `needs.changes.outputs.nightly`：`changes` 自己失败
+  # （例如跨年守卫）时它的 outputs 是空的，反而会把这个告警也吞掉。
+  nightly_notify:
+    name: Nightly Failure (Feishu)
+    if: >-
+      failure() &&
+      github.event_name == 'schedule' &&
+      github.event.schedule == '0 21 * * *'
+    needs: [changes, web_dist, core, studio, mobile, mobile_kernel, nightly_release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Post failure to Feishu
+        # 通知失败绝不能影响流水线结论
+        continue-on-error: true
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          VERSION: ${{ needs.changes.outputs.nightly_version }}
+          C: ${{ needs.changes.result }}
+          W: ${{ needs.web_dist.result }}
+          K: ${{ needs.core.result }}
+          S: ${{ needs.studio.result }}
+          M: ${{ needs.mobile.result }}
+          MK: ${{ needs.mobile_kernel.result }}
+          R: ${{ needs.nightly_release.result }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          text=$(python3 - <<'PY'
+          import os
+          results = {
+              "changes": os.environ["C"],
+              "web_dist": os.environ["W"],
+              "core": os.environ["K"],
+              "studio": os.environ["S"],
+              "mobile": os.environ["M"],
+              "mobile_kernel": os.environ["MK"],
+              "release": os.environ["R"],
+          }
+          bad = [k for k, v in results.items() if v in ("failure", "cancelled")]
+          lines = [
+              f"【EXVlan ❌ nightly 失败】{os.environ['VERSION'] or '版本未算出'} @ {os.environ['SHA'][:8]}",
+              "失败环节: " + (", ".join(bad) if bad else "未知"),
+              " · ".join(f"{k}={v}" for k, v in results.items()),
+              "上一轮 nightly 保留（本轮未发布）",
+              os.environ["RUN_URL"],
+          ]
+          print("\n".join(lines))
+          PY
+          )
+          bash script/ci/feishu-notify.sh "$text"

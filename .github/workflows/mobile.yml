@@ -2,7 +2,25 @@ name: Exvlan Mobile
 
 on:
   workflow_call:
+    inputs:
+      targets:
+        description: 'Android targets: JSON array of rust triples, or "all"'
+        type: string
+        default: "all"
+      build_version:
+        description: >-
+          版本串覆盖（nightly 用固定 tag `nightly`，无法从 ref 推导版本）。
+          留空 = 沿用 `script/ci/build-version.sh` 的默认规则。
+        type: string
+        default: ""
   workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Android targets: JSON array of rust triples, or "all"'
+        default: "all"
+      build_version:
+        description: "版本串覆盖（留空 = 默认规则）"
+        default: ""
 
 concurrency:
   group: mobile-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -32,6 +50,9 @@ jobs:
         }}
     steps:
       - id: skip_check
+        # schedule（nightly）下必须跳过：skip-duplicate 会因「同内容上一轮已成功」
+        # 或 cancel_others 把这一轮判成重复/取消掉，夜间构建就会静默缺失。
+        if: github.event_name != 'schedule'
         uses: fkirc/skip-duplicate-actions@b974a9395958c231af965b70070979a577efa578 # v5
         with:
           concurrent_skipping: "same_content_newer"
@@ -47,25 +68,55 @@ jobs:
           filters: |
             relevant: ${{ env.RELEVANT_PATHS }}
 
+  prepare_matrix:
+    name: Prepare build matrix
+    runs-on: ubuntu-latest
+    needs: pre_job
+    if: needs.pre_job.outputs.should_skip != 'true'
+    outputs:
+      include: ${{ steps.gen.outputs.include }}
+    steps:
+      - name: Generate matrix include
+        id: gen
+        run: |
+          python3 - '${{ inputs.targets }}' <<'PY'
+          import json, os, sys
+
+          ALL = [
+              {"TARGET": "aarch64-linux-android", "ARCH": "aarch64"},
+              {"TARGET": "armv7-linux-androideabi", "ARCH": "armv7"},
+              {"TARGET": "i686-linux-android", "ARCH": "i686"},
+              {"TARGET": "x86_64-linux-android", "ARCH": "x86_64"},
+          ]
+
+          # targets 只做「缩小范围」：nightly 只要 arm64（最小自更新集），
+          # 正式发版仍传 all（split-per-abi 全量）。
+          selected = sys.argv[1] if len(sys.argv) > 1 else "all"
+          if selected in ("", "all"):
+              result = ALL
+          else:
+              wanted = set(json.loads(selected))
+              result = [e for e in ALL if e["TARGET"] in wanted]
+          if not result:
+              sys.exit(f"targets 没有匹配到任何 Android target：{selected}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write("include=" + json.dumps(result) + "\n")
+          print(json.dumps(result))
+          PY
+
   build-mobile:
     strategy:
       fail-fast: true
       matrix:
-        include:
-          - TARGET: aarch64-linux-android
-            ARCH: aarch64
-          - TARGET: armv7-linux-androideabi
-            ARCH: armv7
-          - TARGET: i686-linux-android
-            ARCH: i686
-          - TARGET: x86_64-linux-android
-            ARCH: x86_64
+        include: ${{ fromJSON(needs.prepare_matrix.outputs.include) }}
     runs-on: ubuntu-latest
     env:
       NAME: exvlan
       TARGET: ${{ matrix.TARGET }}
       ARCH: ${{ matrix.ARCH }}
-    needs: pre_job
+      # nightly 等「版本不由 ref 决定」的构建从这里注入（空值 = 默认规则）
+      EXVLAN_BUILD_VERSION_OVERRIDE: ${{ inputs.build_version }}
+    needs: [pre_job, prepare_matrix]
     if: needs.pre_job.outputs.should_skip != 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -281,7 +332,9 @@ jobs:
 
   mobile-result:
     runs-on: ubuntu-latest
-    needs: [pre_job, build-mobile]
+    # prepare_matrix 也必须在列：矩阵生成失败时 build-mobile 会被跳过，
+    # 只检查 build-mobile 会让这条作业「绿着」放过一次没出包的运行。
+    needs: [pre_job, prepare_matrix, build-mobile]
     if: needs.pre_job.result == 'success' && needs.pre_job.outputs.should_skip != 'true' && !cancelled()
     steps:
       # `cancelled` 也要算失败：子作业被取消（runner 回收 / 被并发取代）时

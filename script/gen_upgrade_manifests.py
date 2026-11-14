@@ -43,23 +43,24 @@ def parse_version(version: str) -> tuple[int, int, int, int]:
 
 
 # 自建 manifest 的平台键 → 安装包匹配规则（GUI 的 platform_key() 命名）
+# APK 名允许带版本后缀（nightly/pre-release 会把版本写进文件名：镜像对 .apk 是
+# immutable 缓存，同名覆盖会让客户端永远拿到旧包）。
 APP_PLATFORM_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("macos-x86_64", re.compile(r"^.*_x64.*\.dmg$", re.I)),
     ("macos-aarch64", re.compile(r"^.*(aarch64|arm64).*\.dmg$", re.I)),
     ("windows-x86_64", re.compile(r"^.*_x64.*\.msi$", re.I)),
     ("windows-arm64", re.compile(r"^.*(aarch64|arm64).*\.msi$", re.I)),
     # tauri 用 rust target 的 arch 命名安装包：aarch64→arm64、armv7→arm、i686→x86
-    ("android-arm64-v8a", re.compile(r"^app-arm64-release\.apk$", re.I)),
-    ("android-armeabi-v7a", re.compile(r"^app-arm-release\.apk$", re.I)),
-    ("android-x86_64", re.compile(r"^app-x86_64-release\.apk$", re.I)),
-    ("android-x86", re.compile(r"^app-x86-release\.apk$", re.I)),
+    ("android-arm64-v8a", re.compile(r"^app-arm64-release.*\.apk$", re.I)),
+    ("android-armeabi-v7a", re.compile(r"^app-arm-release.*\.apk$", re.I)),
+    ("android-x86_64", re.compile(r"^app-x86_64-release.*\.apk$", re.I)),
+    ("android-x86", re.compile(r"^app-x86-release.*\.apk$", re.I)),
 ]
 
 # 官方 updater 的平台键（tauri 的 target triple 简写）→ 更新包匹配规则
 UPDATER_TARGET_RULES: list[tuple[str, re.Pattern[str]]] = [
-    # 注意：macOS 的 .app.tar.gz 文件名里没有架构标记（如 "EXVlan Studio.app.tar.gz"），
-    # 只能由调用方用 --macos-arch 指定，这里用占位符 {macos_arch}。
-    ("darwin-{macos_arch}", re.compile(r"^.*\.app\.tar\.gz$", re.I)),
+    # macOS 的 .app.tar.gz 在 UPDATER 规则里单独处理（见 macos_updater_rules）：
+    # 文件名里没有架构标记（如 "EXVlan Studio.app.tar.gz"），只能靠 --macos-arch 指定。
     ("windows-x86_64", re.compile(r"^.*_x64.*setup\.exe$", re.I)),
     ("windows-arm64", re.compile(r"^.*(aarch64|arm64).*setup\.exe$", re.I)),
     ("linux-x86_64", re.compile(r"^.*_amd64.*\.AppImage$", re.I)),
@@ -67,7 +68,26 @@ UPDATER_TARGET_RULES: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+def macos_updater_rules(arches: list[str]) -> list[tuple[str, re.Pattern[str]]]:
+    """每个 macOS 架构一条 updater 规则。
+
+    单架构（正式发版）：沿用原来的宽松匹配（产物名可能是
+    `EXVlan Studio.app.tar.gz`，由下面的改名步骤补上版本与架构）。
+
+    多架构（nightly 的 x86_64 + aarch64）：两个包原始名完全同名，不能共存于同一
+    目录，所以调用方必须已经把架构写进文件名；这里按 `<分隔符><arch>.app.tar.gz`
+    精确匹配，避免两个架构抢同一个文件。
+    """
+    if len(arches) == 1:
+        return [(f"darwin-{arches[0]}", re.compile(r"^.*\.app\.tar\.gz$", re.I))]
+    return [
+        (f"darwin-{arch}", re.compile(rf"^.*[_.-]{re.escape(arch)}\.app\.tar\.gz$", re.I))
+        for arch in arches
+    ]
+
+
 def sha256(path: pathlib.Path) -> str:
+
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
@@ -105,13 +125,18 @@ def main() -> int:
     )
     parser.add_argument(
         "--macos-arch",
-        default="x86_64",
+        action="append",
+        default=None,
         choices=["x86_64", "aarch64"],
-        help="macOS 更新包对应的架构（产物名里没有架构标记，需显式给出）",
+        help=(
+            "macOS 更新包对应的架构（产物名里没有架构标记，需显式给出）；"
+            "可重复传入以在同一轮里支持多架构（nightly = x86_64 + aarch64）"
+        ),
     )
     args = parser.parse_args()
 
     version = args.version.lstrip("v")
+    macos_arches: list[str] = args.macos_arch or ["x86_64"]
     base_url = args.base_url if args.base_url.endswith("/") else args.base_url + "/"
     files = sorted(p for p in args.assets_dir.iterdir() if p.is_file())
 
@@ -129,18 +154,21 @@ def main() -> int:
 
     # macOS 的 updater 产物默认叫 "EXVlan Studio.app.tar.gz"（不含版本号）。
     # 镜像对 .gz 用了 immutable 缓存，同名覆盖会让客户端拿到旧包 —— 这里补上版本与架构。
-    for path in list(files):
-        if not path.is_file():
-            continue
-        if not path.name.lower().endswith(".app.tar.gz") or version in path.name:
-            continue
-        stem = path.name[: -len(".app.tar.gz")]
-        target = path.with_name(f"{stem}_{version}_{args.macos_arch}.app.tar.gz")
-        path.rename(target)
-        if path.with_name(path.name + ".sig").is_file():
-            path.with_name(path.name + ".sig").rename(target.with_name(target.name + ".sig"))
-        print(f"[upgrade] 重命名 macOS 更新包：{path.name} -> {target.name}")
-    files = sorted(p for p in args.assets_dir.iterdir() if p.is_file())
+    # 多架构时两个包原始名同名、无法共存，调用方必须已经按架构改好名字
+    # （script/ci/nightly-assets.sh），这里不再改名。
+    if len(macos_arches) == 1:
+        for path in list(files):
+            if not path.is_file():
+                continue
+            if not path.name.lower().endswith(".app.tar.gz") or version in path.name:
+                continue
+            stem = path.name[: -len(".app.tar.gz")]
+            target = path.with_name(f"{stem}_{version}_{macos_arches[0]}.app.tar.gz")
+            path.rename(target)
+            if path.with_name(path.name + ".sig").is_file():
+                path.with_name(path.name + ".sig").rename(target.with_name(target.name + ".sig"))
+            print(f"[upgrade] 重命名 macOS 更新包：{path.name} -> {target.name}")
+        files = sorted(p for p in args.assets_dir.iterdir() if p.is_file())
 
     # ---- 自建 manifest ----
     assets: dict[str, dict[str, str]] = {}
@@ -161,8 +189,7 @@ def main() -> int:
     # ---- 官方 updater latest.json ----
     platforms: dict[str, dict[str, str]] = {}
     missing_sig: list[str] = []
-    for target, pattern in UPDATER_TARGET_RULES:
-        target = target.format(macos_arch=args.macos_arch)
+    for target, pattern in macos_updater_rules(macos_arches) + UPDATER_TARGET_RULES:
         hit = find_one(files, pattern)
         if hit is None:
             continue

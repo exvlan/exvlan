@@ -32,13 +32,15 @@ git commit -m "feat: <批次描述>（压缩 <a>..<b>）"
 
 - **唯一入口**：`.github/workflows/pipeline.yml`。**所有** CI 都经其依赖链编排；其余工作流（`test/core/studio/mobile/docker/release/go/js/nix/ohos`）一律**只保留 `workflow_call`(+`workflow_dispatch`)**，不得自带 `on: push/pull_request/tags`。
 - **门控矩阵**：
-  | 事件                  | tests | core                            | studio/mobile/docker | go/js/nix/ohos     | audit          | release |
-  | --------------------- | ----- | ------------------------------- | -------------------- | ------------------ | -------------- | ------- |
-  | `feature` push        | ✓     | ✓（仅 linux-x86_64，无 magisk） | ✗                    | ✗                  | 按依赖路径门控 | ✗       |
-  | PR(develop/main)      | ✓     | ✓（全量）                       | ✗                    | ✗                  | ✓（全量）      | ✗       |
-  | `develop`/`main` push | ✓     | ✓（全量+magisk）                | ✓（必跑）            | 按路径门控         | 按依赖路径门控 | ✗       |
-  | tag `v*`              | ✓     | ✓（全量）                       | ✓                    | **全量**（绕门控） | ✓（全量）      | ✓       |
-  | `workflow_dispatch`   | ✓     | ✓（全量）                       | ✓                    | **全量**（绕门控） | ✓（全量）      | ✗       |
+  | 事件                  | tests | core                            | studio/mobile/docker                                | go/js/nix/ohos     | audit          | release                   |
+  | --------------------- | ----- | ------------------------------- | --------------------------------------------------- | ------------------ | -------------- | ------------------------- |
+  | `feature` push        | ✓     | ✓（仅 linux-x86_64，无 magisk） | ✗                                                   | ✗                  | 按依赖路径门控 | ✗                         |
+  | PR(develop/main)      | ✓     | ✓（全量）                       | ✗                                                   | ✗                  | ✓（全量）      | ✗                         |
+  | `develop`/`main` push | ✓     | ✓（全量+magisk）                | ✓（必跑）                                           | 按路径门控         | 按依赖路径门控 | ✗                         |
+  | tag `v*`              | ✓     | ✓（全量）                       | ✓                                                   | **全量**（绕门控） | ✓（全量）      | ✓                         |
+  | `workflow_dispatch`   | ✓     | ✓（全量）                       | ✓                                                   | **全量**（绕门控） | ✓（全量）      | ✗                         |
+  | `schedule` nightly    | ✗     | ✓（6 个镜像平台，无 magisk）    | ✓（仅 mac x86_64/aarch64 + win x86_64 + arm64 APK） | ✗                  | ✗              | ✗（走 `nightly_release`） |
+- **nightly（每天 21:00 UTC / 北京 05:00）**：`schedule` 第二条 cron，由 `changes` 作业输出的 `nightly` 布尔门控（`github.event.schedule == '0 21 * * *'`），其余作业在该 schedule 下全部跳过（周一审计那条 cron 反向排除 nightly）。版本串 = `base 的 patch+1` + `-nightly.<MMDD 北京时间>`（`script/ci/nightly-version.sh`，跨年直接失败要求升 base），经 `EXVLAN_BUILD_VERSION_OVERRIDE` 注入 `core/studio/mobile`；产物只发「最小可自更新集」（6 平台内核 + mac/win updater 包 + arm64 APK + 三个清单），不跑 SignPath/公证；发布用**固定 tag `nightly`**（强推）的单个 release **原地覆盖**（`gh release upload --clobber`），发布前先跑 `script/ci/nightly-smoke.sh`（签名/sha256/`--version`），失败则不发且只在本轮失败时推飞书。
 - **依赖审计门禁**：`audit.yml` 跑 `cargo audit` + `pnpm audit --prod`（root 与 sdk）；允许清单 `.cargo/audit.toml`，元数据 `.cargo/audit-allowlist.toml`（`review_by` 到期即 CI 失败，由 `script/check_audit_allowlist.py` 校验）。清单外的新漏洞直接红灯。另有**每周一 03:00 UTC** 定时（`pipeline.yml` 的 `schedule`）：只跑 `audit` 与 `upstream_watch`（对比 EasyTier 最新 release 与本地 `v2.*` tag，有新版本自动开 issue），其余作业均排除。
 - **不因内容重复跳过构建**：`core/test/mobile` 的 `should_skip` 仅由 PR 路径门控决定（`fkirc/skip-duplicate-actions` 的输出不再影响构建；其 `cancel_others` 仍用于取消被取代的运行）。原因：下游 `docker`/`release` 依赖本轮 `core` 的产物，跳过会导致取不到。
 - **发版产物经 Actions artifact 传递**（`core-*`/`studio-*`/`mobile-*`/`magisk` 前缀上传；`release.yml` 用 `download-artifact` 的 `pattern` 精确拉取）。不用 `actions/cache`（10GB 配额 LRU 驱逐不可靠），也不用全量 `download-artifact`（buildx 产生的 `<owner>~<repo>~*.dockerbuild` 名字含 `~`，会导致解压失败）。

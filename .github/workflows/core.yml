@@ -18,6 +18,12 @@ on:
           `core-<ref>` 组互相取消（实测整条 pipeline 被标记 cancelled）。
         type: string
         default: "all"
+      build_version:
+        description: >-
+          版本串覆盖（nightly 用固定 tag `nightly`，无法从 ref 推导版本）。
+          留空 = 沿用 `script/ci/build-version.sh` 的默认规则（tag 名 / tauri.conf.json 基线）。
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       targets:
@@ -32,6 +38,10 @@ on:
         description: "concurrency 组判别符（见 workflow_call 中的说明）"
         type: string
         default: "all"
+      build_version:
+        description: "版本串覆盖（留空 = 默认规则）"
+        type: string
+        default: ""
 
 concurrency:
   # variant 用来区分「同一 run 内的多次调用」；不同 ref 之间仍然互相取代。
@@ -134,6 +144,8 @@ jobs:
       NAME: exvlan
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
+      # nightly 等"版本不由 ref 决定"的构建从这里注入（空值 = 默认规则）
+      EXVLAN_BUILD_VERSION_OVERRIDE: ${{ inputs.build_version }}
     needs:
       - pre_job
       - prepare_matrix

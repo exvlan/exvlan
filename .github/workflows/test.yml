@@ -91,6 +91,11 @@ jobs:
       - name: Check silent errors
         run: python3 script/ci/check-silent-error.py
 
+      # nightly 版本串（base patch +1 + `-nightly.MMDD`）与跨年守卫的单测：
+      # 版本串算错会把 nightly 顶到正式版之上，必须在这里就拦住。
+      - name: Check nightly version script
+        run: bash script/ci/tests/test_nightly_version.sh
+
       # 契约一致：gateway 的每条路由都必须登记在 /system.manifest
       - name: Check api parity
         run: python3 script/ci/check-api-parity.py

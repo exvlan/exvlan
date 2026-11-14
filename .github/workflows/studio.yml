@@ -13,6 +13,12 @@ on:
           复用桌面内核产物（纯前端改动时用，省掉 12 个内核 target 的构建）。
         type: string
         default: "false"
+      build_version:
+        description: >-
+          版本串覆盖（nightly 用固定 tag `nightly`，无法从 ref 推导版本）。
+          留空 = 沿用 `script/ci/build-version.sh` 的默认规则。
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       targets:
@@ -21,6 +27,9 @@ on:
       kernel_from_previous:
         description: "从最近一次成功运行复用内核产物（true/false）"
         default: "false"
+      build_version:
+        description: "版本串覆盖（留空 = 默认规则）"
+        default: ""
 
 permissions:
   contents: read
@@ -68,12 +77,19 @@ jobs:
             {"TARGET": "x86_64-pc-windows-msvc", "OS": "windows-latest", "GUI_TARGET": "x86_64-pc-windows-msvc", "ARTIFACT_NAME": "windows-x86_64"},
           ]
 
+          # 只有调用方**显式点名**才构建的额外目标（不在 "all" 里）：
+          # macOS aarch64 目前只服务 nightly（最小自更新集），正式发版的产物集
+          # 保持「mac x86_64 + win x86_64」不变。
+          EXTRA = [
+            {"TARGET": "aarch64-apple-darwin", "OS": "macos-latest", "GUI_TARGET": "aarch64-apple-darwin", "ARTIFACT_NAME": "macos-aarch64"},
+          ]
+
           selected = sys.argv[1]
           if selected == "all":
               result = ALL
           else:
               wanted = set(json.loads(selected))
-              result = [e for e in ALL if e["TARGET"] in wanted]
+              result = [e for e in ALL + EXTRA if e["TARGET"] in wanted]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write("include=" + json.dumps(result) + "\n")
           print(json.dumps(result))
@@ -97,6 +113,8 @@ jobs:
       # `BUNDLE_MIGRATE=0`（不需要改代码/改断言）即可停止随包；
       # 未设置时默认 1，保持当前行为。
       BUNDLE_MIGRATE: ${{ vars.BUNDLE_MIGRATE || '1' }}
+      # nightly 等「版本不由 ref 决定」的构建从这里注入（空值 = 默认规则）
+      EXVLAN_BUILD_VERSION_OVERRIDE: ${{ inputs.build_version }}
     needs: [pre_job, prepare_matrix]
     if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     steps:

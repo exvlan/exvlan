@@ -97,7 +97,9 @@ for p in $PLATFORMS; do
 done
 patterns+=(-p 'manifest.json')
 # 应用更新：安装包 + 官方 updater 产物（.app.tar.gz / setup.exe / .sig）+ 清单
-patterns+=(-p '*.dmg' -p '*.msi' -p '*-setup.exe' -p 'app-*-release.apk')
+# APK 文件名允许带版本后缀（nightly 会写 `app-arm64-release-<ver>.apk`：
+# 镜像对 .apk 是 immutable 缓存，同名覆盖会让客户端永远拿到旧包）。
+patterns+=(-p '*.dmg' -p '*.msi' -p '*-setup.exe' -p 'app-*-release*.apk')
 patterns+=(-p '*.app.tar.gz' -p '*.sig')
 patterns+=(-p 'upgrade-manifest.json' -p 'upgrade-latest.json')
 # Magisk 在线更新：模块包 + 清单（module.prop 的 updateJson 指向镜像）
@@ -580,7 +582,7 @@ publish_app() {
       asset="$(basename "$f")"
       case "$asset" in
         *.json) continue ;;
-        *.dmg|*.msi|*-setup.exe|app-*-release.apk|*.app.tar.gz|*.sig|Exvlan-Magisk-*.zip)
+        *.dmg|*.msi|*-setup.exe|app-*-release*.apk|*.app.tar.gz|*.sig|Exvlan-Magisk-*.zip)
           cp -f "$f" "$stage/"
           copied=$((copied + 1))
           ;;
