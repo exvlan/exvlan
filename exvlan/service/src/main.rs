@@ -4463,21 +4463,18 @@ fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
     let _ = write_version_file(p);
     let _ = write_owner_file(p, uid);
 
+    // 只覆盖「安装动作真正决定」的字段，其余**整体沿用**旧配置：
+    // 用 `..load_config(p)` 而不是逐字段列举，避免以后新增字段时这里漏写
+    // （dev.1 就漏了 `update`，而 Linux 上 cfg 门控让本地 check 抓不到）。
     let cfg = ServiceConfig {
         owner_uid: uid,
-        policy: load_config(p).policy,
-        // 重装时保留用户手工追加的网段，不要静默清空。
-        rpc_extra_whitelist: load_config(p).rpc_extra_whitelist,
         // macOS 不用 SID（socket 0600 + peercred），传了也保留原值。
         owner_sid: if sid.is_empty() {
             load_config(p).owner_sid
         } else {
             sid.to_string()
         },
-        // 重装保留用户显式配置的绑定地址与白名单开关（默认回环/关闭）。
-        rpc_portal: load_config(p).rpc_portal,
-        rpc_mesh_whitelist: load_config(p).rpc_mesh_whitelist,
-        gateway: load_config(p).gateway,
+        ..load_config(p)
     };
     save_config(p, &cfg)?;
 
@@ -4565,19 +4562,15 @@ fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
     //    `--diagnose` 只能显示默认值）。
     // 管道 DACL 要收窄到「安装者本人」，所以必须在安装时把 SID 记下来：
     // 服务以 LocalSystem 运行，事后无法推断是哪个用户点的安装。
+    // 同 macOS：只覆盖安装动作决定的字段，其余整体沿用旧配置。
     let cfg = ServiceConfig {
         owner_uid: 0,
-        policy: load_config(p).policy,
-        rpc_extra_whitelist: load_config(p).rpc_extra_whitelist,
         owner_sid: if sid.is_empty() {
             load_config(p).owner_sid
         } else {
             sid.to_string()
         },
-        // 重装保留用户显式配置的绑定地址与白名单开关。
-        rpc_portal: load_config(p).rpc_portal,
-        rpc_mesh_whitelist: load_config(p).rpc_mesh_whitelist,
-        gateway: load_config(p).gateway,
+        ..load_config(p)
     };
     save_config(p, &cfg)?;
 
