@@ -4,12 +4,12 @@
 #
 # 规则（见 README_CN.md「年份版本规范」）：
 #   <标准版本>[-<channel>.<n>][+<sha6>]
-#   · tag `v26.410.20712-pre.8` → `26.410.20712-pre.8+abc123`
-#   · 分支构建                 → `26.410.20712+abc123`
+#   · tag `v26.410.20713-pre.8` → `26.410.20713-pre.8+abc123`
+#   · 分支构建                 → `26.410.20713+abc123`
 #
 # 用法：
 #   bash script/ci/build-version.sh            # 版本基线取自 tauri.conf.json
-#   bash script/ci/build-version.sh 26.410.20712
+#   bash script/ci/build-version.sh 26.410.20713
 #
 # 在 GitHub Actions 中会把结果写入 `$GITHUB_ENV`，本地执行则直接打印。
 

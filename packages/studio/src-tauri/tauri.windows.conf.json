@@ -1,5 +1,5 @@
 {
-  "version": "26.410.20712",
+  "version": "26.410.20713",
   "bundle": {
     "externalBin": [],
     "resources": [
@@ -15,7 +15,7 @@
         "type": "embedBootstrapper"
       },
       "wix": {
-        "version": "26.104.207.12"
+        "version": "26.104.20713.50013"
       }
     }
   }

@@ -597,6 +597,11 @@ port = 2016
 
 中间不再发「只改了一半」的预览版本。
 
+**dev.1 发布记录（2026-11-14）**：标准版本对齐到 `26.410.20713`，tag
+`v26.410.20713-dev.1`。对齐由 `script/ci/set-version.sh` 一次性完成（Rust 清单 +
+`Cargo.lock` + 前端/SDK 嵌套 workspace + Tauri + magisk `versionCode`），
+`grep` 自检只允许旧版本号留在文档与版本排序/内核镜像夹具里。
+
 ### 14.13 镜像通道化（dev.1）
 
 **布局**（资产与清单同目录，manifest 里 `file` 用相对名，客户端拼 `<base><channel>/<file>`）

@@ -14,8 +14,8 @@ pub const WIN_SERVICE_WORK_DIR_REG_KEY: &str = "SOFTWARE\\Exvlan\\Service\\WorkD
 /// 内核版本串：`<标准版本>[-<channel>.<n>][+<sha6>]`。
 ///
 /// 由 `build/main.rs` 注入 `EXVLAN_BUILD_VERSION`：
-/// - CI（tag）：`26.410.20712-pre.8+abc123`
-/// - 本地构建：`26.410.20712+abc123`
+/// - CI（tag）：`26.410.20713-pre.8+abc123`
+/// - 本地构建：`26.410.20713+abc123`
 ///
 /// 旧实现用 `git_version!` + `git describe`，在有 `v*` tag 的工作区会返回
 /// tag 名再被前缀拼接，产出 `26.410.20711-v26.410.20711` 这类重复串；

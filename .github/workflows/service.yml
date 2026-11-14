@@ -10,7 +10,7 @@ name: Service Standalone
 #
 # 用法：
 #   gh workflow run service.yml --ref develop \
-#     -f version=26.410.20712-pre.13+c5ac59
+#     -f version=26.410.20713-pre.13+c5ac59
 # 传入与已装 App 完全一致的版本串，产物装好后 GUI 不会触发 `service.update`，
 # 可以直接观察 install / 命名管道 / 内核拉起 这条真实路径。
 

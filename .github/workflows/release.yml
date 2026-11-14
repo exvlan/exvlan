@@ -11,7 +11,7 @@ on:
       version:
         description: "Version for this release"
         type: string
-        default: "v26.410.20712"
+        default: "v26.410.20713"
         required: true
       make_latest:
         description: "Mark this release as latest"
@@ -121,7 +121,7 @@ jobs:
           # 预览版：安装包文件名带上完整版本串（含 -pre.N），
           # 避免与正式版同名被误下载；正式版（tag 无 '-'）跳过。
           if [[ "$VERSION" == *-* ]]; then
-            # tag 带 v 前缀（v26.410.20712-pre.9），文件名里没有
+            # tag 带 v 前缀（v26.410.20713-pre.9），文件名里没有
             ver="${VERSION#v}"
             base="${ver%%-*}"
             pre="${ver#*-}"
@@ -228,7 +228,7 @@ jobs:
         with:
           name: ${{ inputs.version }}
           draft: false
-          # 预览标签（含 `-`，如 v26.410.20712-pre.8）标记为 prerelease 且不抢占 latest
+          # 预览标签（含 `-`，如 v26.410.20713-pre.8）标记为 prerelease 且不抢占 latest
           prerelease: ${{ contains(inputs.version, '-') }}
           make_latest: ${{ !contains(inputs.version, '-') }}
           generate_release_notes: false

@@ -13,7 +13,7 @@
     "resources": ["resources/kernel/*", "resources/service/*", "resources/tools/*"]
   },
   "productName": "EXVlan Studio",
-  "version": "26.410.20712",
+  "version": "26.410.20713",
   "identifier": "era.exvlan.studio",
   "plugins": {
     "shell": {

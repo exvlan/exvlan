@@ -106,8 +106,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// 构建版本串：`<标准版本>[-<channel>.<n>][+<sha6>]`。
 ///
-/// CI 通过 `EXVLAN_BUILD_VERSION` 注入（tag `v26.410.20712-pre.8` →
-/// `26.410.20712-pre.8+abc123`）；本地构建回落到
+/// CI 通过 `EXVLAN_BUILD_VERSION` 注入（tag `v26.410.20713-pre.8` →
+/// `26.410.20713-pre.8+abc123`）；本地构建回落到
 /// `<CARGO_PKG_VERSION>+<git short sha 6>`。
 ///
 /// 刻意不使用 `git describe`：仓库里存在 `v*` tag 时它返回 tag 名，
