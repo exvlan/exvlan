@@ -2,6 +2,18 @@
 
 这是 Exvlan 的 Android JNI 绑定库，允许 Android 应用程序调用 Exvlan 的网络功能。
 
+> ## ⚠️ 别照抄这里的 Kotlin
+>
+> `kotlin/**` 下的 `*.t.kt` 是**示例模板**，**不参与 EXVlan Studio 的 APK 构建**：
+> 本目录没有 gradle 工程，`build.rs` 也不产出 `cargo:android_library_path` 元数据，
+> `tauri-build` 不会把它接进 `gen/android` 的源集。Studio 实际编译的是
+> `exvlan/plugin/vpnservice/android/src/main/java/TauriVpnService.kt`。
+>
+> **尤其是 `EraXVlanVpnService.t.kt` 里那句 `addDisallowedApplication("<自家包名>")` —— 不要照抄。**
+> 把应用自身排除在 VPN 之外，会让它发往 mesh 地址的请求绕过 tun 直接走物理网卡，
+> 远端访问/配对（R2）因此不可达。正确做法是**不把自身包放进 `disallowedApplications`**
+> （见 `packages/studio/src/composables/mobile_vpn.ts` 的注释）。
+
 ## 功能特性
 
 - 🚀 完整的 Exvlan FFI 接口封装
@@ -29,6 +41,7 @@
 ### 环境设置
 
 1. **安装 Rust**
+
    ```bash
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    source ~/.cargo/env
@@ -53,11 +66,13 @@
 ## 构建步骤
 
 1. **克隆项目并进入目录**
+
    ```bash
    cd /path/to/Exvlan/exvlan/contrib/android-jni
    ```
 
 2. **运行构建脚本**
+
    ```bash
    ./build.sh
    ```
@@ -121,14 +136,14 @@ import com.exvlan.jni.EraXVlanJNI;
 import java.util.Map;
 
 public class EraXVlanManager {
-    
+
     // 初始化网络实例
     public void startNetwork() {
         String config = """
             inst_name = "my_instance"
             network = "my_network"
-            """; 
-        
+            """;
+
         try {
             // 解析配置
             int result = EraXVlanJNI.parseConfig(config);
@@ -136,21 +151,21 @@ public class EraXVlanManager {
                 String error = EraXVlanJNI.getLastError();
                 throw new RuntimeException("配置解析失败: " + error);
             }
-            
+
             // 启动网络实例
             result = EraXVlanJNI.runNetworkInstance(config);
             if (result != 0) {
                 String error = EraXVlanJNI.getLastError();
                 throw new RuntimeException("网络实例启动失败: " + error);
             }
-            
+
             System.out.println("Exvlan 网络实例启动成功");
-            
+
         } catch (RuntimeException e) {
             System.err.println("启动失败: " + e.getMessage());
         }
     }
-    
+
     // 获取网络信息
     public void getNetworkInfo() {
         try {
@@ -162,7 +177,7 @@ public class EraXVlanManager {
             System.err.println("获取网络信息失败: " + e.getMessage());
         }
     }
-    
+
     // 停止所有实例
     public void stopNetwork() {
         try {
@@ -197,15 +212,15 @@ String response = ExvlanJNI.callJsonRpc(
 
 ```java
 public class EraXVlanVpnService extends VpnService {
-    
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         // 建立 VPN 连接
         ParcelFileDescriptor vpnInterface = establishVpnInterface();
-        
+
         if (vpnInterface != null) {
             int fd = vpnInterface.getFd();
-            
+
             // 设置 TUN 文件描述符
             try {
                 EraXVlanJNI.setTunFd("my_instance", fd);
@@ -213,17 +228,17 @@ public class EraXVlanVpnService extends VpnService {
                 Log.e("Exvlan", "设置 TUN FD 失败", e);
             }
         }
-        
+
         return START_STICKY;
     }
-    
+
     private ParcelFileDescriptor establishVpnInterface() {
         Builder builder = new Builder();
         builder.setMtu(1500);
         builder.addAddress("10.0.0.2", 24);
         builder.addRoute("0.0.0.0", 0);
         builder.setSession("Exvlan VPN");
-        
+
         return builder.establish();
     }
 }
@@ -233,17 +248,17 @@ public class EraXVlanVpnService extends VpnService {
 
 ### EraXVlanJNI 类方法
 
-| 方法 | 描述 | 参数 | 返回值 |
-|------|------|------|--------|
-| `parseConfig(String config)` | 解析 TOML 配置 | config: 配置字符串 | 0=成功, -1=失败 |
-| `runNetworkInstance(String config)` | 启动网络实例 | config: 配置字符串 | 0=成功, -1=失败 |
-| `setTunFd(String instanceName, int fd)` | 设置 TUN 文件描述符 | instanceName: 实例名, fd: 文件描述符 | 0=成功, -1=失败 |
-| `retainNetworkInstance(String[] names)` | 保留指定实例 | names: 实例名数组 | 0=成功, -1=失败 |
-| `collectNetworkInfos(int maxLength)` | 收集网络信息 | maxLength: 最大条目数 | 信息字符串数组 |
-| `collectNetworkInfosAsMap(int maxLength)` | 收集网络信息为 Map | maxLength: 最大条目数 | Map<String, String> |
-| `getLastError()` | 获取最后错误 | 无 | 错误消息字符串 |
-| `stopAllInstances()` | 停止所有实例 | 无 | 0=成功, -1=失败 |
-| `retainSingleInstance(String name)` | 保留单个实例 | name: 实例名 | 0=成功, -1=失败 |
+| 方法                                      | 描述                | 参数                                 | 返回值              |
+| ----------------------------------------- | ------------------- | ------------------------------------ | ------------------- |
+| `parseConfig(String config)`              | 解析 TOML 配置      | config: 配置字符串                   | 0=成功, -1=失败     |
+| `runNetworkInstance(String config)`       | 启动网络实例        | config: 配置字符串                   | 0=成功, -1=失败     |
+| `setTunFd(String instanceName, int fd)`   | 设置 TUN 文件描述符 | instanceName: 实例名, fd: 文件描述符 | 0=成功, -1=失败     |
+| `retainNetworkInstance(String[] names)`   | 保留指定实例        | names: 实例名数组                    | 0=成功, -1=失败     |
+| `collectNetworkInfos(int maxLength)`      | 收集网络信息        | maxLength: 最大条目数                | 信息字符串数组      |
+| `collectNetworkInfosAsMap(int maxLength)` | 收集网络信息为 Map  | maxLength: 最大条目数                | Map<String, String> |
+| `getLastError()`                          | 获取最后错误        | 无                                   | 错误消息字符串      |
+| `stopAllInstances()`                      | 停止所有实例        | 无                                   | 0=成功, -1=失败     |
+| `retainSingleInstance(String name)`       | 保留单个实例        | name: 实例名                         | 0=成功, -1=失败     |
 
 ## 故障排除
 

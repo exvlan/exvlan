@@ -692,3 +692,13 @@ dev.1 发布后在 Windows / macOS / Android 三端真机取证，以下几点�
 **删除时机**：migrate 扩容合入并验证通过后，**同一个 dev.2 内**删完全部运行时兼容代码
 （前端 `migrateLegacyMode`、`prefs.rs::migrate_legacy`、`paths::stale_paths`、`networks/legacy.rs` 等），
 不留两套并存到下个版本。
+
+**落地口径（dev.2）**
+
+| 项                    | 结论                                                                                                                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BUNDLE_MIGRATE`      | **保持 `1`**：dev.2 仍随包分发 `exvlan-migrate`、GUI 仍弹迁移闸门。从任意旧版本直跳 dev.2 的用户仍有人兜住旧数据；退役推迟到 dev.3                         |
+| 移动端接入            | 把 `exvlan/migrate` 拆成 **lib + bin**，lib 经**现有 `exvlan_ffi`** 暴露入口（不新增构建产物、不做 tauri plugin），App 首启调用一次                        |
+| 死模板                | `exvlan/contrib/android-jni/kotlin/**.t.kt` **保留**，在 `README.md` 顶部加醒目警示（不进 APK + 勿照抄「排除自身包」）；路径映射上游，删除只会增加合并摩擦 |
+| `service.toml` 旧字段 | 先由 migrate 把 `mode` → `policy`、`service                                                                                                                | normal | off`→`resident | session | stopped`归一，**再**删运行时 serde 别名（否则老配置会静默回落`resident`） |
+| 推送节奏              | **一个 dev.2，分两批 push**：①已合修复 + NSIS 钩子；②migrate 扩容 + Android 版 + 删全部兼容。仍只打一个 tag，但出红时能二分到「修复」还是「迁移重构」      |
