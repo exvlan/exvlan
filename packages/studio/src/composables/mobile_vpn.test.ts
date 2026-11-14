@@ -24,7 +24,12 @@ const mocks = vi.hoisted(() => {
     listNetworkInstanceIds: vi.fn<() => Promise<{ running_inst_ids: unknown[] }>>(async () => ({
       running_inst_ids: [],
     })),
+    // 与 Node 测试环境一致：没有 Tauri 运行时时 osType() 会抛 "window is not defined"。
+    osType: vi.fn((): string => {
+      throw new ReferenceError("window is not defined");
+    }),
     prepareVpn: vi.fn(async () => ({ granted: true })),
+    reportFrontendError: vi.fn(async () => undefined),
     setTunFd: vi.fn(async () => undefined),
     startVpn: vi.fn(async () => {
       await listeners.get("vpn_service_start")?.({ fd: 1 });
@@ -49,6 +54,10 @@ vi.mock("@exvlan/std", () => ({
   },
 }));
 
+vi.mock("@tauri-apps/plugin-os", () => ({
+  type: mocks.osType,
+}));
+
 vi.mock("tauri-plugin-vpnservice-api", () => ({
   consume_vpn_tile_action: mocks.consumeVpnTileAction,
   get_vpn_status: mocks.getVpnStatus,
@@ -62,15 +71,16 @@ vi.mock("./backend", () => ({
   getConfig: mocks.getConfig,
   listNetworkInstanceIds: mocks.listNetworkInstanceIds,
   logVpnRoutes: mocks.logVpnRoutes,
+  reportFrontendError: mocks.reportFrontendError,
   setTunFd: mocks.setTunFd,
 }));
 
-function setConfig(instanceId: string, noTun = false) {
+function setConfig(instanceId: string, noTun = false, routes: string[] = []) {
   mocks.configs.set(instanceId, {
     no_tun: noTun,
     dhcp: false,
     enable_magic_dns: false,
-    routes: [],
+    routes,
   });
 }
 
@@ -107,7 +117,13 @@ beforeEach(() => {
   mocks.getVpnStatus.mockResolvedValue({ running: false });
   mocks.listNetworkInstanceIds.mockReset();
   mocks.listNetworkInstanceIds.mockResolvedValue({ running_inst_ids: [] });
+  // 保持基线：默认没有 Tauri 运行时，osType() 抛错；需要 Android 的用例自行 mockReturnValue。
+  mocks.osType.mockReset();
+  mocks.osType.mockImplementation(() => {
+    throw new ReferenceError("window is not defined");
+  });
   mocks.prepareVpn.mockClear();
+  mocks.reportFrontendError.mockClear();
   mocks.setTunFd.mockClear();
   mocks.startVpn.mockClear();
   mocks.stopVpn.mockClear();
@@ -339,5 +355,92 @@ describe("getRoutesForVpn", () => {
     );
 
     expect(routes).toEqual(["fd00:0:0:1::/64"]);
+  });
+});
+
+describe("Android global (default) route rejection", () => {
+  function useAndroid() {
+    mocks.osType.mockReturnValue("android");
+  }
+
+  it("rejects 0.0.0.0/0 on Android with an actionable error", async () => {
+    const vpn = await loadVpnModule();
+
+    expect(() =>
+      vpn.getRoutesForVpn([], { routes: ["0.0.0.0/0"] } as any, undefined, undefined, "android"),
+    ).toThrow(/不支持全局代理/);
+  });
+
+  it("rejects ::/0 and its non-canonical spellings on Android", async () => {
+    const vpn = await loadVpnModule();
+
+    for (const route of ["::/0", "0:0:0:0:0:0:0:0/0"]) {
+      expect(() =>
+        vpn.getRoutesForVpn([], { routes: [route] } as any, undefined, undefined, "android"),
+      ).toThrow(/不支持全局代理/);
+    }
+  });
+
+  it("rejects a default route advertised by a peer proxy_cidr on Android", async () => {
+    const vpn = await loadVpnModule();
+
+    expect(() =>
+      vpn.getRoutesForVpn(
+        [{ peer_id: 1, ipv4_addr: "10.254.1.2", proxy_cidrs: ["0.0.0.0/0"] }] as any,
+        {} as any,
+        undefined,
+        undefined,
+        "android",
+      ),
+    ).toThrow(/不支持全局代理/);
+  });
+
+  it("keeps 0.0.0.0/0 legal outside Android (desktop routes all traffic into the mesh)", async () => {
+    const vpn = await loadVpnModule();
+
+    const routes = vpn.getRoutesForVpn(
+      [],
+      { routes: ["0.0.0.0/0"] } as any,
+      undefined,
+      undefined,
+      "windows",
+    );
+
+    expect(routes).toEqual(["0.0.0.0/0"]);
+  });
+
+  it("does not hand 0.0.0.0/0 to start_vpn and surfaces the reason to the user", async () => {
+    useAndroid();
+    setConfig("A", false, ["0.0.0.0/0"]);
+    setReady("A", "10.0.0.1");
+    const vpn = await loadVpnModule();
+
+    await vpn.onNetworkInstanceChange("A");
+
+    expect(mocks.startVpn).not.toHaveBeenCalled();
+    expect(vpn.mobileVpnRouteError.value).toMatch(/不支持全局代理/);
+    expect(mocks.reportFrontendError).toHaveBeenCalledWith(
+      "fe:vpn-routes",
+      expect.stringContaining("不支持全局代理"),
+    );
+  });
+
+  it("starts the VPN once the global route is replaced with a concrete subnet", async () => {
+    useAndroid();
+    setConfig("A", false, ["0.0.0.0/0"]);
+    setReady("A", "10.0.0.1");
+    const vpn = await loadVpnModule();
+
+    await vpn.onNetworkInstanceChange("A");
+    expect(mocks.startVpn).not.toHaveBeenCalled();
+
+    setConfig("A", false, ["192.168.1.0/24"]);
+    await vpn.onNetworkInstanceUpdate("A");
+
+    expect(mocks.startVpn).toHaveBeenCalledTimes(1);
+    expect(mocks.startVpn).toHaveBeenCalledWith(
+      expect.objectContaining({ routes: expect.arrayContaining(["192.168.1.0/24"]) }),
+    );
+    expect(vpn.mobileVpnRouteError.value).toBeNull();
   });
 });

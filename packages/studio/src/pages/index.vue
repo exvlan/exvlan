@@ -12,6 +12,7 @@ import {
   consumePendingMobileVpnTileAction,
   initMobileVpnService,
   mobileVpnPermissionDenied,
+  mobileVpnRouteError,
   mobileVpnRunning,
   mobileVpnSyncing,
   scheduleVpnAutoSync,
@@ -492,7 +493,8 @@ const showVpnNotRunningBanner = computed(
   () =>
     isMobileDevice.value &&
     runningInstances.value.length > 0 &&
-    !mobileVpnRunning.value &&
+    // 路由被拒绝时即使旧隧道还在跑也要提示，否则用户只在日志里看到原因。
+    (!!mobileVpnRouteError.value || !mobileVpnRunning.value) &&
     !vpnBannerDismissed.value,
 );
 
@@ -1468,12 +1470,16 @@ const configServerConnectionStatus = computed(() => {
       class="flex items-center gap-2 border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
     >
       <i class="pi pi-exclamation-circle" />
-      <span class="flex-1">{{
+      <span v-if="mobileVpnRouteError" class="flex-1 break-all">
+        {{ mobileVpnRouteError }}
+      </span>
+      <span v-else class="flex-1">{{
         mobileVpnPermissionDenied
           ? t("settings.vpn_need_permission")
           : t("settings.vpn_not_connected_hint")
       }}</span>
       <Button
+        v-if="!mobileVpnRouteError"
         size="small"
         :label="t('settings.vpn_start_now')"
         icon="pi pi-play"

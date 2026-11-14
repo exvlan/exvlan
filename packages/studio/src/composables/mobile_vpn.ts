@@ -16,6 +16,7 @@ import {
   listNetworkInstanceIds,
   logDiagStep,
   logVpnRoutes,
+  reportFrontendError,
   setTunFd,
 } from "./backend";
 
@@ -47,6 +48,8 @@ export const mobileVpnRunning = ref(false);
 export const mobileVpnSyncing = ref(false);
 /** 上次启动是否因为用户拒绝 VPN 授权而失败（横幅文案据此切换）。 */
 export const mobileVpnPermissionDenied = ref(false);
+/** 路由配置被拒绝的原因（如 Android 不支持默认路由）；横幅据此显示可操作提示。 */
+export const mobileVpnRouteError = ref<string | null>(null);
 
 const curVpnStatus: vpnStatus = {
   running: false,
@@ -169,6 +172,7 @@ function resetVpnConfigStatus() {
   curVpnStatus.ipv4Cidr = undefined;
   curVpnStatus.routes = [];
   curVpnStatus.dns = undefined;
+  mobileVpnRouteError.value = null;
 }
 
 function syncVpnStatusFromNative(status: Awaited<ReturnType<typeof get_vpn_status>>) {
@@ -374,24 +378,65 @@ function normalizeCidr(value: unknown, fallbackPrefix = 32): string | null {
 }
 
 /**
+ * 判断规范化后的 CIDR 是否是默认路由（全部流量）。
+ *
+ * IPv4 归一化后必然是 `0.0.0.0/0`；IPv6 侧 `normalizeCidr` 不做地址归一化，
+ * 所以只要前缀是 0 就等价于默认路由（`::/0`、`0:0:0:0:0:0:0:0/0` 等）。
+ */
+function isDefaultRouteCidr(cidr: string): boolean {
+  if (cidr === "0.0.0.0/0") {
+    return true;
+  }
+  const slash = cidr.lastIndexOf("/");
+  if (slash < 0) {
+    return false;
+  }
+  const addr = cidr.slice(0, slash);
+  return addr.includes(":") && Number.parseInt(cidr.slice(slash + 1), 10) === 0;
+}
+
+const ANDROID_GLOBAL_ROUTE_ERROR =
+  "Android 版不支持全局代理（默认路由 0.0.0.0/0 或 ::/0）：VpnService 会把内核自身到 " +
+  "peer 公网 endpoint 的加密 UDP 也拉进隧道，造成自环断网且无法自愈。" +
+  "请把 routes 改成具体网段（例如 192.168.1.0/24）后重试；桌面端不受此限制。";
+
+/** osType() 在无 Tauri 运行时（测试/Node 环境）会抛错，失败时按「非 Android」处理。 */
+function currentPlatform(): string {
+  try {
+    return osType();
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 计算要下发给 Android VpnService 的路由。
  *
  * 历史 bug：只取 `Route.proxy_cidrs`，完全忽略 `Route.ipv4_addr`，也没有本机虚拟网段，
  * 于是默认配置（proxy_cidrs 为空）下只会下发 magic DNS 的 /32，
  * 手机根本不把 peer 流量送进隧道 → 表现为「组网失败」。
+ *
+ * Android 侧是唯一禁止默认路由的地方：桌面端把 0.0.0.0/0 导进 mesh 是合法用法。
  */
 export function getRoutesForVpn(
   routes: Route[] | undefined,
   node_config: NetworkTypes.NetworkConfig,
   selfIp?: string | null,
   selfPrefix?: number,
+  platform?: string,
 ): string[] {
   const out = new Set<string>();
   const skipped: string[] = [];
+  const rejectGlobalRoute = platform === "android";
 
   const push = (value: unknown, fallbackPrefix = 32) => {
     const cidr = normalizeCidr(value, fallbackPrefix);
     if (cidr) {
+      // 桌面端合法，但 Android 不能用：本仓没有向内核暴露 VpnService.protect()，
+      // 内核到 peer 公网 endpoint 的加密 UDP 会被自己的 tun 抢走 → 自环/黑洞、整机断网。
+      if (rejectGlobalRoute && isDefaultRouteCidr(cidr)) {
+        throw new Error(`${ANDROID_GLOBAL_ROUTE_ERROR}（当前 = ${cidr}）`);
+      }
       out.add(cidr);
     } else if (value !== undefined && value !== null && String(value).trim() !== "") {
       skipped.push(String(value));
@@ -534,7 +579,25 @@ async function reconcileNetworkInstance(instanceId: string, generation: number) 
     network_length = 24;
   }
 
-  const routes = getRoutesForVpn(curNetworkInfo?.routes, config, virtual_ip, network_length);
+  let routes: string[];
+  try {
+    routes = getRoutesForVpn(
+      curNetworkInfo?.routes,
+      config,
+      virtual_ip,
+      network_length,
+      currentPlatform(),
+    );
+    mobileVpnRouteError.value = null;
+  } catch (e) {
+    // 默认路由（0.0.0.0/0 / ::/0）在 Android 上不能启用：保持现有（安全的）隧道不动，
+    // 把原因送到横幅 + error.log，而不是静默降级成一半的路由表。
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("vpn service routes rejected", instanceId, message);
+    mobileVpnRouteError.value = message;
+    void reportFrontendError("fe:vpn-routes", message).catch(() => {});
+    return;
+  }
 
   const dns = config.enable_magic_dns ? "100.100.100.101" : undefined;
 
