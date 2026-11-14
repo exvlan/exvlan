@@ -84,3 +84,43 @@ reason = "hickory-proto 0.25.2 DNSSEC 把无关的已签名 RRset 当作答案�
 id = "RUSTSEC-2026-0514"
 review_by = "2027-01-31"
 reason = "hickory-resolver 0.25.2 `lookup/lookup_ip` 会返回未通过 DNSSEC 校验的记录（仅 validate=true）；本仓不启用 DNSSEC。修复需 resolver>=0.26.2，但被 hickory-client 无稳定 0.26 阻塞。"
+
+# --- hickory-proto 0.25.2 的 NSEC/NSEC3 委派批次（2026-09-03 披露，无修复版本）---
+# 「子区把父区/区割处的 NSEC(3) 当作不存在证明」这一组，同属 DNSSEC 校验语义缺陷；
+# 本仓不启用 DNSSEC，实际只可能在 DNS 解析路径被恶意响应触发。
+# `cargo audit` 报「No fixed upgrade is available!」——等上游 / 仅在 DNS 解析路径。
+[[allow]]
+id = "RUSTSEC-2026-0530"
+review_by = "2027-02-12"
+reason = "hickory-proto 0.25.2 把区割处父侧 NSEC 当成不存在证明；无修复版本，等上游 / 仅在 DNS 解析路径（本仓不启用 DNSSEC）。"
+
+[[allow]]
+id = "RUSTSEC-2026-0531"
+review_by = "2027-02-12"
+reason = "hickory-proto 0.25.2 把子区侧 NSEC/NSEC3 当成「无 DS」证明；无修复版本，等上游 / 仅在 DNS 解析路径（本仓不启用 DNSSEC）。"
+
+[[allow]]
+id = "RUSTSEC-2026-0532"
+review_by = "2027-02-12"
+reason = "hickory-proto 0.25.2 把区割处父侧 NSEC3 当成不存在证明；无修复版本，等上游 / 仅在 DNS 解析路径（本仓不启用 DNSSEC）。"
+
+# --- unmaintained：停维护告警（无 CVE，`cargo audit` 仅作警告）---
+[[allow]]
+id = "RUSTSEC-2021-0153"
+review_by = "2027-02-12"
+reason = "encoding 0.2.33 已停维护；仅 `exvlan/src/utils/string.rs` 的 GBK 解码在用，无安全影响，待迁移到其它解码实现。"
+
+[[allow]]
+id = "RUSTSEC-2024-0436"
+review_by = "2027-02-12"
+reason = "paste 1.0.15 已停维护；exvlan / exvlan-rpc 的过程宏辅助用途，展开期无运行时攻击面，等上游换 pastey/替代品。"
+
+[[allow]]
+id = "RUSTSEC-2024-0370"
+review_by = "2027-02-12"
+reason = "proc-macro-error 1.0.4 已停维护；经 glib-macros 0.18.5 / gtk3-macros 0.18.2（studio 的 GTK 链）引入，仅供过程宏展开，等 gtk-rs 升级。"
+
+[[allow]]
+id = "RUSTSEC-2026-0192"
+review_by = "2027-02-12"
+reason = "ttf-parser 0.25.1 已停维护；经 ab_glyph 0.2.32 → owned_ttf_parser 引入（GUI 字体渲染），等 ab_glyph 换字体解析后端。"

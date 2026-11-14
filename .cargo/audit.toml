@@ -31,4 +31,18 @@ ignore = [
   # libsqlite3-sys 0.30.1（经 sqlx 0.8.6 引入）—— SQLite CVE-2026-119375（2026-10-30 新披露）。
   # 升级需 libsqlite3-sys >= 0.39，当前被 sea-orm 1.1.20 → sqlx 0.8 锁定；待 sqlx/sea-orm 链升级后移除。
   "RUSTSEC-2026-0459",
+  # hickory-proto 0.25.2 —— NSEC/NSEC3 委派批次（2026-09-03 披露）。
+  # `cargo audit` 明确报「No fixed upgrade is available!」：无修复版本，等上游；
+  # 触发条件同样是 DNSSEC 校验收到了错误的签名链，本仓不启用 `ResolverOpts::validate`，
+  # 实际只在 DNS 解析路径被恶意响应影响。
+  "RUSTSEC-2026-0530",
+  "RUSTSEC-2026-0531",
+  "RUSTSEC-2026-0532",
+  # unmaintained 批次（无 CVE）：encoding / paste / proc-macro-error / ttf-parser。
+  # 都是「上游停维护、当前无替代」的传递或辅助依赖，`cargo audit` 默认只当警告；
+  # 显式列出是为了让「新出现的停维护告警」仍然能红灯，而不是被 `--ignore` 淹没。
+  "RUSTSEC-2021-0153",
+  "RUSTSEC-2024-0436",
+  "RUSTSEC-2024-0370",
+  "RUSTSEC-2026-0192",
 ]

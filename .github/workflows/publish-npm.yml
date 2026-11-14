@@ -4,14 +4,14 @@ on:
   workflow_call:
     inputs:
       dist_tag:
-        description: "npm dist-tag（如 latest / next）"
+        description: "npm dist-tag（如 latest / next）；tag 触发时忽略，按 tag 后缀自动推导通道"
         type: string
         default: "latest"
         required: false
   workflow_dispatch:
     inputs:
       dist_tag:
-        description: "npm dist-tag（如 latest / next）"
+        description: "npm dist-tag（如 latest / next）；tag 触发时忽略，按 tag 后缀自动推导通道"
         type: string
         default: "latest"
         required: false
@@ -57,6 +57,42 @@ jobs:
       - name: Install dependencies
         run: pnpm --dir packages/sdk install --frozen-lockfile
 
+      # dist-tag 按**发布通道**推导，而不是一律 `latest`：
+      # `latest` 属于正式版，`npm i @exvlan/sdk` 必须永远拿到 stable。
+      # 之前 pipeline 对任何 tag 都传 `dist_tag: latest`，导致 dev.1 预发布把
+      # `latest` 顶掉（装到的是 dev 版）；通道化之后预发布各有自己的 tag
+      # （dev/beta/rc/nightly），`latest` 只会被无后缀的正式版改写。
+      - name: Resolve npm dist-tag
+        id: dist_tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          # 非 tag 触发（workflow_dispatch 手工发布）沿用输入值。
+          if [[ "$REF_TYPE" != "tag" ]]; then
+            tag="${INPUT_TAG:-latest}"
+            echo "dist-tag=${tag}（非 tag 触发，取自输入）"
+            echo "dist-tag=${tag}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version="${REF_NAME#v}"
+          case "$version" in
+            *-nightly.*) tag=nightly ;;
+            *-dev.*)     tag=dev ;;
+            *-beta.*)    tag=beta ;;
+            *-rc.*)      tag=rc ;;
+            *-*)
+              # 其它预发布后缀（pre/alpha/…）：同样不许占用 `latest`，用后缀本身。
+              suffix="${version#*-}"
+              tag="${suffix%%.*}"
+              ;;
+            *)           tag=latest ;;
+          esac
+          echo "dist-tag=${tag}（由 tag ${REF_NAME} 推导）"
+          echo "dist-tag=${tag}" >> "$GITHUB_OUTPUT"
+
       # 发布 runtime / browser / cloudflare / 聚合包（sdk）；
       # examples/web 为 private，自动跳过。各包 prepack=check 会先构建（含 wasm）。
       # 幂等：若该版本已发布（例如重跑 tag 流水线），直接跳过，避免 npm 409。
@@ -69,6 +105,6 @@ jobs:
             echo "@exvlan/sdk@${version} 已存在，跳过发布（幂等）"
             exit 0
           fi
-          pnpm --dir packages/sdk -r publish --access public --no-git-checks --tag "${{ inputs.dist_tag }}"
+          pnpm --dir packages/sdk -r publish --access public --no-git-checks --tag "${{ steps.dist_tag.outputs.dist_tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
