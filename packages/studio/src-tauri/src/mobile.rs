@@ -22,23 +22,36 @@ use exvlan_rpc::exvlan_proto::api::manage::{
 };
 use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
 
-/// 与桌面版保持同一份 serde 表示（`user` / `web` / `legacy`），前端存储格式不变。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+/// 与桌面版保持同一份 serde 表示（`user` / `web`），前端存储格式不变。
+///
+/// 读侧未知值统一按 `user` 处理（见 `From<String>`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", from = "String")]
 pub(super) enum PersistedConfigSource {
     User,
-    #[serde(alias = "webhook")]
     Web,
-    #[serde(other)]
-    #[default]
-    Legacy,
+}
+
+impl Default for PersistedConfigSource {
+    fn default() -> Self {
+        Self::User
+    }
+}
+
+impl From<String> for PersistedConfigSource {
+    fn from(raw: String) -> Self {
+        match raw.as_str() {
+            "web" => Self::Web,
+            _ => Self::User,
+        }
+    }
 }
 
 impl PersistedConfigSource {
     fn to_rpc(self) -> i32 {
         match self {
             Self::Web => RpcConfigSource::Web as i32,
-            Self::User | Self::Legacy => RpcConfigSource::User as i32,
+            Self::User => RpcConfigSource::User as i32,
         }
     }
 
@@ -288,7 +301,7 @@ impl GUIClientManager {
         #[cfg(target_os = "android")]
         if !no_tun_of(cfg) {
             match source {
-                PersistedConfigSource::User | PersistedConfigSource::Legacy => {
+                PersistedConfigSource::User => {
                     self.disable_instances_with_tun(app, false)
                         .await
                         .map_err(|e| e.to_string())?;

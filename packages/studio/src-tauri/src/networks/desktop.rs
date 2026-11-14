@@ -10,7 +10,7 @@
 //! 「列表里有什么」== 「内核下次启动会加载什么」。
 
 use exvlan_rpc::exvlan_core::config::api_input::NetworkConfigExt as _;
-use exvlan_rpc::exvlan_core::config::toml::{ConfigLoader as _, TomlConfigLoader};
+use exvlan_rpc::exvlan_core::config::toml::{ConfigLoader as _, TomlConfig};
 use exvlan_rpc::exvlan_proto::api::manage::NetworkConfig;
 
 use crate::config_store;
@@ -23,7 +23,7 @@ pub fn networks_path_cmd() -> String {
 
 /// 内核 TOML → `NetworkConfig`（与 `generate_network_config` 同源）。
 fn from_toml(text: &str) -> Result<NetworkConfig, String> {
-    let loader = TomlConfigLoader::new_from_str(text).map_err(|e| e.to_string())?;
+    let loader = TomlConfig::new_from_str(text).map_err(|e| e.to_string())?;
     NetworkConfig::new_from_config(&loader).map_err(|e| e.to_string())
 }
 

@@ -153,14 +153,6 @@ pub fn elevate_log() -> PathBuf {
     tmp_dir().join("elevate.log")
 }
 
-/// 旧版本（≤ 7.2）布局：**清单在 `exvlan_control::paths::stale_paths()`**。
-///
-/// 这里只做转发：GUI（装完服务后的清理）、`exvlan-migrate`、`doctor` 必须引用
-/// 同一份清单，各写一遍就会漂（S6 的教训）。7.4 再删除整个清单。
-pub fn stale_paths() -> Vec<PathBuf> {
-    exvlan_control::paths::stale_paths()
-}
-
 /// 收紧文件权限（Unix）：密钥类文件（prefs / networks / 提权日志）用 0600。
 pub fn restrict_file(path: &std::path::Path) {
     #[cfg(unix)]

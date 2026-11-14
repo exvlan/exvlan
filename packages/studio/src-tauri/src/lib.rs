@@ -38,7 +38,7 @@ use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use exvlan_rpc::exvlan_core::config::api_input::NetworkConfigExt;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use exvlan_rpc::exvlan_core::config::toml::{ConfigLoader, ConfigSource, TomlConfigLoader};
+use exvlan_rpc::exvlan_core::config::toml::{ConfigLoader, ConfigSource, TomlConfig};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use exvlan_rpc::exvlan_core::management::config_source_to_rpc;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -77,13 +77,6 @@ pub const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
     Some(v) => v,
     None => env!("CARGO_PKG_VERSION"),
 };
-
-/// 旧版本残留清理开关。
-///
-/// 7.3 起路径 v3 硬切（见 `docs/paths.md`），旧 `exvlan` 布局不再被任何代码读取，
-/// 因此恒为 `true`：新服务健康后删除旧目录/旧 plist/旧日志/UI 快照。
-/// 保留这个开关是为了以后需要临时关闭时有单一入口。
-pub const ENABLE_LEGACY_CLEANUP: bool = true;
 
 macro_rules! get_client_manager {
     () => {{
@@ -151,7 +144,7 @@ async fn parse_network_config(cfg: NetworkConfig) -> Result<String, String> {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 fn generate_network_config(toml_config: String) -> Result<NetworkConfig, String> {
-    let config = TomlConfigLoader::new_from_str(&toml_config)
+    let config = TomlConfig::new_from_str(&toml_config)
         .map_err(|e| logger::other("cmd:generate_network_config", e))?;
     let cfg = NetworkConfig::new_from_config(&config)
         .map_err(|e| logger::other("cmd:generate_network_config", e))?;
@@ -3064,16 +3057,30 @@ mod manager {
     use exvlan_rpc::exvlan_proto::rpc_types::controller::BaseController;
     use std::sync::Arc;
 
+    /// 配置归属：与内核/协议同一份词汇（`user` / `web`）。
+    ///
+    /// 读侧对未知值统一按 `user` 处理（见 `From<String>`）：旧运行时把缺失来源
+    /// 写成 `"legacy"`，那批值没有可保留的语义，落到中立默认即可。
     #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    #[derive(Default)]
+    #[serde(rename_all = "snake_case", from = "String")]
     pub(super) enum PersistedConfigSource {
         User,
-        #[serde(alias = "webhook")]
         Web,
-        #[serde(other)]
-        #[default]
-        Legacy,
+    }
+
+    impl Default for PersistedConfigSource {
+        fn default() -> Self {
+            Self::User
+        }
+    }
+
+    impl From<String> for PersistedConfigSource {
+        fn from(raw: String) -> Self {
+            match raw.as_str() {
+                "web" => Self::Web,
+                _ => Self::User,
+            }
+        }
     }
 
     impl PersistedConfigSource {
@@ -3088,14 +3095,14 @@ mod manager {
             match (self, incoming) {
                 // Older runtimes report missing source as `user`. Keep the stronger persisted
                 // ownership until web sync or an explicit user save repairs it.
-                (Self::Web, Self::User) | (Self::Legacy, Self::User) => self,
+                (Self::Web, Self::User) => self,
                 (_, next) => next,
             }
         }
 
         fn to_runtime_source(self) -> ConfigSource {
             match self {
-                Self::User | Self::Legacy => ConfigSource::User,
+                Self::User => ConfigSource::User,
                 Self::Web => ConfigSource::Web,
             }
         }
@@ -3166,7 +3173,7 @@ mod manager {
             let Ok(uuid) = Uuid::parse_str(id) else {
                 return;
             };
-            let Ok(loader) = TomlConfigLoader::new_from_str(&saved.text) else {
+            let Ok(loader) = TomlConfig::new_from_str(&saved.text) else {
                 return;
             };
             let Ok(config) = NetworkConfig::new_from_config(&loader) else {
@@ -3198,7 +3205,7 @@ mod manager {
                 if self.network_configs.contains_key(&uuid) {
                     continue;
                 }
-                let Ok(loader) = TomlConfigLoader::new_from_str(&entry.text) else {
+                let Ok(loader) = TomlConfig::new_from_str(&entry.text) else {
                     continue;
                 };
                 let Ok(config) = NetworkConfig::new_from_config(&loader) else {
@@ -3340,7 +3347,7 @@ mod manager {
                 Ok(saved) => saved,
                 Err(_) => return Ok(None),
             };
-            let loader = TomlConfigLoader::new_from_str(&saved.text)?;
+            let loader = TomlConfig::new_from_str(&saved.text)?;
             let config = NetworkConfig::new_from_config(&loader)?;
             Ok(Some(GUIConfig::new(
                 network_inst_id.to_string(),
@@ -3448,7 +3455,7 @@ mod manager {
         pub(super) async fn pre_run_network_instance_hook(
             &self,
             app: &AppHandle,
-            cfg: &exvlan_rpc::exvlan_core::config::toml::TomlConfigLoader,
+            cfg: &exvlan_rpc::exvlan_core::config::toml::TomlConfig,
             source: PersistedConfigSource,
         ) -> Result<(), String> {
             let instance_id = cfg.get_id();
@@ -3458,7 +3465,7 @@ mod manager {
             #[cfg(target_os = "android")]
             if !cfg.get_flags().no_tun {
                 match source {
-                    PersistedConfigSource::User | PersistedConfigSource::Legacy => {
+                    PersistedConfigSource::User => {
                         self.disable_instances_with_tun(app, false)
                             .await
                             .map_err(|e| {
@@ -3641,53 +3648,48 @@ mod manager {
         use exvlan_rpc::exvlan_proto::api::manage::NetworkConfig;
 
         #[test]
-        fn stored_gui_config_defaults_missing_source_to_legacy() {
+        fn stored_gui_config_defaults_missing_source_to_user() {
             let stored: StoredGuiConfig = serde_json::from_value(serde_json::json!({
                 "config": NetworkConfig::default(),
             }))
             .unwrap();
-            assert_eq!(stored.source, PersistedConfigSource::Legacy);
+            assert_eq!(stored.source, PersistedConfigSource::User);
         }
 
         #[test]
-        fn stored_gui_config_deserializes_webhook_source_as_web() {
+        fn stored_gui_config_deserializes_web_source() {
             let stored: StoredGuiConfig = serde_json::from_value(serde_json::json!({
                 "config": NetworkConfig::default(),
-                "source": "webhook",
+                "source": "web",
             }))
             .unwrap();
             assert_eq!(stored.source, PersistedConfigSource::Web);
         }
 
         #[test]
-        fn stored_gui_config_defaults_unknown_source_to_legacy() {
+        fn stored_gui_config_defaults_unknown_source_to_user() {
             let stored: StoredGuiConfig = serde_json::from_value(serde_json::json!({
                 "config": NetworkConfig::default(),
                 "source": "unknown",
             }))
             .unwrap();
-            assert_eq!(stored.source, PersistedConfigSource::Legacy);
+            assert_eq!(stored.source, PersistedConfigSource::User);
         }
 
         #[test]
-        fn persisted_source_merge_keeps_legacy_and_web_over_ambiguous_user() {
-            assert_eq!(
-                PersistedConfigSource::Legacy.merge_persisted(PersistedConfigSource::User),
-                PersistedConfigSource::Legacy
-            );
+        fn persisted_source_merge_keeps_web_over_ambiguous_user() {
             assert_eq!(
                 PersistedConfigSource::Web.merge_persisted(PersistedConfigSource::User),
                 PersistedConfigSource::Web
             );
             assert_eq!(
-                PersistedConfigSource::Legacy.merge_persisted(PersistedConfigSource::Web),
+                PersistedConfigSource::User.merge_persisted(PersistedConfigSource::Web),
                 PersistedConfigSource::Web
             );
         }
 
         #[test]
         fn only_web_configs_are_web_like() {
-            assert!(!PersistedConfigSource::Legacy.is_web_like());
             assert!(!PersistedConfigSource::User.is_web_like());
             assert!(PersistedConfigSource::Web.is_web_like());
         }
@@ -3889,9 +3891,6 @@ mod service {
             disable_restart_on_failure: false,
         };
 
-        // 旧服务与新版抢同一个 RPC/TUN 端口，必须先停；失败时恢复（见下）。
-        let legacy_backup = stop_legacy_service();
-
         // 守护进程启动第一步是初始化文件日志：目录不存在会直接退出（20710 实测
         // 表现为「launchctl 显示 Running 但 RPC 端口无人监听」）。这里以 root 预建。
         prepare_runtime_dirs(&opts);
@@ -3926,7 +3925,6 @@ mod service {
 
         if let Some(err) = last_error {
             crate::logger::record("service.install.diag", service_diagnostics(&service, &opts));
-            restore_legacy_service(&legacy_backup);
             return Err(err).with_context(|| "Failed to install service");
         }
 
@@ -3935,7 +3933,6 @@ mod service {
         // 装上了不代表能连：以「RPC 端口真的能连上」为准（launchctl 的 Running 会骗人，
         // 20710 就是守护进程起来即退出、launchd 反复重启，状态一直显示 Running）。
         if wait_until_listening(&opts.rpc_portal, std::time::Duration::from_secs(6)) {
-            cleanup_stale_paths();
             return Ok(());
         }
         // 再 kickstart 一次（首次 bootstrap 的 RunAtLoad 偶尔没触发）
@@ -3945,142 +3942,10 @@ mod service {
         }
         let diag = service_diagnostics(&service, &opts);
         crate::logger::record("service.install.not_listening", &diag);
-        restore_legacy_service(&legacy_backup);
         Err(anyhow::anyhow!(
             "服务已安装但 RPC 端口 {} 无法连接（守护进程可能启动即退出）。诊断已写入 error.log。",
             opts.rpc_portal
         ))
-    }
-
-    /// 卸载旧 label（`exvlan-studio`），避免新旧两个守护进程并存。
-    /// preview 期间**不删除**旧服务定义：只停掉（释放端口），plist 改名保留。
-    ///
-    /// 旧服务和新服务抢同一个 RPC/TUN 端口，必须先停；若新服务安装失败，
-    /// 用 [`restore_legacy_service`] 把旧服务拉回来。
-    #[derive(Default)]
-    struct LegacyBackup {
-        #[cfg(target_os = "macos")]
-        plist: Option<(std::path::PathBuf, std::path::PathBuf)>,
-    }
-
-    fn stop_legacy_service() -> LegacyBackup {
-        const LEGACY: &str = "exvlan-studio";
-        #[allow(unused_mut)]
-        let mut backup = LegacyBackup::default();
-        if SERVICE_LABEL == LEGACY {
-            return backup;
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            let label = format!("system/{LEGACY}");
-            let _ = std::process::Command::new("/bin/launchctl")
-                .args(["bootout", &label])
-                .output();
-            let plist = crate::paths::service_plist(LEGACY).unwrap_or_default();
-            let bak = std::path::PathBuf::from(format!("{}.pre-7.2", plist.display()));
-            if plist.is_file() && !bak.exists() {
-                match std::fs::rename(&plist, &bak) {
-                    Ok(()) => {
-                        crate::logger::record(
-                            "service.migrate",
-                            format!("bootout {LEGACY}; plist → {}", bak.display()),
-                        );
-                        backup.plist = Some((plist, bak));
-                    }
-                    Err(err) => crate::logger::record(
-                        "service.migrate",
-                        format!("rename {} failed: {err}", plist.display()),
-                    ),
-                }
-            }
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            let _ = crate::kernel::hidden_command("sc")
-                .args(["stop", LEGACY])
-                .output();
-            let _ = crate::kernel::hidden_command("sc")
-                .args(["config", LEGACY, "start=", "disabled"])
-                .output();
-            crate::logger::record("service.migrate", format!("stopped legacy {LEGACY}"));
-        }
-
-        #[cfg(all(unix, not(target_os = "macos")))]
-        {
-            let _ = std::process::Command::new("systemctl")
-                .args(["disable", "--now", LEGACY])
-                .output();
-            crate::logger::record("service.migrate", format!("disabled legacy {LEGACY}"));
-        }
-
-        backup
-    }
-
-    /// 新服务安装失败时，把旧服务恢复回去（回退保障）。
-    #[allow(unused_variables)]
-    fn restore_legacy_service(backup: &LegacyBackup) {
-        const LEGACY: &str = "exvlan-studio";
-
-        #[cfg(target_os = "macos")]
-        if let Some((plist, bak)) = &backup.plist {
-            let _ = std::fs::rename(bak, plist);
-            let _ = std::process::Command::new("/bin/launchctl")
-                .args(["bootstrap", "system", &plist.display().to_string()])
-                .output();
-            crate::logger::record("service.migrate", "restored legacy service");
-            return;
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            let _ = crate::kernel::hidden_command("sc")
-                .args(["config", LEGACY, "start=", "auto"])
-                .output();
-            let _ = crate::kernel::hidden_command("sc")
-                .args(["start", LEGACY])
-                .output();
-        }
-
-        #[cfg(all(unix, not(target_os = "macos")))]
-        {
-            let _ = std::process::Command::new("systemctl")
-                .args(["enable", "--now", LEGACY])
-                .output();
-        }
-
-        let _ = LEGACY;
-    }
-
-    /// 删除旧版本残留（幂等：只删存在的路径，不读取、不拷贝、不恢复）。
-    ///
-    /// 清单见 `paths::stale_paths()`（唯一允许出现旧绝对路径的地方）。
-    fn cleanup_stale_paths() {
-        let mut removed: Vec<String> = Vec::new();
-        for path in crate::paths::stale_paths() {
-            if !path.exists() {
-                continue;
-            }
-            let ok = if path.is_dir() {
-                std::fs::remove_dir_all(&path).is_ok()
-            } else {
-                std::fs::remove_file(&path).is_ok()
-            };
-            if ok {
-                removed.push(path.display().to_string());
-            }
-        }
-        if !removed.is_empty() {
-            crate::logger::record(
-                "service.cleanup",
-                format!(
-                    "removed {} legacy path(s): {}",
-                    removed.len(),
-                    removed.join(", ")
-                ),
-            );
-        }
     }
 
     /// GUI 侧写入服务指纹（提权成功后调用）。
@@ -4873,8 +4738,6 @@ fn maybe_repair_user_dirs(app: &AppHandle) {
     let mut paths: Vec<String> = Vec::new();
     for dir in [log_dir.clone(), config_dir.clone()].into_iter().flatten() {
         paths.push(dir.display().to_string());
-        // 旧版内核/服务可能还往 config.d 里写过文件
-        paths.push(dir.join("config.d").display().to_string());
     }
     if paths.is_empty() {
         return;

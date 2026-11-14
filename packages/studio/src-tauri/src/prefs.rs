@@ -5,7 +5,7 @@
 //!
 //! - 文件由 Rust 独占读写，前端只通过 `get_ui_state` / `set_ui_state` 访问
 //! - 写入采用「临时文件 + rename」，写完立即读回校验
-//! - 首次启动自动把旧的 `ui-state.json` 迁移过来
+//! - 旧的 `ui-state.json` 由 `exvlan-migrate` 一次性处理（运行时不再读它）
 //!
 //! 路径：
 //! - macOS / Windows / Android：`<app_config_dir>/prefs.toml`
@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_os = "linux"))]
 use tauri::Manager as _;
 
 const APP_DIR: &str = crate::paths::APP_ID;
@@ -205,68 +206,11 @@ fn set_key(prefs: &mut Prefs, key: &str, value: Option<String>) {
     }
 }
 
-/// 旧 `ui-state.json` 迁移（只做一次；迁移后改名为 `.bak`）。
-fn migrate_legacy(app: &tauri::AppHandle) -> Option<Prefs> {
-    let dir = app.path().app_config_dir().ok()?;
-    let legacy = dir.join("ui-state.json");
-    if !legacy.is_file() && dir.join("ui-state.json.bak").is_file() {
-        // 7.1 曾把它改名为 .bak；按约定只记录、不自动恢复。
-        crate::logger::record(
-            "prefs",
-            "found ui-state.json.bak (7.1 damage); snapshot not restored (rollback only)",
-        );
-    }
-    let text = std::fs::read_to_string(&legacy).ok()?;
-    let map: BTreeMap<String, String> = serde_json::from_str(&text).ok()?;
-    if map.is_empty() {
-        return None;
-    }
-    let mut prefs = Prefs::default();
-    for (key, value) in map {
-        set_key(&mut prefs, &key, Some(value));
-    }
-    // 诊断上传链接在旧版本是 JSON `{at, urls}`，这里转换一下。
-    if let Some(raw) = prefs.diag.last_upload_url.clone()
-        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw)
-    {
-        let urls = v.get("urls").and_then(|u| u.as_str()).map(str::to_owned);
-        let at = v.get("at").and_then(|u| u.as_str()).map(str::to_owned);
-        prefs.diag.last_upload_url = urls;
-        prefs.diag.updated_at = at;
-    }
-    if crate::ENABLE_LEGACY_CLEANUP {
-        let _ = std::fs::rename(&legacy, dir.join("ui-state.json.bak"));
-    } else {
-        // preview 期间**保留** ui-state.json（回退到旧版本仍可读取）。
-        crate::logger::record("prefs", format!("snapshot kept: {}", legacy.display()));
-    }
-    Some(prefs)
-}
-
-fn load_or_migrate(app: &tauri::AppHandle) -> Prefs {
-    let Some(path) = prefs_path(app).ok() else {
-        return Prefs::default();
-    };
-    if path.is_file() {
-        return load(app);
-    }
-    if let Some(prefs) = migrate_legacy(app) {
-        match save(app, &prefs) {
-            Ok(()) => {
-                crate::logger::record("prefs", "migrated ui-state.json → prefs.toml");
-                return prefs;
-            }
-            Err(err) => crate::logger::record("prefs", format!("迁移失败: {err}")),
-        }
-    }
-    Prefs::default()
-}
-
 /// 读取全部偏好（前端启动时回填）。
 #[tauri::command]
 pub fn get_ui_state(app: tauri::AppHandle) -> BTreeMap<String, String> {
     let _guard = prefs_guard();
-    let prefs = load_or_migrate(&app);
+    let prefs = load(&app);
     let mut out = BTreeMap::new();
     for key in [
         "app_mode",
@@ -293,7 +237,7 @@ pub fn set_ui_state(
     value: Option<String>,
 ) -> Result<(), String> {
     let _guard = prefs_guard();
-    let mut prefs = load_or_migrate(&app);
+    let mut prefs = load(&app);
     set_key(&mut prefs, &key, value);
     if key == "diag_last_upload" {
         prefs.diag.updated_at = Some(crate::logger::timestamp());
@@ -308,7 +252,7 @@ pub fn set_ui_state(
 /// 读通道偏好；未设置返回 `None`（由调用方按版本串推断）。
 pub fn update_channel(app: &tauri::AppHandle) -> Option<String> {
     let _guard = prefs_guard();
-    let prefs = load_or_migrate(app);
+    let prefs = load(app);
     prefs.update.channel.filter(|c| !c.trim().is_empty())
 }
 
@@ -322,7 +266,7 @@ pub fn set_update_channel(app: &tauri::AppHandle, channel: &str) -> Result<(), S
         return Err(format!("未知通道: {channel}"));
     }
     let _guard = prefs_guard();
-    let mut prefs = load_or_migrate(app);
+    let mut prefs = load(app);
     prefs.update.channel = Some(normalized);
     save(app, &prefs)
 }
@@ -330,7 +274,7 @@ pub fn set_update_channel(app: &tauri::AppHandle, channel: &str) -> Result<(), S
 /// 「跳过此版本」：该通道下已经跳过的版本号。
 pub fn skipped_version(app: &tauri::AppHandle, channel: &str) -> Option<String> {
     let _guard = prefs_guard();
-    let prefs = load_or_migrate(app);
+    let prefs = load(app);
     prefs.update.skipped.get(channel).cloned()
 }
 
@@ -341,7 +285,7 @@ pub fn set_skipped_version(
     version: Option<&str>,
 ) -> Result<(), String> {
     let _guard = prefs_guard();
-    let mut prefs = load_or_migrate(app);
+    let mut prefs = load(app);
     match version.map(str::trim).filter(|v| !v.is_empty()) {
         Some(v) => {
             prefs
@@ -359,22 +303,19 @@ pub fn set_skipped_version(
 /// 启动时静默检查是否开启（默认开）。
 pub fn auto_check(app: &tauri::AppHandle) -> bool {
     let _guard = prefs_guard();
-    load_or_migrate(app).update.auto_check.unwrap_or(true)
+    load(app).update.auto_check.unwrap_or(true)
 }
 
 /// 自动安装内核更新是否开启（默认关）。
 pub fn auto_install_kernel(app: &tauri::AppHandle) -> bool {
     let _guard = prefs_guard();
-    load_or_migrate(app)
-        .update
-        .auto_install_kernel
-        .unwrap_or(false)
+    load(app).update.auto_install_kernel.unwrap_or(false)
 }
 
 /// 写开关（`key` 只接受 `auto_check` / `auto_install_kernel`）。
 pub fn set_update_flag(app: &tauri::AppHandle, key: &str, value: bool) -> Result<(), String> {
     let _guard = prefs_guard();
-    let mut prefs = load_or_migrate(app);
+    let mut prefs = load(app);
     match key {
         "auto_check" => prefs.update.auto_check = Some(value),
         "auto_install_kernel" => prefs.update.auto_install_kernel = Some(value),
