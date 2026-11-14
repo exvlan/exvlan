@@ -1,27 +1,45 @@
 //! 一次性迁移工具（pre.17 专用）。
 //!
-//! 背景：pre.17 起**运行时不做任何迁移/兼容** —— 旧数据由本工具一次性清掉。
+//! 背景：pre.17 起**运行时不做任何迁移/兼容** —— 旧数据由本工具一次性清掉
+//! （铁律见 `docs/decisions-7.3.md` §14.15）。
 //! 本版随安装包分发、由新版 App 首次启动时弹窗调用；下一版移除随包，只保留
 //! 独立工具给漏掉的机器。
 //!
-//! 它做四件事：
-//! 1. 备份（**目录**形式，含 manifest，零依赖）；
-//! 2. 转换：`networks.toml` → 内核 `config/<id>.toml`；`service.json` → `service.toml`；
-//! 3. 清理：`networks.toml` / `config.d/` / `ui-state.json*` / `core/*.prev`；
-//! 4. 写标记 `migrate.done` + 报告 + 日志（脱敏）。
+//! 它做的事（按执行顺序）：
+//! 0. 存量清洗：`service.toml` 里的非法 `owner_sid`；
+//! 1. 检测：**唯一来源** `exvlan_control::legacy::detect`（GUI 闸门/doctor 共用）；
+//! 2. 备份（**目录**形式，含 manifest，零依赖）；
+//! 3. `ui-state.json` → `prefs.toml` + 旧 `app_mode` 拆分 + 陈旧 `[misc]` 键清理；
+//! 4. `machine_id` 归位（COPY，不删旧文件）；
+//! 5. 转换：`networks.toml` → 内核 `config/<id>.toml`；`service.json` → `service.toml`；
+//! 6. 清理：旧路径清单、旧服务定义、`networks.toml` / `config.d/` / `ui-state.json*`（**条件**）/ `core/*.prev`；
+//! 7. 写标记 `migrate.done` + 报告 + 日志（脱敏）。
 //!
-//! 安全：默认 dry-run；`--yes` 才落地；失败保留现场，`--rollback --backup <dir>` 可还原。
+//! 安全：默认 dry-run（**每一步都能被看见**）；`--yes` 才落地；失败保留现场，
+//! `--rollback --backup <dir>` 可还原。报告里每一步都有 `status`
+//! （`planned|ok|skipped|partial|failed`）+ `reason`。
+
+mod cleanup;
+mod machine_id;
+mod prefs;
+mod report;
+mod service_toml;
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
 use serde_json::{Value, json};
 
+use report::{Status, Step, steps_json};
+
 /// 存量清洗的标记文件名（与 `migrate.done` 同目录 = 用户数据目录）。
 ///
 /// 与 pre.17 迁移解耦：全新安装的机器也要跑（dev.1 的脏 `owner_sid` 正是
 /// 「全新安装 + `--install --tools-dir`」产生的）。
 const SANITIZE_MARKER: &str = "migrate.done.v2";
+
+/// 迁移完成的标记（有它就不再弹闸门）。
+const MIGRATE_MARKER: &str = "migrate.done";
 
 /// 展示版本：优先用 CI 注入的构建串（`<标准版本>[-pre.N][+sha]`），
 /// 本地直接 cargo build 时回落到 crate 版本。
@@ -96,6 +114,9 @@ fn print_help() {
   exvlan-migrate --yes                                 执行
   exvlan-migrate --rollback <backup-dir>               回滚
 
+迁移项: prefs.toml（ui-state.json/app_mode）· machine_id · networks.toml ·
+        service.json · 旧路径 · 旧服务定义 · 内核 .prev
+
 退出码: 0 成功 / 1 无旧数据 / 2 失败"#
     );
 }
@@ -150,56 +171,19 @@ fn now_ts() -> String {
     format!("unix:{secs}")
 }
 
-/// 选出旧 `service.json`：用户目录优先，其次**系统目录**（macOS/Windows 的服务配置）。
-///
-/// 只有系统目录这一处是 pre.17 首个版本漏掉的 —— 结果是升级后服务配置
-/// （owner_uid / policy / rpc_extra_whitelist）被重置成默认值。
-fn pick_service_json(user_data: &Path, service_config: &Path) -> Option<PathBuf> {
-    [
-        user_data.join("service.json"),
-        service_config.with_file_name("service.json"),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
-}
-
-#[derive(Debug, Default)]
-struct Legacy {
-    networks_toml: Option<PathBuf>,
-    service_json: Option<PathBuf>,
-    config_d: Option<PathBuf>,
-    ui_state: Vec<PathBuf>,
-    prev_kernels: Vec<PathBuf>,
-}
-
-fn detect(user: &exvlan_control::paths::UserPaths, p: &exvlan_control::paths::Paths) -> Legacy {
-    let mut l = Legacy::default();
-    let n = user.data.join("networks.toml");
-    if n.is_file() {
-        l.networks_toml = Some(n);
-    }
-    // 旧 `service.json` 可能在两处：
-    // - 用户目录（历史 / Linux 裸核）；
-    // - **系统目录**（macOS/Windows 的服务配置，root 持有）—— pre.17 之前就漏了
-    //   这一处，导致迁移后 owner_uid/policy/rpc_extra_whitelist 全被重置成默认。
-    l.service_json = pick_service_json(&user.data, &p.service_config);
-    let d = user.data.join("config.d");
-    if d.is_dir() {
-        l.config_d = Some(d);
-    }
-    for name in ["ui-state.json", "ui-state.json.bak"] {
-        let path = user.data.join(name);
-        if path.is_file() {
-            l.ui_state.push(path);
+/// 各步骤的日志摘要（日志保持一行一项，便于 grep）。
+fn log_steps(log: &mut Logger, steps: &[Step]) {
+    for step in steps {
+        match &step.reason {
+            Some(reason) => log.info(&format!(
+                "step {}: {} ({})",
+                step.id,
+                step.status.as_str(),
+                reason
+            )),
+            None => log.info(&format!("step {}: {}", step.id, step.status.as_str())),
         }
     }
-    for name in ["exvlan.prev", "exvlan.exe.prev"] {
-        let path = p.core.join(name);
-        if path.is_file() {
-            l.prev_kernels.push(path);
-        }
-    }
-    l
 }
 
 fn migrate(
@@ -210,194 +194,352 @@ fn migrate(
     owner_uid: Option<u32>,
 ) -> anyhow::Result<()> {
     let p = exvlan_control::paths::paths();
-    // 0) 存量清洗（与「有没有旧数据」无关）：dev.1 在 macOS 把 `--tools-dir`
-    //    当 SID 写进了 `service.toml`，这里一次性抹掉（有 `migrate.done.v2` 则跳过）。
-    sanitize_service_config(dry_run, user, &p.service_config, log)?;
-    let legacy = detect(user, &p);
-    let mut items: Vec<String> = Vec::new();
-    if let Some(v) = &legacy.networks_toml {
-        items.push(v.display().to_string());
-    }
-    if let Some(v) = &legacy.service_json {
-        items.push(v.display().to_string());
-    }
-    if let Some(v) = &legacy.config_d {
-        items.push(v.display().to_string());
-    }
-    for v in legacy.ui_state.iter().chain(legacy.prev_kernels.iter()) {
-        items.push(v.display().to_string());
-    }
-
-    if items.is_empty() {
+    let outcome = run(dry_run, user, &p, log, owner_uid)?;
+    if outcome.nothing_to_do {
         log.info("没有旧版本数据，无需迁移");
         if json_out {
-            println!(
-                "{}",
-                json!({"ok": true, "actions": [], "note": "nothing to do"})
-            );
+            println!("{}", outcome.report);
         }
         std::process::exit(1);
     }
+    if json_out {
+        println!("{}", outcome.report);
+    }
+    Ok(())
+}
 
+/// 一次迁移的结论（便于测试：不打印、不退出进程）。
+struct Outcome {
+    report: Value,
+    nothing_to_do: bool,
+}
+
+fn run(
+    dry_run: bool,
+    user: &exvlan_control::paths::UserPaths,
+    p: &exvlan_control::paths::Paths,
+    log: &mut Logger,
+    owner_uid: Option<u32>,
+) -> anyhow::Result<Outcome> {
+    // 0) 存量清洗（与「有没有旧数据」无关）：dev.1 在 macOS 把 `--tools-dir`
+    //    当 SID 写进了 `service.toml`，这里一次性抹掉（有 `migrate.done.v2` 则跳过）。
+    sanitize_service_config(dry_run, user, &p.service_config, log)?;
+
+    // 1) 检测（只读）+ 各步骤的计划
+    let legacy = exvlan_control::legacy::detect(user, p);
+    run_detected(dry_run, user, p, &legacy, log, owner_uid)
+}
+
+/// 迁移主体（`legacy` 由调用方检测好传入 —— 单一来源仍是
+/// [`exvlan_control::legacy::detect`]，测试可以据此避免触碰真实系统目录）。
+fn run_detected(
+    dry_run: bool,
+    user: &exvlan_control::paths::UserPaths,
+    p: &exvlan_control::paths::Paths,
+    legacy: &exvlan_control::legacy::Legacy,
+    log: &mut Logger,
+    owner_uid: Option<u32>,
+) -> anyhow::Result<Outcome> {
+    let prefs_plan = prefs::plan(&user.data);
+    let (machine_id_plan, machine_id_skip) = machine_id::plan(&p.core);
+    let items = legacy.item_labels();
+
+    let nothing_to_do = items.is_empty() && !prefs_plan.changed() && machine_id_plan.is_none();
+    if nothing_to_do {
+        return Ok(Outcome {
+            report: json!({"ok": true, "actions": [], "note": "nothing to do"}),
+            nothing_to_do: true,
+        });
+    }
     log.info(&format!(
         "phase=detect legacy={} items={:?}",
         items.len(),
         items
     ));
 
-    if dry_run {
-        log.warn("dry-run：未做任何修改（加 --yes 执行）");
-        if json_out {
-            println!(
-                "{}",
-                json!({"ok": true, "dry_run": true, "legacy": items, "backup": null})
-            );
+    // 2) 备份（dry-run 不做）
+    let mut backup: Option<PathBuf> = None;
+    if !dry_run {
+        let dir = user.data.join(format!(
+            "exvlan-migrate-backup-{}",
+            exvlan_control::tokens::now_secs()
+        ));
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("创建备份目录失败: {}", dir.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok();
+            if let Some(uid) = owner_uid {
+                chown_tree(&dir, uid);
+            }
         }
-        return Ok(());
+        let mut items_to_backup: Vec<PathBuf> = Vec::new();
+        items_to_backup.extend(legacy.networks_toml.clone());
+        items_to_backup.extend(legacy.service_json.clone());
+        items_to_backup.extend(legacy.config_d.clone());
+        items_to_backup.extend(legacy.ui_state.iter().cloned());
+        items_to_backup.extend(legacy.prev_kernels.iter().cloned());
+        // 会改写的 `prefs.toml` 必须先留底（回滚靠它）。
+        if prefs_plan.file_exists && prefs_plan.changed() {
+            items_to_backup.push(prefs_plan.path.clone());
+        }
+        // `service.toml` 归一（S8）也是原地改写 → 有旧形状就先留底。
+        if let Some(path) = &legacy.service_toml {
+            items_to_backup.push(path.clone());
+        }
+        let mut backed = 0usize;
+        for src in &items_to_backup {
+            let name = src
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "item".into());
+            let dst = dir.join(&name);
+            let ok = if src.is_dir() {
+                copy_dir(src, &dst).is_ok()
+            } else {
+                std::fs::copy(src, &dst).is_ok()
+            };
+            if ok {
+                backed += 1;
+            } else {
+                log.warn(&format!("备份失败（跳过）: {}", src.display()));
+            }
+        }
+        log.info(&format!(
+            "phase=backup dir={} items={}",
+            dir.display(),
+            backed
+        ));
+        backup = Some(dir);
     }
 
-    // 1) 备份
-    let backup = user.data.join(format!(
-        "exvlan-migrate-backup-{}",
-        exvlan_control::tokens::now_secs()
-    ));
-    std::fs::create_dir_all(&backup)
-        .with_context(|| format!("创建备份目录失败: {}", backup.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o700)).ok();
-        if let Some(uid) = owner_uid {
-            chown_tree(&backup, uid);
-        }
-    }
-    let mut backed: Vec<String> = Vec::new();
-    for src in items.iter().map(PathBuf::from) {
-        let name = src
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "item".into());
-        let dst = backup.join(&name);
-        let ok = if src.is_dir() {
-            copy_dir(&src, &dst).is_ok()
-        } else {
-            std::fs::copy(&src, &dst).is_ok()
-        };
-        if ok {
-            backed.push(name);
-        } else {
-            log.warn(&format!("备份失败（跳过）: {}", src.display()));
-        }
-    }
-    log.info(&format!(
-        "phase=backup dir={} items={}",
-        backup.display(),
-        backed.len()
-    ));
-
-    // 2) 转换 networks.toml → 内核 config/*.toml
+    // 3) 转换（失败 → 保留源、不写标记）。dry-run 也走一遍解析，但不落盘，
+    //    这样报告里能提前看见「要转几个网络」。
     let mut converted = 0usize;
-    let mut networks_ok = true;
+    let mut networks_step = Step::skipped("networks", "没有 networks.toml");
+    let mut conversion_failed: Option<String> = None;
     if let Some(src) = &legacy.networks_toml {
-        match convert_networks(src, &p.config, log) {
-            Ok(n) => converted = n,
+        match convert_networks(src, &p.config, dry_run, log) {
+            Ok(n) => {
+                converted = n;
+                networks_step = Step::new(
+                    "networks",
+                    if dry_run { Status::Planned } else { Status::Ok },
+                )
+                .with_detail(json!({"converted": n}));
+            }
             Err(err) => {
-                networks_ok = false;
                 log.error(&format!("转换 networks.toml 失败: {err:#}"));
+                conversion_failed = Some(format!("转换 networks.toml 失败: {err:#}"));
+                networks_step = Step::failed("networks", format!("{err:#}"));
             }
         }
     }
-
-    // 3) 转换 service.json → service.toml
-    //
-    // 目标已存在时**不覆盖**：可能已经迁移过/手工修过（覆盖会把用户的 policy /
-    // 白名单再抹一次，正是 pre.17 首个版本踩过的坑）。
-    let mut service_ok = true;
+    // `service.toml` 已存在时**不覆盖**：可能已经迁移过/手工修过（覆盖会把用户的
+    // policy / 白名单再抹一次，正是 pre.17 首个版本踩过的坑）。
+    let mut service_step = Step::skipped("service_json", "没有 service.json");
     if let Some(src) = &legacy.service_json {
         if p.service_config.is_file() {
             log.warn(&format!(
                 "{} 已存在，跳过转换（保留现值）",
                 p.service_config.display()
             ));
+            service_step = Step::skipped(
+                "service_json",
+                format!("{} 已存在，保留现值", p.service_config.display()),
+            );
         } else {
-            match convert_service(src, &p.service_config, log) {
-                Ok(()) => log.info("convert service.json → service.toml"),
+            match convert_service(src, &p.service_config, dry_run, log) {
+                Ok(()) => {
+                    log.info("convert service.json → service.toml");
+                    service_step = Step::new(
+                        "service_json",
+                        if dry_run { Status::Planned } else { Status::Ok },
+                    );
+                }
                 Err(err) => {
-                    service_ok = false;
                     log.error(&format!("转换 service.json 失败: {err:#}"));
+                    conversion_failed = Some(format!("转换 service.json 失败: {err:#}"));
+                    service_step = Step::failed("service_json", format!("{err:#}"));
                 }
             }
         }
     }
-
     // 转换失败时**保留源文件**并不写标记：宁可让用户重跑，也不能「迁移到一半把源删了」。
-    if !networks_ok || !service_ok {
-        bail!("转换失败，源文件已保留（备份在 {}）", backup.display());
+    // dry-run 不 bail：让用户先看完整份计划。
+    if let Some(err) = &conversion_failed
+        && !dry_run
+    {
+        bail!(
+            "{err}，源文件已保留（备份在 {}）",
+            backup
+                .as_ref()
+                .map(|d| d.display().to_string())
+                .unwrap_or_else(|| "(none)".into())
+        );
     }
 
-    // 4) 清理
-    let mut removed: Vec<String> = Vec::new();
-    for path in [
-        legacy.networks_toml.as_ref(),
-        legacy.service_json.as_ref(),
-        legacy.config_d.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    .chain(legacy.ui_state.iter())
-    .chain(legacy.prev_kernels.iter())
+    // 3.5) `service.toml` 旧字段名/旧词汇归一（S8）
+    let service_toml_step = service_toml::normalize_step(&p.service_config, dry_run);
+
+    // 4) prefs / app_mode / 陈旧键
+    let (prefs_step, prefs_subs, ui_state_ok) = prefs_plan.apply(dry_run);
+
+    // 5) machine_id（COPY，不删旧文件）
+    let machine_step = match (&machine_id_plan, machine_id_skip) {
+        (Some(plan), _) => {
+            let step = plan.apply(dry_run);
+            #[cfg(unix)]
+            if let Some(uid) = owner_uid {
+                // 提权运行时新目录可能是 root 建的，用户要能读自己的 machine_id。
+                if let Some(parent) = plan.to.parent() {
+                    chown_path(parent, uid);
+                }
+                if plan.to.exists() {
+                    chown_path(&plan.to, uid);
+                }
+            }
+            step
+        }
+        (None, Some(step)) => step,
+        (None, None) => Step::skipped("machine_id", "无意外的 machine_id 状态"),
+    };
+
+    // 6) 旧路径 / 旧服务定义
+    //
+    // 护栏：`stale_paths` 里有 `/var/lib/exvlan` 这类**可能装着旧 machine_id** 的目录。
+    // machine_id 没复制成功就先别删那些目录（宁可留残留，也不能让老用户变新设备）。
+    let mut stale_paths = legacy.stale_paths.clone();
+    if let Some(plan) = &machine_id_plan
+        && !matches!(machine_step.status, Status::Ok | Status::Planned)
     {
-        let ok = if path.is_dir() {
-            std::fs::remove_dir_all(path).is_ok()
-        } else {
-            std::fs::remove_file(path).is_ok()
-        };
-        if ok {
-            removed.push(path.display().to_string());
+        let before = stale_paths.len();
+        stale_paths.retain(|path| !plan.from.starts_with(path));
+        if stale_paths.len() != before {
+            log.warn(&format!(
+                "machine_id 未归位，保留包含 {} 的旧目录",
+                plan.from.display()
+            ));
         }
     }
-    log.info(&format!("phase=cleanup removed={}", removed.len()));
+    let stale_step = cleanup::stale_paths(&stale_paths, dry_run);
+    let service_cleanup_step = cleanup::legacy_services(&legacy.services, dry_run);
 
-    // 5) 标记 + 报告
-    let report = json!({
-        "tool_version": TOOL_VERSION,
-        "backend": exvlan_control::detect().as_str(),
-        "backup": backup.display().to_string(),
-        "converted_networks": converted,
-        "removed": removed,
-        "ts": exvlan_control::tokens::now_secs(),
-    });
+    // 7) 删源（`ui-state.json` 只在 prefs 成功时删）
+    let cleanup_step = cleanup::source_step(&legacy, ui_state_ok, dry_run);
+
+    let mut steps = vec![
+        prefs_step,
+        service_toml_step,
+        machine_step,
+        machine_id::uid_hash_note(),
+        networks_step,
+        service_step,
+        stale_step,
+        service_cleanup_step,
+        cleanup_step,
+    ];
+    steps.extend(prefs_subs);
+    log_steps(log, &steps);
+
+    let mut removed: Vec<String> = Vec::new();
+    for step in steps.iter().filter(|s| s.id == "cleanup") {
+        if let Some(list) = step.detail.get("removed").and_then(Value::as_array) {
+            removed.extend(list.iter().filter_map(|v| v.as_str().map(str::to_string)));
+        }
+    }
+    let incomplete: Vec<&str> = steps
+        .iter()
+        .filter(|s| s.is_failure())
+        .map(|s| s.id)
+        .collect();
+
+    if dry_run {
+        let report = build_report(None, true, converted, &removed, &items, &steps, &incomplete);
+        log.warn("dry-run：未做任何修改（加 --yes 执行）");
+        return Ok(Outcome {
+            report,
+            nothing_to_do: false,
+        });
+    }
+
+    // 8) 标记 + 报告
+    let backup_dir = backup
+        .clone()
+        .context("内部错误：非 dry-run 却没有备份目录")?;
+    let report = build_report(
+        Some(&backup_dir),
+        false,
+        converted,
+        &removed,
+        &items,
+        &steps,
+        &incomplete,
+    );
     std::fs::write(
-        backup.join("migrate-report.json"),
+        backup_dir.join("migrate-report.json"),
         serde_json::to_string_pretty(&report)?,
     )
     .ok();
-    let marker = user.data.join("migrate.done");
+    let marker = user.data.join(MIGRATE_MARKER);
     std::fs::write(
         &marker,
         serde_json::to_string_pretty(&json!({
             "version": TOOL_VERSION,
             "ts": exvlan_control::tokens::now_secs(),
-            "backup": backup.display().to_string(),
+            "backup": backup_dir.display().to_string(),
+            // 有失败项时源文件仍在（ui-state.json 等），这里记下来便于人工复查。
+            "incomplete": incomplete,
         }))?,
     )
     .context("写 migrate.done 失败")?;
     #[cfg(unix)]
     if let Some(uid) = owner_uid {
         // 备份目录在转换期间又新增了 report/migrate.log，这里统一再 chown 一次。
-        chown_tree(&backup, uid);
+        chown_tree(&backup_dir, uid);
         chown_path(&marker, uid);
     }
 
     log.info(&format!(
-        "phase=done converted={converted} removed={} backup={}",
+        "phase=done converted={converted} removed={} backup={} incomplete={:?}",
         removed.len(),
-        backup.display()
+        backup_dir.display(),
+        incomplete
     ));
-    if json_out {
-        println!("{report}");
+    Ok(Outcome {
+        report,
+        nothing_to_do: false,
+    })
+}
+
+fn build_report(
+    backup: Option<&Path>,
+    dry_run: bool,
+    converted: usize,
+    removed: &[String],
+    legacy_items: &[String],
+    steps: &[Step],
+    incomplete: &[&str],
+) -> Value {
+    let mut report = json!({
+        "tool_version": TOOL_VERSION,
+        "backend": exvlan_control::detect().as_str(),
+        "ok": incomplete.is_empty(),
+        "dry_run": dry_run,
+        "backup": backup.map(|p| p.display().to_string()),
+        "converted_networks": converted,
+        "removed": removed,
+        "legacy": legacy_items,
+        "incomplete": incomplete,
+        "ts": exvlan_control::tokens::now_secs(),
+    });
+    if let Value::Object(summary) = steps_json(steps) {
+        for (key, value) in summary {
+            report[key] = value;
+        }
     }
-    Ok(())
+    report
 }
 
 /// 一次性清洗 `service.toml` 里的 `owner_sid`（存量修复，标记 `migrate.done.v2`）。
@@ -419,10 +561,7 @@ fn sanitize_service_config(
         Ok(text) => text,
         // 还没装服务：没有可清洗的，写标记免得每次启动都再读一遍。
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            log.info(&format!(
-                "sanitize: {} 不存在，无需清洗",
-                config.display()
-            ));
+            log.info(&format!("sanitize: {} 不存在，无需清洗", config.display()));
             if !dry_run {
                 write_sanitize_marker(&marker, false)?;
             }
@@ -555,7 +694,12 @@ fn owner_sid_span(line: &str) -> Option<(usize, usize, String)> {
 /// `networks.toml`（界面形态）→ `<config>/<id>.toml`（内核形态）。
 ///
 /// 用内核自己的 `NetworkConfig::gen_config()` 做映射（同一份代码，避免手写字段表）。
-fn convert_networks(src: &Path, config_dir: &Path, log: &mut Logger) -> anyhow::Result<usize> {
+fn convert_networks(
+    src: &Path,
+    config_dir: &Path,
+    dry_run: bool,
+    log: &mut Logger,
+) -> anyhow::Result<usize> {
     use exvlan_core::config::api_input::NetworkConfigExt as _;
     use exvlan_core::config::toml::ConfigLoader as _;
     use exvlan_proto::api::manage::NetworkConfig;
@@ -563,7 +707,9 @@ fn convert_networks(src: &Path, config_dir: &Path, log: &mut Logger) -> anyhow::
     let text =
         std::fs::read_to_string(src).with_context(|| format!("读取 {} 失败", src.display()))?;
     let value: toml::Value = toml::from_str(&text).context("解析 networks.toml 失败")?;
-    std::fs::create_dir_all(config_dir)?;
+    if !dry_run {
+        std::fs::create_dir_all(config_dir)?;
+    }
     let mut count = 0usize;
 
     let networks = value
@@ -601,15 +747,19 @@ fn convert_networks(src: &Path, config_dir: &Path, log: &mut Logger) -> anyhow::
         let toml_cfg = nc.gen_config().context("gen_config 失败（字段不合法？）")?;
         let dumped = toml_cfg.dump();
         let path = config_dir.join(format!("{id}.toml"));
-        std::fs::write(&path, &dumped).with_context(|| format!("写入 {} 失败", path.display()))?;
+        if dry_run {
+            log.info(&format!("(dry-run) 将写入 {}", path.display()));
+        } else {
+            std::fs::write(&path, &dumped)
+                .with_context(|| format!("写入 {} 失败", path.display()))?;
+        }
         count += 1;
-        log.info(&format!("convert network id={id} → {}", path.display()));
     }
     Ok(count)
 }
 
 /// `service.json`（旧）→ `service.toml`（新）。
-fn convert_service(src: &Path, dst: &Path, log: &mut Logger) -> anyhow::Result<()> {
+fn convert_service(src: &Path, dst: &Path, dry_run: bool, log: &mut Logger) -> anyhow::Result<()> {
     let text = std::fs::read_to_string(src)?;
     let v: Value = serde_json::from_str(&text).context("解析 service.json 失败")?;
     let owner = v.get("owner_uid").and_then(Value::as_u64).unwrap_or(0);
@@ -644,6 +794,13 @@ fn convert_service(src: &Path, dst: &Path, log: &mut Logger) -> anyhow::Result<(
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!("rpc_extra_whitelist = [{list}]\n"));
+    }
+    if dry_run {
+        log.info(&format!(
+            "(dry-run) 由 service.json 生成 {}（policy={policy} owner_uid={owner}）",
+            dst.display()
+        ));
+        return Ok(());
     }
     if let Some(dir) = dst.parent() {
         std::fs::create_dir_all(dir).ok();
@@ -682,8 +839,11 @@ fn rollback_from(
         }
         restored += 1;
     }
-    // 恢复出来的旧 service.json 意味着「迁移前状态」，标记必须去掉，否则下次启动会跳过迁移。
-    let _ = std::fs::remove_file(user.data.join("migrate.done"));
+    // 恢复出来的旧 service.json / ui-state.json 意味着「迁移前状态」，标记必须去掉，
+    // 否则下次启动会跳过迁移。
+    for marker in [MIGRATE_MARKER, SANITIZE_MARKER] {
+        let _ = std::fs::remove_file(user.data.join(marker));
+    }
     log.info(&format!(
         "rollback restored={restored} from {}",
         dir.display()
@@ -800,50 +960,6 @@ mod tests {
     }
 
     #[test]
-    fn finds_service_json_in_user_dir() {
-        let user = temp("user");
-        let sys = temp("sys");
-        std::fs::write(user.join("service.json"), "{}").unwrap();
-        let picked = pick_service_json(&user, &sys.join("service.toml"));
-        assert_eq!(picked, Some(user.join("service.json")));
-        let _ = std::fs::remove_dir_all(&user);
-        let _ = std::fs::remove_dir_all(&sys);
-    }
-
-    #[test]
-    fn finds_service_json_in_system_dir() {
-        // pre.17 首个版本漏掉的就是这一处（macOS/Windows 的服务配置在系统目录）。
-        let user = temp("user2");
-        let sys = temp("sys2");
-        std::fs::write(sys.join("service.json"), "{\"mode\":\"Normal\"}").unwrap();
-        let picked = pick_service_json(&user, &sys.join("service.toml"));
-        assert_eq!(picked, Some(sys.join("service.json")));
-        let _ = std::fs::remove_dir_all(&user);
-        let _ = std::fs::remove_dir_all(&sys);
-    }
-
-    #[test]
-    fn prefers_user_dir_when_both_exist() {
-        let user = temp("user3");
-        let sys = temp("sys3");
-        std::fs::write(user.join("service.json"), "{}").unwrap();
-        std::fs::write(sys.join("service.json"), "{}").unwrap();
-        let picked = pick_service_json(&user, &sys.join("service.toml"));
-        assert_eq!(picked, Some(user.join("service.json")));
-        let _ = std::fs::remove_dir_all(&user);
-        let _ = std::fs::remove_dir_all(&sys);
-    }
-
-    #[test]
-    fn none_when_no_legacy_service_json() {
-        let user = temp("user4");
-        let sys = temp("sys4");
-        assert_eq!(pick_service_json(&user, &sys.join("service.toml")), None);
-        let _ = std::fs::remove_dir_all(&user);
-        let _ = std::fs::remove_dir_all(&sys);
-    }
-
-    #[test]
     fn strips_installer_flag_but_keeps_everything_else() {
         // dev.1 真机上的原始脏值形状：macOS 的 args[2] 是 `--tools-dir`。
         let dirty = "# 注释\npolicy = \"resident\"\nowner_sid = \"--tools-dir\"\n\n[gateway]\nenabled = true\n";
@@ -890,7 +1006,11 @@ mod tests {
         let user = temp("sanitize-user");
         let sys = temp("sanitize-sys");
         let config = sys.join("service.toml");
-        std::fs::write(&config, "owner_sid = \"--tools-dir\"\npolicy = \"resident\"\n").unwrap();
+        std::fs::write(
+            &config,
+            "owner_sid = \"--tools-dir\"\npolicy = \"resident\"\n",
+        )
+        .unwrap();
         let log_path = user.join("migrate.log");
 
         let mut log = Logger::new(&log_path);
@@ -936,5 +1056,285 @@ mod tests {
             data: dir.to_path_buf(),
             logs: dir.to_path_buf(),
         }
+    }
+
+    /// 一套完全落在临时目录里的路径（绝不碰真实系统目录）。
+    struct Fake {
+        root: PathBuf,
+    }
+
+    impl Fake {
+        fn new(tag: &str) -> Self {
+            let root = temp(tag);
+            Self { root }
+        }
+        fn user(&self) -> exvlan_control::paths::UserPaths {
+            let data = self.root.join("user");
+            std::fs::create_dir_all(&data).unwrap();
+            exvlan_control::paths::UserPaths {
+                data: data.clone(),
+                logs: data,
+            }
+        }
+        fn paths(&self) -> exvlan_control::paths::Paths {
+            let config = self.root.join("system").join("config");
+            let core = self.root.join("system").join("core");
+            std::fs::create_dir_all(&config).unwrap();
+            std::fs::create_dir_all(&core).unwrap();
+            let mut p = exvlan_control::paths::paths();
+            p.config = config.clone();
+            p.core = core.clone();
+            p.logs = self.root.join("system").join("logs");
+            p.service_config = self.root.join("system").join("service.toml");
+            p.service_bin = self.root.join("system").join("bin").join("exvlan-service");
+            p.kernel_bin = core.join(if cfg!(windows) {
+                "exvlan.exe"
+            } else {
+                "exvlan"
+            });
+            p.gateway_bin = core.join("exvlan-gateway");
+            p.cli_bin = core.join("exvlan-cli");
+            p
+        }
+    }
+
+    /// 一台「老机器」：ui-state.json + 旧 app_mode + 旧 networks.toml。
+    fn seed_legacy(user: &exvlan_control::paths::UserPaths, p: &exvlan_control::paths::Paths) {
+        std::fs::write(
+            user.data.join("ui-state.json"),
+            serde_json::to_string(&json!({
+                "lang": "en",
+                "log_level": "debug",
+                "last_network_instance_id": "inst-1",
+                "app_mode": format!(
+                    r#"{{"mode":"remote","remote_rpc_address":"10.9.9.9:{}","config_server_url":"https://cfg/x"}}"#,
+                    exvlan_control::DEFAULT_RPC_PORT
+                ),
+                "networkList": "[]",
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            user.data.join("networks.toml"),
+            r#"[[network]]
+name = "old"
+
+[network.config]
+instance_id = "11111111-1111-4111-a111-111111111111"
+network_name = "net"
+network_secret = "secret"
+hostname = "h"
+networking_method = 1
+peer_urls = ["tcp://192.0.2.10:11010"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(p.core.join("exvlan.prev"), "old-kernel").unwrap();
+        // 更早的 pre.17 构建写过的旧字段名 + 旧词汇（S8）
+        std::fs::write(
+            &p.service_config,
+            "# 服务配置\nowner_uid = 0\nmode = \"normal\"\nrpc_mesh_whitelist = true\n",
+        )
+        .unwrap();
+    }
+
+    /// 测试里**不碰真实系统目录**：把系统级旧路径 / 旧服务定义从检测结果里摘掉
+    /// （否则 `/var/lib/exvlan` 这类真实残留会被删）。
+    fn detected_for_test(
+        user: &exvlan_control::paths::UserPaths,
+        p: &exvlan_control::paths::Paths,
+    ) -> exvlan_control::legacy::Legacy {
+        use exvlan_control::legacy::Kind;
+        let mut legacy = exvlan_control::legacy::detect(user, p);
+        legacy.stale_paths.clear();
+        legacy.services.clear();
+        legacy
+            .items
+            .retain(|item| !matches!(item.kind, Kind::StalePath | Kind::LegacyService));
+        legacy
+    }
+
+    fn run_test(
+        dry_run: bool,
+        user: &exvlan_control::paths::UserPaths,
+        p: &exvlan_control::paths::Paths,
+    ) -> anyhow::Result<Outcome> {
+        let legacy = detected_for_test(user, p);
+        let mut log = Logger::new(&user.data.join("migrate.log"));
+        run_detected(dry_run, user, p, &legacy, &mut log, None)
+    }
+
+    fn read_prefs(user: &exvlan_control::paths::UserPaths) -> toml::Table {
+        toml::from_str(&std::fs::read_to_string(user.data.join("prefs.toml")).unwrap()).unwrap()
+    }
+
+    fn prefs_str<'a>(table: &'a toml::Table, section: &str, key: &str) -> Option<&'a str> {
+        table.get(section)?.get(key)?.as_str()
+    }
+
+    #[test]
+    fn end_to_end_migrates_prefs_and_is_idempotent() {
+        let fake = Fake::new("e2e");
+        let user = fake.user();
+        let p = fake.paths();
+        seed_legacy(&user, &p);
+
+        let first = run_test(false, &user, &p).expect("迁移成功");
+        assert!(!first.nothing_to_do);
+        assert_eq!(first.report["ok"], true, "{:#}", first.report);
+
+        // prefs 落地，ui-state.json 被删（prefs 成功 → 允许删源）
+        let table = read_prefs(&user);
+        assert_eq!(prefs_str(&table, "app", "lang"), Some("en"));
+        assert_eq!(prefs_str(&table, "app", "log_level"), Some("debug"));
+        // app_mode 拆分：runtime=service、target/remotes 合成、config_server_url 保留
+        assert_eq!(prefs_str(&table, "misc", "runtime"), Some("service"));
+        assert_eq!(
+            prefs_str(&table, "misc", "target"),
+            Some(format!("rm-legacy-10.9.9.9-{}", exvlan_control::DEFAULT_RPC_PORT).as_str())
+        );
+        let remotes = prefs_str(&table, "misc", "remotes")
+            .unwrap_or_default()
+            .to_string();
+        assert!(remotes.contains(&format!(
+            "rm-legacy-10.9.9.9-{}",
+            exvlan_control::DEFAULT_RPC_PORT
+        )));
+        // 现役设置保留在瘦身后的 [app].mode 里（前端从 loadMode() 读）
+        let app_mode = prefs_str(&table, "app", "mode").unwrap_or_default();
+        assert!(app_mode.contains("https://cfg/x"), "{app_mode}");
+        assert!(!app_mode.contains("remote_rpc_address"));
+        // 陈旧 misc 键被清掉
+        assert!(prefs_str(&table, "misc", "networkList").is_none());
+        assert!(!user.data.join("ui-state.json").exists());
+        assert!(!user.data.join("networks.toml").exists());
+        assert!(!p.core.join("exvlan.prev").exists());
+        // 内核配置转换产物存在
+        assert!(
+            p.config
+                .join("11111111-1111-4111-a111-111111111111.toml")
+                .is_file()
+        );
+        // S8：service.toml 旧字段名归一，且保留注释与其它行
+        assert_eq!(
+            std::fs::read_to_string(&p.service_config).unwrap(),
+            "# 服务配置\nowner_uid = 0\npolicy = \"session\"\nrpc_mesh_whitelist = true\n"
+        );
+        // 归一成功 → 报告明确写出「别名可安全删」
+        let steps = first.report["steps"].as_array().unwrap();
+        assert!(
+            steps.iter().any(|s| s["id"] == "service_toml"
+                && s["detail"]["runtime_alias_removal"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("可删除")),
+            "{:#}",
+            first.report
+        );
+        // marker 只写一次（内容是单次运行的账）
+        let marker_path = user.data.join(MIGRATE_MARKER);
+        let marker_first = std::fs::read_to_string(&marker_path).unwrap();
+        assert!(marker_first.contains("backup"));
+
+        // 第二次：没有遗留 → nothing to do，且不改任何文件
+        let second = run_test(false, &user, &p).expect("第二次");
+        assert!(second.nothing_to_do, "{:#}", second.report);
+        assert_eq!(marker_first, std::fs::read_to_string(&marker_path).unwrap());
+        assert_eq!(read_prefs(&user), table, "第二次运行不能改动 prefs.toml");
+
+        let _ = std::fs::remove_dir_all(&fake.root);
+    }
+
+    #[test]
+    fn dry_run_reports_every_step_without_writing() {
+        let fake = Fake::new("dry");
+        let user = fake.user();
+        let p = fake.paths();
+        seed_legacy(&user, &p);
+        let before = std::fs::read_to_string(user.data.join("ui-state.json")).unwrap();
+
+        let outcome = run_test(true, &user, &p).expect("dry-run");
+        assert!(!outcome.nothing_to_do);
+        assert_eq!(outcome.report["dry_run"], true);
+        // 每个 S 项都能在 dry-run 里看见状态
+        let steps = outcome.report["steps"].as_array().unwrap();
+        for id in [
+            "prefs",
+            "app_mode",
+            "service_toml",
+            "machine_id_uid_hash",
+            "networks",
+            "stale_paths",
+            "service_cleanup",
+            "cleanup",
+        ] {
+            assert!(
+                steps.iter().any(|s| s["id"] == id),
+                "dry-run 报告缺 {id}: {:#}",
+                outcome.report
+            );
+        }
+        assert!(
+            steps
+                .iter()
+                .any(|s| s["id"] == "prefs" && s["status"] == "planned"),
+            "{:#}",
+            outcome.report
+        );
+        // 不落盘
+        assert_eq!(
+            std::fs::read_to_string(user.data.join("ui-state.json")).unwrap(),
+            before
+        );
+        assert!(!user.data.join("prefs.toml").exists());
+        assert!(!user.data.join(MIGRATE_MARKER).exists());
+        assert!(user.data.join("networks.toml").is_file());
+        assert!(p.core.join("exvlan.prev").is_file());
+        assert!(
+            !p.config
+                .join("11111111-1111-4111-a111-111111111111.toml")
+                .exists()
+        );
+        assert!(
+            !user.data.join("migrate.done.v2").exists(),
+            "dry-run 不写标记"
+        );
+        // S8 在 dry-run 只报告
+        assert!(
+            steps
+                .iter()
+                .any(|s| s["id"] == "service_toml" && s["status"] == "planned"),
+            "{:#}",
+            outcome.report
+        );
+        assert_eq!(
+            std::fs::read_to_string(&p.service_config).unwrap(),
+            "# 服务配置\nowner_uid = 0\nmode = \"normal\"\nrpc_mesh_whitelist = true\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&fake.root);
+    }
+
+    #[test]
+    fn prefs_write_failure_keeps_ui_state_but_marks_incomplete() {
+        let fake = Fake::new("prefs-fail");
+        let user = fake.user();
+        let p = fake.paths();
+        seed_legacy(&user, &p);
+        // 占住 tmp 文件名 → prefs 写入必失败
+        std::fs::create_dir_all(user.data.join("prefs.toml.tmp")).unwrap();
+
+        let outcome = run_test(false, &user, &p).expect("不该 bail");
+        assert_eq!(outcome.report["ok"], false, "{:#}", outcome.report);
+        assert!(user.data.join("ui-state.json").is_file(), "源必须保留");
+        assert!(!user.data.join("prefs.toml").exists());
+        // 其余项照常完成
+        assert!(!user.data.join("networks.toml").exists());
+        // marker 里明确记下未完成项（避免闸门无限循环，同时留痕）
+        let marker = std::fs::read_to_string(user.data.join(MIGRATE_MARKER)).unwrap();
+        assert!(marker.contains("prefs"), "{marker}");
+
+        let _ = std::fs::remove_dir_all(&fake.root);
     }
 }
