@@ -693,8 +693,13 @@ pub mod app {
         pub choices: Vec<VersionChoice>,
     }
 
+    /// 当前安装的应用版本。
+    ///
+    /// 必须用 `BUILD_VERSION`（CI 注入的 `<base>[-channel.N]+sha`）而不是
+    /// `CARGO_PKG_VERSION`：nightly/dev 构建的 base 与 tag 不一致，用 crate 版本
+    /// 会让客户端永远认为「有更新」（装完还提示同一个版本）。
     fn current_version() -> String {
-        env!("CARGO_PKG_VERSION").to_string()
+        crate::BUILD_VERSION.to_string()
     }
 
     /// 检查应用更新（合并「当前通道及以下」的清单）。
