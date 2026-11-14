@@ -4,16 +4,31 @@ on:
   workflow_call:
     inputs:
       dist_tag:
-        description: "npm dist-tag（如 latest / next）；tag 触发时忽略，按 tag 后缀自动推导通道"
+        description: "npm dist-tag（如 latest / next）；仅「无后缀版本 + 非 tag 触发」时使用，其余按版本通道推导"
         type: string
         default: "latest"
+        required: false
+      version:
+        description: "发布版本串（v26.410.20713 / v26.410.20713-dev.1）；省略时取 github.ref_name"
+        type: string
+        default: ""
         required: false
   workflow_dispatch:
     inputs:
       dist_tag:
-        description: "npm dist-tag（如 latest / next）；tag 触发时忽略，按 tag 后缀自动推导通道"
+        description: "npm dist-tag（如 latest / next）；仅「无后缀版本 + 非 tag 触发」时使用，其余按版本通道推导"
         type: string
         default: "latest"
+        required: false
+      version:
+        description: "发布版本串（v26.410.20713 / v26.410.20713-dev.1）；省略时取 github.ref_name"
+        type: string
+        default: ""
+        required: false
+      unpublish_version:
+        description: "【危险】只删除该版本的 4 个 SDK 包（如 26.410.20713），不构建不发布；留空 = 正常构建并发布"
+        type: string
+        default: ""
         required: false
 
 permissions:
@@ -29,55 +44,45 @@ jobs:
     name: Publish @exvlan SDK to GitHub Packages
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
-        with:
-          toolchain: 1.95
-          target: wasm32-wasip1
-          cache: false
-          rustflags: ""
-
-      - uses: ./.github/actions/setup-protoc
-        with:
-          version: "35.1"
-          token: ${{ github.token }}
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@exvlan"
-
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-        with:
-          version: 12
-          run_install: false
-
-      - name: Install dependencies
-        run: pnpm --dir packages/sdk install --frozen-lockfile
-
-      # dist-tag 按**发布通道**推导，而不是一律 `latest`：
-      # `latest` 属于正式版，`npm i @exvlan/sdk` 必须永远拿到 stable。
-      # 之前 pipeline 对任何 tag 都传 `dist_tag: latest`，导致 dev.1 预发布把
-      # `latest` 顶掉（装到的是 dev 版）；通道化之后预发布各有自己的 tag
-      # （dev/beta/rc/nightly），`latest` 只会被无后缀的正式版改写。
-      - name: Resolve npm dist-tag
-        id: dist_tag
+      # 版本串与 dist-tag 都从 tag 推导（tag 是唯一真源）：
+      # registry 的版本号没有「通道」维度，用无后缀的 26.410.20713 发 dev 构建，
+      # 会把 dev 版当成正式版写进 registry 并顶掉 `latest`（曾经真的发生过）。
+      # 因此预发布必须让 sdk 版本自带后缀（…-dev.1），`latest` 只由无后缀正式版改写。
+      - name: Resolve version / dist-tag
+        id: meta
         env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DIST_TAG: ${{ inputs.dist_tag }}
+          UNPUBLISH_VERSION: ${{ inputs.unpublish_version }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
-          INPUT_TAG: ${{ inputs.dist_tag }}
         run: |
           set -euo pipefail
-          # 非 tag 触发（workflow_dispatch 手工发布）沿用输入值。
-          if [[ "$REF_TYPE" != "tag" ]]; then
-            tag="${INPUT_TAG:-latest}"
-            echo "dist-tag=${tag}（非 tag 触发，取自输入）"
-            echo "dist-tag=${tag}" >> "$GITHUB_OUTPUT"
+          semver_re='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$'
+
+          # unpublish 模式：只删指定版本，不推导发布信息、不构建。
+          if [[ -n "$UNPUBLISH_VERSION" ]]; then
+            if [[ ! "$UNPUBLISH_VERSION" =~ $semver_re ]]; then
+              echo "::error::unpublish_version 必须形如 26.410.20713（收到 '${UNPUBLISH_VERSION}'），拒绝执行"
+              exit 1
+            fi
+            echo "mode=unpublish" >> "$GITHUB_OUTPUT"
+            echo "unpublish_version=${UNPUBLISH_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "→ 仅删除版本 ${UNPUBLISH_VERSION}：不构建、不发布"
             exit 0
           fi
-          version="${REF_NAME#v}"
+          echo "mode=publish" >> "$GITHUB_OUTPUT"
+
+          raw="${INPUT_VERSION:-$REF_NAME}"
+          version="${raw#v}"
+          if [[ ! "$version" =~ $semver_re ]]; then
+            echo "::error::无法从 '${raw}' 推导版本：应形如 v26.410.20713 或 v26.410.20713-dev.1"
+            echo "::error::非 tag 触发（dispatch 到分支）必须显式传 version 输入，不能拿基线版本顶正式版"
+            exit 1
+          fi
+
+          # dist-tag 按**发布通道**推导，而不是一律 `latest`：
+          # `latest` 属于正式版，`npm i @exvlan/sdk` 必须永远拿到 stable。
           case "$version" in
             *-nightly.*) tag=nightly ;;
             *-dev.*)     tag=dev ;;
@@ -88,23 +93,197 @@ jobs:
               suffix="${version#*-}"
               tag="${suffix%%.*}"
               ;;
-            *)           tag=latest ;;
+            *)
+              if [[ "$REF_TYPE" == "tag" ]]; then
+                tag=latest
+              else
+                tag="${INPUT_DIST_TAG:-latest}"
+              fi
+              ;;
           esac
-          echo "dist-tag=${tag}（由 tag ${REF_NAME} 推导）"
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "dist-tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "→ 发布版本：@exvlan/*@${version}（dist-tag=${tag}，来源 ${REF_TYPE:-dispatch} ${REF_NAME:-<无>}）"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.meta.outputs.mode == 'publish'
+
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        if: steps.meta.outputs.mode == 'publish'
+        with:
+          toolchain: 1.95
+          target: wasm32-wasip1
+          cache: false
+          rustflags: ""
+
+      - uses: ./.github/actions/setup-protoc
+        if: steps.meta.outputs.mode == 'publish'
+        with:
+          version: "35.1"
+          token: ${{ github.token }}
+
+      # unpublish 也要这一步：它生成指向 npm.pkg.github.com 的 .npmrc 凭据。
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@exvlan"
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        if: steps.meta.outputs.mode == 'publish'
+        with:
+          version: 12
+          run_install: false
+
+      - name: Install dependencies
+        if: steps.meta.outputs.mode == 'publish'
+        run: pnpm --dir packages/sdk install --frozen-lockfile
+
+      # 把 tag 的完整版本串（含通道后缀）写进 4 个可发布包，并同步内部
+      # `workspace:<v>` specifier（`workspace:*` 之类不动）。CI 工作树一次性使用，
+      # 发布后无需还原。examples/web 是 private、不发布，但它的 specifier 指向上面的
+      # 包，跟着改才能让 lockfile 自洽。
+      - name: Apply release version to SDK packages
+        if: steps.meta.outputs.mode == 'publish'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          base=$(jq -r .version packages/sdk/package.json)
+          target_base="${VERSION%%-*}"
+          if [[ "$target_base" != "$base" ]]; then
+            echo "::error::版本 ${VERSION} 的基线（${target_base}）≠ packages/sdk 基线（${base}）：tag 与源码版本不一致"
+            echo "::error::先跑 script/ci/set-version.sh ${target_base} 并提交，再打 tag"
+            exit 1
+          fi
+          echo "基线 ${base} → 发布版本 ${VERSION}"
+          for rel in package.json runtime/package.json browser/package.json \
+                     cloudflare/package.json examples/web/package.json; do
+            f="packages/sdk/${rel}"
+            tmp=$(mktemp)
+            jq --arg v "$VERSION" '
+              .version = $v
+              | (if has("dependencies") then
+                   .dependencies |= with_entries(
+                     if (.value | type) == "string" and (.value | startswith("workspace:"))
+                     then .value = ("workspace:" + $v)
+                     else . end
+                   )
+                 else . end)
+            ' "$f" > "$tmp"
+            mv "$tmp" "$f"
+            deps=$(jq -r '[.dependencies // {} | to_entries[]
+                           | select(.value | startswith("workspace:"))
+                           | "\(.key)@\(.value)"] | join(", ")' "$f")
+            echo "  · ${f}: version=$(jq -r .version "$f")${deps:+ → ${deps}}"
+          done
+
+      - name: Refresh SDK lockfile specifiers
+        if: steps.meta.outputs.mode == 'publish'
+        run: pnpm --dir packages/sdk install --lockfile-only --ignore-scripts
 
       # 发布 runtime / browser / cloudflare / 聚合包（sdk）；
       # examples/web 为 private，自动跳过。各包 prepack=check 会先构建（含 wasm）。
       # 幂等：若该版本已发布（例如重跑 tag 流水线），直接跳过，避免 npm 409。
       - name: Publish (recursive)
-        run: |
-          set -euo pipefail
-          version=$(jq -r .version packages/sdk/package.json)
-          if npm view "@exvlan/sdk@${version}" version \
-               --registry "https://npm.pkg.github.com" >/dev/null 2>&1; then
-            echo "@exvlan/sdk@${version} 已存在，跳过发布（幂等）"
-            exit 0
-          fi
-          pnpm --dir packages/sdk -r publish --access public --no-git-checks --tag "${{ steps.dist_tag.outputs.dist_tag }}"
+        if: steps.meta.outputs.mode == 'publish'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          DIST_TAG: ${{ steps.meta.outputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          registry="https://npm.pkg.github.com"
+          # 仓库根的 package.json 声明了 devEngines.packageManager=pnpm，npm（11+）
+          # 在仓库根会直接 EBADDEVENGINES，所以 npm 探测放在临时目录里（子 shell，
+          # 不影响本步骤后续的相对路径）。
+          if (cd "${RUNNER_TEMP:-/tmp}" && npm view "@exvlan/sdk@${VERSION}" version \
+                --registry "$registry" >/dev/null 2>&1); then
+            echo "@exvlan/sdk@${VERSION} 已存在，跳过发布（幂等）"
+            exit 0
+          fi
+          pnpm --dir packages/sdk -r publish --access public --no-git-checks --tag "$DIST_TAG"
+
+      # 受控清理入口：`workflow_dispatch` 的 unpublish_version 非空时**只**跑这一步。
+      # 逐包先探测是否存在，再按 `--force` 删指定版本（不删整包、不删其它版本）。
+      # GitHub Packages 禁用了命令行的包删除（`npm unpublish` 返回 405
+      # "Package deletion from the command line is disabled"），官方口径是用 REST API
+      # 删「某个版本」，所以 npm 失败时回退到 DELETE …/packages/npm/<pkg>/versions/<id>。
+      # 注：REST 路径里的包名是**不带 scope** 的 `runtime`/`browser`/…。
+      - name: Unpublish version (dispatch only)
+        if: steps.meta.outputs.mode == 'unpublish'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          VERSION: ${{ steps.meta.outputs.unpublish_version }}
+        run: |
+          set -euo pipefail
+          registry="https://npm.pkg.github.com"
+          names=(runtime browser cloudflare sdk)
+          # 仓库根 devEngines.packageManager=pnpm，npm 在仓库根会 EBADDEVENGINES；
+          # 本步骤只用 npm 查询/删除 + curl 调 REST，与仓库内容无关，直接在临时目录跑。
+          cd "${RUNNER_TEMP:-/tmp}"
+
+          echo "将删除以下（仅指定版本，不是整包）："
+          for name in "${names[@]}"; do
+            echo "  - @exvlan/${name}@${VERSION}"
+          done
+
+          api_get() {
+            curl -sS -H "Authorization: Bearer ${NODE_AUTH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" "$1"
+          }
+
+          # 0 = 已删除；2 = 本来就没有这个版本；1 = 删除失败。
+          rest_delete() {
+            local pkg="$1" id code
+            local api="https://api.github.com/orgs/${OWNER}/packages/npm/${pkg}/versions"
+            id=$(api_get "${api}?per_page=100" \
+                 | jq -r --arg v "${VERSION}" '[.[] | select(.name == $v) | .id][0] // empty')
+            if [[ -z "$id" ]]; then
+              return 2
+            fi
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+              -H "Authorization: Bearer ${NODE_AUTH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" "${api}/${id}")
+            echo "  · REST DELETE ${api}/${id} → HTTP ${code}"
+            [[ "$code" == "204" ]]
+          }
+
+          failed=()
+          for name in "${names[@]}"; do
+            if ! npm view "@exvlan/${name}@${VERSION}" version --registry "$registry" >/dev/null 2>&1; then
+              echo "  · @exvlan/${name}@${VERSION} 不存在，跳过"
+              continue
+            fi
+            if npm unpublish "@exvlan/${name}@${VERSION}" --force --registry "$registry" >/dev/null 2>&1; then
+              echo "  ✓ 已删除 @exvlan/${name}@${VERSION}（npm unpublish）"
+              continue
+            fi
+            echo "  · npm unpublish 不可用（GitHub Packages 禁用命令行删除），改走 REST API"
+            rc=0
+            rest_delete "$name" || rc=$?
+            case "$rc" in
+              0) echo "  ✓ 已删除 @exvlan/${name}@${VERSION}（REST API）" ;;
+              2) echo "  · @exvlan/${name}@${VERSION} 在 REST 中已不存在，跳过" ;;
+              *)
+                echo "::error::删除 @exvlan/${name}@${VERSION} 失败（需要 write:packages / delete:packages 权限）"
+                failed+=("@exvlan/${name}@${VERSION}")
+                ;;
+            esac
+          done
+
+          # 删掉 `latest` 指向的版本时，GitHub Packages 会自动把 `latest` 回退到
+          # 现存最高版本；这里打出来确认，避免「发布成功但 latest 悬空」被忽略。
+          echo "--- 删除后 dist-tags ---"
+          for name in "${names[@]}"; do
+            tags=$(npm view "@exvlan/${name}" dist-tags --json --registry "$registry") || tags="<查询失败>"
+            echo "  @exvlan/${name}: $(echo "$tags" | tr -d '\n')"
+          done
+
+          if ((${#failed[@]})); then
+            echo "::error::有 ${#failed[@]} 个包删除失败：${failed[*]}"
+            exit 1
+          fi
+          echo "完成：${VERSION} 的 4 个包均已处理"
