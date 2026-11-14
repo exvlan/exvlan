@@ -64,6 +64,23 @@ pub fn current_user_sid() -> Option<String> {
     None
 }
 
+/// 合法的 Windows SID（形如 `S-1-5-21-...`）。非法返回 `None`。
+///
+/// 安装器与迁移工具共用这一条判据：`service.toml` 的 `owner_sid` 只该来自
+/// 安装者本人。空串、`--tools-dir`（历史 bug：macOS 把命令行开关当 SID 存了）
+/// 或任何非 `S-1-` 开头的残渣都视为非法，写入侧归空、迁移侧抹掉。
+pub fn valid_owner_sid(raw: &str) -> Option<&str> {
+    let value = raw.trim();
+    // 长度上限与管道 SDDL 的校验保持一致（SID 字符串 < 200 字节）。
+    if !value.starts_with("S-1-") || value.len() > 184 {
+        return None;
+    }
+    let numeric = value[4..]
+        .split('-')
+        .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()));
+    numeric.then_some(value)
+}
+
 /// 手工把 SID 结构转成字符串（不引入 `ConvertSidToStringSidW`，少一个 API 面）。
 ///
 /// ```c
@@ -115,5 +132,21 @@ mod tests {
         // 非 Windows 上必须安静地返回 None（安装流程不允许因此失败）。
         #[cfg(not(target_os = "windows"))]
         assert!(super::current_user_sid().is_none());
+    }
+
+    #[test]
+    fn valid_owner_sid_rejects_installer_flags() {
+        // dev.1 的脏值：macOS 把 `--tools-dir` 当 SID 写进了 service.toml。
+        assert_eq!(super::valid_owner_sid("--tools-dir"), None);
+        assert_eq!(super::valid_owner_sid(""), None);
+        assert_eq!(super::valid_owner_sid("   "), None);
+        assert_eq!(super::valid_owner_sid("root"), None);
+        assert_eq!(super::valid_owner_sid("S-1-"), None);
+        assert_eq!(super::valid_owner_sid("S-1-5-21-abc"), None);
+        // 合法 SID：原样返回（去掉首尾空白）。
+        assert_eq!(
+            super::valid_owner_sid("  S-1-5-21-1004336348-1177238915-682003330-1001 "),
+            Some("S-1-5-21-1004336348-1177238915-682003330-1001")
+        );
     }
 }

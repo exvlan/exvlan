@@ -11,6 +11,12 @@ use serde_json::{Value, json};
 use crate::protocol::{Payload, Request};
 use crate::{backend, ipc, paths};
 
+/// 构建版本串（CI 经 `EXVLAN_BUILD_VERSION` 注入；本地构建回落 crate 版本）。
+const BUILD_VERSION: &str = match option_env!("EXVLAN_BUILD_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 #[derive(Debug, Clone)]
 pub struct Finding {
     pub id: &'static str,
@@ -107,10 +113,12 @@ pub fn collect() -> Report {
     }
 
     version_checks(&mut out, &p);
-    port_checks(&mut out);
-    port_conflict_check(&mut out);
+    let svc = service_status();
+    port_checks(&mut out, &svc);
+    port_conflict_check(&mut out, &p, &svc);
     rpc_whitelist_check(&mut out);
     config_checks(&mut out);
+    update_channel_check(&mut out, &user);
     storage_checks(&mut out, &user);
     #[cfg(target_os = "macos")]
     webkit_check(&mut out, &user);
@@ -277,9 +285,40 @@ fn is_pipe_busy(err: &str) -> bool {
     err.contains("os error 231") || err.to_ascii_lowercase().contains("pipe instance")
 }
 
+/// 服务 `status` 里 doctor 需要的几项（多处复用，只打一次 IPC）。
+#[derive(Debug, Default, Clone)]
+struct ServiceStatus {
+    /// 内核 pid（`None` = 没在跑）。
+    kernel_pid: Option<u32>,
+    /// gateway 实际监听地址（`None` = 服务没报，调用方回落回环）。
+    gateway_addr: Option<String>,
+}
+
+fn service_status() -> ServiceStatus {
+    if !backend::detect().has_service() {
+        return ServiceStatus::default();
+    }
+    let Ok(resp) = ipc::call(&Request::Status) else {
+        return ServiceStatus::default();
+    };
+    let Some(Payload::Status { kernel, gateway, .. }) = &resp.data else {
+        return ServiceStatus::default();
+    };
+    ServiceStatus {
+        kernel_pid: kernel
+            .as_ref()
+            .map(|k| k.pid)
+            .filter(|pid| *pid != 0),
+        gateway_addr: gateway
+            .as_ref()
+            .map(|g| g.addr.trim().to_string())
+            .filter(|addr| !addr.is_empty()),
+    }
+}
+
 /// RPC 端口是否被**外来**进程占着（pre.19 起服务会返回结构化 `port_in_use`，
 /// 这里做「事前体检」：内核没跑时也能看出来端口被谁占了）。
-fn port_conflict_check(out: &mut Vec<Finding>) {
+fn port_conflict_check(out: &mut Vec<Finding>, p: &paths::Paths, svc: &ServiceStatus) {
     if !backend::detect().has_service() {
         return;
     }
@@ -291,6 +330,7 @@ fn port_conflict_check(out: &mut Vec<Finding>) {
         port,
         pid,
         name,
+        path,
         is_our_kernel,
         free,
         ..
@@ -301,23 +341,32 @@ fn port_conflict_check(out: &mut Vec<Finding>) {
     if *free {
         return;
     }
-    if is_our_kernel.unwrap_or(false) {
+    let occupant_pid = pid.unwrap_or(0);
+    // 占用者是不是**我们自己的内核**：服务自己的判断之外，再用「内核 pid」与
+    // 「可执行文件路径」各兜一次 —— 服务刚重启/刚拉起内核时 `is_our_kernel`
+    // 可能还没置位，否则 doctor 会把自家内核报成冲突（dev.1 的假阳性）。
+    if own_kernel_occupant(
+        *is_our_kernel,
+        occupant_pid,
+        path.as_deref(),
+        svc,
+        &p.kernel_bin,
+    ) {
         out.push(Finding {
             id: "net.port_conflict",
             level: "ok",
-            summary: format!("RPC 端口 {port} 由本机内核占用（正常）"),
+            summary: format!("RPC 端口 {port} 由本机内核占用（pid={occupant_pid}，正常）"),
             evidence,
             fixable: false,
         });
         return;
     }
     let name = name.clone().unwrap_or_else(|| "unknown".to_string());
-    let pid = pid.unwrap_or(0);
     out.push(Finding {
         id: "net.port_conflict",
         level: "error",
         summary: format!(
-            "RPC 端口 {port} 被 {name}（pid={pid}）占用，内核起不来；\
+            "RPC 端口 {port} 被 {name}（pid={occupant_pid}）占用，内核起不来；\
              若这是编辑器/SSH 的端口转发，请在它的 Ports 面板停掉该端口，\
              或把 service.toml 的 rpc_portal 改成 \"127.0.0.1:{}\"",
             crate::DEFAULT_RPC_PORT.saturating_add(1)
@@ -325,6 +374,32 @@ fn port_conflict_check(out: &mut Vec<Finding>) {
         evidence,
         fixable: false,
     });
+}
+
+/// 两个路径（canonicalize 后）是否指向同一个可执行文件。
+fn same_exe(raw: &str, expected: &std::path::Path) -> bool {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return false;
+    }
+    let canon = |path: &std::path::Path| {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    };
+    canon(std::path::Path::new(raw)) == canon(expected)
+}
+
+/// 端口占用者是否就是本机内核（三条判据任一成立）。
+fn own_kernel_occupant(
+    is_our_kernel: Option<bool>,
+    occupant_pid: u32,
+    occupant_path: Option<&str>,
+    svc: &ServiceStatus,
+    kernel_bin: &std::path::Path,
+) -> bool {
+    is_our_kernel.unwrap_or(false)
+        // pid=0 是「拿不到」的哨兵值，不能与「内核 pid 未知」互认。
+        || (occupant_pid != 0 && svc.kernel_pid.is_some_and(|k| k == occupant_pid))
+        || occupant_path.is_some_and(|path| same_exe(path, kernel_bin))
 }
 
 /// RPC 白名单模式：默认只回环（远端走 gateway）；旧机器可能显式打开 mesh 网段。
@@ -362,7 +437,7 @@ fn version_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
     let service_v = read_trim(&p.service_version_file());
     let cli_v = env!("CARGO_PKG_VERSION").to_string();
     if let (Some(k), Some(s)) = (&kernel_v, &service_v)
-        && k != s
+        && !same_version(k, s)
     {
         out.push(Finding {
             id: "version.mismatch",
@@ -385,9 +460,88 @@ fn version_checks(out: &mut Vec<Finding>, p: &paths::Paths) {
     });
 }
 
-fn port_checks(out: &mut Vec<Finding>) {
+/// 版本比较**忽略构建元数据**（`+<sha6>`）：同一标准版本的不同构建不算不一致。
+///
+/// `26.410.20713-dev.1+bd16ae` 与 `26.410.20713-dev.1` 是同一版；
+/// 不这样处理时，每次安装都会报一条假的 `version.mismatch`。
+pub fn same_version(a: &str, b: &str) -> bool {
+    version_core(a) == version_core(b)
+}
+
+/// 版本主体（去掉 `+<build>` 与首尾空白）。
+fn version_core(version: &str) -> &str {
+    version.split('+').next().unwrap_or(version).trim()
+}
+
+/// 从版本串推断更新通道：`<标准版本>[-<channel>.<n>][+<sha6>]`。
+///
+/// 无通道后缀 = `stable`；仅用于「prefs 里没写通道」时给出信息项，**不联网**。
+pub fn channel_from_version(version: &str) -> &'static str {
+    let Some((_, tail)) = version_core(version).split_once('-') else {
+        return "stable";
+    };
+    let name = tail.split(['.', '+']).next().unwrap_or("").trim();
+    match name {
+        "nightly" => "nightly",
+        "dev" => "dev",
+        "beta" => "beta",
+        "rc" => "rc",
+        _ => "stable",
+    }
+}
+
+/// 更新通道（**只读** `prefs.toml`，不联网）。
+///
+/// 排障时「为什么没收到 nightly」的第一个问题就是「当前通道是哪个」，
+/// 以前只能翻 GUI 设置页。
+fn update_channel_check(out: &mut Vec<Finding>, user: &paths::UserPaths) {
+    let path = user.data.join("prefs.toml");
+    let read = std::fs::read_to_string(&path);
+    let prefs_channel = read
+        .as_deref()
+        .ok()
+        .and_then(|text| toml::from_str::<toml::Value>(text).ok())
+        .and_then(|v| {
+            v.get("update")
+                .and_then(|u| u.get("channel"))
+                .and_then(toml::Value::as_str)
+                .map(|s| s.trim().to_string())
+        })
+        .filter(|s| !s.is_empty());
+    let from_prefs = prefs_channel.is_some();
+    let inferred = channel_from_version(BUILD_VERSION);
+    let summary = if let Some(channel) = &prefs_channel {
+        format!("更新通道 {channel}（prefs.toml）")
+    } else {
+        let why = match &read {
+            Ok(_) => "无 [update] channel".to_string(),
+            Err(err) => format!("读不到: {err}"),
+        };
+        format!("更新通道未设置（prefs.toml {why}）→ 按版本串推断 {inferred}")
+    };
+    out.push(Finding {
+        id: "doctor.update.channel",
+        level: "info",
+        summary,
+        evidence: json!({
+            "channel": prefs_channel.unwrap_or_else(|| inferred.to_string()),
+            "source": if from_prefs { "prefs" } else { "version" },
+            "inferred": inferred,
+            "path": path.display().to_string(),
+        }),
+        fixable: false,
+    });
+}
+
+fn port_checks(out: &mut Vec<Finding>, svc: &ServiceStatus) {
     let rpc = crate::local_rpc_addr();
-    let gw = crate::local_gateway_addr();
+    // gateway 可能绑在 mesh 地址（`[gateway] bind` 或自动取虚拟地址），
+    // 只探回环会误报 closed —— 用服务上报的 addr，拿不到才回落回环。
+    let gw = svc
+        .gateway_addr
+        .as_deref()
+        .map(normalize_probe_addr)
+        .unwrap_or_else(crate::local_gateway_addr);
     let rpc_open = tcp_open(&rpc);
     let gw_open = tcp_open(&gw);
     out.push(Finding {
@@ -401,6 +555,19 @@ fn port_checks(out: &mut Vec<Finding>) {
         evidence: json!({"rpc": rpc, "rpc_open": rpc_open, "gateway": gw, "gateway_open": gw_open}),
         fixable: false,
     });
+}
+
+/// 服务上报的 `addr` 形如 `10.66.0.2:2016`；裸 IPv6（服务端用 `{bind}:{port}`
+/// 拼接）要补方括号，否则 `SocketAddr` 解析必然失败、探测结果永远 closed。
+fn normalize_probe_addr(addr: &str) -> String {
+    let addr = addr.trim();
+    if addr.starts_with('[') {
+        return addr.to_string();
+    }
+    match addr.rsplit_once(':') {
+        Some((host, port)) if host.contains(':') => format!("[{host}]:{port}"),
+        _ => addr.to_string(),
+    }
 }
 
 fn storage_checks(out: &mut Vec<Finding>, user: &paths::UserPaths) {
@@ -564,4 +731,183 @@ pub fn current_uid() -> u32 {
     }
     #[cfg(windows)]
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn status(pid: Option<u32>, gateway: Option<&str>) -> ServiceStatus {
+        ServiceStatus {
+            kernel_pid: pid,
+            gateway_addr: gateway.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn version_compare_ignores_build_metadata() {
+        // dev.1 真机验证：`+bd16ae` 被当成不一致 → 假的 version.mismatch。
+        assert!(same_version(
+            "26.410.20713-dev.1+bd16ae",
+            "26.410.20713-dev.1"
+        ));
+        assert!(same_version(
+            "26.410.20713-dev.1",
+            "26.410.20713-dev.1+bd16ae"
+        ));
+        assert!(same_version("26.410.20713+aaa", "26.410.20713+bbb"));
+        assert!(!same_version("26.410.20713-dev.1", "26.410.20713-dev.2"));
+        assert!(!same_version("26.410.20713", "26.411.20713"));
+    }
+
+    #[test]
+    fn channel_inferred_from_version_string() {
+        assert_eq!(channel_from_version("26.410.20713"), "stable");
+        assert_eq!(channel_from_version("26.410.20713+bd16ae"), "stable");
+        assert_eq!(channel_from_version("26.410.20713-dev.1"), "dev");
+        assert_eq!(channel_from_version("26.410.20713-dev.1+bd16ae"), "dev");
+        assert_eq!(channel_from_version("26.410.20713-beta.2"), "beta");
+        assert_eq!(channel_from_version("26.410.20713-rc.3"), "rc");
+        assert_eq!(channel_from_version("26.410.20713-nightly.0425"), "nightly");
+    }
+
+    #[test]
+    fn own_kernel_is_not_reported_as_conflict() {
+        let dir = temp_dir("exe");
+        let kernel = dir.join("exvlan");
+        std::fs::write(&kernel, b"#!").expect("write fake kernel");
+        let foreign = dir.join("code");
+        std::fs::write(&foreign, b"#!").expect("write fake foreign binary");
+
+        // ① 服务自己已经判定是我们的内核
+        assert!(own_kernel_occupant(
+            Some(true),
+            1234,
+            Some(&foreign.display().to_string()),
+            &status(None, None),
+            &kernel
+        ));
+        // ② pid 与 status.kernel.pid 相同（is_our_kernel 尚未置位）
+        assert!(own_kernel_occupant(
+            None,
+            4242,
+            None,
+            &status(Some(4242), None),
+            &kernel
+        ));
+        // ③ 路径 canonicalize 后与内核二进制一致（`..` 会被折叠）
+        std::fs::create_dir_all(dir.join("core")).expect("temp core dir");
+        let alias = dir.join("core").join("..").join("exvlan");
+        assert!(own_kernel_occupant(
+            Some(false),
+            9,
+            Some(&alias.display().to_string()),
+            &status(Some(4242), None),
+            &kernel
+        ));
+        // 外来进程：pid 与路径都不匹配（同目录的另一个可执行文件）
+        assert!(!own_kernel_occupant(
+            Some(false),
+            9,
+            Some(&foreign.display().to_string()),
+            &status(Some(4242), None),
+            &kernel
+        ));
+        // pid=0 是「拿不到」的哨兵值，不能与「内核 pid 未知」互认
+        assert!(!own_kernel_occupant(
+            None,
+            0,
+            None,
+            &status(None, None),
+            &kernel
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gateway_probe_uses_reported_mesh_addr() {
+        // gateway 绑 mesh 地址时，只探回环会误报 closed。
+        let port = crate::DEFAULT_GATEWAY_PORT;
+        let mesh = format!("10.66.0.2:{port}");
+        let svc = status(None, Some(&format!(" {mesh} ")));
+        let addr = svc
+            .gateway_addr
+            .as_deref()
+            .map(normalize_probe_addr)
+            .unwrap_or_else(crate::local_gateway_addr);
+        assert_eq!(addr, mesh);
+
+        // 拿不到 → 回落回环
+        let fallback = status(None, None)
+            .gateway_addr
+            .as_deref()
+            .map(normalize_probe_addr)
+            .unwrap_or_else(crate::local_gateway_addr);
+        assert_eq!(fallback, crate::local_gateway_addr());
+
+        // 裸 IPv6（服务端用 `{bind}:{port}` 拼接）必须补方括号
+        let bare = format!("fd00::5:{port}");
+        let bracketed = format!("[fd00::5]:{port}");
+        assert_eq!(normalize_probe_addr(&bare), bracketed);
+        assert_eq!(normalize_probe_addr(&bracketed), bracketed);
+        assert_eq!(
+            normalize_probe_addr(&format!("0.0.0.0:{port}")),
+            format!("0.0.0.0:{port}")
+        );
+    }
+
+    /// 测试用临时目录（doctor 的单测不碰真实系统路径）。
+    fn temp_dir(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "exvlan-doctor-{tag}-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    #[test]
+    fn update_channel_finding_reads_prefs_only() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir: PathBuf = std::env::temp_dir().join(format!(
+            "exvlan-doctor-prefs-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let user = crate::paths::UserPaths {
+            data: dir.clone(),
+            logs: dir.clone(),
+        };
+
+        // 没有 prefs.toml：info 级、按版本串推断，不报错
+        let mut out = Vec::new();
+        update_channel_check(&mut out, &user);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "doctor.update.channel");
+        assert_eq!(out[0].level, "info");
+        assert_eq!(out[0].evidence["source"], "version");
+
+        // 写了通道：原样输出
+        std::fs::write(
+            dir.join("prefs.toml"),
+            "[update]\nchannel = \"dev\"\nauto_check = true\n",
+        )
+        .expect("write prefs");
+        let mut out = Vec::new();
+        update_channel_check(&mut out, &user);
+        assert_eq!(out[0].level, "info");
+        assert_eq!(out[0].evidence["channel"], "dev");
+        assert_eq!(out[0].evidence["source"], "prefs");
+        assert!(out[0].summary.contains("dev"), "{}", out[0].summary);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

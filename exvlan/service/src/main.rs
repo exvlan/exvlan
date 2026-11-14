@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
+use exvlan_control::identity::valid_owner_sid;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -402,10 +403,16 @@ impl Default for ServiceConfig {
 fn load_config(p: &Paths) -> ServiceConfig {
     // pre.17 起统一用 TOML（与 prefs.toml / config 目录一致）；
     // 旧 `service.json` 由 `exvlan-migrate` 一次性转换，运行时不做兼容读取。
-    std::fs::read_to_string(&p.service_config)
+    let mut cfg: ServiceConfig = std::fs::read_to_string(&p.service_config)
         .ok()
         .and_then(|t| toml::from_str(&t).ok())
+        .unwrap_or_default();
+    // 历史脏值（dev.1 把 `--tools-dir` 当 SID 写进来了）在读入时就丢掉：
+    // 管道 ACL 只认合法 SID，非法值留着只会误导排查。
+    cfg.owner_sid = valid_owner_sid(&cfg.owner_sid)
         .unwrap_or_default()
+        .to_string();
+    cfg
 }
 
 fn save_config(p: &Paths, cfg: &ServiceConfig) -> anyhow::Result<()> {
@@ -3221,13 +3228,27 @@ fn run_cli(p: &Paths, args: &[String]) -> anyhow::Result<()> {
                 .map(String::as_str)
                 .filter(|v| !v.starts_with("--"))
                 .unwrap_or("");
-            install(p, uid, sid)?;
-            // 控制面工具（cli/gateway）随安装包分发，但只有服务有权限把它们
-            // 放到系统路径（GUI 跑在用户态）。缺工具不阻断安装：日志里说明。
-            if let Some(dir) = flag_value(args, "--tools-dir") {
-                match install_tools(p, Path::new(&dir)) {
-                    Ok(()) => log_line(p, &format!("tools installed from {dir}")),
+            // **先装工具、再装服务**：`install()` 会 bootstrap 服务，而服务一启动
+            // 就会拉起 gateway —— 此时磁盘上若还是旧 gateway，跑起来的就是旧二进制，
+            // 首次 `auth pair` 必 404（dev.1 真机验证）。缺工具不阻断装服务：只记日志。
+            let tools_dir = flag_value(args, "--tools-dir");
+            let mut tools_installed = false;
+            if let Some(dir) = tools_dir.as_deref() {
+                match install_tools(p, Path::new(dir)) {
+                    Ok(()) => {
+                        tools_installed = true;
+                        log_line(p, &format!("tools installed from {dir}"));
+                    }
                     Err(err) => log_line(p, &format!("tools install skipped: {err:#}")),
+                }
+            }
+            install(p, uid, sid)?;
+            // 双保险：新工具落盘后明确再重启一次服务，保证 gateway 换成新二进制
+            // （install() 自己也会重启，但「服务本来就在跑」的路径上不保证重拉起 gateway）。
+            if tools_installed {
+                match restart_service() {
+                    Ok(()) => log_line(p, "install: service restarted（gateway 用新二进制）"),
+                    Err(err) => log_line(p, &format!("install: 装后重启失败: {err:#}")),
                 }
             }
             Ok(())
@@ -4157,6 +4178,23 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
         .find_map(|a| a.strip_prefix(&format!("{flag}=")).map(str::to_string))
 }
 
+/// macOS / Linux 安装时写进 `service.toml` 的 `owner_sid`。
+///
+/// 这两端不用 SID（socket 0600 + peercred），所以空/非法一律归空 ——
+/// 早先「sid 为空就沿用旧值」会把历史脏值（`--tools-dir`）永久留下。
+fn cleared_owner_sid(new_sid: &str) -> String {
+    valid_owner_sid(new_sid).unwrap_or_default().to_string()
+}
+
+/// Windows 安装时写进 `service.toml` 的 `owner_sid`：安装者 SID 优先，
+/// 缺失时沿用旧值，但旧值也必须是**合法** SID（脏值归空 → 管道退回 IU）。
+fn inherited_owner_sid(new_sid: &str, old_sid: &str) -> String {
+    valid_owner_sid(new_sid)
+        .or_else(|| valid_owner_sid(old_sid))
+        .unwrap_or_default()
+        .to_string()
+}
+
 /// 把随包的 `exvlan-cli` / `exvlan-gateway` 安装到系统路径。
 ///
 /// 目的：agent / 用户不依赖 app 包路径就能用控制面（`exvlan-cli doctor` 等）。
@@ -4323,7 +4361,7 @@ fn wait_service_ready(timeout: Duration) -> bool {
 
 /// Linux：拷二进制 + 写 unit + `enable --now` + 等 READY；起不来回滚。
 #[cfg(target_os = "linux")]
-fn install(p: &Paths, uid: u32, _sid: &str) -> anyhow::Result<()> {
+fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
 
     if unsafe { libc::geteuid() } != 0 {
@@ -4360,7 +4398,8 @@ fn install(p: &Paths, uid: u32, _sid: &str) -> anyhow::Result<()> {
         owner_uid: uid,
         policy: old.policy,
         rpc_extra_whitelist: old.rpc_extra_whitelist,
-        owner_sid: old.owner_sid,
+        // Linux 没有 SID 概念：非法/空一律归空（历史脏值不能留在 service.toml）。
+        owner_sid: cleared_owner_sid(sid),
         rpc_portal: old.rpc_portal,
         rpc_mesh_whitelist: old.rpc_mesh_whitelist,
         gateway: old.gateway,
@@ -4468,12 +4507,8 @@ fn install(p: &Paths, uid: u32, sid: &str) -> anyhow::Result<()> {
     // （dev.1 就漏了 `update`，而 Linux 上 cfg 门控让本地 check 抓不到）。
     let cfg = ServiceConfig {
         owner_uid: uid,
-        // macOS 不用 SID（socket 0600 + peercred），传了也保留原值。
-        owner_sid: if sid.is_empty() {
-            load_config(p).owner_sid
-        } else {
-            sid.to_string()
-        },
+        // macOS 不用 SID（socket 0600 + peercred）：空/非法一律归空。
+        owner_sid: cleared_owner_sid(sid),
         ..load_config(p)
     };
     save_config(p, &cfg)?;
@@ -4563,14 +4598,14 @@ fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
     // 管道 DACL 要收窄到「安装者本人」，所以必须在安装时把 SID 记下来：
     // 服务以 LocalSystem 运行，事后无法推断是哪个用户点的安装。
     // 同 macOS：只覆盖安装动作决定的字段，其余整体沿用旧配置。
+    let old = load_config(p);
+    // 安装者 SID 缺失时沿用旧值，但必须是**合法** SID：历史脏值
+    // （`--tools-dir`）一律归空 → 管道退回 IU，不会把用户锁在门外。
+    let owner_sid = inherited_owner_sid(sid, &old.owner_sid);
     let cfg = ServiceConfig {
         owner_uid: 0,
-        owner_sid: if sid.is_empty() {
-            load_config(p).owner_sid
-        } else {
-            sid.to_string()
-        },
-        ..load_config(p)
+        owner_sid,
+        ..old
     };
     save_config(p, &cfg)?;
 
@@ -5325,6 +5360,36 @@ mod install_tools_tests {
         // 只拷这两个，目录里的杂项不带走
         assert_eq!(std::fs::read_dir(&core).unwrap().count(), 2);
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// `service.toml` 的 `owner_sid` 写入规则（dev.1 的 `--tools-dir` 脏值）。
+#[cfg(test)]
+mod owner_sid_tests {
+    use super::{cleared_owner_sid, inherited_owner_sid};
+
+    #[test]
+    fn macos_linux_clear_empty_or_illegal_sid() {
+        // macOS 的 args[2] 是 `--tools-dir`：绝不能写进 service.toml。
+        assert_eq!(cleared_owner_sid("--tools-dir"), "");
+        assert_eq!(cleared_owner_sid(""), "");
+        assert_eq!(cleared_owner_sid("root"), "");
+        // 真给了合法 SID 也不丢
+        assert_eq!(
+            cleared_owner_sid("S-1-5-21-1004336348-1177238915-682003330-1001"),
+            "S-1-5-21-1004336348-1177238915-682003330-1001"
+        );
+    }
+
+    #[test]
+    fn windows_keeps_old_sid_only_when_valid() {
+        let sid = "S-1-5-21-1004336348-1177238915-682003330-1001";
+        // 没传 SID：沿用合法的旧值
+        assert_eq!(inherited_owner_sid("", sid), sid);
+        // 旧值是脏的：归空（管道退回 IU，不会锁人）
+        assert_eq!(inherited_owner_sid("", "--tools-dir"), "");
+        // 新值合法：覆盖旧值
+        assert_eq!(inherited_owner_sid(sid, "--tools-dir"), sid);
     }
 }
 
