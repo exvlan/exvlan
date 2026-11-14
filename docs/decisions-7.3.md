@@ -684,4 +684,11 @@ dev.1 发布后在 Windows / macOS / Android 三端真机取证，以下几点�
 
 **已知待办（按发现顺序）**：`ui-state.json → prefs.toml`、`app_mode` 拆分、`machine_id` 归位、
 旧服务定义清理、`stale_paths` 清单统一到共享 crate、迁移闸门检测清单与 `detect()` 对齐。
-移动端旧 `networks.toml` 无法由桌面二进制迁移，单列决策。
+
+**移动端**：`exvlan-migrate` 是桌面二进制，跑不进 Android。决策是**做 migrate 的 Android 版** ——
+把迁移核心抽成库（`exvlan/migrate` 的 lib 部分），经 FFI 由 App 首启调用一次（带 marker），
+因此移动端旧 `config/networks.toml` 的转换同样归 migrate，**不留在 `networks/mobile.rs` 里**。
+
+**删除时机**：migrate 扩容合入并验证通过后，**同一个 dev.2 内**删完全部运行时兼容代码
+（前端 `migrateLegacyMode`、`prefs.rs::migrate_legacy`、`paths::stale_paths`、`networks/legacy.rs` 等），
+不留两套并存到下个版本。
