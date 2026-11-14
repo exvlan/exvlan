@@ -175,14 +175,6 @@ fn write_version_file(p: &Paths) -> std::io::Result<()> {
     Ok(())
 }
 
-/// 磁盘上已安装服务的版本（版本文件由服务启动时写入）；缺失返回 `None`。
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn installed_service_version(p: &Paths) -> Option<String> {
-    let text = std::fs::read_to_string(version_path(&p.service_bin)).ok()?;
-    let trimmed = text.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
-}
-
 /// `rename` + 轮询重试。
 ///
 /// Windows 上刚停掉的内核可能还握着 exe 句柄（进程退出 → 句柄释放是异步的），
@@ -4635,23 +4627,13 @@ fn install(p: &Paths, _uid: u32, sid: &str) -> anyhow::Result<()> {
         std::fs::create_dir_all(dir).ok();
     }
 
-    // 0) 幂等：目标版本已一致 + 服务在运行 → 直接成功，**不覆盖**。
-    //
-    // 现场证据（dev.1，09:29:00Z）：GUI 首启自愈与「重试安装」都会走到这里，
-    // 服务其实好好的，却因为「覆盖运行中的 exe」失败被报成「安装失败」
-    // （`cli --install failed: 复制服务二进制失败 … os error 32`，
-    // `[elevate] exit code: 1`），用户看到的是假故障。
-    if src != p.service_bin
-        && service_is_running()
-        && installed_service_version(p).as_deref() == Some(BUILD_VERSION)
-    {
-        log_line(p, "install: 版本已一致且服务在运行，跳过覆盖（幂等）");
-        return Ok(());
-    }
-
     // 1) 服务可能正在跑：直接覆盖 exe 会报「另一个程序正在使用此文件」(os error 32)。
+    //    停不下来就别硬覆盖，给出可操作的错误（比让 copy 抛裸 os error 32 有用）。
+    //
+    // 这里**不做**「版本一致就跳过」的短路：那会让「强制重装」变成静默空操作
+    // （GUI `service_reinstall` 走的正是这条路，见 docs R11）。
+    // B3 的重复覆盖由调用方（health 三态分流）与下面的「等 STOPPED 再复制」共同避免。
     if !stop_service_blocking(Duration::from_secs(30)) {
-        // 停不下来就别硬覆盖：给出可操作的错误，而不是让 copy 抛 os error 32。
         bail!(
             "服务仍在运行，未覆盖 {}；请先 `sc stop {}`（或重启机器）后重试",
             p.service_bin.display(),
@@ -4764,25 +4746,6 @@ fn stop_service_blocking(timeout: Duration) -> bool {
     false
 }
 
-/// 服务当前是否 RUNNING（SCM 判定；未安装/打不开 SCM 都算 false）。
-#[cfg(target_os = "windows")]
-fn service_is_running() -> bool {
-    use windows_service::service::{ServiceAccess, ServiceState};
-    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
-
-    let Ok(manager) = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
-    else {
-        return false;
-    };
-    let Ok(service) = manager.open_service(SERVICE_LABEL, ServiceAccess::QUERY_STATUS) else {
-        return false;
-    };
-    matches!(
-        service.query_status().map(|status| status.current_state),
-        Ok(ServiceState::Running)
-    )
-}
-
 /// 启动已注册的服务（幂等：已在运行视为成功）。
 #[cfg(target_os = "windows")]
 fn start_service_scm() -> anyhow::Result<()> {
@@ -4893,8 +4856,15 @@ fn replace_updater(p: &Paths, new_exe: Option<&str>, tools: Option<&str>) -> any
 
     // 3) 拉起；失败回滚
     if let Err(err) = start_service_scm() {
+        log_line(
+            p,
+            &format!("replace-updater: 新二进制启动失败，回滚: {err}"),
+        );
         let _ = std::fs::copy(&backup, &p.service_bin);
-        let _ = start_service_scm();
+        match start_service_scm() {
+            Ok(()) => log_line(p, "replace-updater: 已回滚到旧二进制并重新启动"),
+            Err(err) => log_line(p, &format!("replace-updater: 回滚后仍无法启动: {err}")),
+        }
         bail!("替换后启动失败，已回滚: {err}");
     }
     // 4) 暂存文件收尾（B7）：替换已成功，`.new` 不再需要。
@@ -4971,8 +4941,27 @@ fn uninstall(p: &Paths) -> anyhow::Result<()> {
     {
         // 停（等 SCM 确认）→ 注销注册。**只删 SCM 项**：二进制与 ProgramData 下的
         // 配置/日志/内核/token 一律保留（彻底清理不属于 uninstall 的职责）。
-        let _ = stop_service_blocking(Duration::from_secs(30));
-        let _ = hidden("sc").args(["delete", SERVICE_LABEL]).output();
+        if !stop_service_blocking(Duration::from_secs(30)) {
+            log_line(p, "uninstall: 服务 30s 内未停止，仍尝试注销");
+        }
+        // `sc delete` 的**退出码**是 Win32 错误码，与系统语言无关：
+        // 1060 = 服务不存在（幂等成功），1072 = 标记删除中（下次再删）。
+        match hidden("sc").args(["delete", SERVICE_LABEL]).output() {
+            Ok(out) if out.status.success() => log_line(p, "uninstall: 服务已注销"),
+            Ok(out) if out.status.code() == Some(1060) => {
+                log_line(p, "uninstall: 服务本来就不存在（1060），幂等成功")
+            }
+            Ok(out) => {
+                let code = out.status.code().unwrap_or(-1);
+                let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                log_line(p, &format!("uninstall: sc delete 退出码 {code}: {text}"));
+                bail!("注销服务失败（sc delete 退出码 {code}）: {text}");
+            }
+            Err(err) => {
+                log_line(p, &format!("uninstall: sc delete 无法执行: {err}"));
+                bail!("注销服务失败（无法执行 sc delete）: {err}");
+            }
+        }
         return Ok(());
     }
     #[cfg(target_os = "linux")]

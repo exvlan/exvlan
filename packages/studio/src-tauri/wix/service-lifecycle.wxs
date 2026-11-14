@@ -7,11 +7,18 @@
   服务不是 MSI 装的：二进制在 C:\ProgramData\era.exvlan.studio\bin\exvlan-service.exe，
   由 GUI 首次运行时提权注册。MSI 完全不知道它，于是大版本升级
   （UpgradeCode 不变 → RemoveExistingProducts）时：
-    · 服务及其拉起的 exvlan.exe / exvlan-gateway.exe 仍占着
-      C:\Program Files\EXVlan Studio 下的文件 → Restart Manager 报 351、
-      RemoveExistingProducts 阶段崩 1601；
-    · 升级窗口内服务被文件锁打崩，SCM 三次后放弃拉起（升级后长时间无人善后）。
-  因此：装/升级前停服务（连内核与 gateway），文件铺完后再拉起来。
+
+    · 服务在安装窗口内仍活着：它的看门狗每 5s 拉起 gateway，内核也在按需重启，
+      而 MSI 正在替换 C:\Program Files\EXVlan Studio\resources 下的随包二进制
+      → 读半截文件 / 复制失败（os error 32）→ 服务崩、SCM 三次后放弃（B1）；
+    · GUI 首启自愈此刻也在跑提权安装（B2），和新 MSI 抢同一批文件。
+
+  因此：装/升级前先停服务（它退出时会一并收掉内核与 gateway，见 service_main
+  的 Stop 分支），文件铺完后再拉起来。
+
+  占用 Program Files 的**主要还是 GUI 自身**（EXVlan Studio.exe + WebView2 + 它
+  正在读的 resources）。停服务不解决这一项：GUI 运行中手工跑 MSI 仍可能撞
+  Restart Manager 的「文件正在使用」。见 docs 的已知风险 R9。
 
   刻意不做的事
   ============
@@ -19,52 +26,66 @@
     注册由 GUI 首启自愈负责。
   · 不碰数据目录：C:\ProgramData\era.exvlan.studio 下的配置/日志/内核/token
     在安装、升级、卸载任何路径都不删不移。
-  · 不在失败时中断安装：全部 Return="ignore"。停不掉只是回到旧行为（Restart
-    Manager 弹「文件正在使用」），不该让整个安装失败。
+  · 不在失败时中断安装：全部 Return="ignore"。停不掉只是回到旧行为，不该让
+    整个安装失败。
+  · 不写 Impersonate：这三条都是 immediate 动作，NoImpersonate 位只对
+    in-script（deferred/rollback/commit）动作有意义，写在这里会被引擎忽略。
+    唯一例外是下面的 rollback 动作（见那一条的注释）。
 
   时序（对齐 tauri-bundler main.wxs：MajorUpgrade Schedule="afterInstallInitialize"）
   ===============================================================================
   · 停：Before="InstallValidate"。必须早于 InstallValidate，否则 Restart Manager
-    的文件占用检查已经报错。带 UI 的安装里，InstallValidate 之前的 action 会先在
-    客户端跑一遍、再在服务端（perMachine 为 SYSTEM）重跑；Impersonate="no"
-    保证以服务端身份停服务。用 sc / Get-Service，不依赖 exvlan-service 自己的
-    命令行面（升级源可能是任意旧版本）。
+    的占用检查已经报错；立即动作也只能排在这里（deferred 必须晚于
+    InstallInitialize）。带 UI 的安装里，InstallValidate 之前的动作会先在客户端
+    跑一遍、再在服务端重跑一遍（perMachine 的服务端为 SYSTEM）。
   · 注销：Before="RemoveFiles"，仅真正卸载时（REMOVE="ALL" AND NOT
     UPGRADINGPRODUCTCODE）。MSI 文档要求依赖 REMOVE=ALL 的动作排在
     InstallValidate 之后。只注销 SCM 项，不删二进制、不删数据。
   · 启：After="InstallFinalize"，仅 NOT REMOVE（安装/升级/修复后都拉起）。
+  · 回滚启：Execute="rollback"，排在 InstallInitialize 之后。安装脚本中途失败
+    回滚时把服务拉回来（immediate 的停动作没有回滚语义）。注意用户在执行序列
+    开始前点 Cancel 不会触发回滚动作 —— 那一档写在 docs 的已知风险 R10。
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
     <Fragment>
-        <!-- 停服务（等 STOPPED），随后清掉孤儿内核/gateway：服务被 SCM 放弃后
-             它们仍会占着 Program Files 里的文件。 -->
+        <!-- 停服务并等 STOPPED（≤30s）。**确认停了之后**才清孤儿内核/gateway：
+             服务活着时它的看门狗每 5s 会把 gateway 拉回来，抢在安装窗口里反复
+             抖动，反而放大 B1（见 service spawn_gateway_watchdog）。 -->
         <CustomAction Id="ExvlanStopServiceForUpgrade"
                       Directory="INSTALLDIR"
                       Execute="immediate"
-                      Impersonate="no"
                       Return="ignore"
-                      ExeCommand="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$n='era.exvlan.studio.service'; $s=Get-Service -Name $n -ErrorAction SilentlyContinue; if($s -and $s.Status -ne 'Stopped'){ Stop-Service -Name $n -Force -ErrorAction SilentlyContinue; try{ $s.WaitForStatus('Stopped','00:00:30') }catch{ Write-Output 'exvlan: service stop timeout' } }; Get-Process -Name 'exvlan','exvlan-gateway' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Write-Output 'exvlan: service stopped before upgrade'&quot;" />
+                      ExeCommand="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$n='era.exvlan.studio.service'; $s=Get-Service -Name $n -ErrorAction SilentlyContinue; $stopped=$false; if(-not $s){ $stopped=$true } elseif($s.Status -eq 'Stopped'){ $stopped=$true } else { Stop-Service -Name $n -Force -ErrorAction SilentlyContinue; try{ $s.WaitForStatus('Stopped','00:00:30'); $stopped=$true }catch{ Write-Output 'exvlan: service stop timeout' } }; if($stopped){ Get-Process -Name 'exvlan','exvlan-gateway' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }; Write-Output 'exvlan: pre-upgrade stop done'&quot;" />
 
         <!-- 装/升级收尾把服务拉回 RUNNING（升级窗口内可能已被 SCM 放弃）。
              服务不存在（用户从没启动过 GUI）时静默跳过。 -->
         <CustomAction Id="ExvlanStartServiceAfterInstall"
                       Directory="INSTALLDIR"
                       Execute="immediate"
+                      Return="ignore"
+                      ExeCommand="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$n='era.exvlan.studio.service'; $s=Get-Service -Name $n -ErrorAction SilentlyContinue; if($s -and $s.Status -ne 'Running'){ Start-Service -Name $n -ErrorAction SilentlyContinue; try{ $s.WaitForStatus('Running','00:00:30') }catch{ Write-Output 'exvlan: service start timeout' } }; Write-Output 'exvlan: service start requested'&quot;" />
+
+        <!-- 安装失败回滚时把服务拉回来（immediate 的停动作本身没有回滚语义）。
+             rollback 属于 in-script 动作，NoImpersonate 在这里是**有意义**的：
+             让它在服务端（SYSTEM）执行，否则回滚时可能没权限启动服务。 -->
+        <CustomAction Id="ExvlanStartServiceOnRollback"
+                      Directory="INSTALLDIR"
+                      Execute="rollback"
                       Impersonate="no"
                       Return="ignore"
-                      ExeCommand="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$n='era.exvlan.studio.service'; $s=Get-Service -Name $n -ErrorAction SilentlyContinue; if($s -and $s.Status -ne 'Running'){ Start-Service -Name $n -ErrorAction SilentlyContinue; try{ $s.WaitForStatus('Running','00:00:30') }catch{ Write-Output 'exvlan: service start timeout' } }; Write-Output 'exvlan: service start requested'&quot;" />
+                      ExeCommand="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$n='era.exvlan.studio.service'; $s=Get-Service -Name $n -ErrorAction SilentlyContinue; if($s -and $s.Status -ne 'Running'){ Start-Service -Name $n -ErrorAction SilentlyContinue }; Write-Output 'exvlan: rollback start requested'&quot;" />
 
         <!-- 真卸载：停 + 注销 SCM 注册。二进制与 ProgramData 数据全部保留，
              重装后由 GUI 首启重新注册。 -->
         <CustomAction Id="ExvlanRemoveServiceOnUninstall"
                       Directory="INSTALLDIR"
                       Execute="immediate"
-                      Impersonate="no"
                       Return="ignore"
-                      ExeCommand="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$n='era.exvlan.studio.service'; if(Get-Service -Name $n -ErrorAction SilentlyContinue){ &amp; sc.exe stop $n | Out-Null; &amp; sc.exe delete $n | Out-Null }; Write-Output 'exvlan: service unregistered'&quot;" />
+                      ExeCommand="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$n='era.exvlan.studio.service'; if(Get-Service -Name $n -ErrorAction SilentlyContinue){ &amp; sc.exe stop $n | Out-Null; &amp; sc.exe delete $n | Out-Null; Write-Output 'exvlan: service unregistered' }&quot;" />
 
         <InstallExecuteSequence>
             <Custom Action="ExvlanStopServiceForUpgrade" Before="InstallValidate">1</Custom>
+            <Custom Action="ExvlanStartServiceOnRollback" After="InstallInitialize">NOT REMOVE</Custom>
             <Custom Action="ExvlanRemoveServiceOnUninstall" Before="RemoveFiles"><![CDATA[REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE]]></Custom>
             <Custom Action="ExvlanStartServiceAfterInstall" After="InstallFinalize">NOT REMOVE</Custom>
         </InstallExecuteSequence>

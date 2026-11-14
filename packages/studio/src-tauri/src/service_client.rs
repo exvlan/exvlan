@@ -817,3 +817,50 @@ mod stub {
         Err("当前平台没有特权服务".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 三态判据（B4 的根因就是判据错误，这里把它钉住）。
+    #[test]
+    fn health_covers_three_states() {
+        // 二进制缺失 → 必须走「安装」
+        assert_eq!(
+            health_of(false, false, false),
+            ServiceHealth::NotInstalled,
+            "二进制不在时必须判为未安装"
+        );
+        // 二进制在、注册项丢失（MSI 卸载 sc delete 后重装 / 手工 sc delete）→ 也要走「安装」
+        assert_eq!(
+            health_of(true, false, false),
+            ServiceHealth::NotInstalled,
+            "注册项丢失不能当成就绪或可重启"
+        );
+        // 装了但管道不通（服务停了 / 崩过 / 升级窗口内）→ 只重启
+        assert_eq!(
+            health_of(true, true, false),
+            ServiceHealth::InstalledNotReady,
+            "管道不通不能判为未安装（否则会重复覆盖 exe）"
+        );
+        // 健康
+        assert_eq!(
+            health_of(true, true, true),
+            ServiceHealth::InstalledRunning,
+            "IPC 可用即健康"
+        );
+    }
+
+    /// 前端 `ServiceState.health` 的联合类型依赖这层序列化形状。
+    #[test]
+    fn health_serializes_kebab_case() {
+        let cases = [
+            (ServiceHealth::NotInstalled, "\"not-installed\""),
+            (ServiceHealth::InstalledNotReady, "\"installed-not-ready\""),
+            (ServiceHealth::InstalledRunning, "\"installed-running\""),
+        ];
+        for (health, want) in cases {
+            assert_eq!(serde_json::to_string(&health).unwrap(), want);
+        }
+    }
+}
