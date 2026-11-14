@@ -21,6 +21,19 @@ use std::path::{Path, PathBuf};
 
 use crate::paths::{Paths, UserPaths};
 
+/// `exvlan-migrate` 的「本次迁移已完成」标记（写在用户数据目录）。
+///
+/// **版本要随「必须再跑一次」的原因一起升**：闸门只看这个版本，旧版本标记
+/// 一律视为「还没跑过」—— 于是升级后会再跑一次，而各步骤都幂等，已归一的
+/// 机器零改动（不重复备份、不重写文件）。
+///
+/// 为什么是 v3：`migrate.done`（v2 之前的名字）存在时闸门不再触发，但更早的
+/// pre.17 构建仍会把 `service.toml` 的旧字段名 `mode = …` 写回来；而下一轮要
+/// 删运行时的 serde 别名（`policy` 的 `alias = "mode"`、`Mode` 的
+/// `service/normal/off`），漏归一的机器会静默回落 `resident`。升到 v3 保证这批
+/// 机器再走一次 S8 归一（`docs/migrate-7.3.md` §4 S8 的残余风险）。
+pub const MIGRATE_DONE_MARKER: &str = "migrate.done.v3";
+
 /// 遗留项种类（报告 / 闸门展示用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {

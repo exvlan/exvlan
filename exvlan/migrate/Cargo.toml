@@ -6,6 +6,10 @@ rust-version.workspace = true
 license-file = "../../exvlan/LICENSE"
 description = "EXVlan one-shot migration: pre.17 installs must run this once (inside the installer, removed in the next release)"
 
+[lib]
+name = "exvlan_migrate"
+path = "src/lib.rs"
+
 [[bin]]
 name = "exvlan-migrate"
 path = "src/main.rs"

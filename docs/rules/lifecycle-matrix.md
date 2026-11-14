@@ -8,14 +8,14 @@
 
 ## 对象
 
-| 对象                 | 持有者                                                         | 说明                                |
-| -------------------- | -------------------------------------------------------------- | ----------------------------------- |
-| 内核进程（`exvlan`） | `exvlan-service`（service）/ systemd 或 GUI supervisor（core） | 有 TUN、监听 peer 端口与 RPC portal |
-| 网络实例             | 内核（`--config-dir` 下的 `*.toml`）                           | 一个实例一块 TUN                    |
-| 会话（session）      | 服务（**发过 `hello` 的** IPC 连接计数）                       | `policy=session` 的存活锚点         |
-| 热点代理流（NAT）    | 内核                                                           | TCP 代理（含远程管理的 RPC 端口）   |
-| gateway              | `exvlan-gateway`（服务降权拉起）                               | 控制面 HTTP/WS，仅回环              |
-| 迁移标记             | `<user>/migrate.done`                                          | 一次性迁移是否已完成                |
+| 对象                 | 持有者                                                         | 说明                                                 |
+| -------------------- | -------------------------------------------------------------- | ---------------------------------------------------- |
+| 内核进程（`exvlan`） | `exvlan-service`（service）/ systemd 或 GUI supervisor（core） | 有 TUN、监听 peer 端口与 RPC portal                  |
+| 网络实例             | 内核（`--config-dir` 下的 `*.toml`）                           | 一个实例一块 TUN                                     |
+| 会话（session）      | 服务（**发过 `hello` 的** IPC 连接计数）                       | `policy=session` 的存活锚点                          |
+| 热点代理流（NAT）    | 内核                                                           | TCP 代理（含远程管理的 RPC 端口）                    |
+| gateway              | `exvlan-gateway`（服务降权拉起）                               | 控制面 HTTP/WS，仅回环                               |
+| 迁移标记             | `<user>/migrate.done.v3`                                       | 一次性迁移是否已完成（旧版本标记一律视为「未完成」） |
 
 ## 事件 × 期望
 

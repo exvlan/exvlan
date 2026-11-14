@@ -50,9 +50,16 @@ fn tool_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 #[tauri::command]
 pub fn migrate_status(app: tauri::AppHandle) -> MigrateStatus {
     let user = exvlan_control::paths::user_paths();
-    let done = user.data.join("migrate.done").is_file();
+    // 标记版本升 v3：只跑过旧版 `migrate.done` 的机器视为「还没跑过」，
+    // 于是会再跑一次把 `service.toml` 的旧字段名归一掉（各步幂等，已归一的
+    // 机器零改动）。见 `exvlan_control::legacy::MIGRATE_DONE_MARKER`。
+    let done = user
+        .data
+        .join(exvlan_control::legacy::MIGRATE_DONE_MARKER)
+        .is_file();
     let items = legacy_items();
     MigrateStatus {
+        // 没有遗留项时不该弹（`done` 只影响列表里的「已完成」标记）。
         pending: !done && !items.is_empty(),
         items,
         tool: tool_path(&app).map(|p| p.display().to_string()),

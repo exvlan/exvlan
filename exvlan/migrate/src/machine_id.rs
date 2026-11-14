@@ -96,8 +96,13 @@ fn copy_machine_id(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 /// 计算计划：新路径已存在 → `None`（不动）；否则从旧落点里挑第一个合法的。
-pub fn plan(core: &Path) -> (Option<MachineIdPlan>, Option<Step>) {
-    let Some(dir) = exvlan_control::paths::machine_id_state_dir() else {
+///
+/// `state_dir` 是**显式传入**的 `machine_id` 落点目录（桌面 =
+/// [`exvlan_control::paths::machine_id_state_dir`]，移动端 = App 自己的目录）：
+/// 三端约定不同（macOS 与 data 同目录 / Windows 是 `%LOCALAPPDATA%` / Linux 是
+/// `$XDG_DATA_HOME`），写死在 lib 里移动端就没法复用。
+pub fn plan(core: &Path, state_dir: Option<&Path>) -> (Option<MachineIdPlan>, Option<Step>) {
+    let Some(dir) = state_dir else {
         return (
             None,
             Some(Step::skipped(

@@ -704,6 +704,12 @@ dev.1 发布后在 Windows / macOS / Android 三端真机取证，以下几点�
 | 推送节奏              | **一个 dev.2，分两批 push**：①已合修复 + NSIS 钩子（已推 `a1ec85eb`）；②migrate 扩容 + Android 版 + 删全部兼容。仍只打一个 tag，但出红时能二分到「修复」还是「迁移重构」 |
 
 > **dev.2 状态**：S0–S8（prefs / app_mode 拆分 / machine_id / 旧路径 / 旧服务定义 / `service.toml` 旧字段）
+> **dev.2 状态**：S0–S8（prefs / app_mode 拆分 / machine_id / 旧路径 / 旧服务定义 / `service.toml` 旧字段）
 > **均已由 `exvlan-migrate` 覆盖**，且运行时兼容代码已在**同一批**里删掉（prefs 旧导入 / `app_mode` 旧
 > JSON / `machine_id` 搬家 / GUI 侧 `stale_paths` 清理 / 旧服务定义 / `service.toml` 与配置来源旧词汇）。
-> 步骤、失败语义、逐项删除状态与仍需 marker v3 的前置见 [`docs/migrate-7.3.md`](./migrate-7.3.md) §6。
+> 步骤、失败语义、逐项删除状态见 [`docs/migrate-7.3.md`](./migrate-7.3.md) §4/§6。
+>
+> `exvlan/migrate` 已拆成 **lib + bin**（`plan` / `Plan::apply`，平台差异走 `Host` trait）；Android 首启经
+> `exvlan_ffi` 的 `exvlan_migrate_networks_once` 复用同一个 lib，运行时 `networks/legacy.rs` 已删除；
+> 迁移标记升到 **`migrate.done.v3`**（只跑过 v2 的机器视为未跑过 → 会再跑一次把 `service.toml` 旧字段名
+> 归一，各步幂等、已归一文件 `mtime` 不变）。这正是删除 `service.toml` serde 别名的安全前提。
