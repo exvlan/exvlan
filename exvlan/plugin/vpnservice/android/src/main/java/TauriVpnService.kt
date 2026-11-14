@@ -214,6 +214,8 @@ class TauriVpnService : VpnService() {
             }
         }
         
+        // 调用方不应把自身包放进该列表：R2 远端只读/配对需要 App 自身的流量进 tun，
+        // 才能经内核转发到 mesh 对端（排除自身会直接走物理网卡而不可达）。
         for (app in disallowedApplications) {
             builder.addDisallowedApplication(app)
         }

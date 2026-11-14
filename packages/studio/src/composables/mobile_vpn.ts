@@ -255,7 +255,9 @@ async function doStartVpn(
     ipv4Addr: `${ipv4Addr}/${cidr}`,
     routes,
     dns,
-    disallowedApplications: ["era.exvlan.studio"],
+    // 不排除自身包：R2 的远端只读/配对要由 App 自身把请求发到 mesh 地址（如 10.254.1.6:15999），
+    // 排除自身会让这些流量绕过 tun 直接走物理网卡而不可达。本地 RPC 走回环，不受影响。
+    disallowedApplications: [],
     mtu: 1300,
   };
 

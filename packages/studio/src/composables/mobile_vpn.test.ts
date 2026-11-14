@@ -249,6 +249,22 @@ describe("mobile VPN reconciliation ownership", () => {
   });
 });
 
+describe("mobile VPN excluded applications", () => {
+  it("keeps the app's own package inside the tunnel so R2 traffic can reach the mesh", async () => {
+    setConfig("A");
+    setReady("A", "10.254.1.6");
+    const vpn = await loadVpnModule();
+
+    await vpn.onNetworkInstanceChange("A");
+
+    expect(mocks.startVpn).toHaveBeenCalledTimes(1);
+    const call = ((mocks.startVpn.mock.calls as unknown[][])[0] ?? [])[0] as
+      | { disallowedApplications?: string[] }
+      | undefined;
+    expect(call?.disallowedApplications ?? []).not.toContain("era.exvlan.studio");
+  });
+});
+
 describe("mobile VPN tile action delivery", () => {
   it("does not consume a pending action before a handler is ready", async () => {
     const vpn = await loadVpnModule();
